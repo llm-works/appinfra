@@ -5,7 +5,6 @@ import time
 
 import pytest
 
-import appinfra.regex_utils
 from appinfra.regex_utils import (
     MAX_PATTERN_LENGTH,
     RegexComplexityError,
@@ -178,42 +177,23 @@ def test_regex_timeout_degradation_windows():
     should rely on pattern complexity validation only.
     """
     # On Windows, safe_compile should work but timeout is disabled
-    import sys
+    # This test only runs on Windows (skipif handles non-Windows platforms)
 
-    if sys.platform == "win32":
-        # Pattern that would timeout on Unix
-        pattern = r"(a+)+"
-        input_str = "a" * 30 + "b"
+    # Pattern that would timeout on Unix
+    pattern = r"(a+)+"
 
-        # Compile with timeout parameter (will be ignored on Windows)
-        try:
-            compiled = safe_compile(pattern)
+    # Compile with timeout parameter (will be ignored on Windows)
+    try:
+        compiled = safe_compile(pattern)
 
-            # Matching may hang on Windows (no timeout protection)
-            # We can't easily test this without actually hanging,
-            # so we just document the behavior
-            pytest.skip("Windows timeout test skipped - would hang without protection")
+        # Matching may hang on Windows (no timeout protection)
+        # We can't easily test this without actually hanging,
+        # so we just document the behavior
+        pytest.skip("Windows timeout test skipped - would hang without protection")
 
-        except RegexComplexityError:
-            # Pattern caught by complexity validator - good fallback!
-            pass
-    else:
-        # On Unix, mock Windows behavior
-        import unittest.mock as mock
-
-        with mock.patch("appinfra.regex_utils.signal.SIGALRM", create=False):
-            # Simulate Windows environment where SIGALRM doesn't exist
-            delattr(appinfra.regex_utils.signal, "SIGALRM")
-
-            # safe_compile should still work, just without timeout
-            simple_pattern = r"^[a-z]+$"
-            compiled = safe_compile(simple_pattern, timeout=1.0)
-            assert compiled is not None
-
-            # Restore SIGALRM
-            import signal
-
-            appinfra.regex_utils.signal.SIGALRM = signal.SIGALRM
+    except RegexComplexityError:
+        # Pattern caught by complexity validator - good fallback!
+        pass
 
 
 # Positive test: Verify legitimate patterns still work

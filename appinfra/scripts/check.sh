@@ -289,52 +289,42 @@ record_skips() {
     # Using portable grep+sed instead of grep -oP (not available on macOS BSD grep)
     grep -E "^SKIPPED \[" "$logfile" 2>/dev/null | while read -r line; do
         # Extract count: "SKIPPED [6] ..." -> "6"
-        local count=$(echo "$line" | sed -E 's/^SKIPPED \[([0-9]+)\].*/\1/')
+        # SC2155: Declare and assign separately to preserve exit status
+        local count reason
+        count=$(echo "$line" | sed -E 's/^SKIPPED \[([0-9]+)\].*/\1/')
         # Extract reason: everything after "path:line: " or "path: " (line number optional)
-        local reason=$(echo "$line" | sed -E 's/^SKIPPED \[[0-9]+\] [^:]+:([0-9]+:)? //')
+        reason=$(echo "$line" | sed -E 's/^SKIPPED \[[0-9]+\] [^:]+:([0-9]+:)? //')
         # Skip reasons prefixed with [expected] (from @pytest.mark.expected_skip)
         if [[ "$reason" == "[expected] "* ]]; then
             continue
         fi
-        [ -n "$count" ] && [ -n "$reason" ] && echo "${count}|${reason}" >> "${STATUS_DIR}/skips"
+        # Use tab delimiter to avoid issues with | in skip reasons
+        [ -n "$count" ] && [ -n "$reason" ] && printf '%s\t%s\n' "$count" "$reason" >> "${STATUS_DIR}/skips"
     done
-
-    # Also record passed count from pytest summary for totals calculation
-    local passed=$(grep -o '[0-9]* passed' "$logfile" 2>/dev/null | tail -1 | sed 's/ passed//')
-    [ -n "$passed" ] && echo "$passed" >> "${STATUS_DIR}/passed_counts"
 }
 
 display_skip_summary() {
     [ -f "${STATUS_DIR}/skips" ] || return 0
 
-    # Aggregate skip counts by reason
+    # Aggregate skip counts by reason (using tab delimiter)
     declare -A skip_reasons
     local total_skipped=0
 
-    while IFS='|' read -r count reason; do
+    while IFS=$'\t' read -r count reason; do
         skip_reasons["$reason"]=$((${skip_reasons["$reason"]:-0} + count))
         total_skipped=$((total_skipped + count))
     done < "${STATUS_DIR}/skips"
 
     [ $total_skipped -eq 0 ] && return 0
 
-    # Sum passed counts recorded by record_skips
-    local total_passed=0
-    if [ -f "${STATUS_DIR}/passed_counts" ]; then
-        while read -r count; do
-            total_passed=$((total_passed + count))
-        done < "${STATUS_DIR}/passed_counts"
-    fi
-
-    local total_tests=$((total_passed + total_skipped))
     echo ""
-    echo -e "${YELLOW}⚠ Warning: ${total_skipped}/${total_tests} tests skipped${RESET}"
+    echo -e "${YELLOW}⚠ Warning: ${total_skipped} tests skipped${RESET}"
 
     # Sort reasons by count (descending) and display
-    # Use printf to avoid issues with special characters (backslashes, etc.)
+    # Use tab delimiter to avoid issues with special characters in skip reasons
     for reason in "${!skip_reasons[@]}"; do
-        printf '%s|%s\n' "${skip_reasons[$reason]}" "$reason"
-    done | sort -t'|' -k1 -rn | while IFS='|' read -r count reason; do
+        printf '%s\t%s\n' "${skip_reasons[$reason]}" "$reason"
+    done | sort -t$'\t' -k1 -rn | while IFS=$'\t' read -r count reason; do
         printf "  ${GRAY}- %s skipped: %s${RESET}\n" "$count" "$reason"
     done
 }

@@ -26,6 +26,7 @@ warning summaries.
 **Example:**
 
 ```python
+import os
 import sys
 import pytest
 
@@ -55,10 +56,10 @@ reported.
 
 The `make check` command shows a skip summary at the end:
 
-```
+```text
 ✓ All checks passed in 35.2s
 
-⚠ Warning: 3/4500 tests skipped
+⚠ Warning: 3 tests skipped
   - 2 skipped: Database not available
   - 1 skipped: Requires GPU
 ```

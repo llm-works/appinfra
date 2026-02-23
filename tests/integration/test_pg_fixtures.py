@@ -456,7 +456,6 @@ class TestPGStaleTableCleanup:
         This tests the cleanup logic directly by mocking the test outcome,
         rather than running a subprocess test that actually fails.
         """
-        import os
         import time
         from unittest.mock import Mock
 

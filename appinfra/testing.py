@@ -20,7 +20,7 @@ Example:
 from __future__ import annotations
 
 from collections.abc import Generator
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -44,10 +44,10 @@ def pytest_configure(config: Config) -> None:
     )
 
 
-@pytest.hookimpl(hookwrapper=True)
+@pytest.hookimpl(wrapper=True)
 def pytest_runtest_makereport(
     item: Item, call: CallInfo
-) -> Generator[None, None, None]:
+) -> Generator[None, TestReport, TestReport]:
     """
     Modify skip reason for tests marked with expected_skip.
 
@@ -55,13 +55,14 @@ def pytest_runtest_makereport(
     the skip reason with '[expected] ' so that check.sh can filter it out
     of the warning summary.
     """
-    outcome: Any = yield
-    report: TestReport = outcome.get_result()
+    report: TestReport = yield
 
     # Process skipped tests in call or setup phase (not teardown - rare and typically fixture failures)
     if report.skipped and call.when in ("call", "setup"):
         if item.get_closest_marker("expected_skip"):
             _prefix_skip_reason(report)
+
+    return report
 
 
 def _prefix_skip_reason(report: TestReport) -> None:

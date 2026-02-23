@@ -291,11 +291,15 @@ class TestExceptionHierarchy:
             ToolError,
             ServerError,
             ObservabilityError,
+            DependencyError,
         ]
 
         for exc_type in exception_types:
             with pytest.raises(InfraError):
-                raise exc_type("Test error")
+                if exc_type is DependencyError:
+                    raise exc_type(package="pkg", extra="extra", feature="Feature")
+                else:
+                    raise exc_type("Test error")
 
     def test_exception_context_preserved_when_caught(self):
         """Test exception context is preserved when caught."""
