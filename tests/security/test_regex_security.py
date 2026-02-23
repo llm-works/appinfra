@@ -113,14 +113,13 @@ def test_pattern_length_limit():
 
 
 @pytest.mark.security
-@pytest.mark.integration
 @pytest.mark.skipif(
     sys.platform == "win32",
     reason="signal.SIGALRM not available on Windows",
 )
 @pytest.mark.parametrize(
     "pattern,evil_input",
-    list(REDOS_EVIL_INPUTS.items())[:3],  # Test first 3 patterns
+    list(REDOS_EVIL_INPUTS.items()),  # Test all available ReDoS patterns
 )
 def test_regex_timeout_enforcement_unix(pattern: str, evil_input: str):
     """
@@ -136,11 +135,6 @@ def test_regex_timeout_enforcement_unix(pattern: str, evil_input: str):
 
     Note: This test only runs on Unix systems where signal.SIGALRM is available.
     """
-    # Skip the (a|a)* pattern - Python's regex engine optimizes it so it doesn't
-    # actually cause catastrophic backtracking in practice
-    if pattern == r"(a|a)*":
-        pytest.skip("Pattern optimized by Python regex engine - doesn't timeout")
-
     # These patterns are known to cause ReDoS, but may not be caught by
     # the complexity validator (simple syntax, complex behavior)
 

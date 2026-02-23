@@ -50,6 +50,12 @@ REDOS_EVIL_INPUTS = {
     r"^(a+)+$": "a" * 30
     + "b",  # 30 a's followed by b - causes exponential backtracking
     r"(a*)*b": "a" * 30 + "c",  # No 'b' at end causes full backtracking
-    r"(a|a)*": "a" * 30,  # Degenerate alternation with many a's
-    r"(a+)+": "a" * 30 + "x",  # Nested quantifiers with mismatch
+    # NOTE: (a+)+ without anchors doesn't cause backtracking - the unanchored pattern
+    # simply matches all the a's and succeeds. Backtracking only occurs when the
+    # pattern is forced to fail (e.g., with $ anchor that can't match after 'x').
+    # r"(a+)+": "a" * 30 + "x",
+    # NOTE: (a|a)* is theoretically vulnerable to ReDoS, but Python's regex engine
+    # optimizes it (recognizes a|a is redundant), so it matches instantly instead
+    # of causing catastrophic backtracking. Not useful for timeout testing.
+    # r"(a|a)*": "a" * 30,
 }
