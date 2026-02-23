@@ -299,8 +299,11 @@ record_skips() {
             continue
         fi
         # Use tab delimiter to avoid issues with | in skip reasons
-        [ -n "$count" ] && [ -n "$reason" ] && printf '%s\t%s\n' "$count" "$reason" >> "${STATUS_DIR}/skips"
-    done
+        # Use if block instead of && chain to avoid pipefail issues
+        if [ -n "$count" ] && [ -n "$reason" ]; then
+            printf '%s\t%s\n' "$count" "$reason" >> "${STATUS_DIR}/skips"
+        fi
+    done || true  # Guard against pipefail when loop has no matching lines
 }
 
 display_skip_summary() {
@@ -366,7 +369,8 @@ run_check() {
     case "$exit_code" in
         0)
             # Record skips for test subchecks (pytest output)
-            if [ "$is_subcheck" = true ] && grep -qE "^SKIPPED \[" "$tmpfile" 2>/dev/null; then
+            # Skip coverage subcheck to avoid double-counting (it re-runs tests with --cov)
+            if [ "$is_subcheck" = true ] && [[ "$name" != *"coverage"* ]] && grep -qE "^SKIPPED \[" "$tmpfile" 2>/dev/null; then
                 record_skips "$name" "$tmpfile"
             fi
 

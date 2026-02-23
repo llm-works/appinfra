@@ -326,6 +326,7 @@ class TestDependencyError:
             package="sqlalchemy", extra="sql", feature="Database support"
         )
         assert isinstance(error, InfraError)
+        assert isinstance(error, DependencyError)
 
     def test_dependency_error_message_format(self):
         """Test DependencyError message format."""
