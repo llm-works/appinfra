@@ -144,28 +144,28 @@ if [ -n "$COVERAGE_MARKERS" ]; then
 fi
 
 declare -a TEST_SUBCHECKS=(
-    "Unit tests|test.unit|${PYTHON} -m pytest tests/ -m unit --tb=short --no-header -qq ${PYTEST_PARALLEL}|"
-    "Integration tests|test.integration|${PYTHON} -m pytest tests/ -m integration --tb=short --no-header -qq ${PYTEST_PARALLEL}|"
-    "E2E tests|test.e2e|${PYTHON} -m pytest tests/ -m e2e --tb=short --no-header -qq ${PYTEST_PARALLEL}|"
-    "Security tests|test.security|${PYTHON} -m pytest tests/ -m security --tb=short --no-header -qq ${PYTEST_PARALLEL}|"
-    "Performance tests|test.perf|${PYTHON} -m pytest tests/ -m performance --tb=short --no-header -qq ${PYTEST_PARALLEL}|"
+    "Unit tests|test.unit|${PYTHON} -m pytest tests/ -m unit --tb=short --no-header -qq -rs ${PYTEST_PARALLEL}|"
+    "Integration tests|test.integration|${PYTHON} -m pytest tests/ -m integration --tb=short --no-header -qq -rs ${PYTEST_PARALLEL}|"
+    "E2E tests|test.e2e|${PYTHON} -m pytest tests/ -m e2e --tb=short --no-header -qq -rs ${PYTEST_PARALLEL}|"
+    "Security tests|test.security|${PYTHON} -m pytest tests/ -m security --tb=short --no-header -qq -rs ${PYTEST_PARALLEL}|"
+    "Performance tests|test.perf|${PYTHON} -m pytest tests/ -m performance --tb=short --no-header -qq -rs ${PYTEST_PARALLEL}|"
 )
 # Add coverage check only if threshold > 0 (awk is more portable than bc)
 if awk "BEGIN {exit !($COVERAGE_TARGET > 0)}" 2>/dev/null; then
-    TEST_SUBCHECKS+=("Code coverage|test.coverage|${PYTHON} -m pytest tests/ ${COVERAGE_MARKER_ARG} --cov=${PKG_NAME} --cov-report=term -qq ${PYTEST_PARALLEL}|${COVERAGE_TARGET}")
+    TEST_SUBCHECKS+=("Code coverage|test.coverage|${PYTHON} -m pytest tests/ ${COVERAGE_MARKER_ARG} --cov=${PKG_NAME} --cov-report=term -qq -rs ${PYTEST_PARALLEL}|${COVERAGE_TARGET}")
 fi
 
 # Verbose versions for raw mode
 declare -a TEST_SUBCHECKS_RAW=(
-    "Unit tests|test.unit.v|${PYTHON} -m pytest tests/ -m unit -v --tb=short ${PYTEST_PARALLEL}|"
-    "Integration tests|test.integration.v|${PYTHON} -m pytest tests/ -m integration -v --tb=short ${PYTEST_PARALLEL}|"
-    "E2E tests|test.e2e.v|${PYTHON} -m pytest tests/ -m e2e -v --tb=short ${PYTEST_PARALLEL}|"
-    "Security tests|test.security.v|${PYTHON} -m pytest tests/ -m security -v --tb=short ${PYTEST_PARALLEL}|"
-    "Performance tests|test.perf.v|${PYTHON} -m pytest tests/ -m performance -v --tb=short ${PYTEST_PARALLEL}|"
+    "Unit tests|test.unit.v|${PYTHON} -m pytest tests/ -m unit -v --tb=short -rs ${PYTEST_PARALLEL}|"
+    "Integration tests|test.integration.v|${PYTHON} -m pytest tests/ -m integration -v --tb=short -rs ${PYTEST_PARALLEL}|"
+    "E2E tests|test.e2e.v|${PYTHON} -m pytest tests/ -m e2e -v --tb=short -rs ${PYTEST_PARALLEL}|"
+    "Security tests|test.security.v|${PYTHON} -m pytest tests/ -m security -v --tb=short -rs ${PYTEST_PARALLEL}|"
+    "Performance tests|test.perf.v|${PYTHON} -m pytest tests/ -m performance -v --tb=short -rs ${PYTEST_PARALLEL}|"
 )
 # Add coverage check only if threshold > 0 (awk is more portable than bc)
 if awk "BEGIN {exit !($COVERAGE_TARGET > 0)}" 2>/dev/null; then
-    TEST_SUBCHECKS_RAW+=("Code coverage|test.coverage|${PYTHON} -m pytest tests/ ${COVERAGE_MARKER_ARG} --cov=${PKG_NAME} --cov-report=term-missing ${PYTEST_PARALLEL}|${COVERAGE_TARGET}")
+    TEST_SUBCHECKS_RAW+=("Code coverage|test.coverage|${PYTHON} -m pytest tests/ ${COVERAGE_MARKER_ARG} --cov=${PKG_NAME} --cov-report=term-missing -rs ${PYTEST_PARALLEL}|${COVERAGE_TARGET}")
 fi
 
 declare -A CHECK_LINES
@@ -279,6 +279,59 @@ record_warning() {
     echo "$name|$count" >> "${STATUS_DIR}/warnings"
 }
 
+record_skips() {
+    local name="$1" logfile="$2"
+    # Parse pytest -rs output for skip reasons
+    # Format: "SKIPPED [N] path:line: reason" or "SKIPPED [N] path: reason" (no line number)
+    # Using portable grep+sed instead of grep -oP (not available on macOS BSD grep)
+    grep -E "^SKIPPED \[" "$logfile" 2>/dev/null | while read -r line; do
+        # Extract count: "SKIPPED [6] ..." -> "6"
+        local count=$(echo "$line" | sed -E 's/^SKIPPED \[([0-9]+)\].*/\1/')
+        # Extract reason: everything after "path:line: " or "path: " (line number optional)
+        local reason=$(echo "$line" | sed -E 's/^SKIPPED \[[0-9]+\] [^:]+:([0-9]+:)? //')
+        [ -n "$count" ] && [ -n "$reason" ] && echo "${count}|${reason}" >> "${STATUS_DIR}/skips"
+    done
+
+    # Also record passed count from pytest summary for totals calculation
+    local passed=$(grep -o '[0-9]* passed' "$logfile" 2>/dev/null | tail -1 | sed 's/ passed//')
+    [ -n "$passed" ] && echo "$passed" >> "${STATUS_DIR}/passed_counts"
+}
+
+display_skip_summary() {
+    [ -f "${STATUS_DIR}/skips" ] || return 0
+
+    # Aggregate skip counts by reason
+    declare -A skip_reasons
+    local total_skipped=0
+
+    while IFS='|' read -r count reason; do
+        skip_reasons["$reason"]=$((${skip_reasons["$reason"]:-0} + count))
+        total_skipped=$((total_skipped + count))
+    done < "${STATUS_DIR}/skips"
+
+    [ $total_skipped -eq 0 ] && return 0
+
+    # Sum passed counts recorded by record_skips
+    local total_passed=0
+    if [ -f "${STATUS_DIR}/passed_counts" ]; then
+        while read -r count; do
+            total_passed=$((total_passed + count))
+        done < "${STATUS_DIR}/passed_counts"
+    fi
+
+    local total_tests=$((total_passed + total_skipped))
+    echo ""
+    echo -e "${YELLOW}⚠ Warning: ${total_skipped}/${total_tests} tests skipped${RESET}"
+
+    # Sort reasons by count (descending) and display
+    # Use printf to avoid issues with special characters (backslashes, etc.)
+    for reason in "${!skip_reasons[@]}"; do
+        printf '%s|%s\n' "${skip_reasons[$reason]}" "$reason"
+    done | sort -t'|' -k1 -rn | while IFS='|' read -r count reason; do
+        printf "  ${GRAY}- %s skipped: %s${RESET}\n" "$count" "$reason"
+    done
+}
+
 # Unified check runner - handles both main checks and subchecks
 run_check() {
     local name="$1" cmd="$2" line_num="$3"
@@ -315,6 +368,11 @@ run_check() {
     # Handle result based on exit code
     case "$exit_code" in
         0)
+            # Record skips for test subchecks (pytest output)
+            if [ "$is_subcheck" = true ] && grep -qE "^SKIPPED \[" "$tmpfile" 2>/dev/null; then
+                record_skips "$name" "$tmpfile"
+            fi
+
             if [ -n "$coverage_target" ]; then
                 # Use appropriate parser based on check type
                 local actual
@@ -657,6 +715,7 @@ main() {
         echo -e "${RED}✗ ${failure_count} check(s) failed${RESET} ${GRAY}after ${elapsed}s${RESET}"
         echo ""
         display_failures
+        display_skip_summary
         exit 1
     else
         # Check for warnings
@@ -666,6 +725,7 @@ main() {
         else
             echo -e "${GREEN}✓ All checks passed${RESET} ${GRAY}in ${elapsed}s${RESET}"
         fi
+        display_skip_summary
     fi
 }
 
