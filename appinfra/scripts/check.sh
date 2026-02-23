@@ -19,6 +19,7 @@ COVERAGE_TARGET=""
 FAIL_FAST=false
 RAW=false
 SUMMARY=false
+SKIP_TESTS=false
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -33,9 +34,10 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         --summary) SUMMARY=true; shift ;;
+        --skip-tests) SKIP_TESTS=true; shift ;;
         *)
             echo "Unknown option: $1"
-            echo "Usage: $0 [--sequential] [--coverage-target <percentage>] [--fail-fast] [--raw] [--summary]"
+            echo "Usage: $0 [--sequential] [--coverage-target <percentage>] [--fail-fast] [--raw] [--summary] [--skip-tests]"
             exit 1
             ;;
     esac
@@ -133,9 +135,10 @@ if awk "BEGIN {exit !($DOCSTRING_THRESHOLD > 0)}" 2>/dev/null; then
     CHECKS+=("Docstring coverage|cq.docstring.strict|${DOCSTRING_CMD}|docstring:${DOCSTRING_THRESHOLD}")
 fi
 
-CHECKS+=(
-    "Test suite|test.all|SPECIAL|test.v"
-)
+# Add test suite check only if not skipped
+if [ "$SKIP_TESTS" = false ]; then
+    CHECKS+=("Test suite|test.all|SPECIAL|test.v")
+fi
 
 # Test subchecks: "Name|Make Target|Command|Coverage Target"
 COVERAGE_MARKER_ARG=""
@@ -535,23 +538,25 @@ run_checks() {
             fi
         done
 
-        # Launch test subchecks in parallel (except perf tests)
-        for subcheck_def in "${TEST_SUBCHECKS[@]}"; do
-            IFS='|' read -r subname submake subcmd coverage_target <<< "$subcheck_def"
-            if [[ "$subname" == "Performance tests" ]]; then
-                perf_subcheck="$subcheck_def"
-                continue
-            fi
-            local subline=${SUBCHECK_LINES["$subname"]}
-            run_check "$subname" "$subcmd" "$subline" true "$coverage_target" "" "$submake" &
-            pids+=($!)
-        done
+        # Launch test subchecks in parallel (except perf tests) - only if tests enabled
+        if [ -n "$test_suite_line" ]; then
+            for subcheck_def in "${TEST_SUBCHECKS[@]}"; do
+                IFS='|' read -r subname submake subcmd coverage_target <<< "$subcheck_def"
+                if [[ "$subname" == "Performance tests" ]]; then
+                    perf_subcheck="$subcheck_def"
+                    continue
+                fi
+                local subline=${SUBCHECK_LINES["$subname"]}
+                run_check "$subname" "$subcmd" "$subline" true "$coverage_target" "" "$submake" &
+                pids+=($!)
+            done
+        fi
 
         # Wait for all parallel checks
         monitor_jobs "${pids[@]}" || any_failed=true
 
-        # Run performance tests last (needs isolated CPU)
-        if [ -n "$perf_subcheck" ]; then
+        # Run performance tests last (needs isolated CPU) - only if tests enabled
+        if [ -n "$test_suite_line" ] && [ -n "$perf_subcheck" ]; then
             [ "$FAIL_FAST" = true ] && [ "$any_failed" = true ] && {
                 update_line "$test_suite_line" "${RED}${CHECK_FAILURE}${RESET}" "Test suite" ""
                 return 1
@@ -561,11 +566,13 @@ run_checks() {
             run_check "$subname" "$subcmd" "$subline" true "$coverage_target" "" "$submake" || any_failed=true
         fi
 
-        # Update test suite status
-        if [ -f "${STATUS_DIR}/failures" ]; then
-            update_line "$test_suite_line" "${RED}${CHECK_FAILURE}${RESET}" "Test suite" ""
-        else
-            update_line "$test_suite_line" "${GREEN}${CHECK_SUCCESS}${RESET}" "Test suite" ""
+        # Update test suite status - only if tests enabled
+        if [ -n "$test_suite_line" ]; then
+            if [ -f "${STATUS_DIR}/failures" ]; then
+                update_line "$test_suite_line" "${RED}${CHECK_FAILURE}${RESET}" "Test suite" ""
+            else
+                update_line "$test_suite_line" "${GREEN}${CHECK_SUCCESS}${RESET}" "Test suite" ""
+            fi
         fi
     else
         # Sequential mode
