@@ -8,6 +8,8 @@ Run with:
     ~/.venv/bin/python -m pytest tests/integration/test_pg_fixtures.py -v -s
 """
 
+import os
+
 import pytest
 import sqlalchemy
 
@@ -403,7 +405,12 @@ class TestPGComplexScenarios:
 class TestPGStaleTableCleanup:
     """Test that stale debug tables are cleaned at session start."""
 
-    def test_stale_tables_cleaned_at_session_start(self, pg_session, worker_id):
+    @pytest.mark.expected_skip  # Skipped in xdist workers (expected)
+    @pytest.mark.skipif(
+        os.environ.get("PYTEST_XDIST_WORKER") is not None,
+        reason="Cleanup only runs on master; test not valid with xdist workers",
+    )
+    def test_stale_tables_cleaned_at_session_start(self, pg_session):
         """
         Verify no tables with old timestamps exist after session starts.
 
@@ -415,11 +422,6 @@ class TestPGStaleTableCleanup:
         fixture only runs on master. With xdist, workers create tables that
         won't be cleaned by the master's session-scoped fixture.
         """
-        if worker_id != "master":
-            pytest.skip(
-                "Cleanup only runs on master; test not valid with xdist workers"
-            )
-
         import re
         import time
 
