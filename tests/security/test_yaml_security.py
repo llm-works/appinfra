@@ -82,6 +82,7 @@ def test_yaml_include_path_traversal(
 
 @pytest.mark.security
 @pytest.mark.integration
+@pytest.mark.expected_skip  # Skips on Windows (no /etc/passwd)
 def test_yaml_include_symlink_attack(secure_temp_project: Path):
     """
     Verify symlink resolution respects project_root boundary.

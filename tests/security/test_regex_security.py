@@ -5,7 +5,6 @@ import time
 
 import pytest
 
-import appinfra.regex_utils
 from appinfra.regex_utils import (
     MAX_PATTERN_LENGTH,
     RegexComplexityError,
@@ -44,6 +43,7 @@ def test_nested_quantifier_detection(pattern: str):
 
 @pytest.mark.security
 @pytest.mark.unit
+@pytest.mark.expected_skip  # Skips on Windows (no SIGALRM for timeout)
 def test_alternation_explosion_detection():
     """
     Verify pattern complexity validator catches degenerate alternations.
@@ -112,14 +112,13 @@ def test_pattern_length_limit():
 
 
 @pytest.mark.security
-@pytest.mark.integration
 @pytest.mark.skipif(
     sys.platform == "win32",
     reason="signal.SIGALRM not available on Windows",
 )
 @pytest.mark.parametrize(
     "pattern,evil_input",
-    list(REDOS_EVIL_INPUTS.items())[:3],  # Test first 3 patterns
+    list(REDOS_EVIL_INPUTS.items()),  # Test all available ReDoS patterns
 )
 def test_regex_timeout_enforcement_unix(pattern: str, evil_input: str):
     """
@@ -135,11 +134,6 @@ def test_regex_timeout_enforcement_unix(pattern: str, evil_input: str):
 
     Note: This test only runs on Unix systems where signal.SIGALRM is available.
     """
-    # Skip the (a|a)* pattern - Python's regex engine optimizes it so it doesn't
-    # actually cause catastrophic backtracking in practice
-    if pattern == r"(a|a)*":
-        pytest.skip("Pattern optimized by Python regex engine - doesn't timeout")
-
     # These patterns are known to cause ReDoS, but may not be caught by
     # the complexity validator (simple syntax, complex behavior)
 
@@ -162,6 +156,7 @@ def test_regex_timeout_enforcement_unix(pattern: str, evil_input: str):
 
 @pytest.mark.security
 @pytest.mark.integration
+@pytest.mark.expected_skip  # Windows-only test, skips on Unix
 @pytest.mark.skipif(
     sys.platform != "win32",
     reason="Test Windows behavior (or mock it on Unix)",
@@ -182,42 +177,23 @@ def test_regex_timeout_degradation_windows():
     should rely on pattern complexity validation only.
     """
     # On Windows, safe_compile should work but timeout is disabled
-    import sys
+    # This test only runs on Windows (skipif handles non-Windows platforms)
 
-    if sys.platform == "win32":
-        # Pattern that would timeout on Unix
-        pattern = r"(a+)+"
-        input_str = "a" * 30 + "b"
+    # Pattern that would timeout on Unix
+    pattern = r"(a+)+"
 
-        # Compile with timeout parameter (will be ignored on Windows)
-        try:
-            compiled = safe_compile(pattern)
+    # Compile with timeout parameter (will be ignored on Windows)
+    try:
+        compiled = safe_compile(pattern)
 
-            # Matching may hang on Windows (no timeout protection)
-            # We can't easily test this without actually hanging,
-            # so we just document the behavior
-            pytest.skip("Windows timeout test skipped - would hang without protection")
+        # Matching may hang on Windows (no timeout protection)
+        # We can't easily test this without actually hanging,
+        # so we just document the behavior
+        pytest.skip("Windows timeout test skipped - would hang without protection")
 
-        except RegexComplexityError:
-            # Pattern caught by complexity validator - good fallback!
-            pass
-    else:
-        # On Unix, mock Windows behavior
-        import unittest.mock as mock
-
-        with mock.patch("appinfra.regex_utils.signal.SIGALRM", create=False):
-            # Simulate Windows environment where SIGALRM doesn't exist
-            delattr(appinfra.regex_utils.signal, "SIGALRM")
-
-            # safe_compile should still work, just without timeout
-            simple_pattern = r"^[a-z]+$"
-            compiled = safe_compile(simple_pattern, timeout=1.0)
-            assert compiled is not None
-
-            # Restore SIGALRM
-            import signal
-
-            appinfra.regex_utils.signal.SIGALRM = signal.SIGALRM
+    except RegexComplexityError:
+        # Pattern caught by complexity validator - good fallback!
+        pass
 
 
 # Positive test: Verify legitimate patterns still work

@@ -262,6 +262,7 @@ test:
 
 @pytest.mark.security
 @pytest.mark.integration
+@pytest.mark.expected_skip  # Skips non-relative paths (absolute, Windows, etc.)
 @pytest.mark.parametrize("traversal_path", CLASSIC_TRAVERSAL + ABSOLUTE_PATH_ESCAPE)
 def test_config_path_resolution_traversal(
     traversal_path: str, secure_temp_project: Path
@@ -308,6 +309,7 @@ paths:
 
 @pytest.mark.security
 @pytest.mark.integration
+@pytest.mark.expected_skip  # Skips on Windows (no /etc/passwd)
 def test_config_path_symlink_attack(secure_temp_project: Path):
     """
     Verify !path tag symlink resolution doesn't escape project boundaries.

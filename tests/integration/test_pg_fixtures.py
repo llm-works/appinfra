@@ -8,6 +8,8 @@ Run with:
     ~/.venv/bin/python -m pytest tests/integration/test_pg_fixtures.py -v -s
 """
 
+import os
+
 import pytest
 import sqlalchemy
 
@@ -250,28 +252,6 @@ class TestPGDebugTableCleanup:
         # Test passes - table will be cleaned up by fixture
         assert True
 
-    @pytest.mark.skip(
-        reason="Demo test - would be kept for debugging if it actually ran and failed"
-    )
-    def test_failed_test_keeps_table(self, pg_session, pg_debug_table):
-        """
-        Test that failed tests keep their tables for debugging.
-
-        This test is skipped for the actual test run, but demonstrates
-        that if it were to fail, the table would be kept.
-        """
-        pg_session.execute(
-            sqlalchemy.text(
-                f"""
-            CREATE TABLE {pg_debug_table} (id INT)
-        """
-            )
-        )
-        pg_session.commit()
-
-        # If this assertion failed, the table would be kept
-        assert False, "This failure would preserve the debug table"
-
 
 @pytest.mark.integration
 class TestPGComplexScenarios:
@@ -425,7 +405,12 @@ class TestPGComplexScenarios:
 class TestPGStaleTableCleanup:
     """Test that stale debug tables are cleaned at session start."""
 
-    def test_stale_tables_cleaned_at_session_start(self, pg_session, worker_id):
+    @pytest.mark.expected_skip  # Skipped in xdist workers (expected)
+    @pytest.mark.skipif(
+        os.environ.get("PYTEST_XDIST_WORKER") is not None,
+        reason="Cleanup only runs on master; test not valid with xdist workers",
+    )
+    def test_stale_tables_cleaned_at_session_start(self, pg_session):
         """
         Verify no tables with old timestamps exist after session starts.
 
@@ -437,11 +422,6 @@ class TestPGStaleTableCleanup:
         fixture only runs on master. With xdist, workers create tables that
         won't be cleaned by the master's session-scoped fixture.
         """
-        if worker_id != "master":
-            pytest.skip(
-                "Cleanup only runs on master; test not valid with xdist workers"
-            )
-
         import re
         import time
 
@@ -476,7 +456,6 @@ class TestPGStaleTableCleanup:
         This tests the cleanup logic directly by mocking the test outcome,
         rather than running a subprocess test that actually fails.
         """
-        import os
         import time
         from unittest.mock import Mock
 

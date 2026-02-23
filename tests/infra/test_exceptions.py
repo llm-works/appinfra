@@ -13,6 +13,7 @@ import pytest
 from appinfra.exceptions import (
     ConfigError,
     DatabaseError,
+    DependencyError,
     InfraError,
     LoggingError,
     ObservabilityError,
@@ -290,11 +291,15 @@ class TestExceptionHierarchy:
             ToolError,
             ServerError,
             ObservabilityError,
+            DependencyError,
         ]
 
         for exc_type in exception_types:
             with pytest.raises(InfraError):
-                raise exc_type("Test error")
+                if exc_type is DependencyError:
+                    raise exc_type(package="pkg", extra="extra", feature="Feature")
+                else:
+                    raise exc_type("Test error")
 
     def test_exception_context_preserved_when_caught(self):
         """Test exception context is preserved when caught."""
@@ -304,3 +309,39 @@ class TestExceptionHierarchy:
             assert e.context == {"key": "value", "code": 123}
             assert "key=value" in str(e)
             assert "code=123" in str(e)
+
+
+# =============================================================================
+# Test DependencyError
+# =============================================================================
+
+
+@pytest.mark.unit
+class TestDependencyError:
+    """Test DependencyError class."""
+
+    def test_dependency_error_inherits_from_infra_error(self):
+        """Test DependencyError inherits from InfraError."""
+        error = DependencyError(
+            package="sqlalchemy", extra="sql", feature="Database support"
+        )
+        assert isinstance(error, InfraError)
+        assert isinstance(error, DependencyError)
+
+    def test_dependency_error_message_format(self):
+        """Test DependencyError message format."""
+        error = DependencyError(
+            package="sqlalchemy", extra="sql", feature="Database support"
+        )
+        error_str = str(error)
+        assert "Database support" in error_str
+        assert "sqlalchemy" in error_str
+        assert "pip install appinfra[sql]" in error_str
+
+    def test_dependency_error_context(self):
+        """Test DependencyError context contains package and extra."""
+        error = DependencyError(
+            package="pydantic", extra="validation", feature="Schema validation"
+        )
+        assert error.context["package"] == "pydantic"
+        assert error.context["extra"] == "validation"

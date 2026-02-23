@@ -19,6 +19,7 @@ COVERAGE_TARGET=""
 FAIL_FAST=false
 RAW=false
 SUMMARY=false
+SKIP_TESTS=false
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -33,9 +34,10 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         --summary) SUMMARY=true; shift ;;
+        --skip-tests) SKIP_TESTS=true; shift ;;
         *)
             echo "Unknown option: $1"
-            echo "Usage: $0 [--sequential] [--coverage-target <percentage>] [--fail-fast] [--raw] [--summary]"
+            echo "Usage: $0 [--sequential] [--coverage-target <percentage>] [--fail-fast] [--raw] [--summary] [--skip-tests]"
             exit 1
             ;;
     esac
@@ -133,9 +135,10 @@ if awk "BEGIN {exit !($DOCSTRING_THRESHOLD > 0)}" 2>/dev/null; then
     CHECKS+=("Docstring coverage|cq.docstring.strict|${DOCSTRING_CMD}|docstring:${DOCSTRING_THRESHOLD}")
 fi
 
-CHECKS+=(
-    "Test suite|test.all|SPECIAL|test.v"
-)
+# Add test suite check only if not skipped
+if [ "$SKIP_TESTS" = false ]; then
+    CHECKS+=("Test suite|test.all|SPECIAL|test.v")
+fi
 
 # Test subchecks: "Name|Make Target|Command|Coverage Target"
 COVERAGE_MARKER_ARG=""
@@ -144,28 +147,28 @@ if [ -n "$COVERAGE_MARKERS" ]; then
 fi
 
 declare -a TEST_SUBCHECKS=(
-    "Unit tests|test.unit|${PYTHON} -m pytest tests/ -m unit --tb=short --no-header -qq ${PYTEST_PARALLEL}|"
-    "Integration tests|test.integration|${PYTHON} -m pytest tests/ -m integration --tb=short --no-header -qq ${PYTEST_PARALLEL}|"
-    "E2E tests|test.e2e|${PYTHON} -m pytest tests/ -m e2e --tb=short --no-header -qq ${PYTEST_PARALLEL}|"
-    "Security tests|test.security|${PYTHON} -m pytest tests/ -m security --tb=short --no-header -qq ${PYTEST_PARALLEL}|"
-    "Performance tests|test.perf|${PYTHON} -m pytest tests/ -m performance --tb=short --no-header -qq ${PYTEST_PARALLEL}|"
+    "Unit tests|test.unit|${PYTHON} -m pytest tests/ -m unit --tb=short --no-header -qq -rs ${PYTEST_PARALLEL}|"
+    "Integration tests|test.integration|${PYTHON} -m pytest tests/ -m integration --tb=short --no-header -qq -rs ${PYTEST_PARALLEL}|"
+    "E2E tests|test.e2e|${PYTHON} -m pytest tests/ -m e2e --tb=short --no-header -qq -rs ${PYTEST_PARALLEL}|"
+    "Security tests|test.security|${PYTHON} -m pytest tests/ -m security --tb=short --no-header -qq -rs ${PYTEST_PARALLEL}|"
+    "Performance tests|test.perf|${PYTHON} -m pytest tests/ -m performance --tb=short --no-header -qq -rs ${PYTEST_PARALLEL}|"
 )
 # Add coverage check only if threshold > 0 (awk is more portable than bc)
 if awk "BEGIN {exit !($COVERAGE_TARGET > 0)}" 2>/dev/null; then
-    TEST_SUBCHECKS+=("Code coverage|test.coverage|${PYTHON} -m pytest tests/ ${COVERAGE_MARKER_ARG} --cov=${PKG_NAME} --cov-report=term -qq ${PYTEST_PARALLEL}|${COVERAGE_TARGET}")
+    TEST_SUBCHECKS+=("Code coverage|test.coverage|${PYTHON} -m pytest tests/ ${COVERAGE_MARKER_ARG} --cov=${PKG_NAME} --cov-report=term -qq -rs ${PYTEST_PARALLEL}|${COVERAGE_TARGET}")
 fi
 
 # Verbose versions for raw mode
 declare -a TEST_SUBCHECKS_RAW=(
-    "Unit tests|test.unit.v|${PYTHON} -m pytest tests/ -m unit -v --tb=short ${PYTEST_PARALLEL}|"
-    "Integration tests|test.integration.v|${PYTHON} -m pytest tests/ -m integration -v --tb=short ${PYTEST_PARALLEL}|"
-    "E2E tests|test.e2e.v|${PYTHON} -m pytest tests/ -m e2e -v --tb=short ${PYTEST_PARALLEL}|"
-    "Security tests|test.security.v|${PYTHON} -m pytest tests/ -m security -v --tb=short ${PYTEST_PARALLEL}|"
-    "Performance tests|test.perf.v|${PYTHON} -m pytest tests/ -m performance -v --tb=short ${PYTEST_PARALLEL}|"
+    "Unit tests|test.unit.v|${PYTHON} -m pytest tests/ -m unit -v --tb=short -rs ${PYTEST_PARALLEL}|"
+    "Integration tests|test.integration.v|${PYTHON} -m pytest tests/ -m integration -v --tb=short -rs ${PYTEST_PARALLEL}|"
+    "E2E tests|test.e2e.v|${PYTHON} -m pytest tests/ -m e2e -v --tb=short -rs ${PYTEST_PARALLEL}|"
+    "Security tests|test.security.v|${PYTHON} -m pytest tests/ -m security -v --tb=short -rs ${PYTEST_PARALLEL}|"
+    "Performance tests|test.perf.v|${PYTHON} -m pytest tests/ -m performance -v --tb=short -rs ${PYTEST_PARALLEL}|"
 )
 # Add coverage check only if threshold > 0 (awk is more portable than bc)
 if awk "BEGIN {exit !($COVERAGE_TARGET > 0)}" 2>/dev/null; then
-    TEST_SUBCHECKS_RAW+=("Code coverage|test.coverage|${PYTHON} -m pytest tests/ ${COVERAGE_MARKER_ARG} --cov=${PKG_NAME} --cov-report=term-missing ${PYTEST_PARALLEL}|${COVERAGE_TARGET}")
+    TEST_SUBCHECKS_RAW+=("Code coverage|test.coverage|${PYTHON} -m pytest tests/ ${COVERAGE_MARKER_ARG} --cov=${PKG_NAME} --cov-report=term-missing -rs ${PYTEST_PARALLEL}|${COVERAGE_TARGET}")
 fi
 
 declare -A CHECK_LINES
@@ -279,6 +282,56 @@ record_warning() {
     echo "$name|$count" >> "${STATUS_DIR}/warnings"
 }
 
+record_skips() {
+    local name="$1" logfile="$2"
+    # Parse pytest -rs output for skip reasons
+    # Format: "SKIPPED [N] path:line: reason" or "SKIPPED [N] path: reason" (no line number)
+    # Using portable grep+sed instead of grep -oP (not available on macOS BSD grep)
+    grep -E "^SKIPPED \[" "$logfile" 2>/dev/null | while read -r line; do
+        # Extract count: "SKIPPED [6] ..." -> "6"
+        # SC2155: Declare and assign separately to preserve exit status
+        local count reason
+        count=$(echo "$line" | sed -E 's/^SKIPPED \[([0-9]+)\].*/\1/')
+        # Extract reason: everything after "path:line: " or "path: " (line number optional)
+        reason=$(echo "$line" | sed -E 's/^SKIPPED \[[0-9]+\] [^:]+:([0-9]+:)? //')
+        # Skip reasons prefixed with [expected] (from @pytest.mark.expected_skip)
+        if [[ "$reason" == "[expected] "* ]]; then
+            continue
+        fi
+        # Use tab delimiter to avoid issues with | in skip reasons
+        # Use if block instead of && chain to avoid pipefail issues
+        if [ -n "$count" ] && [ -n "$reason" ]; then
+            printf '%s\t%s\n' "$count" "$reason" >> "${STATUS_DIR}/skips"
+        fi
+    done || true  # Guard against pipefail when loop has no matching lines
+}
+
+display_skip_summary() {
+    [ -f "${STATUS_DIR}/skips" ] || return 0
+
+    # Aggregate skip counts by reason (using tab delimiter)
+    declare -A skip_reasons
+    local total_skipped=0
+
+    while IFS=$'\t' read -r count reason; do
+        skip_reasons["$reason"]=$((${skip_reasons["$reason"]:-0} + count))
+        total_skipped=$((total_skipped + count))
+    done < "${STATUS_DIR}/skips"
+
+    [ $total_skipped -eq 0 ] && return 0
+
+    echo ""
+    echo -e "${YELLOW}⚠ Warning: ${total_skipped} tests skipped${RESET}"
+
+    # Sort reasons by count (descending) and display
+    # Use tab delimiter to avoid issues with special characters in skip reasons
+    for reason in "${!skip_reasons[@]}"; do
+        printf '%s\t%s\n' "${skip_reasons[$reason]}" "$reason"
+    done | sort -t$'\t' -k1 -rn | while IFS=$'\t' read -r count reason; do
+        printf "  ${GRAY}- %s skipped: %s${RESET}\n" "$count" "$reason"
+    done
+}
+
 # Unified check runner - handles both main checks and subchecks
 run_check() {
     local name="$1" cmd="$2" line_num="$3"
@@ -315,6 +368,12 @@ run_check() {
     # Handle result based on exit code
     case "$exit_code" in
         0)
+            # Record skips for test subchecks (pytest output)
+            # Skip coverage subcheck to avoid double-counting (it re-runs tests with --cov)
+            if [ "$is_subcheck" = true ] && [[ "$name" != *"coverage"* ]] && grep -qE "^SKIPPED \[" "$tmpfile" 2>/dev/null; then
+                record_skips "$name" "$tmpfile"
+            fi
+
             if [ -n "$coverage_target" ]; then
                 # Use appropriate parser based on check type
                 local actual
@@ -473,23 +532,25 @@ run_checks() {
             fi
         done
 
-        # Launch test subchecks in parallel (except perf tests)
-        for subcheck_def in "${TEST_SUBCHECKS[@]}"; do
-            IFS='|' read -r subname submake subcmd coverage_target <<< "$subcheck_def"
-            if [[ "$subname" == "Performance tests" ]]; then
-                perf_subcheck="$subcheck_def"
-                continue
-            fi
-            local subline=${SUBCHECK_LINES["$subname"]}
-            run_check "$subname" "$subcmd" "$subline" true "$coverage_target" "" "$submake" &
-            pids+=($!)
-        done
+        # Launch test subchecks in parallel (except perf tests) - only if tests enabled
+        if [ -n "$test_suite_line" ]; then
+            for subcheck_def in "${TEST_SUBCHECKS[@]}"; do
+                IFS='|' read -r subname submake subcmd coverage_target <<< "$subcheck_def"
+                if [[ "$subname" == "Performance tests" ]]; then
+                    perf_subcheck="$subcheck_def"
+                    continue
+                fi
+                local subline=${SUBCHECK_LINES["$subname"]}
+                run_check "$subname" "$subcmd" "$subline" true "$coverage_target" "" "$submake" &
+                pids+=($!)
+            done
+        fi
 
         # Wait for all parallel checks
         monitor_jobs "${pids[@]}" || any_failed=true
 
-        # Run performance tests last (needs isolated CPU)
-        if [ -n "$perf_subcheck" ]; then
+        # Run performance tests last (needs isolated CPU) - only if tests enabled
+        if [ -n "$test_suite_line" ] && [ -n "$perf_subcheck" ]; then
             [ "$FAIL_FAST" = true ] && [ "$any_failed" = true ] && {
                 update_line "$test_suite_line" "${RED}${CHECK_FAILURE}${RESET}" "Test suite" ""
                 return 1
@@ -499,11 +560,13 @@ run_checks() {
             run_check "$subname" "$subcmd" "$subline" true "$coverage_target" "" "$submake" || any_failed=true
         fi
 
-        # Update test suite status
-        if [ -f "${STATUS_DIR}/failures" ]; then
-            update_line "$test_suite_line" "${RED}${CHECK_FAILURE}${RESET}" "Test suite" ""
-        else
-            update_line "$test_suite_line" "${GREEN}${CHECK_SUCCESS}${RESET}" "Test suite" ""
+        # Update test suite status - only if tests enabled
+        if [ -n "$test_suite_line" ]; then
+            if [ -f "${STATUS_DIR}/failures" ]; then
+                update_line "$test_suite_line" "${RED}${CHECK_FAILURE}${RESET}" "Test suite" ""
+            else
+                update_line "$test_suite_line" "${GREEN}${CHECK_SUCCESS}${RESET}" "Test suite" ""
+            fi
         fi
     else
         # Sequential mode
@@ -657,6 +720,7 @@ main() {
         echo -e "${RED}✗ ${failure_count} check(s) failed${RESET} ${GRAY}after ${elapsed}s${RESET}"
         echo ""
         display_failures
+        display_skip_summary
         exit 1
     else
         # Check for warnings
@@ -666,6 +730,7 @@ main() {
         else
             echo -e "${GREEN}✓ All checks passed${RESET} ${GRAY}in ${elapsed}s${RESET}"
         fi
+        display_skip_summary
     fi
 }
 

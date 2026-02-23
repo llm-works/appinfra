@@ -16,8 +16,9 @@ import pytest
 # Plugin Registration
 # =============================================================================
 
-# Register integration test fixtures
+# Register integration test fixtures and appinfra testing utilities
 pytest_plugins = [
+    "appinfra.testing",
     "tests.fixtures.pg_integration",
     "tests.fixtures.sqlite_integration",
     "tests.fixtures.logging",

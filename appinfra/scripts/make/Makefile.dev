@@ -199,6 +199,10 @@ check.summary:: ## Full checks with summary output (no cursor, summaries + failu
 	@bash $(INFRA_DEV_CHECK_SCRIPT) --raw --summary
 .PHONY: check.summary
 
+check.nt:: ## Code quality checks only (no tests)
+	@bash $(INFRA_DEV_CHECK_SCRIPT) --fail-fast --skip-tests
+.PHONY: check.nt
+
 count:: ## counts number of lines
 	@echo "* running count..."
 	@find . -name \*.py | xargs wc -l

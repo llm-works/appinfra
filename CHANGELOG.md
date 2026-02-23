@@ -10,10 +10,26 @@ For API stability guarantees and deprecation policy, see
 
 ## [Unreleased]
 
+### Added
+- `appinfra.testing` pytest plugin with `expected_skip` marker for acceptable skips:
+  - Prefixes skip reasons with `[expected]` for filtering in `check.sh`
+  - See `appinfra docs show pytest-plugin` for usage
+- `check.sh` now displays skip summary with grouped reasons:
+  - Shows count and reasons for skipped tests at end of check output
+  - Expected skips (marked with `[expected]`) are filtered from warnings
+  - Helps identify unintentional test skips that need attention
+- `make check.nt` target for running code quality checks without tests:
+  - Runs formatting, linting, type checking, docstring coverage
+  - Skips all test suites (unit, integration, e2e, security, performance)
+  - Useful for quick feedback during development
+
 ### Fixed
 - `make install` and `make install.e` now clean build artifacts before installing:
   - Removes `*.egg-info`, `.dist`, `.build`, `dist`, `build` directories
   - Prevents stale cached files from being reinstalled after `make uninstall`
+- Test directory `tests/infra/app/fastapi/` renamed to `tests/infra/app/fastapi_tests/`:
+  - Prevents package shadowing when pytest-xdist adds test directories to `sys.path`
+  - Eliminates spurious "FastAPI not available" skips in parallel test runs
 
 ## [0.4.0] - 2026-02-20
 
