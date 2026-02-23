@@ -250,28 +250,6 @@ class TestPGDebugTableCleanup:
         # Test passes - table will be cleaned up by fixture
         assert True
 
-    @pytest.mark.skip(
-        reason="Demo test - would be kept for debugging if it actually ran and failed"
-    )
-    def test_failed_test_keeps_table(self, pg_session, pg_debug_table):
-        """
-        Test that failed tests keep their tables for debugging.
-
-        This test is skipped for the actual test run, but demonstrates
-        that if it were to fail, the table would be kept.
-        """
-        pg_session.execute(
-            sqlalchemy.text(
-                f"""
-            CREATE TABLE {pg_debug_table} (id INT)
-        """
-            )
-        )
-        pg_session.commit()
-
-        # If this assertion failed, the table would be kept
-        assert False, "This failure would preserve the debug table"
-
 
 @pytest.mark.integration
 class TestPGComplexScenarios:
