@@ -19,7 +19,7 @@ from .config import (
 )
 from .deprecation import deprecated
 from .dict import DictInterface
-from .dot_dict import DotDict
+from .dot_dict import DataDotDict, DotDict, field
 from .ewma import EWMA
 from .exceptions import (
     ConfigError,
@@ -60,8 +60,10 @@ __all__ = [
     "net",
     # Core classes
     "Backoff",
+    "DataDotDict",
     "DictInterface",
     "DotDict",
+    "field",
     "EWMA",
     "RateLimiter",
     "Config",

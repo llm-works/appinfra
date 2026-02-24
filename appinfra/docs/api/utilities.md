@@ -118,6 +118,75 @@ data = config.dict()       # One level conversion
 data = config.to_dict()    # Recursive conversion
 ```
 
+## DataDotDict
+
+Typed DotDict with field declarations for IDE autocomplete and validation.
+
+```python
+class DataDotDict(DotDict):
+    # Subclass with field annotations
+    pass
+
+def field(*, default_factory: Callable[[], Any]) -> Any:
+    """Declare field with mutable default (list, dict, set)."""
+```
+
+**Usage:**
+
+```python
+from appinfra import DataDotDict, field
+
+class RunResult(DataDotDict):
+    # Required fields (no default)
+    status: str
+    started_at: datetime
+    completed_at: datetime
+
+    # Optional fields (with defaults)
+    method: str = "sft"
+    error: str | None = None
+
+    # Mutable defaults (use field() to avoid shared state)
+    metrics: dict = field(default_factory=dict)
+
+    # Computed fields via __post_init__
+    def __post_init__(self):
+        self.duration = (self.completed_at - self.started_at).total_seconds()
+
+# Create instance
+result = RunResult(status="completed", started_at=t0, completed_at=t1)
+
+result.status    # IDE autocomplete works
+result.method    # "sft" (default applied)
+result.metrics   # {} (fresh dict per instance)
+
+# Still a dict - no serialization needed
+json.dumps(result)       # Just works
+yaml.safe_dump(result)   # Just works
+isinstance(result, dict) # True
+```
+
+**Strict Mode:**
+
+```python
+class StrictConfig(DataDotDict, strict=True):
+    host: str
+    port: int = 5432
+
+StrictConfig(host="localhost")                    # OK
+StrictConfig(host="localhost", extra="field")     # TypeError: unknown field
+```
+
+**Key differences from dataclass:**
+
+| Feature | dataclass | DataDotDict |
+|---------|-----------|-------------|
+| Is a dict | No | Yes |
+| JSON serialization | `asdict()` required | Just works |
+| Attribute access | Yes | Yes |
+| Dict access `obj["key"]` | No | Yes |
+| Dot-path `obj.get("a.b")` | No | Yes |
+
 ## RateLimiter
 
 Control operation frequency with blocking or non-blocking modes.
