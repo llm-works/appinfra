@@ -586,8 +586,10 @@ class DataDotDict(DotDict):
 
         super().__init__(**kwargs)
 
-        if hasattr(self, "__post_init__"):
-            self.__post_init__()
+        # Look up __post_init__ on the class, not instance (avoids matching data keys)
+        post_init = getattr(type(self), "__post_init__", None)
+        if callable(post_init):
+            post_init(self)
 
     def __repr__(self) -> str:
         """Show class name in repr."""
