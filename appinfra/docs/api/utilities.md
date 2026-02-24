@@ -118,12 +118,12 @@ data = config.dict()       # One level conversion
 data = config.to_dict()    # Recursive conversion
 ```
 
-## DataDotDict
+## FieldDict
 
 Typed DotDict with field declarations for IDE autocomplete and validation.
 
 ```python
-class DataDotDict(DotDict):
+class FieldDict(DotDict):
     # Subclass with field annotations
     pass
 
@@ -134,9 +134,9 @@ def field(*, default_factory: Callable[[], Any]) -> Any:
 **Usage:**
 
 ```python
-from appinfra import DataDotDict, field
+from appinfra import FieldDict, field
 
-class RunResult(DataDotDict):
+class RunResult(FieldDict):
     # Required fields (no default)
     status: str
     started_at: datetime
@@ -169,7 +169,7 @@ isinstance(result, dict) # True
 **Strict Mode:**
 
 ```python
-class StrictConfig(DataDotDict, strict=True):
+class StrictConfig(FieldDict, strict=True):
     host: str
     port: int = 5432
 
@@ -179,7 +179,7 @@ StrictConfig(host="localhost", extra="field")     # TypeError: unknown field
 
 **Key differences from dataclass:**
 
-| Feature | dataclass | DataDotDict |
+| Feature | dataclass | FieldDict |
 |---------|-----------|-------------|
 | Is a dict | No | Yes |
 | JSON serialization | `asdict()` required | Just works |

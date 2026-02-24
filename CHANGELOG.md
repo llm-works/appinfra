@@ -11,7 +11,7 @@ For API stability guarantees and deprecation policy, see
 ## [Unreleased]
 
 ### Added
-- `DataDotDict` - typed DotDict with field declarations for IDE autocomplete:
+- `FieldDict` - typed DotDict with field declarations for IDE autocomplete:
   - Required/optional fields with defaults, `field(default_factory=...)` for mutable defaults
   - `__post_init__` hook for computed fields, optional `strict=True` mode
 - `appinfra.testing` pytest plugin with `expected_skip` marker for acceptable skips:

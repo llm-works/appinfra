@@ -19,7 +19,7 @@ from .config import (
 )
 from .deprecation import deprecated
 from .dict import DictInterface
-from .dot_dict import DataDotDict, DotDict, field
+from .dot_dict import DotDict
 from .ewma import EWMA
 from .exceptions import (
     ConfigError,
@@ -32,6 +32,7 @@ from .exceptions import (
     ToolError,
     ValidationError,
 )
+from .field_dict import FieldDict, field
 from .rate_limit import Backoff, RateLimiter
 from .regex_utils import (
     RegexComplexityError,
@@ -60,7 +61,7 @@ __all__ = [
     "net",
     # Core classes
     "Backoff",
-    "DataDotDict",
+    "FieldDict",
     "DictInterface",
     "DotDict",
     "field",

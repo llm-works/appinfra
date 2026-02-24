@@ -1,19 +1,19 @@
-"""Tests for DataDotDict - typed DotDict with field declarations."""
+"""Tests for FieldDict - typed DotDict with field declarations."""
 
 from datetime import datetime
 from typing import Any
 
 import pytest
 
-from appinfra import DataDotDict, field
+from appinfra import FieldDict, field
 
 # =============================================================================
 # Test Basic Field Declarations
 # =============================================================================
 
 
-class SimpleResult(DataDotDict):
-    """Simple DataDotDict with required and optional fields."""
+class SimpleResult(FieldDict):
+    """Simple FieldDict with required and optional fields."""
 
     status: str  # required
     method: str = "sft"  # optional with default
@@ -61,8 +61,8 @@ class TestBasicFields:
 # =============================================================================
 
 
-class ResultWithLists(DataDotDict):
-    """DataDotDict with mutable defaults using field()."""
+class ResultWithLists(FieldDict):
+    """FieldDict with mutable defaults using field()."""
 
     name: str
     errors: list = field(default_factory=list)
@@ -97,21 +97,21 @@ class TestMutableDefaults:
         """Test bare mutable default raises TypeError."""
         with pytest.raises(TypeError, match="Mutable default.*not allowed"):
 
-            class BadClass(DataDotDict):
+            class BadClass(FieldDict):
                 items: list = []  # Should use field(default_factory=list)
 
     def test_mutable_dict_default_raises(self):
         """Test bare dict default raises TypeError."""
         with pytest.raises(TypeError, match="Mutable default.*not allowed"):
 
-            class BadClass(DataDotDict):
+            class BadClass(FieldDict):
                 data: dict = {}
 
     def test_mutable_set_default_raises(self):
         """Test bare set default raises TypeError."""
         with pytest.raises(TypeError, match="Mutable default.*not allowed"):
 
-            class BadClass(DataDotDict):
+            class BadClass(FieldDict):
                 tags: set = set()
 
 
@@ -120,8 +120,8 @@ class TestMutableDefaults:
 # =============================================================================
 
 
-class RunResult(DataDotDict):
-    """DataDotDict with __post_init__ for computed fields."""
+class RunResult(FieldDict):
+    """FieldDict with __post_init__ for computed fields."""
 
     started_at: datetime
     completed_at: datetime
@@ -148,7 +148,7 @@ class TestPostInit:
     def test_post_init_can_access_all_fields(self):
         """Test __post_init__ can access required and default fields."""
 
-        class Config(DataDotDict):
+        class Config(FieldDict):
             host: str
             port: int = 5432
             url: str = ""
@@ -165,15 +165,15 @@ class TestPostInit:
 # =============================================================================
 
 
-class StrictConfig(DataDotDict, strict=True):
-    """Strict DataDotDict that rejects unknown fields."""
+class StrictConfig(FieldDict, strict=True):
+    """Strict FieldDict that rejects unknown fields."""
 
     host: str
     port: int = 5432
 
 
-class FlexibleConfig(DataDotDict):
-    """Default (non-strict) DataDotDict that allows extra fields."""
+class FlexibleConfig(FieldDict):
+    """Default (non-strict) FieldDict that allows extra fields."""
 
     host: str
 
@@ -208,15 +208,15 @@ class TestStrictMode:
 
 @pytest.mark.unit
 class TestDictBehavior:
-    """Test that DataDotDict is still a dict."""
+    """Test that FieldDict is still a dict."""
 
     def test_isinstance_dict(self):
-        """Test DataDotDict instances are dicts."""
+        """Test FieldDict instances are dicts."""
         result = SimpleResult(status="ok")
         assert isinstance(result, dict)
 
     def test_json_serializable(self):
-        """Test DataDotDict can be serialized to JSON."""
+        """Test FieldDict can be serialized to JSON."""
         import json
 
         result = SimpleResult(status="ok", method="dpo")
@@ -288,7 +288,7 @@ class TestRepr:
 # =============================================================================
 
 
-class BaseResult(DataDotDict):
+class BaseResult(FieldDict):
     """Base class with some fields."""
 
     status: str
@@ -302,7 +302,7 @@ class ExtendedResult(BaseResult):
 
 @pytest.mark.unit
 class TestInheritance:
-    """Test DataDotDict inheritance."""
+    """Test FieldDict inheritance."""
 
     def test_subclass_inherits_parent_behavior(self):
         """Test subclass works with parent fields."""
@@ -334,6 +334,39 @@ class TestInheritance:
         result2 = ChildWithDefault(status="custom")
         assert result2.status == "custom"
 
+    def test_subclass_factory_overrides_parent_static_default(self):
+        """Test subclass factory properly overrides parent's static default."""
+
+        class ParentWithStatic(FieldDict):
+            items: list = field(default_factory=list)  # Will be overridden
+            config: str = "parent_config"
+
+        class ChildWithFactory(ParentWithStatic):
+            config: list = field(default_factory=list)  # Override static with factory
+
+        # Each instance should get its own list (not the parent's static default)
+        c1 = ChildWithFactory()
+        c2 = ChildWithFactory()
+        assert c1.config == []
+        assert c2.config == []
+        c1.config.append("item")
+        assert c1.config == ["item"]
+        assert c2.config == []  # Independent - confirms factory is used
+
+    def test_subclass_static_overrides_parent_factory(self):
+        """Test subclass static default properly overrides parent's factory."""
+
+        class ParentWithFactory(FieldDict):
+            items: list = field(default_factory=list)
+
+        class ChildWithStatic(ParentWithFactory):
+            items: str = "static_value"  # Override factory with static
+
+        c1 = ChildWithStatic()
+        c2 = ChildWithStatic()
+        assert c1.items == "static_value"
+        assert c2.items == "static_value"
+
 
 # =============================================================================
 # Test Edge Cases
@@ -344,19 +377,50 @@ class TestInheritance:
 class TestEdgeCases:
     """Test edge cases and special scenarios."""
 
+    def test_classvar_skipped(self):
+        """Test ClassVar fields are not treated as instance fields."""
+        from typing import ClassVar
+
+        class ConfigWithClassVar(FieldDict):
+            name: str
+            VERSION: ClassVar[str] = "1.0"
+
+        # ClassVar should not be required
+        cfg = ConfigWithClassVar(name="test")
+        assert cfg.name == "test"
+        # ClassVar should still be accessible as class attribute
+        assert ConfigWithClassVar.VERSION == "1.0"
+        # But not in instance dict
+        assert "VERSION" not in cfg
+
+    def test_classvar_string_annotation_skipped(self):
+        """Test ClassVar with string annotation (postponed) is skipped."""
+
+        # Simulate postponed annotation by using __annotations__ directly
+        class ConfigWithStringClassVar(FieldDict):
+            name: str
+
+        # Manually set a string annotation for ClassVar
+        ConfigWithStringClassVar.__annotations__["CACHED"] = "ClassVar[dict]"
+        ConfigWithStringClassVar.CACHED = {}
+
+        # Should not fail - ClassVar should be skipped even as string
+        cfg = ConfigWithStringClassVar(name="test")
+        assert cfg.name == "test"
+
     def test_none_as_default(self):
         """Test None as default value."""
 
-        class NullableResult(DataDotDict):
+        class NullableResult(FieldDict):
             value: Any = None
 
         result = NullableResult()
         assert result.value is None
 
     def test_empty_class(self):
-        """Test DataDotDict with no fields."""
+        """Test FieldDict with no fields."""
 
-        class Empty(DataDotDict):
+        class Empty(FieldDict):
             pass
 
         e = Empty()
@@ -365,7 +429,7 @@ class TestEdgeCases:
     def test_multiple_required_fields_error_message(self):
         """Test error message lists all missing fields."""
 
-        class MultiRequired(DataDotDict):
+        class MultiRequired(FieldDict):
             a: str
             b: str
             c: str
