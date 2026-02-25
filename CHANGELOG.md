@@ -10,6 +10,8 @@ For API stability guarantees and deprecation policy, see
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-02-25
+
 ### Added
 - `FieldDict` - typed DotDict with field declarations for IDE autocomplete:
   - Required/optional fields with defaults, `field(default_factory=...)` for mutable defaults
@@ -412,7 +414,8 @@ as config. Affected: `ConfigValidator`, `PG.readonly`, `PG.migrate()`,
 ### Changed
 - Package renamed to `appinfra` (install and import both use `appinfra`)
 
-[Unreleased]: https://github.com/serendip-ml/appinfra/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/serendip-ml/appinfra/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/serendip-ml/appinfra/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/serendip-ml/appinfra/compare/v0.3.5...v0.4.0
 [0.3.5]: https://github.com/serendip-ml/appinfra/compare/v0.3.4...v0.3.5
 [0.3.4]: https://github.com/serendip-ml/appinfra/compare/v0.3.3...v0.3.4
