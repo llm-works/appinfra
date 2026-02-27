@@ -10,6 +10,10 @@ For API stability guarantees and deprecation policy, see
 
 ## [Unreleased]
 
+### Fixed
+- Added `setuptools` to dev dependencies (required by `sphinx.setup_command`)
+- Test for `!path` YAML tag now uses non-existent paths to avoid symlink resolution issues
+
 ## [0.4.1] - 2026-02-25
 
 ### Added

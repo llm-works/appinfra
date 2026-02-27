@@ -1214,10 +1214,12 @@ data_dir: !path ~/data/files
     def test_path_tag_expands_tilde_with_subdirs(self):
         """Test that !path expands ~ in paths with multiple subdirectories."""
         yaml_content = """
-config: !path ~/ops/models/selected.yaml
+config: !path ~/._appinfra_test_nonexistent/subdir/config.yaml
 """
         data = load(StringIO(yaml_content))
-        expected = str(Path.home() / "ops" / "models" / "selected.yaml")
+        expected = str(
+            Path.home() / "._appinfra_test_nonexistent" / "subdir" / "config.yaml"
+        )
         assert data["config"] == expected
 
     def test_path_tag_absolute_path_unchanged(self):
