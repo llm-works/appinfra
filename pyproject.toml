@@ -24,6 +24,7 @@ Issues = "https://github.com/serendip-ml/appinfra/issues"
 
 [project.optional-dependencies]
 dev = [
+    "setuptools>=68.0",
     "coverage>=7.0.0,<8.0.0",
     "ruff>=0.1.0,<1.0.0",
     "mypy>=1.0.0,<2.0.0",
