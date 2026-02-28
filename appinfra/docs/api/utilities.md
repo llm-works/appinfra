@@ -441,6 +441,33 @@ cache: !path ./cache               # Relative to config file
 home_cache: !path ~/.cache/myapp   # Expands ~ to home directory
 ```
 
+**`!deep`** - Deep merge with YAML merge keys (recursive instead of shallow):
+
+```yaml
+# Standard merge (<<: *anchor) does SHALLOW merge - nested dicts replaced entirely
+# Deep merge (<<: !deep *anchor) recursively merges nested dicts
+
+templates:
+  defaults: &defaults
+    timeout: 30
+    options:
+      retries: 3
+      backoff: 1.5
+
+services:
+  api:
+    <<: !deep *defaults    # Deep merge
+    options:
+      cache: true          # options = {retries: 3, backoff: 1.5, cache: true}
+
+  worker:
+    <<: *defaults          # Standard shallow merge
+    options:
+      cache: true          # options = {cache: true} (retries, backoff lost!)
+```
+
+Works with anchors (`!deep *anchor`) and includes (`!deep !include "./base.yaml"`).
+
 ## Path Resolution
 
 Path resolution in configuration files requires the explicit `!path` YAML tag. Without the tag,

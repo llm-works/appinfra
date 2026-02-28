@@ -10,6 +10,13 @@ For API stability guarantees and deprecation policy, see
 
 ## [Unreleased]
 
+### Added
+- `!deep` YAML tag for recursive deep merging with YAML merge keys (`<<`):
+  - Standard merge keys do shallow merge (nested dicts replaced entirely)
+  - `!deep` enables deep merge where nested dicts are recursively merged
+  - Syntax: `<<: !deep *anchor` or `<<: !deep !include "./file.yaml"`
+  - Example: template `{nested: {a: 1}}` + override `{nested: {b: 2}}` = `{nested: {a: 1, b: 2}}`
+
 ### Fixed
 - Added `setuptools` to dev dependencies (required by `sphinx.setup_command`)
 - Test for `!path` YAML tag now uses non-existent paths to avoid symlink resolution issues
