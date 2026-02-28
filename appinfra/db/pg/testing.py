@@ -49,6 +49,72 @@ if TYPE_CHECKING:
 
 
 # =============================================================================
+# Helpers
+# =============================================================================
+
+# Extension name validation pattern (same as PG class)
+_EXT_PATTERN = __import__("re").compile(r"^[a-z][a-z0-9_-]*$")
+
+
+def _create_extensions_in_db(url: str, extensions: list[str]) -> None:
+    """Create PostgreSQL extensions in the target database."""
+    import sqlalchemy
+    from sqlalchemy import text
+
+    if not extensions:
+        return
+
+    engine = sqlalchemy.create_engine(url)
+    try:
+        with engine.connect() as conn:
+            for ext in extensions:
+                if _EXT_PATTERN.match(ext):
+                    conn.execute(text(f'CREATE EXTENSION IF NOT EXISTS "{ext}"'))
+            conn.commit()
+    finally:
+        engine.dispose()
+
+
+def _setup_database_with_lock(config: dict[str, Any]) -> None:
+    """
+    Set up database and extensions with advisory lock coordination.
+
+    Connects to the 'postgres' database to acquire an advisory lock,
+    then creates the target database and extensions if needed.
+    This prevents race conditions with pytest-xdist workers.
+    """
+    import hashlib
+    from urllib.parse import urlparse
+
+    import sqlalchemy
+    import sqlalchemy_utils
+    from sqlalchemy import text
+
+    if not config.get("create_db"):
+        return
+
+    url = config["url"]
+    parsed = urlparse(url)
+    db_name = parsed.path.lstrip("/")
+    postgres_url = url.replace(f"/{db_name}", "/postgres")
+    lock_id = int(hashlib.md5(db_name.encode()).hexdigest()[:15], 16)
+
+    engine = sqlalchemy.create_engine(postgres_url)
+    try:
+        with engine.connect() as conn:
+            conn.execute(text(f"SELECT pg_advisory_lock({lock_id})"))
+            try:
+                if not sqlalchemy_utils.database_exists(url):
+                    sqlalchemy_utils.create_database(url)
+                _create_extensions_in_db(url, config.get("extensions", []))
+            finally:
+                conn.execute(text(f"SELECT pg_advisory_unlock({lock_id})"))
+                conn.commit()
+    finally:
+        engine.dispose()
+
+
+# =============================================================================
 # Core Fixtures
 # =============================================================================
 
@@ -143,9 +209,11 @@ def pg_isolated(
     """
     from .pg import PG
 
+    # Set up database and extensions under advisory lock (handles xdist race conditions)
+    _setup_database_with_lock(pg_test_config)
+
     pg = PG(pg_test_logger, pg_test_config, schema=pg_test_schema)
 
-    # Create fresh schema at session start
     if pg._schema_mgr:
         pg._schema_mgr.reset_schema()
 
@@ -253,9 +321,11 @@ def pg_migrate_factory(
         if extensions is not None:
             config["extensions"] = extensions
 
+        # Set up database and extensions under advisory lock (handles xdist race conditions)
+        _setup_database_with_lock(config)
+
         pg = PG(pg_test_logger, config, schema=pg_test_schema)
 
-        # Create fresh schema and run migrations
         if pg._schema_mgr:
             pg._schema_mgr.reset_schema()
 
@@ -319,22 +389,21 @@ def make_migrate_fixture(
     ) -> Generator[PG, None, None]:
         from .pg import PG
 
-        # Merge extensions into config if provided (use None check so empty list clears extensions)
-        config = dict(pg_test_config)
+        config = dict(pg_test_config)  # Copy to avoid mutating fixture
         if extensions is not None:
             config["extensions"] = extensions
 
+        # Set up database and extensions under advisory lock (handles xdist race conditions)
+        _setup_database_with_lock(config)
+
         pg = PG(pg_test_logger, config, schema=pg_test_schema)
 
-        # Create fresh schema and run migrations
         if pg._schema_mgr:
             pg._schema_mgr.reset_schema()
-
         pg.migrate(base)
 
         yield pg
 
-        # Clean up
         if pg._schema_mgr:
             pg._schema_mgr.drop_schema(cascade=True)
             pg._schema_mgr.remove_listeners()

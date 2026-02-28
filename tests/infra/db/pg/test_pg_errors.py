@@ -539,9 +539,9 @@ class TestPGExtensionValidation:
         # Call _create_extensions
         pg._create_extensions()
 
-        # Verify execute was called for each extension
+        # Verify execute and commit were called for each extension (separate transactions)
         assert mock_conn.execute.call_count == 2
-        mock_conn.commit.assert_called_once()
+        assert mock_conn.commit.call_count == 2
 
     @patch("appinfra.db.pg.pg.LoggerFactory")
     @patch.object(PG, "_create_managers")
