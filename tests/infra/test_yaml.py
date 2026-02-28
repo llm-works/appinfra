@@ -2330,6 +2330,73 @@ config:
         result = load(StringIO(content), track_sources=False)
         assert result["config"]["nested"] == {"a": 1, "b": 2}
 
+    def test_deep_merge_list_syntax(self):
+        """Test <<: !deep [*a, *b] applies deep merge to all items."""
+        content = """
+a: &a
+  nested:
+    x: 1
+b: &b
+  nested:
+    y: 2
+
+config:
+  <<: !deep [*a, *b]
+  nested:
+    z: 3
+"""
+        result = load(StringIO(content), track_sources=False)
+        # All nested keys should be merged
+        assert result["config"]["nested"] == {"x": 1, "y": 2, "z": 3}
+
+    def test_deep_merge_mixed_list_syntax(self):
+        """Test <<: [*a, !deep *b] for mixed shallow/deep merge."""
+        content = """
+a: &a
+  top_level: from_a
+
+b: &b
+  nested:
+    x: 1
+
+config:
+  <<: [*a, !deep *b]
+  nested:
+    y: 2
+"""
+        result = load(StringIO(content), track_sources=False)
+        assert result["config"]["top_level"] == "from_a"
+        # Only *b is deep merged, so nested should have both x and y
+        assert result["config"]["nested"] == {"x": 1, "y": 2}
+
+    def test_deep_merge_multiple_merge_keys(self):
+        """Test multiple <<: keys with mixed shallow and deep merge."""
+        content = """
+behavior: &behavior
+  think:
+    enabled: true
+
+settings: &settings
+  max_len: 8192
+  vllm:
+    enforce_eager: true
+
+model:
+  <<: *behavior
+  <<: !deep *settings
+  vllm:
+    gpu_memory_gb: 8.0
+"""
+        result = load(StringIO(content), track_sources=False)
+        model = result["model"]
+        # behavior is shallow merged
+        assert model["think"] == {"enabled": True}
+        # settings.max_len is inherited
+        assert model["max_len"] == 8192
+        # vllm is deep merged
+        assert model["vllm"]["enforce_eager"] is True
+        assert model["vllm"]["gpu_memory_gb"] == 8.0
+
 
 # =============================================================================
 # DeepMergeWrapper Unit Tests

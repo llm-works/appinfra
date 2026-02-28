@@ -14,7 +14,11 @@ For API stability guarantees and deprecation policy, see
 - `!deep` YAML tag for recursive deep merging with YAML merge keys (`<<`):
   - Standard merge keys do shallow merge (nested dicts replaced entirely)
   - `!deep` enables deep merge where nested dicts are recursively merged
-  - Syntax: `<<: !deep *anchor` or `<<: !deep !include "./file.yaml"`
+  - Supported syntaxes:
+    - `<<: !deep *anchor` - deep merge single anchor
+    - `<<: !deep [*a, *b]` - deep merge all items in list
+    - `<<: [*a, !deep *b]` - mixed shallow/deep per item
+    - Multiple `<<:` keys with independent shallow/deep control
   - Example: template `{nested: {a: 1}}` + override `{nested: {b: 2}}` = `{nested: {a: 1, b: 2}}`
 
 ### Fixed

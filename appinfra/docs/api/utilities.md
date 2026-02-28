@@ -466,7 +466,25 @@ services:
       cache: true          # options = {cache: true} (retries, backoff lost!)
 ```
 
-Works with anchors (`!deep *anchor`) and includes (`!deep !include "./base.yaml"`).
+**Supported syntaxes:**
+
+```yaml
+# Single anchor
+<<: !deep *template
+
+# All items deep merged
+<<: !deep [*template_a, *template_b]
+
+# Mixed: shallow for *a, deep for *b
+<<: [*behavior, !deep *settings]
+
+# Multiple merge keys (each independent)
+<<: *behavior           # shallow
+<<: !deep *settings     # deep
+
+# With includes
+<<: !deep !include "./base.yaml"
+```
 
 ## Path Resolution
 

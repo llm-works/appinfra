@@ -751,23 +751,71 @@ class Loader(yaml.SafeLoader):
 
         for key_node, value_node in node.value:
             if self._is_merge_key(key_node):
-                if isinstance(value_node, yaml.SequenceNode):
-                    for subnode in value_node.value:
-                        merge_value = self.construct_object(subnode, deep=True)
-                        self._apply_merge_value(
-                            merge_value, merge_base, deep_merge_func
-                        )
-                        if isinstance(merge_value, DeepMergeWrapper):
-                            has_deep_merge = True
-                else:
-                    merge_value = self.construct_object(value_node, deep=True)
-                    self._apply_merge_value(merge_value, merge_base, deep_merge_func)
-                    if isinstance(merge_value, DeepMergeWrapper):
-                        has_deep_merge = True
+                is_deep = self._process_merge_value(
+                    value_node, merge_base, deep_merge_func
+                )
+                if is_deep:
+                    has_deep_merge = True
             else:
                 regular_pairs.append((key_node, value_node))
 
         return merge_base, has_deep_merge, regular_pairs
+
+    def _process_merge_value(
+        self, value_node: yaml.Node, merge_base: dict[str, Any], deep_merge_func: Any
+    ) -> bool:
+        """Process a merge key value, returning True if deep merge was used."""
+        has_deep = False
+
+        # <<: !deep [*a, *b] - apply deep merge to all items
+        if isinstance(value_node, yaml.SequenceNode) and value_node.tag == "!deep":
+            for subnode in value_node.value:
+                data = self._construct_node_directly(subnode)
+                if isinstance(data, dict):
+                    self._apply_merge_value(
+                        DeepMergeWrapper(data), merge_base, deep_merge_func
+                    )
+            return True
+
+        # <<: [*a, *b] or <<: [*a, !deep *b]
+        if isinstance(value_node, yaml.SequenceNode):
+            for subnode in value_node.value:
+                merge_value = self._construct_merge_item(subnode)
+                self._apply_merge_value(merge_value, merge_base, deep_merge_func)
+                if isinstance(merge_value, DeepMergeWrapper):
+                    has_deep = True
+            return has_deep
+
+        # Single value: <<: *anchor or <<: !deep *anchor
+        merge_value = self._construct_merge_item(value_node)
+        self._apply_merge_value(merge_value, merge_base, deep_merge_func)
+        return isinstance(merge_value, DeepMergeWrapper)
+
+    def _construct_merge_item(self, node: yaml.Node) -> Any:
+        """Construct a merge item, handling !deep tag specially."""
+        if node.tag == "!deep":
+            # !deep anchor_name - look up anchor and wrap in DeepMergeWrapper
+            if isinstance(node, yaml.ScalarNode):
+                anchor_name = self.construct_scalar(node)
+                if anchor_name in self._anchor_nodes:
+                    data = self._construct_node_directly(
+                        self._anchor_nodes[anchor_name]
+                    )
+                    return self._wrap_deep_merge(data, node)
+            # !deep on inline mapping
+            data = self._construct_node_directly(node)
+            return self._wrap_deep_merge(data, node)
+        else:
+            # Regular merge - use _construct_node_directly to bypass cache
+            return self._construct_node_directly(node)
+
+    def _wrap_deep_merge(self, data: Any, node: yaml.Node) -> DeepMergeWrapper:
+        """Wrap data in DeepMergeWrapper, converting TypeError to YAMLError."""
+        try:
+            return DeepMergeWrapper(data)
+        except TypeError as e:
+            ctx = self._create_error_context(node)
+            raise yaml.YAMLError(f"{e} ({ctx.format_location()})")
 
     def _is_merge_key(self, key_node: yaml.Node) -> bool:
         """Check if a key node is a YAML merge key (<<)."""
