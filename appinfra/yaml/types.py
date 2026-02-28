@@ -10,6 +10,7 @@ This module contains:
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -125,3 +126,30 @@ class DeepMergeDict(dict):
     """
 
     pass
+
+
+class ResetValue:
+    """
+    Wrapper to mark a value for complete replacement (no merging).
+
+    When used with the !reset tag, signals that this value should completely
+    replace any inherited value, bypassing deep merge behavior.
+
+    Example:
+        # base.yaml has: options: {a: 1, b: 2}
+        config:
+          <<: !include "base.yaml"   # Deep merges by default
+          options: !reset {c: 3}     # Replaces entirely: options = {c: 3}
+
+    Without !reset, the result would be: options = {a: 1, b: 2, c: 3}
+    With !reset, the result is: options = {c: 3}
+    """
+
+    __slots__ = ("value",)
+
+    def __init__(self, value: Any) -> None:
+        """Initialize with value to use as complete replacement."""
+        self.value = value
+
+    def __repr__(self) -> str:
+        return f"ResetValue({self.value!r})"

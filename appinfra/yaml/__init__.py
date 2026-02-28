@@ -45,6 +45,9 @@ def deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]
     """
     Deep merge two dictionaries, with override taking precedence.
 
+    ResetValue wrappers in override bypass merging - the wrapped value
+    replaces the base value entirely.
+
     Args:
         base: Base dictionary to merge into
         override: Dictionary with values to override base
@@ -52,9 +55,16 @@ def deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]
     Returns:
         Merged dictionary
     """
+    from .types import ResetValue
+
     result = base.copy()
     for key, value in override.items():
-        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+        # ResetValue bypasses merging - use wrapped value directly
+        if isinstance(value, ResetValue):
+            result[key] = value.value
+        elif (
+            key in result and isinstance(result[key], dict) and isinstance(value, dict)
+        ):
             result[key] = deep_merge(result[key], value)
         else:
             result[key] = value

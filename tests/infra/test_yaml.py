@@ -2431,6 +2431,117 @@ config: !include "{services_file}"
 
 
 # =============================================================================
+# Reset Tag Tests
+# =============================================================================
+
+
+@pytest.mark.unit
+class TestResetTag:
+    """Tests for !reset tag that bypasses deep merge."""
+
+    def test_reset_bypasses_deep_merge_with_include(self, tmp_path):
+        """Test !reset prevents deep merge when using !include."""
+        base_file = tmp_path / "base.yaml"
+        base_file.write_text("""
+options:
+  retries: 3
+  timeout: 30
+  debug: true
+""")
+
+        main_content = f"""
+config:
+  <<: !include "{base_file}"
+  options: !reset {{cache: true}}
+"""
+        result = load(StringIO(main_content), current_file=tmp_path / "main.yaml")
+        # !reset should completely replace options, not merge
+        assert result["config"]["options"] == {"cache": True}
+        assert "retries" not in result["config"]["options"]
+        assert "timeout" not in result["config"]["options"]
+
+    def test_reset_bypasses_deep_merge_with_anchor(self):
+        """Test !reset prevents deep merge when using !deep *anchor."""
+        content = """
+defaults: &defaults
+  options:
+    a: 1
+    b: 2
+
+config:
+  <<: !deep *defaults
+  options: !reset {c: 3}
+"""
+        result = load(StringIO(content), track_sources=False)
+        # !reset should completely replace options
+        assert result["config"]["options"] == {"c": 3}
+        assert "a" not in result["config"]["options"]
+
+    def test_reset_with_scalar_value(self):
+        """Test !reset works with scalar values."""
+        content = """
+defaults: &defaults
+  count: 10
+
+config:
+  <<: !deep *defaults
+  count: !reset 0
+"""
+        result = load(StringIO(content), track_sources=False)
+        assert result["config"]["count"] == 0
+
+    def test_reset_with_list_value(self):
+        """Test !reset works with list values."""
+        content = """
+defaults: &defaults
+  items:
+    - a
+    - b
+
+config:
+  <<: !deep *defaults
+  items: !reset [c]
+"""
+        result = load(StringIO(content), track_sources=False)
+        assert result["config"]["items"] == ["c"]
+
+    def test_without_reset_deep_merges(self):
+        """Test that without !reset, deep merge happens normally."""
+        content = """
+defaults: &defaults
+  options:
+    a: 1
+    b: 2
+
+config:
+  <<: !deep *defaults
+  options:
+    c: 3
+"""
+        result = load(StringIO(content), track_sources=False)
+        # Without !reset, options should be deep merged
+        assert result["config"]["options"] == {"a": 1, "b": 2, "c": 3}
+
+    def test_reset_in_nested_structure(self):
+        """Test !reset works in nested structures."""
+        content = """
+defaults: &defaults
+  level1:
+    level2:
+      a: 1
+      b: 2
+
+config:
+  <<: !deep *defaults
+  level1:
+    level2: !reset {c: 3}
+"""
+        result = load(StringIO(content), track_sources=False)
+        # level2 should be completely replaced
+        assert result["config"]["level1"]["level2"] == {"c": 3}
+
+
+# =============================================================================
 # DeepMergeWrapper Unit Tests
 # =============================================================================
 

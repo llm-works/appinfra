@@ -29,6 +29,7 @@ from .types import (
     DeepMergeWrapper,
     ErrorContext,
     IncludeContext,
+    ResetValue,
     SecretLiteralWarning,
 )
 
@@ -624,6 +625,38 @@ class Loader(yaml.SafeLoader):
 
         return str(path)
 
+    def reset_constructor(self, node: Any) -> Any:
+        """
+        Construct value from !reset tag to bypass deep merging.
+
+        When deep merge is active (via !include or !deep), marks this value
+        to completely replace inherited values instead of merging.
+
+        Note: Returns the raw value, not wrapped. The !reset tag is detected
+        by checking node.tag in _process_deep_merge_pairs.
+
+        Args:
+            node: YAML node containing the value to use as replacement
+
+        Returns:
+            The replacement value (unwrapped)
+
+        Example:
+            # base.yaml: options: {a: 1, b: 2}
+            config:
+              <<: !include "base.yaml"
+              options: !reset {c: 3}     # Replaces entirely: {c: 3}
+              # Without !reset: {a: 1, b: 2, c: 3}
+        """
+        # Construct the value directly without the !reset tag
+        # Temporarily clear the tag so we use default constructors
+        original_tag = node.tag
+        node.tag = None
+        try:
+            return self._construct_node_directly(node)
+        finally:
+            node.tag = original_tag
+
     def deep_constructor(self, node: Any) -> DeepMergeWrapper:
         """
         Construct a DeepMergeWrapper from !deep tag for deep merging.
@@ -693,8 +726,26 @@ class Loader(yaml.SafeLoader):
             node: YAML node to construct
 
         Returns:
-            Constructed Python value
+            Constructed Python value (wrapped in ResetValue if !reset tag)
         """
+        # Handle !reset tag - wrap result in ResetValue for deep_merge to handle
+        if node.tag == "!reset":
+            # For scalars, resolve implicit tag (e.g., "0" -> int, "true" -> bool)
+            # For mappings/sequences, None works fine (uses default map/seq constructor)
+            if isinstance(node, yaml.ScalarNode):
+                node.tag = self.resolve(yaml.ScalarNode, node.value, (True, False))
+            else:
+                node.tag = None  # type: ignore[assignment]  # PyYAML accepts None at runtime
+            try:
+                value = self._construct_node_inner(node)
+            finally:
+                node.tag = "!reset"
+            return ResetValue(value)
+
+        return self._construct_node_inner(node)
+
+    def _construct_node_inner(self, node: yaml.Node) -> Any:
+        """Inner construction logic for _construct_node_directly."""
         if isinstance(node, yaml.MappingNode):
             # Don't call flatten_mapping here - we want raw data
             pairs = []
@@ -837,11 +888,23 @@ class Loader(yaml.SafeLoader):
             key = self._convert_key_to_string(key)
 
             if has_deep_merge and key in merge_base:
-                value = self._construct_node_directly(value_node)
-                if isinstance(merge_base[key], dict) and isinstance(value, dict):
-                    regular_dict[key] = deep_merge_func(merge_base[key], value)
+                # Check for !reset tag - bypasses deep merge entirely
+                if value_node.tag == "!reset":
+                    reset_val = self._construct_node_directly(value_node)
+                    # Unwrap ResetValue at top level
+                    regular_dict[key] = (
+                        reset_val.value
+                        if isinstance(reset_val, ResetValue)
+                        else reset_val
+                    )
+                elif isinstance(merge_base[key], dict):
+                    value = self._construct_node_directly(value_node)
+                    if isinstance(value, dict):
+                        regular_dict[key] = deep_merge_func(merge_base[key], value)
+                    else:
+                        regular_dict[key] = value
                 else:
-                    regular_dict[key] = value
+                    regular_dict[key] = self._construct_node_directly(value_node)
             else:
                 new_regular_pairs.append((key_node, value_node))
 
@@ -951,4 +1014,5 @@ class Loader(yaml.SafeLoader):
 Loader.add_constructor("!include", Loader.include_constructor)
 Loader.add_constructor("!secret", Loader.secret_constructor)
 Loader.add_constructor("!path", Loader.path_constructor)
+Loader.add_constructor("!reset", Loader.reset_constructor)
 Loader.add_constructor("!deep", Loader.deep_constructor)

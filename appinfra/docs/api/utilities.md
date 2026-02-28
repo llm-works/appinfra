@@ -487,6 +487,31 @@ services:
 <<: !include "./base.yaml"
 ```
 
+**`!reset`** - Bypass deep merge for specific keys:
+
+```yaml
+# When deep merging, use !reset to completely replace a nested value
+# instead of recursively merging it
+
+templates:
+  defaults: &defaults
+    options:
+      retries: 3
+      backoff: 1.5
+      timeout: 30
+
+services:
+  api:
+    <<: !deep *defaults
+    options:
+      cache: true    # Deep merged: {retries: 3, backoff: 1.5, timeout: 30, cache: true}
+
+  worker:
+    <<: !deep *defaults
+    options: !reset      # Complete replacement: {cache: true}
+      cache: true
+```
+
 ## Path Resolution
 
 Path resolution in configuration files requires the explicit `!path` YAML tag. Without the tag,
