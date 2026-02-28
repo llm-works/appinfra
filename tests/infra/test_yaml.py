@@ -2115,25 +2115,25 @@ config:
         """Test deep merge allows overriding specific nested values."""
         content = """
 templates:
-  vllm_default: &vllm_default
-    max_model_len: 8192
-    vllm:
-      enforce_eager: false
-      max_num_seqs: 4
+  server_default: &server_default
+    timeout: 30
+    options:
+      debug: false
+      max_connections: 100
 
-models:
-  my-model:
-    <<: !deep *vllm_default
-    vllm:
-      gpu_memory_gb: 8.0
-      enforce_eager: true
+servers:
+  api:
+    <<: !deep *server_default
+    options:
+      port: 8080
+      debug: true
 """
         result = load(StringIO(content), track_sources=False)
-        model = result["models"]["my-model"]
-        assert model["max_model_len"] == 8192
-        assert model["vllm"]["enforce_eager"] is True  # overridden
-        assert model["vllm"]["max_num_seqs"] == 4  # preserved from template
-        assert model["vllm"]["gpu_memory_gb"] == 8.0  # added
+        server = result["servers"]["api"]
+        assert server["timeout"] == 30
+        assert server["options"]["debug"] is True  # overridden
+        assert server["options"]["max_connections"] == 100  # preserved from template
+        assert server["options"]["port"] == 8080  # added
 
     def test_deep_merge_deeply_nested(self):
         """Test deep merge works with deeply nested structures."""
@@ -2254,8 +2254,8 @@ config:
         assert result["config"]["nested"] == {"a": 1, "b": 2}
         assert source_map is not None
 
-    def test_deep_merge_with_include(self, tmp_path):
-        """Test !deep works with !include."""
+    def test_include_always_deep_merges(self, tmp_path):
+        """Test !include always deep merges (no !deep needed)."""
         # Create base config file
         base_file = tmp_path / "base.yaml"
         base_file.write_text("""
@@ -2265,15 +2265,16 @@ nested:
 top_level: value
 """)
 
-        # Create main config that deep-merges the include
+        # !include now always deep merges - no !deep prefix needed
         main_content = f"""
 config:
-  <<: !deep !include "{base_file}"
+  <<: !include "{base_file}"
   nested:
     c: 3
 """
         result = load(StringIO(main_content), current_file=tmp_path / "main.yaml")
         assert result["config"]["top_level"] == "value"
+        # Deep merged - all nested keys present
         assert result["config"]["nested"] == {"a": 1, "b": 2, "c": 3}
 
     def test_deep_merge_non_dict_raises_error(self):
@@ -2373,29 +2374,60 @@ config:
         """Test multiple <<: keys with mixed shallow and deep merge."""
         content = """
 behavior: &behavior
-  think:
+  logging:
     enabled: true
 
 settings: &settings
-  max_len: 8192
-  vllm:
-    enforce_eager: true
+  timeout: 30
+  database:
+    pool_size: 10
 
-model:
+service:
   <<: *behavior
   <<: !deep *settings
-  vllm:
-    gpu_memory_gb: 8.0
+  database:
+    host: localhost
 """
         result = load(StringIO(content), track_sources=False)
-        model = result["model"]
+        service = result["service"]
         # behavior is shallow merged
-        assert model["think"] == {"enabled": True}
-        # settings.max_len is inherited
-        assert model["max_len"] == 8192
-        # vllm is deep merged
-        assert model["vllm"]["enforce_eager"] is True
-        assert model["vllm"]["gpu_memory_gb"] == 8.0
+        assert service["logging"] == {"enabled": True}
+        # settings.timeout is inherited
+        assert service["timeout"] == 30
+        # database is deep merged
+        assert service["database"]["pool_size"] == 10
+        assert service["database"]["host"] == "localhost"
+
+    def test_deep_merge_in_included_file(self, tmp_path):
+        """Test !deep *anchor works inside an included file."""
+        # Create services.yaml with anchors and !deep usage
+        services_file = tmp_path / "services.yaml"
+        services_file.write_text("""
+templates:
+  small_server: &small_server
+    max_connections: 100
+    options:
+      debug: true
+
+services:
+  api:
+    <<: !deep *small_server
+    options:
+      port: 8080
+""")
+
+        # Create main config that includes services.yaml
+        main_content = f"""
+config: !include "{services_file}"
+"""
+        result = load(StringIO(main_content), current_file=tmp_path / "main.yaml")
+
+        service = result["config"]["services"]["api"]
+        # Inherited from anchor
+        assert service["max_connections"] == 100
+        # Deep merged - both keys present
+        assert service["options"]["debug"] is True
+        assert service["options"]["port"] == 8080
 
 
 # =============================================================================

@@ -446,6 +446,7 @@ home_cache: !path ~/.cache/myapp   # Expands ~ to home directory
 ```yaml
 # Standard merge (<<: *anchor) does SHALLOW merge - nested dicts replaced entirely
 # Deep merge (<<: !deep *anchor) recursively merges nested dicts
+# NOTE: !include always deep merges (no !deep prefix needed)
 
 templates:
   defaults: &defaults
@@ -469,7 +470,7 @@ services:
 **Supported syntaxes:**
 
 ```yaml
-# Single anchor
+# Single anchor - use !deep for deep merge
 <<: !deep *template
 
 # All items deep merged
@@ -482,8 +483,8 @@ services:
 <<: *behavior           # shallow
 <<: !deep *settings     # deep
 
-# With includes
-<<: !deep !include "./base.yaml"
+# Includes always deep merge (no !deep needed)
+<<: !include "./base.yaml"
 ```
 
 ## Path Resolution

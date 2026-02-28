@@ -20,6 +20,7 @@ For API stability guarantees and deprecation policy, see
     - `<<: [*a, !deep *b]` - mixed shallow/deep per item
     - Multiple `<<:` keys with independent shallow/deep control
   - Example: template `{nested: {a: 1}}` + override `{nested: {b: 2}}` = `{nested: {a: 1, b: 2}}`
+- `!include` now always deep merges when used with merge keys (`<<: !include "file.yaml"`)
 
 ### Fixed
 - Added `setuptools` to dev dependencies (required by `sphinx.setup_command`)

@@ -13,8 +13,10 @@ This module provides the Loader class that extends yaml.SafeLoader to:
 from __future__ import annotations
 
 import datetime
+import re
 import warnings
 from collections.abc import Hashable
+from io import StringIO
 from pathlib import Path
 from typing import Any
 
@@ -23,11 +25,25 @@ import yaml  # type: ignore[import-untyped]
 from ._include import _resolve_variables_in_data
 from .types import (
     ENV_VAR_PATTERN,
+    DeepMergeDict,
     DeepMergeWrapper,
     ErrorContext,
     IncludeContext,
     SecretLiteralWarning,
 )
+
+# Pattern to match !deep *anchor and transform to !deep anchor
+_DEEP_ANCHOR_PATTERN = re.compile(r"!deep\s+\*(\w+)")
+
+
+def preprocess_deep_tags(content: str) -> str:
+    """
+    Preprocess !deep syntax to valid YAML.
+
+    Transforms:
+    - !deep *anchor -> !deep anchor  (tag before alias not valid YAML)
+    """
+    return _DEEP_ANCHOR_PATTERN.sub(r"!deep \1", content)
 
 
 class Loader(yaml.SafeLoader):
@@ -388,8 +404,9 @@ class Loader(yaml.SafeLoader):
             )
 
         with open(include_path, encoding="utf-8") as f:
+            content = preprocess_deep_tags(f.read())
             included_loader = Loader(
-                f,
+                StringIO(content),
                 current_file=include_path,
                 include_chain=set(new_chain),
                 merge_strategy=self.merge_strategy,
@@ -521,9 +538,22 @@ class Loader(yaml.SafeLoader):
 
         # Extract specific section if requested
         if section_path:
-            return self._extract_section_from_data(data, section_path, ctx)
+            data = self._extract_section_from_data(data, section_path, ctx)
 
-        return data
+        return self._wrap_include_for_deep_merge(data)
+
+    def _wrap_include_for_deep_merge(self, data: Any) -> Any:
+        """Wrap dict data in DeepMergeDict and update source map tracking."""
+        if not isinstance(data, dict):
+            return data
+        original_id = id(data)
+        wrapped = DeepMergeDict(data)
+        # Update source map key to use wrapped object's id
+        if original_id in self._pending_include_maps:
+            self._pending_include_maps[id(wrapped)] = self._pending_include_maps.pop(
+                original_id
+            )
+        return wrapped
 
     def secret_constructor(self, node: Any) -> str:
         """
@@ -679,39 +709,6 @@ class Loader(yaml.SafeLoader):
             # Scalar - use normal construction
             return self.construct_object(node, deep=False)
 
-    def deep_include_constructor(self, node: Any) -> DeepMergeWrapper:
-        """
-        Construct a DeepMergeWrapper from !deep-include tag.
-
-        This is the preprocessed form of `!deep !include "path"`, which isn't
-        valid YAML (can't have two tags on one value). The preprocessor
-        transforms it to `!deep-include "path"`.
-
-        Args:
-            node: YAML scalar node containing the include path
-
-        Returns:
-            DeepMergeWrapper containing the included file's data
-
-        Raises:
-            yaml.YAMLError: If include fails or data is not a mapping
-
-        Example:
-            config:
-              <<: !deep !include "./base.yaml"  # Preprocessed to !deep-include
-              nested:
-                c: 3
-        """
-        # Use include_constructor to load the file
-        data = self.include_constructor(node)
-
-        # Wrap in DeepMergeWrapper
-        ctx = self._create_error_context(node)
-        try:
-            return DeepMergeWrapper(data)
-        except TypeError as e:
-            raise yaml.YAMLError(f"{e} ({ctx.format_location()})")
-
     def flatten_mapping(self, node: yaml.MappingNode) -> None:
         """
         Flatten merge keys (<<) with support for deep merging via !deep tag.
@@ -782,14 +779,14 @@ class Loader(yaml.SafeLoader):
             for subnode in value_node.value:
                 merge_value = self._construct_merge_item(subnode)
                 self._apply_merge_value(merge_value, merge_base, deep_merge_func)
-                if isinstance(merge_value, DeepMergeWrapper):
+                if isinstance(merge_value, (DeepMergeWrapper, DeepMergeDict)):
                     has_deep = True
             return has_deep
 
-        # Single value: <<: *anchor or <<: !deep *anchor
+        # Single value: <<: *anchor or <<: !deep *anchor or <<: !include
         merge_value = self._construct_merge_item(value_node)
         self._apply_merge_value(merge_value, merge_base, deep_merge_func)
-        return isinstance(merge_value, DeepMergeWrapper)
+        return isinstance(merge_value, (DeepMergeWrapper, DeepMergeDict))
 
     def _construct_merge_item(self, node: yaml.Node) -> Any:
         """Construct a merge item, handling !deep tag specially."""
@@ -893,8 +890,16 @@ class Loader(yaml.SafeLoader):
             deep_merge_func: The deep_merge function for nested merging
         """
         if isinstance(merge_value, DeepMergeWrapper):
-            # Deep merge the data into base
+            # Deep merge the wrapped data into base
             data = merge_value.data
+        elif isinstance(merge_value, DeepMergeDict):
+            # Deep merge the dict into base (includes always deep merge)
+            data = merge_value
+        else:
+            data = None
+
+        if data is not None:
+            # Deep merge: recursively merge nested dicts
             for key, value in data.items():
                 if (
                     key in merge_base
@@ -947,4 +952,3 @@ Loader.add_constructor("!include", Loader.include_constructor)
 Loader.add_constructor("!secret", Loader.secret_constructor)
 Loader.add_constructor("!path", Loader.path_constructor)
 Loader.add_constructor("!deep", Loader.deep_constructor)
-Loader.add_constructor("!deep-include", Loader.deep_include_constructor)

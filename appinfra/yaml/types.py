@@ -71,25 +71,25 @@ class DeepMergeWrapper:
 
     Example:
         templates:
-          vllm_default: &vllm_default
-            max_model_len: 8192
-            vllm:
-              enforce_eager: false
-              max_num_seqs: 4
+          defaults: &defaults
+            timeout: 30
+            options:
+              retries: 3
+              backoff: 1.5
 
-        models:
-          my-model:
-            <<: !deep *vllm_default
-            vllm:
-              gpu_memory_gb: 8.0   # Deep merged with template's vllm
+        services:
+          api:
+            <<: !deep *defaults
+            options:
+              cache: true   # Deep merged with template's options
 
     Result:
-        my-model:
-          max_model_len: 8192
-          vllm:
-            enforce_eager: false   # Preserved from template
-            max_num_seqs: 4        # Preserved from template
-            gpu_memory_gb: 8.0     # Added locally
+        api:
+          timeout: 30
+          options:
+            retries: 3        # Preserved from template
+            backoff: 1.5      # Preserved from template
+            cache: true       # Added locally
     """
 
     __slots__ = ("data",)
@@ -113,3 +113,15 @@ class DeepMergeWrapper:
 
     def __repr__(self) -> str:
         return f"DeepMergeWrapper({self.data!r})"
+
+
+class DeepMergeDict(dict):
+    """
+    Dict subclass that signals deep merge behavior in YAML merge keys.
+
+    Used by !include to mark included dicts for deep merging. Unlike
+    DeepMergeWrapper, this is a real dict so it works in all contexts
+    (not just merge keys).
+    """
+
+    pass

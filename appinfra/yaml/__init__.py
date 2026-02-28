@@ -14,7 +14,6 @@ Public API:
     SecretLiteralWarning: Warning for literal secrets
 """
 
-import re
 from io import StringIO
 from pathlib import Path
 from typing import Any
@@ -27,7 +26,7 @@ from ._include import (
     _resolve_include_path_standalone,
     _validate_include_standalone,
 )
-from .loader import Loader
+from .loader import Loader, preprocess_deep_tags
 from .types import DeepMergeWrapper, ErrorContext, IncludeContext, SecretLiteralWarning
 
 # Public API exports
@@ -284,36 +283,6 @@ def _init_include_chain(
     return chain
 
 
-# Pattern to match !deep *anchor and transform to !deep anchor
-# This allows users to write the natural syntax while we transform it to valid YAML
-_DEEP_ANCHOR_PATTERN = re.compile(r"!deep\s+\*(\w+)")
-
-# Pattern to match !deep !include "path" and transform to !deep-include "path"
-# YAML doesn't support two tags on the same value
-_DEEP_INCLUDE_PATTERN = re.compile(r"!deep\s+!include\s+(['\"]?)([^'\"]+)\1")
-
-
-def _preprocess_deep_tags(content: str) -> str:
-    """
-    Preprocess !deep syntax to valid YAML.
-
-    Transforms:
-    - !deep *anchor -> !deep anchor  (tag before alias not valid)
-    - !deep !include "path" -> !deep-include "path"  (two tags not valid)
-
-    Args:
-        content: YAML content string
-
-    Returns:
-        Preprocessed content with valid YAML syntax
-    """
-    # Transform !deep !include first (more specific pattern)
-    content = _DEEP_INCLUDE_PATTERN.sub(r'!deep-include "\2"', content)
-    # Transform !deep *anchor
-    content = _DEEP_ANCHOR_PATTERN.sub(r"!deep \1", content)
-    return content
-
-
 def load(
     stream: Any,
     current_file: Path | None = None,
@@ -340,7 +309,7 @@ def load(
     """
     include_chain = _init_include_chain(current_file, _include_chain)
     content = stream.read() if hasattr(stream, "read") else str(stream)
-    content = _preprocess_deep_tags(content)
+    content = preprocess_deep_tags(content)
     remaining_content, doc_include_paths = _preprocess_document_includes(content)
 
     merged_data, merged_source_map = _merge_document_includes(
