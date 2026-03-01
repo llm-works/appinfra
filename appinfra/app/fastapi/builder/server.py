@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import logging
 import multiprocessing as mp
+import pickle
 from collections.abc import Awaitable, Callable
 from contextlib import AbstractAsyncContextManager
 from typing import TYPE_CHECKING, Any
@@ -32,6 +34,8 @@ from ..runtime.server import Server
 from .route import RouteConfigurer
 from .subprocess import SubprocessConfigurer
 from .uvicorn import UvicornConfigurer
+
+logger = logging.getLogger("fastapi.builder")
 
 
 class ServerBuilder:
@@ -413,16 +417,77 @@ class ServerBuilder:
         for exception_cb in self._exception_callbacks:
             adapter.add_exception_callback(exception_cb)
 
+    def _is_subprocess_mode(self) -> bool:
+        """Check if subprocess mode is configured."""
+        return self._request_q is not None and self._response_q is not None
+
+    def _validate_handler_pickling(self, handler: Any, exc_class_name: str) -> bool:
+        """Validate a single handler can be pickled.
+
+        Returns True if validation passed, raises RuntimeError if handler cannot be
+        pickled and doesn't implement LoggerInjectable.
+        """
+        from ..handlers import LoggerInjectable
+
+        try:
+            pickle.dumps(handler)
+            return True
+        except Exception as e:
+            if isinstance(handler, LoggerInjectable):
+                return True  # Protocol handlers will have logger injected
+
+            raise RuntimeError(
+                f"Exception handler for {exc_class_name} cannot be pickled for "
+                f"subprocess mode: {e}\n"
+                f"Use appinfra.app.fastapi.ExceptionHandler base class or implement "
+                f"LoggerInjectable protocol (__getstate__, __setstate__, set_logger)."
+            ) from e
+
+    def _warn_on_logger_attributes(self, handler: Any, exc_class_name: str) -> None:
+        """Warn if handler has Logger attributes without implementing LoggerInjectable."""
+        from ....log import Logger
+        from ..handlers import LoggerInjectable
+
+        if not hasattr(handler, "__dict__") or isinstance(handler, LoggerInjectable):
+            return
+
+        for attr, value in handler.__dict__.items():
+            if isinstance(value, Logger):
+                logger.warning(
+                    "Exception handler contains Logger attribute that may not "
+                    "work correctly in subprocess mode. "
+                    "handler=%s attribute=%s exc_class=%s",
+                    type(handler).__name__,
+                    attr,
+                    exc_class_name,
+                )
+
+    def _validate_subprocess_handlers(self) -> None:
+        """Validate exception handlers are subprocess-compatible."""
+        for handler_def in self._exception_handlers:
+            handler = handler_def.handler
+            exc_class_name = handler_def.exc_class.__name__
+            self._validate_handler_pickling(handler, exc_class_name)
+            self._warn_on_logger_attributes(handler, exc_class_name)
+
     def build(self) -> Server:
         """
         Build the Server runtime instance.
 
         Returns:
             Configured Server ready to start
+
+        Raises:
+            RuntimeError: If subprocess mode is enabled and an exception handler
+                cannot be pickled.
         """
         config = self._build_config()
         adapter = FastAPIAdapter(config)
         self._configure_adapter(adapter)
+
+        # Validate handlers are subprocess-compatible
+        if self._is_subprocess_mode():
+            self._validate_subprocess_handlers()
 
         return Server(
             name=self._name,

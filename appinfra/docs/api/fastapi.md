@@ -244,6 +244,42 @@ or other values injected by your middleware.
 - **Shutdown failures:** Logged but don't prevent other callbacks from running. All shutdown
   callbacks execute even if earlier ones fail.
 
+### Exception Handlers in Subprocess Mode
+
+Exception handlers containing `Logger` instances fail silently in subprocess mode because `Logger`
+cannot be pickled. Use `ExceptionHandler` base class to handle this automatically:
+
+```python
+from appinfra.app.fastapi import ServerBuilder, ExceptionHandler
+from appinfra.log import Logger
+from starlette.responses import JSONResponse
+
+class TimeoutHandler(ExceptionHandler):
+    async def handle(self, request, exc: TimeoutError):
+        # self._lg is automatically injected after unpickling
+        self._lg.warning("request timeout", extra={"path": str(request.url.path)})
+        return JSONResponse({"error": "timeout"}, status_code=504)
+
+lg = Logger("api")
+server = (ServerBuilder("api")
+    .routes
+        .with_exception_handler(TimeoutError, TimeoutHandler(lg))
+        .done()
+    .subprocess.with_ipc(request_q, response_q).done()
+    .build())
+```
+
+**How it works:**
+1. `ExceptionHandler.__getstate__()` strips Logger during pickle (subprocess spawn)
+2. Framework calls `set_logger()` with subprocess Logger after unpickling
+3. Handler's `handle()` method can use `self._lg` normally
+
+**Build-time validation:** If a handler cannot be pickled and doesn't implement `LoggerInjectable`,
+`build()` raises `RuntimeError` with guidance on how to fix it.
+
+For custom implementations, implement the `LoggerInjectable` protocol (`set_logger()` method) and
+handle `__getstate__`/`__setstate__` yourself.
+
 ### Uvicorn Configuration
 
 Access via `.uvicorn`:

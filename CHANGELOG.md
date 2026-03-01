@@ -11,6 +11,9 @@ For API stability guarantees and deprecation policy, see
 ## [Unreleased]
 
 ### Added
+- FastAPI: `ExceptionHandler` base class for subprocess mode with Logger support:
+  - Handles Logger pickle/unpickle automatically; subclass and implement `handle()`
+  - Build-time validation catches unpicklable handlers with clear error messages
 - `!deep` YAML tag for recursive deep merging with YAML merge keys (`<<`):
   - Standard merge keys do shallow merge (nested dicts replaced entirely)
   - `!deep` enables deep merge where nested dicts are recursively merged

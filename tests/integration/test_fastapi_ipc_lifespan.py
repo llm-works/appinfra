@@ -71,6 +71,36 @@ class IPCResponse:
     error: str | None = None
 
 
+# Exception and handler for subprocess exception handler test
+# Must be at module level to be picklable
+class _TestSubprocessError(Exception):
+    """Test exception for subprocess handler test."""
+
+    pass
+
+
+# Import ExceptionHandler at module level if available
+try:
+    from appinfra.app.fastapi.handlers import ExceptionHandler
+
+    class _TestSubprocessErrorHandler(ExceptionHandler):
+        """Handler that uses Logger - tests Logger injection in subprocess."""
+
+        async def handle(self, request, exc: _TestSubprocessError):
+            from starlette.responses import JSONResponse
+
+            # This will fail if Logger wasn't injected
+            self._lg.warning("test exception handled", extra={"error": str(exc)})
+            return JSONResponse(
+                {"error": "handled", "message": str(exc)},
+                status_code=418,  # I'm a teapot - distinctive status code
+            )
+
+except ImportError:
+    # ExceptionHandler not available - test will be skipped
+    _TestSubprocessErrorHandler = None  # type: ignore[misc,assignment]
+
+
 def _ipc_request_handler(
     request_q: mp.Queue, response_q: mp.Queue, stop_event: threading.Event
 ) -> None:
@@ -286,3 +316,81 @@ class TestFastAPIIPCWithLifecycleCallbacks:
             stop_event.set()
             server.stop(timeout=2.0)
             handler_thread.join(timeout=1.0)
+
+    def test_exception_handler_with_logger_in_subprocess(self):
+        """
+        Test that ExceptionHandler with Logger works correctly in subprocess mode.
+
+        This tests the Logger injection feature where:
+        1. Handler's Logger is stripped during pickle (subprocess spawn)
+        2. Framework re-injects subprocess Logger after unpickling
+        3. Handler can log and return proper responses
+        """
+        if _TestSubprocessErrorHandler is None:
+            pytest.skip("ExceptionHandler not available")
+
+        from appinfra.app.fastapi.builder.server import ServerBuilder
+        from appinfra.log import Logger
+
+        # Route that raises the exception
+        async def raise_test_exception():
+            raise _TestSubprocessError("test error message")
+
+        # Create logger for the handler
+        lg = Logger("test-handler")
+        handler = _TestSubprocessErrorHandler(lg)
+
+        # Create IPC queues (required for subprocess mode)
+        request_q: mp.Queue = mp.Queue()
+        response_q: mp.Queue = mp.Queue()
+
+        # Build server with exception handler in subprocess mode
+        server = (
+            ServerBuilder("test-exc-handler")
+            .with_host("127.0.0.1")
+            .with_port(18767)
+            .routes.with_route("/ping", lambda: {"status": "ok"}, methods=["GET"])
+            .with_route("/raise", raise_test_exception, methods=["GET"])
+            .with_exception_handler(_TestSubprocessError, handler)
+            .done()
+            .subprocess.with_ipc(request_q, response_q)
+            .done()
+            .build()
+        )
+
+        # No IPC handler needed - we're just testing exception handling
+        try:
+            # Start the subprocess
+            server.start_subprocess()
+
+            # Wait for server to be ready
+            ready = False
+            for _ in range(50):
+                try:
+                    resp = requests.get("http://127.0.0.1:18767/ping", timeout=0.5)
+                    if resp.status_code == 200:
+                        ready = True
+                        break
+                except requests.exceptions.ConnectionError:
+                    time.sleep(0.1)
+                    continue
+
+            assert ready, "Server did not become ready"
+
+            # Trigger the exception - this is the critical test
+            # If Logger wasn't injected, the handler will raise RuntimeError
+            resp = requests.get("http://127.0.0.1:18767/raise", timeout=5.0)
+
+            # Verify the exception handler ran correctly
+            assert resp.status_code == 418, (
+                f"Expected 418 (teapot), got {resp.status_code}: {resp.text}"
+            )
+
+            result = resp.json()
+            assert result["error"] == "handled", f"Unexpected result: {result}"
+            assert result["message"] == "test error message", (
+                f"Unexpected message: {result}"
+            )
+
+        finally:
+            server.stop(timeout=2.0)

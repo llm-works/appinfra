@@ -458,3 +458,19 @@ class FastAPIAdapter:
             tags=["Health"],
             summary="Health check with IPC status",
         )
+
+    def inject_subprocess_logger(self, lg: Any) -> None:
+        """Inject subprocess logger into LoggerInjectable handlers.
+
+        Called in subprocess after unpickling, before build().
+        This allows exception handlers that need logging to work correctly
+        in subprocess mode.
+
+        Args:
+            lg: The Logger instance created in the subprocess.
+        """
+        from ..handlers import LoggerInjectable
+
+        for handler_def in self._exception_handlers:
+            if isinstance(handler_def.handler, LoggerInjectable):
+                handler_def.handler.set_logger(lg)

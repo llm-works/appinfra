@@ -73,6 +73,7 @@ _HAS_FASTAPI = False
 # Guard runtime imports for optional dependency
 try:
     from .builder.server import ServerBuilder
+    from .handlers import ExceptionHandler, LoggerInjectable
     from .plugin import ServerPlugin
     from .runtime.ipc import IPCChannel
     from .runtime.server import Server
@@ -84,6 +85,8 @@ except ImportError:
     if TYPE_CHECKING:
         # For type checking, import the real types
         from .builder.server import ServerBuilder as ServerBuilder
+        from .handlers import ExceptionHandler as ExceptionHandler
+        from .handlers import LoggerInjectable as LoggerInjectable
         from .plugin import ServerPlugin as ServerPlugin
         from .runtime.ipc import IPCChannel as IPCChannel
         from .runtime.server import Server as Server
@@ -114,6 +117,18 @@ except ImportError:
             def __init__(self, *args: Any, **kwargs: Any) -> None:
                 raise ImportError(_INSTALL_MSG)
 
+        class ExceptionHandler:
+            """Stub for ExceptionHandler when FastAPI is not installed."""
+
+            def __init__(self, *args: Any, **kwargs: Any) -> None:
+                raise ImportError(_INSTALL_MSG)
+
+        class LoggerInjectable:
+            """Stub for LoggerInjectable when FastAPI is not installed."""
+
+            def __init__(self, *args: Any, **kwargs: Any) -> None:
+                raise ImportError(_INSTALL_MSG)
+
 
 __all__ = [
     # Builder
@@ -127,4 +142,7 @@ __all__ = [
     "IPCConfig",
     # Plugin
     "ServerPlugin",
+    # Exception handlers (subprocess support)
+    "ExceptionHandler",
+    "LoggerInjectable",
 ]

@@ -74,6 +74,9 @@ def _uvicorn_subprocess_entry(
 
     lg = _create_subprocess_logger(config)
 
+    # Inject logger into handlers that need it (after unpickling, before build)
+    adapter.inject_subprocess_logger(lg)
+
     with SubprocessContext(
         lg=lg,
         etc_dir=config.etc_dir,
