@@ -214,8 +214,15 @@ class Server:
             raise RuntimeError("Server subprocess is already running")
 
     def _setup_subprocess_logging(self) -> None:
-        """Set up queue-based logging for subprocess."""
+        """Set up queue-based logging for subprocess.
+
+        Idempotent: tears down existing logging before setting up new.
+        """
         from ....log.mp import LogQueueListener
+
+        # Tear down any existing logging first (idempotent)
+        if self._log_listener is not None or self._log_queue is not None:
+            self._teardown_subprocess_logging()
 
         self._log_queue = mp.Queue()
         self._log_config = self._lg.queue_config(self._log_queue)
@@ -223,17 +230,29 @@ class Server:
         self._log_listener.start()
 
     def _teardown_subprocess_logging(self) -> None:
-        """Tear down queue-based logging."""
+        """Tear down queue-based logging.
+
+        Idempotent: safe to call multiple times. Properly closes queue resources.
+        """
         if self._log_listener is not None:
             self._log_listener.stop()
             self._log_listener = None
-        self._log_queue = None
+        if self._log_queue is not None:
+            self._log_queue.close()
+            self._log_queue.join_thread()
+            self._log_queue = None
         self._log_config = None
 
     def _create_subprocess_manager(self) -> SubprocessManager:
         """Create subprocess manager with current configuration."""
         assert self._request_q is not None
         assert self._response_q is not None
+
+        if self._log_config is None:
+            raise RuntimeError(
+                "Subprocess log configuration not initialized. "
+                "Call _setup_subprocess_logging() before creating subprocess manager."
+            )
 
         if self._config.ipc is None:
             self._config.ipc = IPCConfig()

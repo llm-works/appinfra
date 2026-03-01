@@ -25,7 +25,7 @@ Example:
 
 from __future__ import annotations
 
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
@@ -57,7 +57,7 @@ class LoggerInjectable(Protocol):
         ...
 
 
-class ExceptionHandler:
+class ExceptionHandler(ABC):
     """Base class for exception handlers that work across process boundaries.
 
     Logger is stripped during pickle and reinjected by the framework in subprocess

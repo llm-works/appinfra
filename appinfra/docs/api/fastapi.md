@@ -205,8 +205,8 @@ server = (ServerBuilder(lg, "myapi")
     .build())
 ```
 
-**Note:** If both `with_lifespan()` and startup/shutdown callbacks are set, the lifespan takes
-precedence and callbacks are ignored (with a warning).
+**Note:** Using both `with_lifespan()` and startup/shutdown callbacks raises `ConfigError` at build
+time. Choose one approach: either use a lifespan context manager or individual callbacks.
 
 #### Request/Response Callbacks
 
@@ -277,8 +277,10 @@ This provides clean logger access without passing it through closure chains.
 
 ### Exception Handlers in Subprocess Mode
 
-Exception handlers containing `Logger` instances fail silently in subprocess mode because `Logger`
-cannot be pickled. Use `ExceptionHandler` base class to handle this automatically:
+Exception handlers containing `Logger` instances cannot be used directly in subprocess mode because
+`Logger` cannot be pickled. Build-time validation will raise `ConfigError` if an unpicklable
+handler is detected. Use the `ExceptionHandler` base class to handle Logger serialization
+automatically:
 
 ```python
 from appinfra.app.fastapi import ServerBuilder, ExceptionHandler

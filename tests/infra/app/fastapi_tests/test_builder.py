@@ -137,6 +137,7 @@ class TestServerBuilder:
             # Verify Server was called with correct arguments
             mock_server.assert_called_once()
             call_kwargs = mock_server.call_args[1]
+            assert call_kwargs["lg"] is mock_lg
             assert call_kwargs["name"] == "test-api"
             assert call_kwargs["config"].host == "127.0.0.1"
             assert call_kwargs["config"].port == 9000

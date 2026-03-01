@@ -79,26 +79,21 @@ class _TestSubprocessError(Exception):
     pass
 
 
-# Import ExceptionHandler at module level if available
-try:
-    from appinfra.app.fastapi.handlers import ExceptionHandler
+from appinfra.app.fastapi.handlers import ExceptionHandler
 
-    class _TestSubprocessErrorHandler(ExceptionHandler):
-        """Handler that uses Logger - tests Logger injection in subprocess."""
 
-        async def handle(self, request, exc: _TestSubprocessError):
-            from starlette.responses import JSONResponse
+class _TestSubprocessErrorHandler(ExceptionHandler):
+    """Handler that uses Logger - tests Logger injection in subprocess."""
 
-            # This will fail if Logger wasn't injected
-            self._lg.warning("test exception handled", extra={"error": str(exc)})
-            return JSONResponse(
-                {"error": "handled", "message": str(exc)},
-                status_code=418,  # I'm a teapot - distinctive status code
-            )
+    async def handle(self, request, exc: _TestSubprocessError):
+        from starlette.responses import JSONResponse
 
-except ImportError:
-    # ExceptionHandler not available - test will be skipped
-    _TestSubprocessErrorHandler = None  # type: ignore[misc,assignment]
+        # This will fail if Logger wasn't injected
+        self._lg.warning("test exception handled", extra={"error": str(exc)})
+        return JSONResponse(
+            {"error": "handled", "message": str(exc)},
+            status_code=418,  # I'm a teapot - distinctive status code
+        )
 
 
 def _ipc_request_handler(

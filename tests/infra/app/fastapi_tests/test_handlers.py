@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from appinfra.app.fastapi.config.api import ApiConfig
+from appinfra.app.fastapi.errors import ConfigError
 from appinfra.app.fastapi.handlers import ExceptionHandler, LoggerInjectable
 from appinfra.app.fastapi.runtime.adapter import (
     ExceptionHandlerDefinition,
@@ -309,7 +310,7 @@ class TestServerBuilderValidation:
         builder._request_q = mp.Queue()
         builder._response_q = mp.Queue()
 
-        with pytest.raises(RuntimeError, match="cannot be pickled"):
+        with pytest.raises(ConfigError, match="cannot be pickled"):
             builder.build()
 
     def test_build_allows_picklable_handlers(self, mock_fastapi):

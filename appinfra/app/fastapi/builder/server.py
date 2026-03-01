@@ -425,19 +425,32 @@ class ServerBuilder:
     def _validate_handler_pickling(self, handler: Any, exc_class_name: str) -> bool:
         """Validate a single handler can be pickled.
 
-        Returns True if validation passed, raises RuntimeError if handler cannot be
+        Returns True if validation passed, raises ConfigError if handler cannot be
         pickled and doesn't implement LoggerInjectable.
         """
+        from ..errors import ConfigError
         from ..handlers import LoggerInjectable
 
         try:
             pickle.dumps(handler)
             return True
         except Exception as e:
-            if isinstance(handler, LoggerInjectable):
-                return True  # Protocol handlers will have logger injected
+            # For LoggerInjectable handlers, verify __getstate__ result is picklable
+            if isinstance(handler, LoggerInjectable) and hasattr(
+                handler, "__getstate__"
+            ):
+                try:
+                    state = handler.__getstate__()
+                    pickle.dumps(state)
+                    return True  # State without Logger is picklable
+                except Exception as state_error:
+                    raise ConfigError(
+                        f"Exception handler for {exc_class_name} implements LoggerInjectable "
+                        f"but __getstate__() result cannot be pickled: {state_error}\n"
+                        f"Ensure __getstate__() strips all unpicklable attributes."
+                    ) from state_error
 
-            raise RuntimeError(
+            raise ConfigError(
                 f"Exception handler for {exc_class_name} cannot be pickled for "
                 f"subprocess mode: {e}\n"
                 f"Use appinfra.app.fastapi.ExceptionHandler base class or implement "
