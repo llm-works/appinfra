@@ -10,11 +10,11 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 import sqlalchemy
+import sqlalchemy_utils
+from sqlalchemy import text
 
 if TYPE_CHECKING:  # pragma: no cover
     from .scoped import ScopedPG
-import sqlalchemy_utils
-from sqlalchemy import text
 
 from ...dot_dict import DotDict
 from ...log import Logger, LoggerFactory

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Generator
 from contextlib import contextmanager
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
@@ -83,7 +83,7 @@ class ScopedPG:
         return name
 
     @contextmanager
-    def session(self) -> Generator[Any, None, None]:
+    def session(self) -> Generator[Session, None, None]:
         """
         Get a session with search_path set to this schema.
 
