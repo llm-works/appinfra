@@ -291,7 +291,7 @@ class Server:
             self._teardown_subprocess_logging()
             raise
         self._lg.info(
-            "Server started in subprocess",
+            "server started in subprocess",
             extra={
                 "server": self._name,
                 "pid": proc.pid,
@@ -311,11 +311,11 @@ class Server:
             timeout: Seconds to wait for graceful shutdown
         """
         if self._subprocess_manager:
-            self._lg.info("Stopping server", extra={"server": self._name})
+            self._lg.debug("stopping server...", extra={"server": self._name})
             self._subprocess_manager.stop()
             self._subprocess_manager = None
             self._teardown_subprocess_logging()
-            self._lg.info("Server stopped", extra={"server": self._name})
+            self._lg.info("server stopped", extra={"server": self._name})
 
     def _run_direct(self) -> None:
         """Run uvicorn directly in current process (blocking)."""
