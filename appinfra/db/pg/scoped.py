@@ -45,21 +45,21 @@ class ScopedPG:
         >>> scope_b = pg.scoped("schema_b")
     """
 
-    def __init__(self, pg: PG, schema_name: str, lg: Logger) -> None:
+    def __init__(self, lg: Logger, pg: PG, schema_name: str) -> None:
         """
         Initialize a scoped PG wrapper.
 
         Args:
+            lg: Logger instance
             pg: Parent PG instance
             schema_name: PostgreSQL schema name for this scope
-            lg: Logger instance
 
         Raises:
             ValueError: If schema name is invalid
         """
+        self._lg = lg
         self._pg = pg
         self._schema_name = self._validate_schema_name(schema_name)
-        self._lg = lg
 
     @staticmethod
     def _validate_schema_name(name: str) -> str:

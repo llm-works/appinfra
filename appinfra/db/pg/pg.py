@@ -256,7 +256,7 @@ class PG(Interface):
         """
         from .scoped import ScopedPG
 
-        return ScopedPG(self, schema_name, self._lg)
+        return ScopedPG(self._lg, self, schema_name)
 
     def connect(self) -> Any:
         """

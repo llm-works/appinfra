@@ -21,7 +21,7 @@ class TestScopedPGInit:
         mock_pg = MagicMock()
         mock_lg = MagicMock()
 
-        scoped = ScopedPG(mock_pg, "test_schema", mock_lg)
+        scoped = ScopedPG(mock_lg, mock_pg, "test_schema")
 
         assert scoped.schema == "test_schema"
         assert scoped._pg is mock_pg
@@ -33,7 +33,7 @@ class TestScopedPGInit:
         mock_lg = MagicMock()
 
         with pytest.raises(ValueError, match="Invalid schema name"):
-            ScopedPG(mock_pg, "Invalid-Schema", mock_lg)
+            ScopedPG(mock_lg, mock_pg, "Invalid-Schema")
 
     def test_init_rejects_uppercase(self):
         """Test uppercase schema names are rejected."""
@@ -41,7 +41,7 @@ class TestScopedPGInit:
         mock_lg = MagicMock()
 
         with pytest.raises(ValueError):
-            ScopedPG(mock_pg, "TestSchema", mock_lg)
+            ScopedPG(mock_lg, mock_pg, "TestSchema")
 
     def test_init_rejects_hyphens(self):
         """Test hyphenated schema names are rejected."""
@@ -49,7 +49,7 @@ class TestScopedPGInit:
         mock_lg = MagicMock()
 
         with pytest.raises(ValueError):
-            ScopedPG(mock_pg, "test-schema", mock_lg)
+            ScopedPG(mock_lg, mock_pg, "test-schema")
 
     def test_init_rejects_starting_with_number(self):
         """Test schema names starting with number are rejected."""
@@ -57,7 +57,7 @@ class TestScopedPGInit:
         mock_lg = MagicMock()
 
         with pytest.raises(ValueError):
-            ScopedPG(mock_pg, "1test", mock_lg)
+            ScopedPG(mock_lg, mock_pg, "1test")
 
 
 @pytest.mark.unit
@@ -71,7 +71,7 @@ class TestScopedPGSession:
         mock_pg.session.return_value = mock_session
         mock_lg = MagicMock()
 
-        scoped = ScopedPG(mock_pg, "my_schema", mock_lg)
+        scoped = ScopedPG(mock_lg, mock_pg, "my_schema")
 
         with scoped.session() as session:
             assert session is mock_session
@@ -88,7 +88,7 @@ class TestScopedPGSession:
         mock_pg.session.return_value = mock_session
         mock_lg = MagicMock()
 
-        scoped = ScopedPG(mock_pg, "my_schema", mock_lg)
+        scoped = ScopedPG(mock_lg, mock_pg, "my_schema")
 
         with scoped.session():
             pass
@@ -104,7 +104,7 @@ class TestScopedPGSession:
         mock_pg.session.return_value = mock_session
         mock_lg = MagicMock()
 
-        scoped = ScopedPG(mock_pg, "my_schema", mock_lg)
+        scoped = ScopedPG(mock_lg, mock_pg, "my_schema")
 
         with pytest.raises(RuntimeError):
             with scoped.session():
@@ -121,7 +121,7 @@ class TestScopedPGSession:
         mock_pg.session.return_value = mock_session
         mock_lg = MagicMock()
 
-        scoped = ScopedPG(mock_pg, "my_schema", mock_lg)
+        scoped = ScopedPG(mock_lg, mock_pg, "my_schema")
         test_error = RuntimeError("test error")
 
         with pytest.raises(RuntimeError):
@@ -141,7 +141,7 @@ class TestScopedPGSession:
         mock_pg.session.return_value = mock_session
         mock_lg = MagicMock()
 
-        scoped = ScopedPG(mock_pg, "my_schema", mock_lg)
+        scoped = ScopedPG(mock_lg, mock_pg, "my_schema")
 
         with pytest.raises(RuntimeError, match="commit failed"):
             with scoped.session():
@@ -165,7 +165,7 @@ class TestScopedPGEnsureSchema:
         mock_pg.readonly = False
         mock_lg = MagicMock()
 
-        scoped = ScopedPG(mock_pg, "new_schema", mock_lg)
+        scoped = ScopedPG(mock_lg, mock_pg, "new_schema")
         scoped.ensure_schema()
 
         # Verify CREATE SCHEMA was executed
@@ -185,7 +185,7 @@ class TestScopedPGEnsureSchema:
         mock_pg.readonly = False
         mock_lg = MagicMock()
 
-        scoped = ScopedPG(mock_pg, "new_schema", mock_lg)
+        scoped = ScopedPG(mock_lg, mock_pg, "new_schema")
         scoped.ensure_schema()
 
         mock_lg.info.assert_called_once()
@@ -201,7 +201,7 @@ class TestScopedPGEnsureSchema:
         mock_pg.readonly = True
         mock_lg = MagicMock()
 
-        scoped = ScopedPG(mock_pg, "new_schema", mock_lg)
+        scoped = ScopedPG(mock_lg, mock_pg, "new_schema")
 
         with pytest.raises(DatabaseError, match="readonly"):
             scoped.ensure_schema()
@@ -216,7 +216,7 @@ class TestScopedPGProperties:
         mock_pg = MagicMock()
         mock_lg = MagicMock()
 
-        scoped = ScopedPG(mock_pg, "test_schema", mock_lg)
+        scoped = ScopedPG(mock_lg, mock_pg, "test_schema")
 
         assert scoped.schema == "test_schema"
 
@@ -227,7 +227,7 @@ class TestScopedPGProperties:
         mock_pg.engine = mock_engine
         mock_lg = MagicMock()
 
-        scoped = ScopedPG(mock_pg, "test_schema", mock_lg)
+        scoped = ScopedPG(mock_lg, mock_pg, "test_schema")
 
         assert scoped.engine is mock_engine
 
