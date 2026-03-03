@@ -275,7 +275,7 @@ tenant_a.ensure_schema()  # CREATE SCHEMA IF NOT EXISTS tenant_a
 |---------|------------------|------------------|
 | Schema binding | Engine-level (all sessions) | Session-level (per scope) |
 | Multiple schemas | Requires multiple PG instances | Single PG, multiple scopes |
-| Schema must exist | At PG construction time | At session time (lazy) |
+| Schema must exist | Before first DB operation | At session time (lazy) |
 | Session API | `pg.session()` returns raw session | `scoped.session()` is context manager |
 
 **When to use which:**

@@ -79,7 +79,7 @@ class TestScopedPGSession:
         # Verify search_path was set
         mock_session.execute.assert_called()
         call_args = mock_session.execute.call_args[0][0]
-        assert 'SET search_path TO "my_schema", public' in str(call_args)
+        assert 'SET LOCAL search_path TO "my_schema", public' in str(call_args)
 
     def test_session_commits_on_success(self):
         """Test session commits on successful exit."""

@@ -103,7 +103,9 @@ class ScopedPG:
         """
         session: Session = self._pg.session()
         try:
-            session.execute(text(f'SET search_path TO "{self._schema_name}", public'))
+            session.execute(
+                text(f'SET LOCAL search_path TO "{self._schema_name}", public')
+            )
             yield session
             session.commit()
         except Exception as e:
