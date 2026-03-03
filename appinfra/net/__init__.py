@@ -1,6 +1,6 @@
 """Network components for TCP/HTTP servers."""
 
-from .exceptions import (
+from .errors import (
     HandlerError,
     ServerError,
     ServerShutdownError,

@@ -17,7 +17,7 @@ from .colors import ColorManager
 from .config import LogConfig
 from .config_holder import LogConfigHolder
 from .constants import LogConstants
-from .exceptions import FormatterError
+from .errors import FormatterError
 
 # Type alias for config parameter that can be either LogConfig or LogConfigHolder
 ConfigLike = LogConfig | LogConfigHolder

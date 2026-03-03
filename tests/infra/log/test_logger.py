@@ -19,7 +19,7 @@ import pytest
 
 from appinfra.log.callback import CallbackRegistry, listens_for
 from appinfra.log.config import LogConfig
-from appinfra.log.exceptions import (
+from appinfra.log.errors import (
     CallbackError,
     InvalidLogLevelError,
 )

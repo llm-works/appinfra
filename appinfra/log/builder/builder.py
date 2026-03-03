@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, Self
 
 from ..config import LogConfig
-from ..exceptions import LogConfigurationError
+from ..errors import LogConfigurationError
 from ..factory import LoggerFactory
 from ..logger import Logger
 from .interface import HandlerConfig, LoggingBuilderInterface

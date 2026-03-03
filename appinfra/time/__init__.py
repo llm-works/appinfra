@@ -2,7 +2,7 @@
 
 # Date range utilities
 # Ticker exceptions
-from appinfra.exceptions import (
+from appinfra.errors import (
     TickerAPIError,
     TickerConfigError,
     TickerError,

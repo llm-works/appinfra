@@ -18,7 +18,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from appinfra.exceptions import TickerAPIError, TickerConfigError, TickerStateError
+from appinfra.errors import TickerAPIError, TickerConfigError, TickerStateError
 from appinfra.time.ticker import Ticker, TickerHandler, TickerMode
 
 # =============================================================================

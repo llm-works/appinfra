@@ -18,7 +18,7 @@ import pytest
 
 from appinfra.log.builder.builder import LoggingBuilder, create_logger
 from appinfra.log.builder.interface import HandlerConfig
-from appinfra.log.exceptions import LogConfigurationError
+from appinfra.log.errors import LogConfigurationError
 from appinfra.log.logger import Logger
 
 # =============================================================================

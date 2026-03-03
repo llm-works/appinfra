@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
-from ...exceptions import DatabaseError
+from ...errors import DatabaseError
 from .schema import validate_schema_name
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -136,7 +136,7 @@ class ScopedPG:
         with self._pg.engine.connect() as conn:
             conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{self._schema_name}"'))
             conn.commit()
-        self._lg.info("ensured schema exists", extra={"schema": self._schema_name})
+        self._lg.trace("ensured schema exists", extra={"schema": self._schema_name})
 
     @property
     def schema(self) -> str:

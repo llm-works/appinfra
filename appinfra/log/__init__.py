@@ -54,7 +54,7 @@ from .config import ChildLogConfig, LogConfig
 
 # Import new architecture components
 from .constants import LogConstants
-from .exceptions import (
+from .errors import (
     CallbackError,
     FormatterError,
     InvalidLogLevelError,

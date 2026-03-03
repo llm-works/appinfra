@@ -10,7 +10,7 @@ from typing import Any
 
 import sqlalchemy
 
-from ...exceptions import DatabaseError
+from ...errors import DatabaseError
 
 
 class ReconnectionStrategy:

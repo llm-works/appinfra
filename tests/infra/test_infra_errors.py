@@ -10,7 +10,7 @@ Tests key exception features including:
 
 import pytest
 
-from appinfra.exceptions import (
+from appinfra.errors import (
     ConfigError,
     DatabaseError,
     DependencyError,

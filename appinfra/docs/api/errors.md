@@ -45,7 +45,7 @@ class InfraError(Exception):
 **Catching Framework Exceptions:**
 
 ```python
-from appinfra.exceptions import InfraError, ConfigError
+from appinfra.errors import InfraError, ConfigError
 from appinfra.config import Config
 
 try:
@@ -59,7 +59,7 @@ except InfraError as e:
 **Catching Specific Exceptions:**
 
 ```python
-from appinfra.exceptions import DatabaseError
+from appinfra.errors import DatabaseError
 from appinfra.db import PG
 from appinfra.cfg import get_config_file_path
 
@@ -74,7 +74,7 @@ except DatabaseError as e:
 **Raising with Context:**
 
 ```python
-from appinfra.exceptions import ValidationError
+from appinfra.errors import ValidationError
 
 raise ValidationError(
     "Invalid configuration",
@@ -85,7 +85,7 @@ raise ValidationError(
 **Re-raising with Context:**
 
 ```python
-from appinfra.exceptions import DatabaseError
+from appinfra.errors import DatabaseError
 
 try:
     connect_to_database()

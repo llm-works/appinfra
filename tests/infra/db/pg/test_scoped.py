@@ -188,14 +188,14 @@ class TestScopedPGEnsureSchema:
         scoped = ScopedPG(mock_lg, mock_pg, "new_schema")
         scoped.ensure_schema()
 
-        mock_lg.info.assert_called_once()
-        call_kwargs = mock_lg.info.call_args
+        mock_lg.trace.assert_called_once()
+        call_kwargs = mock_lg.trace.call_args
         assert "ensured schema exists" in call_kwargs[0][0]
         assert call_kwargs[1]["extra"]["schema"] == "new_schema"
 
     def test_ensure_schema_raises_on_readonly(self):
         """Test ensure_schema raises DatabaseError if PG is readonly."""
-        from appinfra.exceptions import DatabaseError
+        from appinfra.errors import DatabaseError
 
         mock_pg = MagicMock()
         mock_pg.readonly = True

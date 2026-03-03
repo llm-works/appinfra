@@ -13,7 +13,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from appinfra.log.exceptions import LogConfigurationError
+from appinfra.log.errors import LogConfigurationError
 from appinfra.log.handler_factory import (
     HandlerFactory,
     HandlerRegistry,

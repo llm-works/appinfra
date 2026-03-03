@@ -24,7 +24,7 @@ from .builder.file import (
     TimedRotatingFileHandlerConfig as TimedRotatingFileHandlerConfigClass,
 )
 from .builder.interface import HandlerConfig
-from .exceptions import LogConfigurationError
+from .errors import LogConfigurationError
 
 # Helper functions for HandlerRegistry.add_handler_from_config()
 

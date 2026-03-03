@@ -795,7 +795,7 @@ class TestMissingCoverage:
 
     def test_render_exception_with_non_exception_raises(self, formatter_config):
         """Test _render_exception raises FormatterError for non-exceptions (line 270-271)."""
-        from appinfra.log.exceptions import FormatterError
+        from appinfra.log.errors import FormatterError
 
         formatter = FieldFormatter(formatter_config)
 
@@ -804,7 +804,7 @@ class TestMissingCoverage:
 
     def test_render_exception_with_non_exception_object(self, formatter_config):
         """Test _render_exception raises for arbitrary objects."""
-        from appinfra.log.exceptions import FormatterError
+        from appinfra.log.errors import FormatterError
 
         formatter = FieldFormatter(formatter_config)
 

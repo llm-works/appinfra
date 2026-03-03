@@ -11,7 +11,7 @@ import logging
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
-from .exceptions import CallbackError
+from .errors import CallbackError
 
 if TYPE_CHECKING:
     from .logger import Logger

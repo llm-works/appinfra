@@ -20,8 +20,7 @@ from .config import (
 from .deprecation import deprecated
 from .dict import DictInterface
 from .dot_dict import DotDict
-from .ewma import EWMA
-from .exceptions import (
+from .errors import (
     ConfigError,
     DatabaseError,
     DependencyError,
@@ -32,6 +31,7 @@ from .exceptions import (
     ToolError,
     ValidationError,
 )
+from .ewma import EWMA
 from .field_dict import FieldDict, field
 from .rate_limit import Backoff, RateLimiter
 from .regex_utils import (

@@ -11,6 +11,11 @@ For API stability guarantees and deprecation policy, see
 ## [Unreleased]
 
 ### Changed
+- **BREAKING:** Renamed exception modules from `exceptions.py` to `errors.py` for consistency:
+  - `appinfra.exceptions` → `appinfra.errors`
+  - `appinfra.log.exceptions` → `appinfra.log.errors`
+  - `appinfra.net.exceptions` → `appinfra.net.errors`
+  - Update imports: `from appinfra.exceptions import ...` → `from appinfra.errors import ...`
 - **BREAKING:** FastAPI `ServerBuilder` and `Server` now require `lg: Logger` as first parameter:
   - Before: `ServerBuilder("name")` / `Server(name="name", ...)`
   - After: `ServerBuilder(lg, "name")` / `Server(lg, name="name", ...)`
