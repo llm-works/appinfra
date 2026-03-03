@@ -243,6 +243,45 @@ pg_with_tables = make_migrate_fixture(Base, extensions=["vector"])
 3. **Query routing**: SQLAlchemy event listeners set `search_path` on every connection
 4. **Extension visibility**: `search_path` includes `public` so extensions (pgvector, etc.) work
 
+### ScopedPG: Dynamic Schema Selection
+
+For applications that need to access multiple schemas from a single PG instance (e.g., multi-tenant
+applications where schemas are created dynamically), use `ScopedPG`:
+
+```python
+from appinfra.db.pg import PG
+
+# Create a schema-agnostic PG instance
+pg = PG(logger, config)
+
+# Get scoped views for different schemas
+tenant_a = pg.scoped("tenant_a")
+tenant_b = pg.scoped("tenant_b")
+
+# Each scope has its own search_path (set at session level, not engine level)
+with tenant_a.session() as session:
+    session.execute(text("SELECT * FROM users"))  # Uses tenant_a.users
+
+with tenant_b.session() as session:
+    session.execute(text("SELECT * FROM users"))  # Uses tenant_b.users
+
+# Create schema if it doesn't exist
+tenant_a.ensure_schema()  # CREATE SCHEMA IF NOT EXISTS tenant_a
+```
+
+**Key differences from engine-level schema isolation:**
+
+| Feature | `PG(schema="x")` | `pg.scoped("x")` |
+|---------|------------------|------------------|
+| Schema binding | Engine-level (all sessions) | Session-level (per scope) |
+| Multiple schemas | Requires multiple PG instances | Single PG, multiple scopes |
+| Schema must exist | Before first DB operation | At session time (lazy) |
+| Session API | `pg.session()` returns raw session | `scoped.session()` is context manager |
+
+**When to use which:**
+- **Engine-level (`schema=`)**: Single schema per PG instance, schema known at startup
+- **ScopedPG**: Dynamic schemas, multi-tenant with schema-per-tenant, lazy schema creation
+
 ### PostgreSQL Extensions (`extensions` field)
 
 The `extensions` field specifies PostgreSQL extensions to create automatically when `pg.migrate()`

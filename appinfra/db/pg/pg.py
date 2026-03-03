@@ -7,11 +7,14 @@ using composition pattern for clean separation of concerns.
 
 import re
 from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import sqlalchemy
 import sqlalchemy_utils
 from sqlalchemy import text
+
+if TYPE_CHECKING:  # pragma: no cover
+    from .scoped import ScopedPG
 
 from ...dot_dict import DotDict
 from ...log import Logger, LoggerFactory
@@ -223,6 +226,37 @@ class PG(Interface):
         """
         if self._schema_mgr:
             self._schema_mgr.create_schema()
+
+    def scoped(self, schema_name: str) -> "ScopedPG":
+        """
+        Get a scoped view of this PG for a specific schema.
+
+        Sessions from the scoped PG will have search_path set at session level,
+        allowing a single PG instance to serve multiple schemas without
+        engine-level schema binding.
+
+        Args:
+            schema_name: PostgreSQL schema name for the scope
+
+        Returns:
+            ScopedPG instance configured for the specified schema
+
+        Raises:
+            ValueError: If schema name is invalid
+
+        Example:
+            >>> pg = PG(logger, config)  # Schema-agnostic
+            >>> scoped = pg.scoped("my_schema")
+            >>> with scoped.session() as session:
+            ...     session.query(MyModel).all()  # Uses my_schema.* tables
+
+            >>> # Multiple scopes from same PG
+            >>> scope_a = pg.scoped("schema_a")
+            >>> scope_b = pg.scoped("schema_b")
+        """
+        from .scoped import ScopedPG
+
+        return ScopedPG(self._lg, self, schema_name)
 
     def connect(self) -> Any:
         """

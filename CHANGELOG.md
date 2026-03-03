@@ -23,6 +23,12 @@ For API stability guarantees and deprecation policy, see
   `ConfigError` instead of logging a warning and ignoring callbacks
 
 ### Added
+- `ScopedPG` for per-operation schema selection without engine-level binding:
+  - `pg.scoped("schema_name")` returns a `ScopedPG` instance
+  - Sessions have `search_path` set at session level, not via engine event listeners
+  - Single PG instance can serve multiple schemas (no instance caching needed)
+  - `scoped.session()` is a context manager with automatic commit/rollback/close
+  - `scoped.ensure_schema()` creates schema if it doesn't exist
 - FastAPI: `ExceptionHandler` base class for subprocess mode with Logger support:
   - Handles Logger pickle/unpickle automatically; subclass and implement `handle()`
   - Build-time validation catches unpicklable handlers with clear error messages
