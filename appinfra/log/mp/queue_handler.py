@@ -99,7 +99,8 @@ class MPQueueHandler(logging.Handler):
         Converts exception objects to formatted strings. Handles:
         - The standard "exception" key (renamed to "exception_formatted")
         - Any other keys containing exceptions (converted in-place)
-        - Nested dicts and lists containing exceptions
+        - Nested dicts, lists, tuples, and sets containing exceptions
+        - Cyclic container references (replaced with a placeholder)
 
         Args:
             record: Log record to modify in place
@@ -152,7 +153,13 @@ class MPQueueHandler(logging.Handler):
         for key, value in obj.items():
             sanitized = self._sanitize_for_pickle(value, seen)
             if key == "exception" and isinstance(value, BaseException):
-                result["exception_formatted"] = sanitized
+                # Find a unique key to avoid overwriting existing entries
+                new_key = "exception_formatted"
+                suffix = 1
+                while new_key in result or new_key in obj:
+                    new_key = f"exception_formatted_{suffix}"
+                    suffix += 1
+                result[new_key] = sanitized
             else:
                 result[key] = sanitized
         return result
