@@ -212,6 +212,53 @@ class TestMPQueueHandlerPrepare:
         pickled = pickle.dumps(prepared)
         pickle.loads(pickled)
 
+    def test_prepare_handles_exception_in_tuple_and_set(self, handler, log_record):
+        """Test prepare handles exceptions in tuple and set."""
+        import pickle
+
+        exc_tuple = ValueError("tuple error")
+        exc_set = RuntimeError("set error")
+        setattr(
+            log_record,
+            "__infra__extra",
+            {"tuple_errors": (exc_tuple,), "set_errors": {exc_set}},
+        )
+
+        prepared = handler._prepare(log_record)
+        extra = getattr(prepared, "__infra__extra")
+
+        assert isinstance(extra["tuple_errors"], tuple)
+        assert isinstance(extra["tuple_errors"][0], str)
+        assert "ValueError" in extra["tuple_errors"][0]
+
+        assert isinstance(extra["set_errors"], set)
+        assert all(isinstance(e, str) for e in extra["set_errors"])
+
+        # Should be picklable
+        pickled = pickle.dumps(prepared)
+        pickle.loads(pickled)
+
+    def test_prepare_handles_cyclic_reference(self, handler, log_record):
+        """Test prepare handles cyclic references without infinite recursion."""
+        import pickle
+
+        # Create a cyclic structure
+        cyclic_dict: dict = {"key": "value"}
+        cyclic_dict["self"] = cyclic_dict
+
+        setattr(log_record, "__infra__extra", cyclic_dict)
+
+        # Should not hang or raise RecursionError
+        prepared = handler._prepare(log_record)
+        extra = getattr(prepared, "__infra__extra")
+
+        assert extra["key"] == "value"
+        assert extra["self"] == "<cyclic reference>"
+
+        # Should be picklable
+        pickled = pickle.dumps(prepared)
+        pickle.loads(pickled)
+
 
 @pytest.mark.unit
 class TestMPQueueHandlerFormatException:

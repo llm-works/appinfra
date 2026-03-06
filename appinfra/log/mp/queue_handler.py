@@ -109,18 +109,20 @@ class MPQueueHandler(logging.Handler):
             return
 
         # Recursively sanitize to handle exceptions anywhere in the structure
-        extra = self._sanitize_for_pickle(extra)
+        extra = self._sanitize_for_pickle(extra, set())
         setattr(record, "__infra__extra", extra)
 
-    def _sanitize_for_pickle(self, obj: Any) -> Any:
+    def _sanitize_for_pickle(self, obj: Any, seen: set[int]) -> Any:
         """
         Recursively sanitize an object for pickling.
 
         Converts BaseException instances to formatted strings.
-        Handles dicts, lists, tuples, and sets.
+        Handles dicts, lists, tuples, and sets. Detects cycles to prevent
+        infinite recursion on self-referential structures.
 
         Args:
             obj: Object to sanitize
+            seen: Set of object ids already visited (for cycle detection)
 
         Returns:
             Sanitized object safe for pickling
@@ -128,27 +130,32 @@ class MPQueueHandler(logging.Handler):
         if isinstance(obj, BaseException):
             return self._format_exception_in_context(obj)
 
+        # Cycle detection for mutable container types
+        if isinstance(obj, (dict, list, set)):
+            if id(obj) in seen:
+                return "<cyclic reference>"
+            seen = seen | {id(obj)}
+
         if isinstance(obj, dict):
-            result = {}
-            for key, value in obj.items():
-                sanitized = self._sanitize_for_pickle(value)
-                # Special handling for "exception" key - rename to "exception_formatted"
-                if key == "exception" and isinstance(value, BaseException):
-                    result["exception_formatted"] = sanitized
-                else:
-                    result[key] = sanitized
-            return result
-
+            return self._sanitize_dict(obj, seen)
         if isinstance(obj, list):
-            return [self._sanitize_for_pickle(item) for item in obj]
-
+            return [self._sanitize_for_pickle(item, seen) for item in obj]
         if isinstance(obj, tuple):
-            return tuple(self._sanitize_for_pickle(item) for item in obj)
-
+            return tuple(self._sanitize_for_pickle(item, seen) for item in obj)
         if isinstance(obj, set):
-            return {self._sanitize_for_pickle(item) for item in obj}
-
+            return {self._sanitize_for_pickle(item, seen) for item in obj}
         return obj
+
+    def _sanitize_dict(self, obj: dict, seen: set[int]) -> dict:
+        """Sanitize a dict, handling the special 'exception' key rename."""
+        result = {}
+        for key, value in obj.items():
+            sanitized = self._sanitize_for_pickle(value, seen)
+            if key == "exception" and isinstance(value, BaseException):
+                result["exception_formatted"] = sanitized
+            else:
+                result[key] = sanitized
+        return result
 
     def _format_exc_info(
         self, exc_info: tuple[type, BaseException, Any] | tuple[None, None, None]
