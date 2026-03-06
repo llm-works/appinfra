@@ -64,6 +64,8 @@ For API stability guarantees and deprecation policy, see
 - `PG` testing fixtures now handle `create_db` race conditions with pytest-xdist:
   - Uses PostgreSQL advisory locks to coordinate database creation across workers
   - Prevents "database already exists" errors when multiple workers start simultaneously
+- `MPQueueHandler` now recursively sanitizes exceptions in `__infra__extra` for pickling.
+  Previously only handled the `exception` key; now handles any key and nested structures.
 
 ## [0.4.1] - 2026-02-25
 
