@@ -257,10 +257,12 @@ or other values injected by your middleware.
 
 ### Logger Access in Subprocess Mode
 
-In subprocess mode, the logger is available in two places:
+In subprocess mode, the logger is stored on **`app.state.lg`** at startup and accessed differently
+depending on context:
 
-- **`request.app.state.lg`** - Available immediately, use in **middleware**
-- **`request.state.lg`** - Set per-request, use in **route handlers**
+- **`app.state.lg`** - App-scoped logger, set at startup. Middleware accesses this via
+  `request.app.state.lg` since they receive a request object.
+- **`request.state.lg`** - Per-request copy, set by middleware. Use in **route handlers**.
 
 #### Route Handlers
 
