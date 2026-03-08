@@ -1002,6 +1002,104 @@ class TestLifecycleCallbackExecution:
 
 
 @pytest.mark.unit
+class TestSubprocessLoggerInjection:
+    """Tests for subprocess logger injection."""
+
+    @pytest.fixture
+    def mock_fastapi(self):
+        """Mock FastAPI and dependencies."""
+        with (
+            patch("appinfra.app.fastapi.runtime.adapter.FASTAPI_AVAILABLE", True),
+            patch("appinfra.app.fastapi.runtime.adapter.FastAPI") as mock_fastapi_cls,
+            patch("appinfra.app.fastapi.runtime.adapter.CORSMiddleware") as mock_cors,
+        ):
+            mock_app = MagicMock()
+            mock_app.state = MagicMock()
+            mock_fastapi_cls.return_value = mock_app
+            yield {
+                "FastAPI": mock_fastapi_cls,
+                "app": mock_app,
+                "CORSMiddleware": mock_cors,
+            }
+
+    def test_inject_subprocess_logger_sets_app_state_lg(self, mock_fastapi):
+        """Test that inject_subprocess_logger enables app.state.lg access."""
+        adapter = FastAPIAdapter(ApiConfig())
+        mock_logger = MagicMock()
+
+        adapter.inject_subprocess_logger(mock_logger)
+        app = adapter.build()
+
+        # app.state.lg should be set for middleware access
+        assert mock_fastapi["app"].state.lg is mock_logger
+
+    def test_no_logger_middleware_without_inject_subprocess_logger(self, mock_fastapi):
+        """Test that logger middleware is not added without inject_subprocess_logger."""
+        adapter = FastAPIAdapter(ApiConfig())
+
+        adapter.build()
+
+        # Without inject_subprocess_logger, app.middleware should not be called for logger
+        # (it may be called for other middleware like callbacks)
+        middleware_decorator = mock_fastapi["app"].middleware
+        # If no callbacks, middleware decorator should not have been called
+        assert middleware_decorator.call_count == 0
+
+
+@pytest.mark.integration
+class TestSubprocessLoggerMiddlewareOrdering:
+    """Integration test for middleware ordering with subprocess logger."""
+
+    def test_app_state_lg_available_in_custom_middleware(self):
+        """Test that app.state.lg is available in custom middleware before request.state.lg."""
+        from fastapi import Request
+        from starlette.middleware.base import BaseHTTPMiddleware
+        from starlette.testclient import TestClient
+
+        # Track what the middleware observes
+        middleware_observations: dict = {}
+
+        class ObserverMiddleware(BaseHTTPMiddleware):
+            async def dispatch(self, request: Request, call_next):
+                middleware_observations["app_state_lg"] = getattr(
+                    request.app.state, "lg", None
+                )
+                middleware_observations["request_state_lg"] = getattr(
+                    request.state, "lg", None
+                )
+                return await call_next(request)
+
+        # Build app with real FastAPI (not mocked)
+        with patch("appinfra.app.fastapi.runtime.adapter.FASTAPI_AVAILABLE", True):
+            adapter = FastAPIAdapter(ApiConfig())
+            mock_logger = MagicMock()
+            mock_logger.name = "test_logger"
+
+            # Inject logger and add custom middleware
+            adapter.inject_subprocess_logger(mock_logger)
+            adapter.add_middleware(
+                MiddlewareDefinition(middleware_class=ObserverMiddleware)
+            )
+
+            app = adapter.build()
+
+            # Add a simple route for testing
+            @app.get("/test")
+            async def test_route():
+                return {"status": "ok"}
+
+            # Make a request using context manager for proper lifespan handling
+            with TestClient(app) as client:
+                response = client.get("/test")
+
+                assert response.status_code == 200
+
+                # Verify middleware ordering: app.state.lg available, request.state.lg not yet set
+                assert middleware_observations["app_state_lg"] is mock_logger
+                assert middleware_observations["request_state_lg"] is None
+
+
+@pytest.mark.unit
 class TestIPCLifespanIntegration:
     """Tests for IPC lifecycle integration with lifespan."""
 

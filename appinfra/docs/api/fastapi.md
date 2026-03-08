@@ -255,9 +255,16 @@ or other values injected by your middleware.
 - **Configuration conflicts:** Using both `with_lifespan()` and startup/shutdown callbacks raises
   `ConfigError` at build time
 
-### Logger Access in Route Handlers
+### Logger Access in Subprocess Mode
 
-In subprocess mode, the logger is automatically injected into `request.state.lg`:
+In subprocess mode, the logger is stored on **`app.state.lg`** at startup and accessed differently
+depending on context:
+
+- **`app.state.lg`** - App-scoped logger, set at startup. Middleware accesses this via
+  `request.app.state.lg` since they receive a request object.
+- **`request.state.lg`** - Per-request copy, set by middleware. Use in **route handlers**.
+
+#### Route Handlers
 
 ```python
 from fastapi import Request
@@ -273,7 +280,30 @@ async def process(request: Request):
         return JSONResponse({"error": "timeout"}, status_code=504)
 ```
 
-This provides clean logger access without passing it through closure chains.
+#### Custom Middleware
+
+Middleware runs before the logger injection middleware, so `request.state.lg` is not yet set.
+Use `request.app.state.lg` instead:
+
+```python
+from starlette.middleware.base import BaseHTTPMiddleware
+
+class TraceMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        lg = request.app.state.lg  # Use app.state, not request.state
+        if lg and request.url.path.startswith("/v1/"):
+            lg.trace("request", extra={"path": request.url.path})
+        return await call_next(request)
+
+# Register via builder
+server = (ServerBuilder(lg, "api")
+    .routes.with_middleware(TraceMiddleware).done()
+    .build())
+```
+
+**Why the difference?** Due to Starlette's middleware ordering (LIFO), custom middleware added via
+`with_middleware()` runs before the logger injection middleware. The logger is stored on
+`app.state.lg` at startup, making it immediately available to all middleware.
 
 ### Exception Handlers in Subprocess Mode
 

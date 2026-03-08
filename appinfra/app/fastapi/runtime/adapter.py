@@ -342,20 +342,30 @@ class FastAPIAdapter:
             self._add_health_route(app, ipc_channel)
 
     def _configure_logger_injection(self, app: FastAPI) -> None:
-        """Configure middleware to inject subprocess logger into request.state.
+        """Configure logger access for subprocess mode.
 
         Only active in subprocess mode (when inject_subprocess_logger was called).
-        Allows route handlers to access the logger via request.state.lg.
+
+        Provides two access patterns:
+        - app.state.lg: Available immediately, for middleware and lifespan
+        - request.state.lg: Set per-request, for route handlers
+
+        Middleware should use request.app.state.lg since request.state.lg
+        is not set until after all middleware has processed the request.
         """
         if self._subprocess_lg is None:
             return
 
         lg = self._subprocess_lg
 
+        # Store on app.state for middleware access (available immediately)
+        app.state.lg = lg
+
         @app.middleware("http")
         async def inject_logger_middleware(
             request: Request, call_next: Callable[[Request], Awaitable[Response]]
         ) -> Response:
+            # Also set on request.state for route handler convenience
             request.state.lg = lg
             return await call_next(request)
 

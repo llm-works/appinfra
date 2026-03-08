@@ -40,9 +40,10 @@ For API stability guarantees and deprecation policy, see
 - FastAPI: Queue-based subprocess logging forwards logs to main process:
   - Subprocess Logger inherits level from main process (e.g., debug, info, warning)
   - Uses `Logger.queue_config()` and `Logger.from_queue_config()` pattern
-- FastAPI: Logger injection into `request.state.lg` in subprocess mode:
-  - Route handlers can access logger via `request.state.lg`
-  - Automatically injected by middleware when subprocess logger is available
+- FastAPI: Logger injection in subprocess mode:
+  - Route handlers: access via `request.state.lg` (set per-request by middleware)
+  - Middleware: access via `request.app.state.lg` (set at startup, available immediately)
+  - Due to middleware ordering, custom middleware runs before logger injection middleware
 - FastAPI: New error classes `CallbackError` and `ConfigError` for cleaner error handling
 - `!deep` YAML tag for recursive deep merging with YAML merge keys (`<<`):
   - Standard merge keys do shallow merge (nested dicts replaced entirely)
