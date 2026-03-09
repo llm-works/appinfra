@@ -13,6 +13,11 @@ For API stability guarantees and deprecation policy, see
 ### Fixed
 - `make check` now shows failing test names and error details when tests fail
   (previously only showed pass/fail count with no details)
+- `RateLimiter` is now thread-safe: concurrent calls from multiple threads no longer
+  cause race conditions that could result in exceeding the rate limit
+- `RateLimiter` no longer allows burst at startup: first request now waits like
+  subsequent requests, preventing thundering herd when multiple threads start
+  simultaneously
 
 ### Changed
 - **BREAKING:** Renamed exception modules from `exceptions.py` to `errors.py` for consistency:
