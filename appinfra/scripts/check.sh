@@ -147,28 +147,28 @@ if [ -n "$COVERAGE_MARKERS" ]; then
 fi
 
 declare -a TEST_SUBCHECKS=(
-    "Unit tests|test.unit|${PYTHON} -m pytest tests/ -m unit --tb=short --no-header -qq -rs ${PYTEST_PARALLEL}|"
-    "Integration tests|test.integration|${PYTHON} -m pytest tests/ -m integration --tb=short --no-header -qq -rs ${PYTEST_PARALLEL}|"
-    "E2E tests|test.e2e|${PYTHON} -m pytest tests/ -m e2e --tb=short --no-header -qq -rs ${PYTEST_PARALLEL}|"
-    "Security tests|test.security|${PYTHON} -m pytest tests/ -m security --tb=short --no-header -qq -rs ${PYTEST_PARALLEL}|"
-    "Performance tests|test.perf|${PYTHON} -m pytest tests/ -m performance --tb=short --no-header -qq -rs ${PYTEST_PARALLEL}|"
+    "Unit tests|test.unit|${PYTHON} -m pytest tests/ -m unit --tb=short --no-header -q -rfs ${PYTEST_PARALLEL}|"
+    "Integration tests|test.integration|${PYTHON} -m pytest tests/ -m integration --tb=short --no-header -q -rfs ${PYTEST_PARALLEL}|"
+    "E2E tests|test.e2e|${PYTHON} -m pytest tests/ -m e2e --tb=short --no-header -q -rfs ${PYTEST_PARALLEL}|"
+    "Security tests|test.security|${PYTHON} -m pytest tests/ -m security --tb=short --no-header -q -rfs ${PYTEST_PARALLEL}|"
+    "Performance tests|test.perf|${PYTHON} -m pytest tests/ -m performance --tb=short --no-header -q -rfs ${PYTEST_PARALLEL}|"
 )
 # Add coverage check only if threshold > 0 (awk is more portable than bc)
 if awk "BEGIN {exit !($COVERAGE_TARGET > 0)}" 2>/dev/null; then
-    TEST_SUBCHECKS+=("Code coverage|test.coverage|${PYTHON} -m pytest tests/ ${COVERAGE_MARKER_ARG} --cov=${PKG_NAME} --cov-report=term -qq -rs ${PYTEST_PARALLEL}|${COVERAGE_TARGET}")
+    TEST_SUBCHECKS+=("Code coverage|test.coverage|${PYTHON} -m pytest tests/ ${COVERAGE_MARKER_ARG} --cov=${PKG_NAME} --cov-report=term -q -rfs ${PYTEST_PARALLEL}|${COVERAGE_TARGET}")
 fi
 
 # Verbose versions for raw mode
 declare -a TEST_SUBCHECKS_RAW=(
-    "Unit tests|test.unit.v|${PYTHON} -m pytest tests/ -m unit -v --tb=short -rs ${PYTEST_PARALLEL}|"
-    "Integration tests|test.integration.v|${PYTHON} -m pytest tests/ -m integration -v --tb=short -rs ${PYTEST_PARALLEL}|"
-    "E2E tests|test.e2e.v|${PYTHON} -m pytest tests/ -m e2e -v --tb=short -rs ${PYTEST_PARALLEL}|"
-    "Security tests|test.security.v|${PYTHON} -m pytest tests/ -m security -v --tb=short -rs ${PYTEST_PARALLEL}|"
-    "Performance tests|test.perf.v|${PYTHON} -m pytest tests/ -m performance -v --tb=short -rs ${PYTEST_PARALLEL}|"
+    "Unit tests|test.unit.v|${PYTHON} -m pytest tests/ -m unit -v --tb=short -rfs ${PYTEST_PARALLEL}|"
+    "Integration tests|test.integration.v|${PYTHON} -m pytest tests/ -m integration -v --tb=short -rfs ${PYTEST_PARALLEL}|"
+    "E2E tests|test.e2e.v|${PYTHON} -m pytest tests/ -m e2e -v --tb=short -rfs ${PYTEST_PARALLEL}|"
+    "Security tests|test.security.v|${PYTHON} -m pytest tests/ -m security -v --tb=short -rfs ${PYTEST_PARALLEL}|"
+    "Performance tests|test.perf.v|${PYTHON} -m pytest tests/ -m performance -v --tb=short -rfs ${PYTEST_PARALLEL}|"
 )
 # Add coverage check only if threshold > 0 (awk is more portable than bc)
 if awk "BEGIN {exit !($COVERAGE_TARGET > 0)}" 2>/dev/null; then
-    TEST_SUBCHECKS_RAW+=("Code coverage|test.coverage|${PYTHON} -m pytest tests/ ${COVERAGE_MARKER_ARG} --cov=${PKG_NAME} --cov-report=term-missing -rs ${PYTEST_PARALLEL}|${COVERAGE_TARGET}")
+    TEST_SUBCHECKS_RAW+=("Code coverage|test.coverage|${PYTHON} -m pytest tests/ ${COVERAGE_MARKER_ARG} --cov=${PKG_NAME} --cov-report=term-missing -rfs ${PYTEST_PARALLEL}|${COVERAGE_TARGET}")
 fi
 
 declare -A CHECK_LINES
@@ -229,8 +229,21 @@ display_failures() {
         [ -n "$fix_target" ] && echo -e "→ To fix: ${YELLOW}make ${fix_target}${RESET}"
         if [ "$FAIL_FAST" = true ] && [ -n "$logfile" ] && [ -f "$logfile" ]; then
             echo ""
-            echo -e "${GRAY}Output:${RESET}"
-            tail -20 "$logfile"
+            # Show FAILED lines first (pytest short test summary)
+            local failed_lines
+            failed_lines=$(grep "^FAILED " "$logfile" 2>/dev/null || true)
+            if [ -n "$failed_lines" ]; then
+                echo -e "${GRAY}Failed tests:${RESET}"
+                echo "$failed_lines"
+                echo ""
+            fi
+            # Show assertion errors (lines starting with E that contain Assert)
+            local assert_lines
+            assert_lines=$(grep -E "^E\s+Assert" "$logfile" 2>/dev/null | head -5 || true)
+            if [ -n "$assert_lines" ]; then
+                echo -e "${GRAY}Errors:${RESET}"
+                echo "$assert_lines"
+            fi
         fi
         echo ""
     done < "${STATUS_DIR}/failures"

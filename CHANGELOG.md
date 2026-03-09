@@ -10,6 +10,10 @@ For API stability guarantees and deprecation policy, see
 
 ## [Unreleased]
 
+### Fixed
+- `make check` now shows failing test names and assertion errors when tests fail
+  (previously only showed pass/fail count with no details)
+
 ### Changed
 - **BREAKING:** Renamed exception modules from `exceptions.py` to `errors.py` for consistency:
   - `appinfra.exceptions` → `appinfra.errors`
