@@ -5,7 +5,7 @@
 ![Type Hints](https://img.shields.io/badge/type%20hints-100%25-brightgreen.svg)
 [![Typed](https://img.shields.io/badge/typed-PEP%20561-brightgreen.svg)](https://peps.python.org/pep-0561/)
 [![Linting: Ruff](https://img.shields.io/badge/linting-ruff-brightgreen)](https://github.com/astral-sh/ruff)
-[![CI](https://github.com/serendip-ml/appinfra/actions/workflows/test-docker.yml/badge.svg)](https://github.com/serendip-ml/appinfra/actions/workflows/test-docker.yml)
+[![CI](https://github.com/llm-works/appinfra/actions/workflows/test-docker.yml/badge.svg)](https://github.com/llm-works/appinfra/actions/workflows/test-docker.yml)
 [![PyPI](https://img.shields.io/pypi/v/appinfra)](https://pypi.org/project/appinfra/)
 ![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)
 
