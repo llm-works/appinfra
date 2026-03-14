@@ -122,6 +122,6 @@ __all__ = [
     "ToolRegistrationError",
     "ConfigError",
     "LifecycleError",
-    "ApplicationError",
+    "AppError",
     "CommandError",
 ]
