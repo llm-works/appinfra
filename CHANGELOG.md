@@ -21,6 +21,7 @@ For API stability guarantees and deprecation policy, see
 
 ### Changed
 - **BREAKING:** Renamed error classes for consistency (shorter names):
+  - `ApplicationError` → `AppError` (appinfra.app.errors)
   - `ConfigurationError` → `ConfigError` (appinfra.app.errors)
   - `LogConfigurationError` → `LogConfigError` (appinfra.log.errors)
   - `InvalidConfigurationError` → `InvalidConfigError` (appinfra.time.sched)

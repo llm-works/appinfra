@@ -9,7 +9,7 @@ from unittest.mock import Mock
 import pytest
 
 from appinfra.app.errors import (
-    ApplicationError,
+    AppError,
     AttrNotFoundError,
     CommandError,
     ConfigError,
@@ -225,17 +225,17 @@ class TestLifecycleError:
 
 
 # =============================================================================
-# Test ApplicationError
+# Test AppError
 # =============================================================================
 
 
 @pytest.mark.unit
-class TestApplicationError:
-    """Test ApplicationError class."""
+class TestAppError:
+    """Test AppError class."""
 
     def test_with_message(self):
-        """Test ApplicationError (line 95)."""
-        error = ApplicationError("app crashed")
+        """Test AppError (line 95)."""
+        error = AppError("app crashed")
 
         assert "Application error" in str(error)
         assert "app crashed" in str(error)

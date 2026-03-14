@@ -90,7 +90,7 @@ class LifecycleError(InfraAppError):
         super().__init__(f"Lifecycle error: {message}")
 
 
-class ApplicationError(InfraAppError):
+class AppError(InfraAppError):
     """Raised when application-level operations fail."""
 
     def __init__(self, message: str):
