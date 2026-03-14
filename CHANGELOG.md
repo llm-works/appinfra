@@ -10,6 +10,8 @@ For API stability guarantees and deprecation policy, see
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-03-14
+
 ### Fixed
 - `make check` now shows failing test names and error details when tests fail
   (previously only showed pass/fail count with no details)
@@ -486,7 +488,8 @@ as config. Affected: `ConfigValidator`, `PG.readonly`, `PG.migrate()`,
 ### Changed
 - Package renamed to `appinfra` (install and import both use `appinfra`)
 
-[Unreleased]: https://github.com/llm-works/appinfra/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/llm-works/appinfra/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/llm-works/appinfra/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/llm-works/appinfra/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/llm-works/appinfra/compare/v0.3.5...v0.4.0
 [0.3.5]: https://github.com/llm-works/appinfra/compare/v0.3.4...v0.3.5
