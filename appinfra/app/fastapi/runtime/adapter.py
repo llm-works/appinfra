@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass, field
@@ -14,9 +13,8 @@ if TYPE_CHECKING:
     from starlette.requests import Request
     from starlette.responses import Response
 
+    from ....log import Logger
     from .ipc import IPCChannel
-
-logger = logging.getLogger("fastapi.adapter")
 
 # Guard FastAPI imports for optional dependency
 try:
@@ -127,13 +125,58 @@ async def _run_exception_callbacks(
     request: Request,
     exc: Exception,
 ) -> None:
-    """Run exception callbacks, logging errors but not raising."""
+    """Run exception callbacks, raising CallbackError on failure."""
+    from ..errors import CallbackError
+
     for exc_cb in exception_callbacks:
         try:
             await exc_cb.callback(request, exc)
-        except Exception:
+        except Exception as cb_exc:
             name = exc_cb.name or exc_cb.callback.__name__
-            logger.exception(f"Error in exception callback '{name}'")
+            lg = getattr(request.state, "lg", None)
+            if lg is not None:
+                lg.error(
+                    f"error in exception callback '{name}'", extra={"exception": cb_exc}
+                )
+            raise CallbackError(f"Exception callback '{name}' failed") from cb_exc
+
+
+async def _run_startup_callbacks(
+    callbacks: list[LifecycleCallbackDefinition],
+    app: Any,
+    lg: Logger | None,
+) -> None:
+    """Run startup callbacks, raising CallbackError on failure."""
+    from ..errors import CallbackError
+
+    for cb in callbacks:
+        name = cb.name or cb.callback.__name__
+        if lg is not None:
+            lg.debug(f"running startup callback: {name}")
+        try:
+            await cb.callback(app)
+        except Exception as e:
+            raise CallbackError(f"Startup callback '{name}' failed") from e
+
+
+async def _run_shutdown_callbacks(
+    callbacks: list[LifecycleCallbackDefinition],
+    app: Any,
+    lg: Logger | None,
+) -> None:
+    """Run shutdown callbacks, logging and raising CallbackError on failure."""
+    from ..errors import CallbackError
+
+    for cb in callbacks:
+        name = cb.name or cb.callback.__name__
+        if lg is not None:
+            lg.debug(f"running shutdown callback: {name}")
+        try:
+            await cb.callback(app)
+        except Exception as e:
+            if lg is not None:
+                lg.error(f"error in shutdown callback '{name}'", extra={"exception": e})
+            raise CallbackError(f"Shutdown callback '{name}' failed") from e
 
 
 def _create_callback_middleware(
@@ -215,6 +258,9 @@ class FastAPIAdapter:
         self._response_callbacks: list[ResponseCallbackDefinition] = []
         self._exception_callbacks: list[ExceptionCallbackDefinition] = []
 
+        # Subprocess logger (injected after unpickling in subprocess mode)
+        self._subprocess_lg: Logger | None = None
+
     def add_route(self, route: RouteDefinition) -> None:
         """Add a route definition."""
         self._routes.append(route)
@@ -278,6 +324,7 @@ class FastAPIAdapter:
         )
 
         self._configure_ipc(app, ipc_channel)
+        self._configure_logger_injection(app)
         self._configure_request_response_middleware(app)
         self._configure_middleware(app)
         self._configure_exception_handlers(app)
@@ -293,6 +340,34 @@ class FastAPIAdapter:
         app.state.ipc_channel = ipc_channel
         if self._config.ipc and self._config.ipc.enable_health_reporting:
             self._add_health_route(app, ipc_channel)
+
+    def _configure_logger_injection(self, app: FastAPI) -> None:
+        """Configure logger access for subprocess mode.
+
+        Only active in subprocess mode (when inject_subprocess_logger was called).
+
+        Provides two access patterns:
+        - app.state.lg: Available immediately, for middleware and lifespan
+        - request.state.lg: Set per-request, for route handlers
+
+        Middleware should use request.app.state.lg since request.state.lg
+        is not set until after all middleware has processed the request.
+        """
+        if self._subprocess_lg is None:
+            return
+
+        lg = self._subprocess_lg
+
+        # Store on app.state for middleware access (available immediately)
+        app.state.lg = lg
+
+        @app.middleware("http")
+        async def inject_logger_middleware(
+            request: Request, call_next: Callable[[Request], Awaitable[Response]]
+        ) -> Response:
+            # Also set on request.state for route handler convenience
+            request.state.lg = lg
+            return await call_next(request)
 
     def _build_lifespan(
         self, ipc_channel: IPCChannel | None = None
@@ -310,9 +385,11 @@ class FastAPIAdapter:
 
         if self._lifespan is not None:
             if self._startup_callbacks or self._shutdown_callbacks:
-                logger.warning(
-                    "Both lifespan and startup/shutdown callbacks provided. "
-                    "startup/shutdown callbacks will be ignored when lifespan is set."
+                from ..errors import ConfigError
+
+                raise ConfigError(
+                    "Cannot use both lifespan and startup/shutdown callbacks. "
+                    "Use either with_lifespan() or with_on_startup()/with_on_shutdown(), not both."
                 )
             user_lifespan = self._lifespan.lifespan
         elif self._startup_callbacks or self._shutdown_callbacks:
@@ -330,24 +407,13 @@ class FastAPIAdapter:
         """Create a lifespan context manager from startup/shutdown callbacks."""
         startup_callbacks = self._startup_callbacks
         shutdown_callbacks = self._shutdown_callbacks
+        lg = self._subprocess_lg
 
         @asynccontextmanager
         async def lifespan(app: Any) -> AsyncIterator[None]:
-            for cb in startup_callbacks:
-                name = cb.name or cb.callback.__name__
-                logger.debug(f"Running startup callback: {name}")
-                try:
-                    await cb.callback(app)
-                except Exception as e:
-                    raise RuntimeError(f"Startup callback '{name}' failed") from e
+            await _run_startup_callbacks(startup_callbacks, app, lg)
             yield
-            for cb in shutdown_callbacks:
-                name = cb.name or cb.callback.__name__
-                logger.debug(f"Running shutdown callback: {name}")
-                try:
-                    await cb.callback(app)
-                except Exception:
-                    logger.exception(f"Error in shutdown callback '{name}'")
+            await _run_shutdown_callbacks(shutdown_callbacks, app, lg)
 
         return lifespan
 
@@ -458,3 +524,26 @@ class FastAPIAdapter:
             tags=["Health"],
             summary="Health check with IPC status",
         )
+
+    def inject_subprocess_logger(self, lg: Logger) -> None:
+        """Inject subprocess logger into adapter and LoggerInjectable handlers.
+
+        Called in subprocess after unpickling, before build().
+        This allows exception handlers and route handlers to access the logger.
+
+        The logger is:
+        1. Stored for injection into request.state.lg via middleware
+        2. Injected into LoggerInjectable exception handlers
+
+        Args:
+            lg: The Logger instance created in the subprocess.
+        """
+        # Store for request.state injection
+        self._subprocess_lg = lg
+
+        # Inject into exception handlers
+        from ..handlers import LoggerInjectable
+
+        for handler_def in self._exception_handlers:
+            if isinstance(handler_def.handler, LoggerInjectable):
+                handler_def.handler.set_logger(lg)

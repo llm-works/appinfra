@@ -441,6 +441,77 @@ cache: !path ./cache               # Relative to config file
 home_cache: !path ~/.cache/myapp   # Expands ~ to home directory
 ```
 
+**`!deep`** - Deep merge with YAML merge keys (recursive instead of shallow):
+
+```yaml
+# Standard merge (<<: *anchor) does SHALLOW merge - nested dicts replaced entirely
+# Deep merge (<<: !deep *anchor) recursively merges nested dicts
+# NOTE: !include always deep merges (no !deep prefix needed)
+
+templates:
+  defaults: &defaults
+    timeout: 30
+    options:
+      retries: 3
+      backoff: 1.5
+
+services:
+  api:
+    <<: !deep *defaults    # Deep merge
+    options:
+      cache: true          # options = {retries: 3, backoff: 1.5, cache: true}
+
+  worker:
+    <<: *defaults          # Standard shallow merge
+    options:
+      cache: true          # options = {cache: true} (retries, backoff lost!)
+```
+
+**Supported syntaxes:**
+
+```yaml
+# Single anchor - use !deep for deep merge
+<<: !deep *template
+
+# All items deep merged
+<<: !deep [*template_a, *template_b]
+
+# Mixed: shallow for *a, deep for *b
+<<: [*behavior, !deep *settings]
+
+# Multiple merge keys (each independent)
+<<: *behavior           # shallow
+<<: !deep *settings     # deep
+
+# Includes always deep merge (no !deep needed)
+<<: !include "./base.yaml"
+```
+
+**`!reset`** - Bypass deep merge for specific keys:
+
+```yaml
+# When deep merging, use !reset to completely replace a nested value
+# instead of recursively merging it
+
+templates:
+  defaults: &defaults
+    options:
+      retries: 3
+      backoff: 1.5
+      timeout: 30
+
+services:
+  api:
+    <<: !deep *defaults
+    options:
+      cache: true    # Deep merged: {retries: 3, backoff: 1.5, timeout: 30, cache: true}
+
+  worker:
+    <<: !deep *defaults
+    options: !reset      # Complete replacement: {cache: true}
+      cache: true
+```
+
 ## Path Resolution
 
 Path resolution in configuration files requires the explicit `!path` YAML tag. Without the tag,

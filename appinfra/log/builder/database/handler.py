@@ -12,7 +12,7 @@ import signal
 from datetime import datetime
 from typing import Any
 
-from ....exceptions import DependencyError
+from ....errors import DependencyError
 from ...config import LogConfig
 from .config import DatabaseHandlerConfig
 

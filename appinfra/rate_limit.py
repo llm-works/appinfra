@@ -7,6 +7,7 @@ for implementing exponential backoff retry logic.
 """
 
 import random
+import threading
 import time
 
 from . import time as t
@@ -15,10 +16,11 @@ from .log import Logger
 
 class RateLimiter:
     """
-    Rate limiter for controlling operation frequency.
+    Thread-safe rate limiter for controlling operation frequency.
 
     Provides functionality to limit the rate of operations to a specified
     number per minute, with automatic waiting when the rate limit is exceeded.
+    All methods are safe to call concurrently from multiple threads.
     """
 
     def __init__(self, lg: Logger, per_minute: float) -> None:
@@ -36,14 +38,22 @@ class RateLimiter:
             raise ValueError("per_minute must be positive")
         self._lg = lg
         self.per_minute = per_minute
-        self.last_t: float | None = None
+        self._lock = threading.Lock()
+        # Initialize to future time so first request also respects rate limit
+        self._last_t: float = time.monotonic() + 60.0 / per_minute
+
+    @property
+    def last_t(self) -> float:
+        """Return the next available slot time (thread-safe)."""
+        with self._lock:
+            return self._last_t
 
     def next(self, respect_max_ticks: bool = True) -> float:
         """
         Wait for the next allowed operation time.
 
         Calculates the required delay based on the rate limit and sleeps
-        if necessary to maintain the specified rate.
+        if necessary to maintain the specified rate. Thread-safe.
 
         Args:
             respect_max_ticks (bool): Whether to respect the rate limit
@@ -52,19 +62,23 @@ class RateLimiter:
             float: Time waited in seconds
         """
         delay = 60.0 / self.per_minute
-        now = time.monotonic()
-        wait = 0.0
-        if self.last_t is not None:
-            delta = now - self.last_t
-            if delta < delay:
-                wait = delay - delta
-                if respect_max_ticks:
-                    self._lg.trace(
-                        "rate limiter wait",
-                        extra={"wait": t.delta.delta_str(wait, precise=False)},
-                    )
-                    time.sleep(wait)
-        self.last_t = time.monotonic()
+        with self._lock:
+            now = time.monotonic()
+            if now >= self._last_t:
+                # Slot available now, claim next slot
+                wait = 0.0
+                self._last_t = now + delay
+            else:
+                # Need to wait for current slot
+                wait = self._last_t - now
+                self._last_t = self._last_t + delay
+        # Sleep outside lock to avoid blocking other threads
+        if wait > 0 and respect_max_ticks:
+            self._lg.trace(
+                "rate limiter wait",
+                extra={"wait": t.delta.delta_str(wait, precise=False)},
+            )
+            time.sleep(wait)
         return wait
 
     def try_next(self) -> bool:
@@ -72,15 +86,15 @@ class RateLimiter:
         Non-blocking rate limit check.
 
         Checks if the rate limit allows an operation without blocking.
-        If allowed, updates the last operation time and returns True.
-        If rate limited, returns False without modifying state.
+        If allowed, claims the slot and returns True.
+        If rate limited, returns False without modifying state. Thread-safe.
 
         This method is useful for event loops that cannot block, such as
         message-processing loops that need to handle signals while rate-limiting
         operations.
 
         Returns:
-            bool: True if operation is allowed (updates last_t), False if rate limited.
+            bool: True if operation is allowed (claims slot), False if rate limited.
 
         Example:
             if limiter.try_next():
@@ -90,19 +104,21 @@ class RateLimiter:
                 pass
         """
         delay = 60.0 / self.per_minute
-        now = time.monotonic()
-        if self.last_t is None or (now - self.last_t) >= delay:
-            self.last_t = now
-            return True
-        return False
+        with self._lock:
+            now = time.monotonic()
+            if now >= self._last_t:
+                # Slot available, claim next slot
+                self._last_t = now + delay
+                return True
+            return False
 
     def can_proceed(self) -> bool:
         """
         Check if rate limit allows an operation (non-consuming).
 
-        Unlike try_next(), this does NOT update last_t or consume a slot.
+        Unlike try_next(), this does NOT claim a slot.
         Use this for informational checks in event loops where you need to
-        know availability without committing to an operation.
+        know availability without committing to an operation. Thread-safe.
 
         Returns:
             bool: True if a call would be allowed, False if rate limited.
@@ -110,15 +126,13 @@ class RateLimiter:
         Example:
             while True:
                 if limiter.can_proceed():
-                    limiter.try_next()  # Actually consume the slot
+                    limiter.try_next()  # Actually claim the slot
                     do_operation()
                 else:
                     handle_other_work()
         """
-        if self.last_t is None:
-            return True
-        delay = 60.0 / self.per_minute
-        return time.monotonic() - self.last_t >= delay
+        with self._lock:
+            return time.monotonic() >= self._last_t
 
 
 class Backoff:

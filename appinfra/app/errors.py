@@ -76,7 +76,7 @@ class ToolRegistrationError(InfraAppError):
         super().__init__(f"Failed to register tool '{tool_name}': {reason}")
 
 
-class ConfigurationError(InfraAppError):
+class ConfigError(InfraAppError):
     """Raised when configuration is invalid."""
 
     def __init__(self, message: str):
@@ -90,7 +90,7 @@ class LifecycleError(InfraAppError):
         super().__init__(f"Lifecycle error: {message}")
 
 
-class ApplicationError(InfraAppError):
+class AppError(InfraAppError):
     """Raised when application-level operations fail."""
 
     def __init__(self, message: str):

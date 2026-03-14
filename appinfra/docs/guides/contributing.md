@@ -25,7 +25,7 @@ Guide for developers who want to contribute to appinfra or use it in development
 Clone the repository and set up the development environment:
 
 ```bash
-git clone https://github.com/serendip-ml/appinfra.git
+git clone https://github.com/llm-works/appinfra.git
 cd appinfra
 
 # Install dependencies

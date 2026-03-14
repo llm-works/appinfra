@@ -10,7 +10,7 @@ import pytest
 import sqlalchemy
 
 from appinfra.db.pg.reconnection import ReconnectionStrategy
-from appinfra.exceptions import DatabaseError
+from appinfra.errors import DatabaseError
 
 
 @pytest.fixture

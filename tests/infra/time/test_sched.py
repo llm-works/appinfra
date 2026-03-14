@@ -21,7 +21,7 @@ from appinfra.time.sched import (
     SECONDS_PER_DAY,
     SECONDS_PER_HOUR,
     SECONDS_PER_MINUTE,
-    InvalidConfigurationError,
+    InvalidConfigError,
     InvalidTimeFormatError,
     Period,
     Sched,
@@ -106,8 +106,8 @@ class TestExceptionClasses:
         assert isinstance(error, SchedulerError)
 
     def test_invalid_configuration_error(self):
-        """Test InvalidConfigurationError."""
-        error = InvalidConfigurationError("Invalid config")
+        """Test InvalidConfigError."""
+        error = InvalidConfigError("Invalid config")
         assert isinstance(error, SchedulerError)
 
 
@@ -128,7 +128,7 @@ class TestHelperFunctions:
 
     def test_validate_logger_with_none_raises_error(self):
         """Test _validate_logger with None raises error."""
-        with pytest.raises(InvalidConfigurationError, match="Logger cannot be None"):
+        with pytest.raises(InvalidConfigError, match="Logger cannot be None"):
             _validate_logger(None)
 
     def test_normalize_period_with_enum(self):
@@ -158,16 +158,12 @@ class TestHelperFunctions:
 
     def test_validate_weekday_for_weekly_without_weekday_raises_error(self):
         """Test _validate_weekday raises error when weekday missing."""
-        with pytest.raises(
-            InvalidConfigurationError, match="weekday must be specified"
-        ):
+        with pytest.raises(InvalidConfigError, match="weekday must be specified"):
             _validate_weekday(Period.WEEKLY, None)
 
     def test_validate_weekday_out_of_range_raises_error(self):
         """Test _validate_weekday validates range."""
-        with pytest.raises(
-            InvalidConfigurationError, match="weekday must be between 0"
-        ):
+        with pytest.raises(InvalidConfigError, match="weekday must be between 0"):
             _validate_weekday(Period.WEEKLY, 7)
 
     def test_validate_weekday_for_non_weekly_period(self):
@@ -262,7 +258,7 @@ class TestSchedInitialization:
 
     def test_init_with_none_logger_raises_error(self):
         """Test initialization with None logger raises error."""
-        with pytest.raises(InvalidConfigurationError):
+        with pytest.raises(InvalidConfigError):
             Sched(None, Period.DAILY, "14:30")
 
     def test_init_with_string_period(self, mock_logger):

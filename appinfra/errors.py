@@ -253,9 +253,9 @@ class DependencyError(InfraError):
 # also making them inherit from the new hierarchy
 
 # These are defined in their respective modules:
-# - appinfra.app.errors: ApplicationError, ToolRegistrationError, etc.
-# - appinfra.log.exceptions: LogError, InvalidLogLevelError, etc.
-# - appinfra.net.exceptions: ServerError (original), etc.
+# - appinfra.app.errors: AppError, ToolRegistrationError, etc.
+# - appinfra.log.errors: LogError, InvalidLogLevelError, etc.
+# - appinfra.net.errors: ServerError (original), etc.
 #
 # The new hierarchy provides a unified way to catch all framework errors,
 # while the specific exceptions in each module provide detailed error handling.

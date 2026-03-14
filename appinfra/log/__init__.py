@@ -54,11 +54,11 @@ from .config import ChildLogConfig, LogConfig
 
 # Import new architecture components
 from .constants import LogConstants
-from .exceptions import (
+from .errors import (
     CallbackError,
     FormatterError,
     InvalidLogLevelError,
-    LogConfigurationError,
+    LogConfigError,
     LogError,
 )
 from .factory import LoggerFactory
@@ -240,7 +240,7 @@ def capture_all_loggers(
     """
     Capture all Python logging and route through appinfra's formatted handler.
 
-    Useful for unifying log output from third-party libraries (torch, vllm, httpx, etc.)
+    Useful for unifying log output from third-party libraries (requests, sqlalchemy, boto3, etc.)
     with your application's logging format.
 
     Args:
@@ -283,14 +283,14 @@ def capture_logger(name: str, level: str | int | None = None) -> None:
     propagate to the root handler set by capture_all_loggers().
 
     Args:
-        name: Logger name (e.g., "flashinfer", "torch.cuda")
+        name: Logger name (e.g., "urllib3", "sqlalchemy.engine")
         level: Optional level override. If None, inherits from root.
 
     Example:
         >>> from appinfra.log import capture_all_loggers, capture_logger
         >>> capture_all_loggers(level="info")
-        >>> capture_logger("flashinfer", level="warning")  # Pre-capture before import
-        >>> import flashinfer  # Logger already configured
+        >>> capture_logger("urllib3", level="warning")  # Pre-capture before import
+        >>> import urllib3  # Logger already configured
     """
     logger = logging.getLogger(name)
     logger.handlers.clear()
@@ -320,7 +320,7 @@ __all__ = [
     # Exception classes
     "LogError",
     "InvalidLogLevelError",
-    "LogConfigurationError",
+    "LogConfigError",
     "FormatterError",
     "CallbackError",
     # LoggingBuilder classes

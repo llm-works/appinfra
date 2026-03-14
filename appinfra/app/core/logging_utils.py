@@ -309,9 +309,9 @@ def _load_handlers_from_config(
     if not handlers:
         return
     if not hasattr(handlers, "items"):
-        from ...log.handler_factory import LogConfigurationError
+        from ...log.handler_factory import LogConfigError
 
-        raise LogConfigurationError(
+        raise LogConfigError(
             f"Handlers configuration must be a dictionary, got {type(handlers)}"
         )
 

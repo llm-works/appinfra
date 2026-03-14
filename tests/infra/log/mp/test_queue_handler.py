@@ -153,6 +153,112 @@ class TestMPQueueHandlerPrepare:
         prepared = handler._prepare(log_record)
         assert prepared.args is None
 
+    def test_prepare_handles_exception_in_non_standard_key(self, handler, log_record):
+        """Test prepare handles exception in non-standard key (not 'exception')."""
+        import pickle
+
+        exc = ValueError("test error")
+        setattr(log_record, "__infra__extra", {"error": exc, "key": "value"})
+
+        prepared = handler._prepare(log_record)
+        extra = getattr(prepared, "__infra__extra")
+
+        # Non-standard key should be converted in-place (not renamed)
+        assert "error" in extra
+        assert isinstance(extra["error"], str)
+        assert "ValueError" in extra["error"]
+        assert extra["key"] == "value"
+
+        # Should be picklable
+        pickled = pickle.dumps(prepared)
+        unpickled = pickle.loads(pickled)
+        assert "ValueError" in getattr(unpickled, "__infra__extra")["error"]
+
+    def test_prepare_handles_nested_exception(self, handler, log_record):
+        """Test prepare handles exception nested in dict."""
+        import pickle
+
+        exc = RuntimeError("nested error")
+        setattr(log_record, "__infra__extra", {"context": {"exc": exc}})
+
+        prepared = handler._prepare(log_record)
+        extra = getattr(prepared, "__infra__extra")
+
+        assert isinstance(extra["context"]["exc"], str)
+        assert "RuntimeError" in extra["context"]["exc"]
+
+        # Should be picklable
+        pickled = pickle.dumps(prepared)
+        unpickled = pickle.loads(pickled)
+        assert "RuntimeError" in getattr(unpickled, "__infra__extra")["context"]["exc"]
+
+    def test_prepare_handles_exception_in_list(self, handler, log_record):
+        """Test prepare handles exception in list."""
+        import pickle
+
+        exc1 = KeyError("key1")
+        exc2 = KeyError("key2")
+        setattr(log_record, "__infra__extra", {"errors": [exc1, exc2]})
+
+        prepared = handler._prepare(log_record)
+        extra = getattr(prepared, "__infra__extra")
+
+        assert len(extra["errors"]) == 2
+        assert all(isinstance(e, str) for e in extra["errors"])
+        assert "key1" in extra["errors"][0]
+        assert "key2" in extra["errors"][1]
+
+        # Should be picklable
+        pickled = pickle.dumps(prepared)
+        pickle.loads(pickled)
+
+    def test_prepare_handles_exception_in_tuple_and_set(self, handler, log_record):
+        """Test prepare handles exceptions in tuple and set."""
+        import pickle
+
+        exc_tuple = ValueError("tuple error")
+        exc_set = RuntimeError("set error")
+        setattr(
+            log_record,
+            "__infra__extra",
+            {"tuple_errors": (exc_tuple,), "set_errors": {exc_set}},
+        )
+
+        prepared = handler._prepare(log_record)
+        extra = getattr(prepared, "__infra__extra")
+
+        assert isinstance(extra["tuple_errors"], tuple)
+        assert isinstance(extra["tuple_errors"][0], str)
+        assert "ValueError" in extra["tuple_errors"][0]
+
+        assert isinstance(extra["set_errors"], set)
+        assert all(isinstance(e, str) for e in extra["set_errors"])
+
+        # Should be picklable
+        pickled = pickle.dumps(prepared)
+        pickle.loads(pickled)
+
+    def test_prepare_handles_cyclic_reference(self, handler, log_record):
+        """Test prepare handles cyclic references without infinite recursion."""
+        import pickle
+
+        # Create a cyclic structure
+        cyclic_dict: dict = {"key": "value"}
+        cyclic_dict["self"] = cyclic_dict
+
+        setattr(log_record, "__infra__extra", cyclic_dict)
+
+        # Should not hang or raise RecursionError
+        prepared = handler._prepare(log_record)
+        extra = getattr(prepared, "__infra__extra")
+
+        assert extra["key"] == "value"
+        assert extra["self"] == "<cyclic reference>"
+
+        # Should be picklable
+        pickled = pickle.dumps(prepared)
+        pickle.loads(pickled)
+
 
 @pytest.mark.unit
 class TestMPQueueHandlerFormatException:

@@ -15,7 +15,7 @@ from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
-from appinfra.net.exceptions import (
+from appinfra.net.errors import (
     HandlerError,
     ServerShutdownError,
     ServerStartupError,

@@ -9,10 +9,10 @@ from unittest.mock import Mock
 import pytest
 
 from appinfra.app.errors import (
-    ApplicationError,
+    AppError,
     AttrNotFoundError,
     CommandError,
-    ConfigurationError,
+    ConfigError,
     DupToolError,
     InfraAppError,
     LifecycleError,
@@ -191,17 +191,17 @@ class TestToolRegistrationError:
 
 
 # =============================================================================
-# Test ConfigurationError
+# Test ConfigError
 # =============================================================================
 
 
 @pytest.mark.unit
-class TestConfigurationError:
-    """Test ConfigurationError class."""
+class TestConfigError:
+    """Test ConfigError class."""
 
     def test_with_message(self):
-        """Test ConfigurationError (line 81)."""
-        error = ConfigurationError("invalid setting")
+        """Test ConfigError (line 81)."""
+        error = ConfigError("invalid setting")
 
         assert "Configuration error" in str(error)
         assert "invalid setting" in str(error)
@@ -225,17 +225,17 @@ class TestLifecycleError:
 
 
 # =============================================================================
-# Test ApplicationError
+# Test AppError
 # =============================================================================
 
 
 @pytest.mark.unit
-class TestApplicationError:
-    """Test ApplicationError class."""
+class TestAppError:
+    """Test AppError class."""
 
     def test_with_message(self):
-        """Test ApplicationError (line 95)."""
-        error = ApplicationError("app crashed")
+        """Test AppError (line 95)."""
+        error = AppError("app crashed")
 
         assert "Application error" in str(error)
         assert "app crashed" in str(error)

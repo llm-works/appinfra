@@ -10,6 +10,80 @@ For API stability guarantees and deprecation policy, see
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-03-14
+
+### Fixed
+- `make check` now shows failing test names and error details when tests fail
+  (previously only showed pass/fail count with no details)
+- `RateLimiter` is now thread-safe: concurrent calls from multiple threads no longer
+  cause race conditions that could result in exceeding the rate limit
+- `RateLimiter` no longer allows burst at startup: first request now waits like
+  subsequent requests, preventing thundering herd when multiple threads start
+  simultaneously
+
+### Changed
+- **BREAKING:** Renamed error classes for consistency (shorter names):
+  - `ApplicationError` → `AppError` (appinfra.app.errors)
+  - `ConfigurationError` → `ConfigError` (appinfra.app.errors)
+  - `LogConfigurationError` → `LogConfigError` (appinfra.log.errors)
+  - `InvalidConfigurationError` → `InvalidConfigError` (appinfra.time.sched)
+- **BREAKING:** Renamed exception modules from `exceptions.py` to `errors.py` for consistency:
+  - `appinfra.exceptions` → `appinfra.errors`
+  - `appinfra.log.exceptions` → `appinfra.log.errors`
+  - `appinfra.net.exceptions` → `appinfra.net.errors`
+  - Update imports: `from appinfra.exceptions import ...` → `from appinfra.errors import ...`
+- **BREAKING:** FastAPI `ServerBuilder` and `Server` now require `lg: Logger` as first parameter:
+  - Before: `ServerBuilder("name")` / `Server(name="name", ...)`
+  - After: `ServerBuilder(lg, "name")` / `Server(lg, name="name", ...)`
+  - Enables queue-based subprocess logging that inherits main process log level
+  - Exception handlers using `self._lg` now log at correct level in subprocess mode
+- **BREAKING:** FastAPI lifecycle callback failures now raise `CallbackError` instead of being swallowed:
+  - Startup, shutdown, and exception callbacks that fail now propagate errors
+  - Errors are logged first if logger is available, then `CallbackError` is raised
+- **BREAKING:** Using both `with_lifespan()` and `with_on_startup()`/`with_on_shutdown()` now raises
+  `ConfigError` instead of logging a warning and ignoring callbacks
+
+### Added
+- `ScopedPG` for per-operation schema selection without engine-level binding:
+  - `pg.scoped("schema_name")` returns a `ScopedPG` instance
+  - Sessions have `search_path` set at session level, not via engine event listeners
+  - Single PG instance can serve multiple schemas (no instance caching needed)
+  - `scoped.session()` is a context manager with automatic commit/rollback/close
+  - `scoped.ensure_schema()` creates schema if it doesn't exist
+- FastAPI: `ExceptionHandler` base class for subprocess mode with Logger support:
+  - Handles Logger pickle/unpickle automatically; subclass and implement `handle()`
+  - Build-time validation catches unpicklable handlers with clear error messages
+- FastAPI: Queue-based subprocess logging forwards logs to main process:
+  - Subprocess Logger inherits level from main process (e.g., debug, info, warning)
+  - Uses `Logger.queue_config()` and `Logger.from_queue_config()` pattern
+- FastAPI: Logger injection in subprocess mode:
+  - Route handlers: access via `request.state.lg` (set per-request by middleware)
+  - Middleware: access via `request.app.state.lg` (set at startup, available immediately)
+  - Due to middleware ordering, custom middleware runs before logger injection middleware
+- FastAPI: New error classes `CallbackError` and `ConfigError` for cleaner error handling
+- `!deep` YAML tag for recursive deep merging with YAML merge keys (`<<`):
+  - Standard merge keys do shallow merge (nested dicts replaced entirely)
+  - `!deep` enables deep merge where nested dicts are recursively merged
+  - Supported syntaxes:
+    - `<<: !deep *anchor` - deep merge single anchor
+    - `<<: !deep [*a, *b]` - deep merge all items in list
+    - `<<: [*a, !deep *b]` - mixed shallow/deep per item
+    - Multiple `<<:` keys with independent shallow/deep control
+  - Example: template `{nested: {a: 1}}` + override `{nested: {b: 2}}` = `{nested: {a: 1, b: 2}}`
+- `!include` now always deep merges when used with merge keys (`<<: !include "file.yaml"`)
+- `!reset` YAML tag to bypass deep merge for specific keys:
+  - Use when you want to completely replace a value instead of deep merging
+  - Example: `options: !reset` followed by indented content replaces entire `options`
+
+### Fixed
+- Added `setuptools` to dev dependencies (required by `sphinx.setup_command`)
+- Test for `!path` YAML tag now uses non-existent paths to avoid symlink resolution issues
+- `PG` testing fixtures now handle `create_db` race conditions with pytest-xdist:
+  - Uses PostgreSQL advisory locks to coordinate database creation across workers
+  - Prevents "database already exists" errors when multiple workers start simultaneously
+- `MPQueueHandler` now recursively sanitizes exceptions in `__infra__extra` for pickling.
+  Previously only handled the `exception` key; now handles any key and nested structures.
+
 ## [0.4.1] - 2026-02-25
 
 ### Added
@@ -414,18 +488,19 @@ as config. Affected: `ConfigValidator`, `PG.readonly`, `PG.migrate()`,
 ### Changed
 - Package renamed to `appinfra` (install and import both use `appinfra`)
 
-[Unreleased]: https://github.com/serendip-ml/appinfra/compare/v0.4.1...HEAD
-[0.4.1]: https://github.com/serendip-ml/appinfra/compare/v0.4.0...v0.4.1
-[0.4.0]: https://github.com/serendip-ml/appinfra/compare/v0.3.5...v0.4.0
-[0.3.5]: https://github.com/serendip-ml/appinfra/compare/v0.3.4...v0.3.5
-[0.3.4]: https://github.com/serendip-ml/appinfra/compare/v0.3.3...v0.3.4
-[0.3.3]: https://github.com/serendip-ml/appinfra/compare/v0.3.2...v0.3.3
-[0.3.2]: https://github.com/serendip-ml/appinfra/compare/v0.3.1...v0.3.2
-[0.3.1]: https://github.com/serendip-ml/appinfra/compare/v0.3.0...v0.3.1
-[0.3.0]: https://github.com/serendip-ml/appinfra/compare/v0.2.1...v0.3.0
-[0.2.1]: https://github.com/serendip-ml/appinfra/compare/v0.2.0...v0.2.1
-[0.2.0]: https://github.com/serendip-ml/appinfra/compare/v0.1.3...v0.2.0
-[0.1.3]: https://github.com/serendip-ml/appinfra/compare/v0.1.2...v0.1.3
-[0.1.2]: https://github.com/serendip-ml/appinfra/compare/v0.1.1...v0.1.2
-[0.1.1]: https://github.com/serendip-ml/appinfra/compare/v0.1.0...v0.1.1
-[0.1.0]: https://github.com/serendip-ml/appinfra/releases/tag/v0.1.0
+[Unreleased]: https://github.com/llm-works/appinfra/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/llm-works/appinfra/compare/v0.4.1...v0.5.0
+[0.4.1]: https://github.com/llm-works/appinfra/compare/v0.4.0...v0.4.1
+[0.4.0]: https://github.com/llm-works/appinfra/compare/v0.3.5...v0.4.0
+[0.3.5]: https://github.com/llm-works/appinfra/compare/v0.3.4...v0.3.5
+[0.3.4]: https://github.com/llm-works/appinfra/compare/v0.3.3...v0.3.4
+[0.3.3]: https://github.com/llm-works/appinfra/compare/v0.3.2...v0.3.3
+[0.3.2]: https://github.com/llm-works/appinfra/compare/v0.3.1...v0.3.2
+[0.3.1]: https://github.com/llm-works/appinfra/compare/v0.3.0...v0.3.1
+[0.3.0]: https://github.com/llm-works/appinfra/compare/v0.2.1...v0.3.0
+[0.2.1]: https://github.com/llm-works/appinfra/compare/v0.2.0...v0.2.1
+[0.2.0]: https://github.com/llm-works/appinfra/compare/v0.1.3...v0.2.0
+[0.1.3]: https://github.com/llm-works/appinfra/compare/v0.1.2...v0.1.3
+[0.1.2]: https://github.com/llm-works/appinfra/compare/v0.1.1...v0.1.2
+[0.1.1]: https://github.com/llm-works/appinfra/compare/v0.1.0...v0.1.1
+[0.1.0]: https://github.com/llm-works/appinfra/releases/tag/v0.1.0

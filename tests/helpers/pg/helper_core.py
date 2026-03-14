@@ -255,7 +255,7 @@ class PGTestHelperCore:
             return [row[0] for row in result.fetchall()]
 
         except Exception as e:
-            self.lg.warning("Could not list debug tables", extra={"error": str(e)})
+            self.lg.warning("could not list debug tables", extra={"error": str(e)})
             return []
         finally:
             session.close()

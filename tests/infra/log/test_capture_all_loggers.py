@@ -102,7 +102,7 @@ class TestCaptureAllLoggers:
 
     def test_simulated_third_party_logger(self):
         """Test that simulated third-party loggers are captured."""
-        # Simulate a third-party library logger (like torch, httpx)
+        # Simulate a third-party library logger (like requests, sqlalchemy)
         third_party = logging.getLogger("third_party.module.submodule")
         third_party.addHandler(logging.NullHandler())
         third_party.propagate = False

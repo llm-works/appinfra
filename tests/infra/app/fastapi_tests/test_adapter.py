@@ -573,9 +573,8 @@ class TestFastAPIAdapterLifecycleCallbacks:
         call_kwargs = mock_fastapi["FastAPI"].call_args.kwargs
         assert call_kwargs["lifespan"] is my_lifespan
 
-    def test_build_with_lifespan_and_callbacks_warns(self, mock_fastapi, caplog):
-        """Test build warns when both lifespan and startup/shutdown callbacks are set."""
-        import logging
+    def test_build_with_lifespan_and_callbacks_raises(self, mock_fastapi):
+        """Test build raises when both lifespan and startup/shutdown callbacks are set."""
         from contextlib import asynccontextmanager
 
         adapter = FastAPIAdapter(ApiConfig())
@@ -590,10 +589,10 @@ class TestFastAPIAdapterLifecycleCallbacks:
         adapter.set_lifespan(LifespanDefinition(lifespan=my_lifespan))
         adapter.add_startup_callback(LifecycleCallbackDefinition(callback=startup))
 
-        with caplog.at_level(logging.WARNING):
-            adapter.build()
+        from appinfra.app.fastapi.errors import ConfigError
 
-        assert "startup/shutdown callbacks will be ignored" in caplog.text
+        with pytest.raises(ConfigError, match="Cannot use both lifespan"):
+            adapter.build()
 
     def test_build_with_request_response_callbacks_adds_middleware(self, mock_fastapi):
         """Test build adds middleware for request/response callbacks."""
@@ -803,16 +802,21 @@ class TestLifecycleCallbackExecution:
                 LifecycleCallbackDefinition(callback=failing_startup, name="init_db")
             )
 
+            from appinfra.app.fastapi.errors import CallbackError
+
             lifespan = adapter._create_lifespan_from_callbacks()
 
             mock_app = MagicMock()
-            with pytest.raises(RuntimeError, match="Startup callback 'init_db' failed"):
+            with pytest.raises(
+                CallbackError, match="Startup callback 'init_db' failed"
+            ):
                 async with lifespan(mock_app):
                     pass
 
     @pytest.mark.asyncio
-    async def test_shutdown_callbacks_continue_on_failure(self):
-        """Test that shutdown callbacks continue even if one fails."""
+    async def test_shutdown_callback_failure_raises(self):
+        """Test that shutdown callback failure raises CallbackError."""
+        from appinfra.app.fastapi.errors import CallbackError
         from appinfra.app.fastapi.runtime.adapter import (
             FastAPIAdapter,
             LifecycleCallbackDefinition,
@@ -843,11 +847,14 @@ class TestLifecycleCallbackExecution:
             lifespan = adapter._create_lifespan_from_callbacks()
 
             mock_app = MagicMock()
-            async with lifespan(mock_app):
-                pass
+            with pytest.raises(
+                CallbackError, match="Shutdown callback 'cleanup' failed"
+            ):
+                async with lifespan(mock_app):
+                    pass
 
-            # Both callbacks should have run despite the first one failing
-            assert called == ["failing", "second"]
+            # Only the first callback ran before failure
+            assert called == ["failing"]
 
     @pytest.mark.asyncio
     async def test_request_callback_failure_wraps_exception(self):
@@ -913,8 +920,9 @@ class TestLifecycleCallbackExecution:
             await middleware.dispatch(mock_request, mock_call_next)
 
     @pytest.mark.asyncio
-    async def test_exception_callback_failure_does_not_swallow_original(self):
-        """Test that failing exception callback doesn't swallow original exception."""
+    async def test_exception_callback_failure_raises_callback_error(self):
+        """Test that failing exception callback raises CallbackError."""
+        from appinfra.app.fastapi.errors import CallbackError
         from appinfra.app.fastapi.runtime.adapter import (
             ExceptionCallbackDefinition,
             _create_callback_middleware,
@@ -945,16 +953,19 @@ class TestLifecycleCallbackExecution:
         mock_app = MagicMock()
         middleware = middleware_cls(mock_app)
         mock_request = MagicMock()
+        mock_request.state = MagicMock(spec=[])  # No lg attribute
 
         async def mock_call_next(req):
             raise ValueError("original request error")
 
-        # Should raise the ORIGINAL exception, not the callback's exception
-        with pytest.raises(ValueError, match="original request error"):
+        # Should raise CallbackError when callback fails
+        with pytest.raises(
+            CallbackError, match="Exception callback 'error_logger' failed"
+        ):
             await middleware.dispatch(mock_request, mock_call_next)
 
-        # Both exception callbacks should have been called despite first one failing
-        assert called == ["failing_cb", "second_cb"]
+        # Only the first callback ran before failure
+        assert called == ["failing_cb"]
 
     @pytest.mark.asyncio
     async def test_response_callback_returning_none_raises_error(self):
@@ -988,6 +999,104 @@ class TestLifecycleCallbackExecution:
             RuntimeError, match="Response callback 'bad_cb' returned None"
         ):
             await middleware.dispatch(mock_request, mock_call_next)
+
+
+@pytest.mark.unit
+class TestSubprocessLoggerInjection:
+    """Tests for subprocess logger injection."""
+
+    @pytest.fixture
+    def mock_fastapi(self):
+        """Mock FastAPI and dependencies."""
+        with (
+            patch("appinfra.app.fastapi.runtime.adapter.FASTAPI_AVAILABLE", True),
+            patch("appinfra.app.fastapi.runtime.adapter.FastAPI") as mock_fastapi_cls,
+            patch("appinfra.app.fastapi.runtime.adapter.CORSMiddleware") as mock_cors,
+        ):
+            mock_app = MagicMock()
+            mock_app.state = MagicMock()
+            mock_fastapi_cls.return_value = mock_app
+            yield {
+                "FastAPI": mock_fastapi_cls,
+                "app": mock_app,
+                "CORSMiddleware": mock_cors,
+            }
+
+    def test_inject_subprocess_logger_sets_app_state_lg(self, mock_fastapi):
+        """Test that inject_subprocess_logger enables app.state.lg access."""
+        adapter = FastAPIAdapter(ApiConfig())
+        mock_logger = MagicMock()
+
+        adapter.inject_subprocess_logger(mock_logger)
+        app = adapter.build()
+
+        # app.state.lg should be set for middleware access
+        assert mock_fastapi["app"].state.lg is mock_logger
+
+    def test_no_logger_middleware_without_inject_subprocess_logger(self, mock_fastapi):
+        """Test that logger middleware is not added without inject_subprocess_logger."""
+        adapter = FastAPIAdapter(ApiConfig())
+
+        adapter.build()
+
+        # Without inject_subprocess_logger, app.middleware should not be called for logger
+        # (it may be called for other middleware like callbacks)
+        middleware_decorator = mock_fastapi["app"].middleware
+        # If no callbacks, middleware decorator should not have been called
+        assert middleware_decorator.call_count == 0
+
+
+@pytest.mark.integration
+class TestSubprocessLoggerMiddlewareOrdering:
+    """Integration test for middleware ordering with subprocess logger."""
+
+    def test_app_state_lg_available_in_custom_middleware(self):
+        """Test that app.state.lg is available in custom middleware before request.state.lg."""
+        from fastapi import Request
+        from starlette.middleware.base import BaseHTTPMiddleware
+        from starlette.testclient import TestClient
+
+        # Track what the middleware observes
+        middleware_observations: dict = {}
+
+        class ObserverMiddleware(BaseHTTPMiddleware):
+            async def dispatch(self, request: Request, call_next):
+                middleware_observations["app_state_lg"] = getattr(
+                    request.app.state, "lg", None
+                )
+                middleware_observations["request_state_lg"] = getattr(
+                    request.state, "lg", None
+                )
+                return await call_next(request)
+
+        # Build app with real FastAPI (not mocked)
+        with patch("appinfra.app.fastapi.runtime.adapter.FASTAPI_AVAILABLE", True):
+            adapter = FastAPIAdapter(ApiConfig())
+            mock_logger = MagicMock()
+            mock_logger.name = "test_logger"
+
+            # Inject logger and add custom middleware
+            adapter.inject_subprocess_logger(mock_logger)
+            adapter.add_middleware(
+                MiddlewareDefinition(middleware_class=ObserverMiddleware)
+            )
+
+            app = adapter.build()
+
+            # Add a simple route for testing
+            @app.get("/test")
+            async def test_route():
+                return {"status": "ok"}
+
+            # Make a request using context manager for proper lifespan handling
+            with TestClient(app) as client:
+                response = client.get("/test")
+
+                assert response.status_code == 200
+
+                # Verify middleware ordering: app.state.lg available, request.state.lg not yet set
+                assert middleware_observations["app_state_lg"] is mock_logger
+                assert middleware_observations["request_state_lg"] is None
 
 
 @pytest.mark.unit

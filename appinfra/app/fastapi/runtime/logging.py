@@ -19,7 +19,7 @@ def setup_subprocess_logging(
 
     Critical implementation notes:
     - Replaces (not appends to) root logger handlers
-    - Redirects stdout/stderr for libraries that print directly (e.g., PyTorch)
+    - Redirects stdout/stderr for libraries that print directly (e.g., C extensions)
     - File is opened in append mode to preserve logs across restarts
 
     Args:
@@ -50,7 +50,7 @@ def setup_subprocess_logging(
         logging.root.setLevel(getattr(logging, log_level.upper(), logging.INFO))
 
         # Redirect stdout/stderr for libraries that print directly
-        # (e.g., PyTorch, TensorFlow, some C extensions)
+        # (e.g., native code, C extensions that bypass Python logging)
         if redirect_stdio:
             log_stream = open(log_file, "a")  # noqa: SIM115
             sys.stdout = log_stream  # type: ignore[assignment]

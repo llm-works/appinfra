@@ -56,7 +56,7 @@ from typing import Any
 
 from ..log import Logger
 from ..time import Ticker, TickerHandler
-from .exceptions import (
+from .errors import (
     ServerShutdownError,
     ServerStartupError,
 )

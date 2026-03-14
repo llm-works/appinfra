@@ -18,7 +18,7 @@ import pytest
 
 from appinfra.log.builder.builder import LoggingBuilder, create_logger
 from appinfra.log.builder.interface import HandlerConfig
-from appinfra.log.exceptions import LogConfigurationError
+from appinfra.log.errors import LogConfigError
 from appinfra.log.logger import Logger
 
 # =============================================================================
@@ -207,7 +207,7 @@ class TestExceptionHandling:
     """Test exception handling in builder."""
 
     def test_add_handlers_raises_on_handler_creation_failure(self):
-        """Test _add_handlers raises LogConfigurationError on failure (lines 328-329)."""
+        """Test _add_handlers raises LogConfigError on failure (lines 328-329)."""
         builder = LoggingBuilder("test")
 
         # Create a mock handler config that raises an exception
@@ -218,7 +218,7 @@ class TestExceptionHandling:
 
         builder._handlers.append(mock_handler_config)
 
-        with pytest.raises(LogConfigurationError, match="Failed to create handler"):
+        with pytest.raises(LogConfigError, match="Failed to create handler"):
             builder.build()
 
     def test_add_handlers_wraps_original_exception(self):
@@ -232,7 +232,7 @@ class TestExceptionHandling:
 
         builder._handlers.append(mock_handler_config)
 
-        with pytest.raises(LogConfigurationError, match="Invalid configuration"):
+        with pytest.raises(LogConfigError, match="Invalid configuration"):
             builder.build()
 
     def test_add_handlers_various_exception_types(self):
@@ -245,7 +245,7 @@ class TestExceptionHandling:
 
             builder._handlers.append(mock_handler_config)
 
-            with pytest.raises(LogConfigurationError):
+            with pytest.raises(LogConfigError):
                 builder.build()
 
 

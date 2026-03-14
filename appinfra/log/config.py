@@ -45,7 +45,7 @@ class LogConfig:
     def _resolve_level(level: str | int | bool) -> int | bool:
         """Resolve level parameter to int or False."""
         from .constants import LogConstants
-        from .exceptions import InvalidLogLevelError
+        from .errors import InvalidLogLevelError
 
         if isinstance(level, bool):
             return False if not level else logging.INFO

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 import multiprocessing as mp
 from typing import TYPE_CHECKING, Any
 
@@ -12,10 +11,9 @@ from .logging import setup_subprocess_logging
 from .subprocess import SubprocessManager
 
 if TYPE_CHECKING:
+    from ....log import Logger
+    from ....log.mp import LogQueueListener
     from .adapter import FastAPIAdapter
-
-# Module-level logger for main process Server class methods
-logger = logging.getLogger("fastapi.server")
 
 # Guard imports for optional dependency
 try:
@@ -43,23 +41,12 @@ def _build_uvicorn_log_config(config: ApiConfig) -> dict[str, Any]:
     }
 
 
-def _create_subprocess_logger(config: ApiConfig) -> Any:
-    """Create appinfra logger for subprocess hot-reload support."""
-    from ....log import LoggerFactory
-    from ....log.config import LogConfig
-
-    setup_subprocess_logging(
-        config.log_file, log_level=config.uvicorn.log_level.upper()
-    )
-    log_config = LogConfig.from_params(level=config.uvicorn.log_level, location=1)
-    return LoggerFactory.create_root(log_config)
-
-
 def _uvicorn_subprocess_entry(
     adapter: FastAPIAdapter,
     config: ApiConfig,
     request_q: mp.Queue[Any],
     response_q: mp.Queue[Any],
+    log_config: dict[str, Any],
 ) -> None:
     """
     Entry point for uvicorn subprocess.
@@ -69,10 +56,14 @@ def _uvicorn_subprocess_entry(
     """
     import uvicorn
 
+    from ....log import Logger
     from ....subprocess import SubprocessContext
     from .ipc import IPCChannel
 
-    lg = _create_subprocess_logger(config)
+    # Set up queue-based logging forwarding to parent process
+    setup_subprocess_logging(config.log_file, log_level=log_config.get("level", "info"))
+    lg = Logger.from_queue_config(log_config, name="fastapi.subprocess")
+    adapter.inject_subprocess_logger(lg)
 
     with SubprocessContext(
         lg=lg,
@@ -115,6 +106,7 @@ class Server:
 
     def __init__(
         self,
+        lg: Logger,
         name: str,
         config: ApiConfig,
         adapter: FastAPIAdapter,
@@ -125,6 +117,7 @@ class Server:
         Initialize server.
 
         Args:
+            lg: Logger for queue-based subprocess logging
             name: Server name (for logging)
             config: API configuration
             adapter: FastAPI adapter with route/middleware definitions
@@ -144,8 +137,14 @@ class Server:
         self._adapter = adapter
         self._request_q = request_q
         self._response_q = response_q
+        self._lg = lg
         self._subprocess_manager: SubprocessManager | None = None
         self._app: FastAPI | None = None
+
+        # Queue-based logging for subprocess (only if logger provided)
+        self._log_queue: mp.Queue[Any] | None = None
+        self._log_config: dict[str, Any] | None = None
+        self._log_listener: LogQueueListener | None = None
 
     @property
     def name(self) -> str:
@@ -214,17 +213,59 @@ class Server:
         if self._subprocess_manager and self._subprocess_manager.is_alive():
             raise RuntimeError("Server subprocess is already running")
 
+    def _setup_subprocess_logging(self) -> None:
+        """Set up queue-based logging for subprocess.
+
+        Idempotent: tears down existing logging before setting up new.
+        """
+        from ....log.mp import LogQueueListener
+
+        # Tear down any existing logging first (idempotent)
+        if self._log_listener is not None or self._log_queue is not None:
+            self._teardown_subprocess_logging()
+
+        self._log_queue = mp.Queue()
+        self._log_config = self._lg.queue_config(self._log_queue)
+        self._log_listener = LogQueueListener(self._log_queue, self._lg)
+        self._log_listener.start()
+
+    def _teardown_subprocess_logging(self) -> None:
+        """Tear down queue-based logging.
+
+        Idempotent: safe to call multiple times. Properly closes queue resources.
+        """
+        if self._log_listener is not None:
+            self._log_listener.stop()
+            self._log_listener = None
+        if self._log_queue is not None:
+            self._log_queue.close()
+            self._log_queue.join_thread()
+            self._log_queue = None
+        self._log_config = None
+
     def _create_subprocess_manager(self) -> SubprocessManager:
         """Create subprocess manager with current configuration."""
         assert self._request_q is not None
         assert self._response_q is not None
+
+        if self._log_config is None:
+            raise RuntimeError(
+                "Subprocess log configuration not initialized. "
+                "Call _setup_subprocess_logging() before creating subprocess manager."
+            )
 
         if self._config.ipc is None:
             self._config.ipc = IPCConfig()
 
         return SubprocessManager(
             target=_uvicorn_subprocess_entry,
-            args=(self._adapter, self._config, self._request_q, self._response_q),
+            args=(
+                self._adapter,
+                self._config,
+                self._request_q,
+                self._response_q,
+                self._log_config,
+            ),
             shutdown_timeout=5.0,
             auto_restart=self._config.auto_restart,
             restart_delay=self._config.restart_delay,
@@ -242,11 +283,21 @@ class Server:
             RuntimeError: If not in subprocess mode or already running
         """
         self._validate_subprocess_mode()
-        self._subprocess_manager = self._create_subprocess_manager()
-        proc = self._subprocess_manager.start()
-        logger.info(
-            f"Server '{self._name}' started in subprocess "
-            f"(pid={proc.pid}, host={self._config.host}, port={self._config.port})"
+        self._setup_subprocess_logging()
+        try:
+            self._subprocess_manager = self._create_subprocess_manager()
+            proc = self._subprocess_manager.start()
+        except Exception:
+            self._teardown_subprocess_logging()
+            raise
+        self._lg.info(
+            "server started in subprocess",
+            extra={
+                "server": self._name,
+                "pid": proc.pid,
+                "host": self._config.host,
+                "port": self._config.port,
+            },
         )
         return proc
 
@@ -260,10 +311,11 @@ class Server:
             timeout: Seconds to wait for graceful shutdown
         """
         if self._subprocess_manager:
-            logger.info(f"Stopping server '{self._name}'...")
+            self._lg.debug("stopping server...", extra={"server": self._name})
             self._subprocess_manager.stop()
             self._subprocess_manager = None
-            logger.info(f"Server '{self._name}' stopped")
+            self._teardown_subprocess_logging()
+            self._lg.info("server stopped", extra={"server": self._name})
 
     def _run_direct(self) -> None:
         """Run uvicorn directly in current process (blocking)."""
@@ -271,9 +323,13 @@ class Server:
 
         app = self._adapter.build()
 
-        logger.info(
-            f"Starting server '{self._name}' "
-            f"(host={self._config.host}, port={self._config.port})"
+        self._lg.info(
+            "Starting server",
+            extra={
+                "server": self._name,
+                "host": self._config.host,
+                "port": self._config.port,
+            },
         )
 
         uvicorn.run(

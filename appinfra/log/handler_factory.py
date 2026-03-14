@@ -24,7 +24,7 @@ from .builder.file import (
     TimedRotatingFileHandlerConfig as TimedRotatingFileHandlerConfigClass,
 )
 from .builder.interface import HandlerConfig
-from .exceptions import LogConfigurationError
+from .errors import LogConfigError
 
 # Helper functions for HandlerRegistry.add_handler_from_config()
 
@@ -32,7 +32,7 @@ from .exceptions import LogConfigurationError
 def _validate_handler_type(handler_config: dict[str, Any]) -> None:
     """Validate handler configuration has required 'type' field."""
     if "type" not in handler_config:
-        raise LogConfigurationError("Handler configuration must include 'type' field")
+        raise LogConfigError("Handler configuration must include 'type' field")
 
 
 def _is_handler_enabled(handler_config: dict[str, Any]) -> bool:
@@ -133,9 +133,7 @@ def _create_file_handler(
     """Create file handler with required filename parameter."""
     filename = config.get("file") or config.get("filename")
     if not filename:
-        raise LogConfigurationError(
-            "File handler requires 'file' or 'filename' parameter"
-        )
+        raise LogConfigError("File handler requires 'file' or 'filename' parameter")
 
     return handler_class(
         filename,
@@ -149,7 +147,7 @@ def _create_rotating_file_handler(
     """Create rotating file handler with required filename parameter."""
     filename = config.get("file") or config.get("filename")
     if not filename:
-        raise LogConfigurationError(
+        raise LogConfigError(
             f"{handler_class.__name__} requires 'file' or 'filename' parameter"
         )
 
@@ -167,9 +165,9 @@ def _create_database_handler(
     db_interface = config.get("db")
 
     if not table_name:
-        raise LogConfigurationError("Database handler requires 'table' parameter")
+        raise LogConfigError("Database handler requires 'table' parameter")
     if not db_interface:
-        raise LogConfigurationError("Database handler requires 'db' parameter")
+        raise LogConfigError("Database handler requires 'db' parameter")
 
     return handler_class(  # type: ignore[call-arg]
         table_name,
@@ -207,11 +205,11 @@ class HandlerFactory:
             The handler configuration class
 
         Raises:
-            LogConfigurationError: If the handler type is not supported
+            LogConfigError: If the handler type is not supported
         """
         if handler_type not in cls._TYPE_REGISTRY:
             available_types = ", ".join(cls._TYPE_REGISTRY.keys())
-            raise LogConfigurationError(
+            raise LogConfigError(
                 f"Unknown handler type: '{handler_type}'. "
                 f"Supported types: {available_types}"
             )
@@ -237,7 +235,7 @@ class HandlerFactory:
             A handler configuration instance
 
         Raises:
-            LogConfigurationError: If the handler type is not supported or config is invalid
+            LogConfigError: If the handler type is not supported or config is invalid
         """
         handler_class = cls.get_handler_class(handler_type)
 
@@ -251,7 +249,7 @@ class HandlerFactory:
             )
 
         except Exception as e:
-            raise LogConfigurationError(
+            raise LogConfigError(
                 f"Failed to create handler configuration for type '{handler_type}': {e}"
             )
 
@@ -377,7 +375,7 @@ class HandlerRegistry:
             global_level: The global logger level to consider when adjusting handler levels
 
         Raises:
-            LogConfigurationError: If configuration is invalid
+            LogConfigError: If configuration is invalid
         """
         _validate_handler_type(handler_config)
 
@@ -481,7 +479,7 @@ class HandlerRegistry:
                 Format: {"handler_name": {"type": "console", ...}, ...}
 
         Raises:
-            LogConfigurationError: If configuration is invalid
+            LogConfigError: If configuration is invalid
         """
         # Check if it's a dictionary-like object (including DotDict)
         if hasattr(handlers_config, "items") and hasattr(handlers_config, "keys"):
@@ -499,6 +497,6 @@ class HandlerRegistry:
                     handler_config_with_name, self.global_level
                 )
         else:
-            raise LogConfigurationError(
+            raise LogConfigError(
                 f"Handlers configuration must be a dictionary, got {type(handlers_config)}"
             )

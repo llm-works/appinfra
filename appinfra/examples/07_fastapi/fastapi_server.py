@@ -33,6 +33,7 @@ sys.path.append(project_root) if project_root not in sys.path else None
 from appinfra.app.builder.app import AppBuilder
 from appinfra.app.fastapi import ServerBuilder, ServerPlugin
 from appinfra.app.fastapi.runtime.server import Server
+from appinfra.log import Logger
 
 # -----------------------------------------------------------------------------
 # Route handlers
@@ -61,8 +62,9 @@ def create_simple_server(port: int = 8000) -> Server:
     Direct mode runs uvicorn in the current process (blocking).
     Suitable for simple deployments or development.
     """
+    lg = Logger("simple-api")
     return (
-        ServerBuilder("simple-api")
+        ServerBuilder(lg, "simple-api")
         .with_port(port)
         .with_title("Simple API")
         .with_description("Direct mode example")
@@ -113,8 +115,9 @@ def create_subprocess_server(
     - Queue-based request/response pattern
     - Subprocess log isolation
     """
+    lg = Logger("worker-api")
     return (
-        ServerBuilder("worker-api")
+        ServerBuilder(lg, "worker-api")
         .with_port(port)
         .with_title("Worker API")
         .subprocess.with_ipc(request_q, response_q)
@@ -176,8 +179,9 @@ def create_cli_app() -> Any:
 
     Usage: python fastapi_server.py --cli serve
     """
+    lg = Logger("cli-api")
     server = (
-        ServerBuilder("cli-api")
+        ServerBuilder(lg, "cli-api")
         .with_port(8002)
         .with_title("CLI API")
         .routes.with_route("/health", health_handler)

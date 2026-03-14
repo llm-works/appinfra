@@ -95,7 +95,7 @@ class InvalidTimeFormatError(SchedulerError):
     pass
 
 
-class InvalidConfigurationError(SchedulerError):
+class InvalidConfigError(SchedulerError):
     """Raised when invalid configuration is provided."""
 
     pass
@@ -123,7 +123,7 @@ TIME_PATTERNS = [
 def _validate_logger(lg: Any) -> None:
     """Validate logger parameter."""
     if lg is None:
-        raise InvalidConfigurationError("Logger cannot be None")
+        raise InvalidConfigError("Logger cannot be None")
 
 
 def _normalize_period(period: str | Period) -> Period:
@@ -140,11 +140,9 @@ def _validate_weekday(period: Period, weekday: int | None) -> int | None:
     """Validate weekday for weekly scheduling."""
     if period == Period.WEEKLY:
         if weekday is None:
-            raise InvalidConfigurationError(
-                "weekday must be specified for weekly scheduling"
-            )
+            raise InvalidConfigError("weekday must be specified for weekly scheduling")
         if not 0 <= weekday <= 6:
-            raise InvalidConfigurationError(
+            raise InvalidConfigError(
                 "weekday must be between 0 (Monday) and 6 (Sunday)"
             )
         return weekday
@@ -230,7 +228,7 @@ class Sched:
             sleep_interval: Seconds to sleep between checks in run() method
 
         Raises:
-            InvalidConfigurationError: If configuration is invalid
+            InvalidConfigError: If configuration is invalid
             InvalidTimeFormatError: If time format is invalid
             UnsupportedPeriodError: If period is not supported
         """

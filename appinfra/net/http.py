@@ -35,7 +35,7 @@ Example Usage:
 import http.server
 from typing import Any, Protocol, cast
 
-from .exceptions import HandlerError
+from .errors import HandlerError
 
 
 class ServerWithHandler(Protocol):

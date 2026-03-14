@@ -19,7 +19,7 @@ except ImportError as e:
         and e.name
         and e.name.startswith("sqlalchemy")
     ):
-        from ..exceptions import DependencyError
+        from ..errors import DependencyError
 
         raise DependencyError("sqlalchemy", "sql", "Database module") from e
     raise

@@ -13,7 +13,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from appinfra.log.exceptions import LogConfigurationError
+from appinfra.log.errors import LogConfigError
 from appinfra.log.handler_factory import (
     HandlerFactory,
     HandlerRegistry,
@@ -47,10 +47,10 @@ class TestValidateHandlerType:
         _validate_handler_type(config)
 
     def test_raises_when_type_missing(self):
-        """Test raises LogConfigurationError when type missing."""
+        """Test raises LogConfigError when type missing."""
         config = {"level": "info"}
 
-        with pytest.raises(LogConfigurationError) as exc_info:
+        with pytest.raises(LogConfigError) as exc_info:
             _validate_handler_type(config)
 
         assert "type" in str(exc_info.value)
@@ -286,7 +286,7 @@ class TestCreateFileHandler:
         handler_class = Mock()
         config = {"level": 10}
 
-        with pytest.raises(LogConfigurationError) as exc_info:
+        with pytest.raises(LogConfigError) as exc_info:
             _create_file_handler(handler_class, config)
 
         assert "filename" in str(exc_info.value)
@@ -310,7 +310,7 @@ class TestCreateRotatingFileHandler:
         handler_class = Mock(__name__="RotatingFileHandler")
         config = {"maxBytes": 1024}
 
-        with pytest.raises(LogConfigurationError) as exc_info:
+        with pytest.raises(LogConfigError) as exc_info:
             _create_rotating_file_handler(handler_class, config)
 
         assert "filename" in str(exc_info.value)
@@ -335,7 +335,7 @@ class TestCreateDatabaseHandler:
         handler_class = Mock()
         config = {"db": Mock()}
 
-        with pytest.raises(LogConfigurationError) as exc_info:
+        with pytest.raises(LogConfigError) as exc_info:
             _create_database_handler(handler_class, config)
 
         assert "table" in str(exc_info.value)
@@ -345,7 +345,7 @@ class TestCreateDatabaseHandler:
         handler_class = Mock()
         config = {"table": "logs"}
 
-        with pytest.raises(LogConfigurationError) as exc_info:
+        with pytest.raises(LogConfigError) as exc_info:
             _create_database_handler(handler_class, config)
 
         assert "db" in str(exc_info.value)
@@ -377,8 +377,8 @@ class TestHandlerFactoryGetHandlerClass:
         assert result is FileHandlerConfig
 
     def test_raises_for_unknown_type(self):
-        """Test raises LogConfigurationError for unknown type."""
-        with pytest.raises(LogConfigurationError) as exc_info:
+        """Test raises LogConfigError for unknown type."""
+        with pytest.raises(LogConfigError) as exc_info:
             HandlerFactory.get_handler_class("unknown")
 
         assert "Unknown handler type" in str(exc_info.value)
@@ -425,8 +425,8 @@ class TestHandlerFactoryCreateHandlerConfig:
         assert isinstance(result, ConsoleHandlerConfig)
 
     def test_raises_on_invalid_config(self):
-        """Test raises LogConfigurationError on invalid config."""
-        with pytest.raises(LogConfigurationError):
+        """Test raises LogConfigError on invalid config."""
+        with pytest.raises(LogConfigError):
             # File handler requires filename
             HandlerFactory.create_handler_config("file", {})
 
@@ -482,7 +482,7 @@ class TestHandlerRegistryAddHandler:
         registry = HandlerRegistry()
         config = {"level": "info"}
 
-        with pytest.raises(LogConfigurationError):
+        with pytest.raises(LogConfigError):
             registry.add_handler_from_config(config)
 
 
@@ -618,7 +618,7 @@ class TestHandlerRegistryLoadFromConfig:
         """Test raises for non-dictionary config."""
         registry = HandlerRegistry()
 
-        with pytest.raises(LogConfigurationError) as exc_info:
+        with pytest.raises(LogConfigError) as exc_info:
             registry.load_from_config(["invalid"])
 
         assert "dictionary" in str(exc_info.value)

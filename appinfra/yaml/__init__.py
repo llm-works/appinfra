@@ -26,14 +26,22 @@ from ._include import (
     _resolve_include_path_standalone,
     _validate_include_standalone,
 )
-from .loader import Loader
-from .types import ErrorContext, IncludeContext, SecretLiteralWarning
+from .loader import Loader, preprocess_deep_tags
+from .types import (
+    DeepMergeWrapper,
+    ErrorContext,
+    IncludeContext,
+    ResetValue,
+    SecretLiteralWarning,
+)
 
 # Public API exports
 __all__ = [
     "load",
     "Loader",
     "deep_merge",
+    "DeepMergeWrapper",
+    "ResetValue",
     "ErrorContext",
     "IncludeContext",
     "SecretLiteralWarning",
@@ -44,6 +52,9 @@ def deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]
     """
     Deep merge two dictionaries, with override taking precedence.
 
+    ResetValue wrappers in override bypass merging - the wrapped value
+    replaces the base value entirely.
+
     Args:
         base: Base dictionary to merge into
         override: Dictionary with values to override base
@@ -53,7 +64,12 @@ def deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]
     """
     result = base.copy()
     for key, value in override.items():
-        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+        # ResetValue bypasses merging - use wrapped value directly
+        if isinstance(value, ResetValue):
+            result[key] = value.value
+        elif (
+            key in result and isinstance(result[key], dict) and isinstance(value, dict)
+        ):
             result[key] = deep_merge(result[key], value)
         else:
             result[key] = value
@@ -308,6 +324,7 @@ def load(
     """
     include_chain = _init_include_chain(current_file, _include_chain)
     content = stream.read() if hasattr(stream, "read") else str(stream)
+    content = preprocess_deep_tags(content)
     remaining_content, doc_include_paths = _preprocess_document_includes(content)
 
     merged_data, merged_source_map = _merge_document_includes(

@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, Self
 
 from ..config import LogConfig
-from ..exceptions import LogConfigurationError
+from ..errors import LogConfigError
 from ..factory import LoggerFactory
 from ..logger import Logger
 from .interface import HandlerConfig, LoggingBuilderInterface
@@ -415,7 +415,7 @@ class LoggingBuilder(LoggingBuilderInterface):
             Configured logger instance
 
         Raises:
-            LogConfigurationError: If configuration is invalid
+            LogConfigError: If configuration is invalid
         """
         # Create base configuration
         config = LogConfig.from_params(
@@ -452,7 +452,7 @@ class LoggingBuilder(LoggingBuilderInterface):
                 handler = handler_config.create_handler(config, logger=logger)
                 logger.addHandler(handler)
             except Exception as e:
-                raise LogConfigurationError(f"Failed to create handler: {e}")
+                raise LogConfigError(f"Failed to create handler: {e}")
 
 
 def create_logger(name: str) -> LoggingBuilder:

@@ -10,6 +10,7 @@ This module contains:
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -60,3 +61,95 @@ class SecretLiteralWarning(UserWarning):
     """Warning emitted when a !secret tagged value appears to be a literal instead of env var."""
 
     pass
+
+
+class DeepMergeWrapper:
+    """
+    Wrapper to mark data for deep merging with YAML merge keys (<<).
+
+    When used with the !deep tag, signals that the wrapped data should be
+    deep-merged into the parent mapping instead of shallow-merged.
+
+    Example:
+        templates:
+          defaults: &defaults
+            timeout: 30
+            options:
+              retries: 3
+              backoff: 1.5
+
+        services:
+          api:
+            <<: !deep *defaults
+            options:
+              cache: true   # Deep merged with template's options
+
+    Result:
+        api:
+          timeout: 30
+          options:
+            retries: 3        # Preserved from template
+            backoff: 1.5      # Preserved from template
+            cache: true       # Added locally
+    """
+
+    __slots__ = ("data",)
+
+    def __init__(self, data: dict) -> None:
+        """
+        Initialize wrapper with data to deep merge.
+
+        Args:
+            data: Dictionary data to be deep merged. Must be a dict.
+
+        Raises:
+            TypeError: If data is not a dictionary.
+        """
+        if not isinstance(data, dict):
+            raise TypeError(
+                f"!deep tag requires a mapping (dict), got {type(data).__name__}. "
+                "Use !deep with anchors or includes that resolve to mappings."
+            )
+        self.data = data
+
+    def __repr__(self) -> str:
+        return f"DeepMergeWrapper({self.data!r})"
+
+
+class DeepMergeDict(dict):
+    """
+    Dict subclass that signals deep merge behavior in YAML merge keys.
+
+    Used by !include to mark included dicts for deep merging. Unlike
+    DeepMergeWrapper, this is a real dict so it works in all contexts
+    (not just merge keys).
+    """
+
+    pass
+
+
+class ResetValue:
+    """
+    Wrapper to mark a value for complete replacement (no merging).
+
+    When used with the !reset tag, signals that this value should completely
+    replace any inherited value, bypassing deep merge behavior.
+
+    Example:
+        # base.yaml has: options: {a: 1, b: 2}
+        config:
+          <<: !include "base.yaml"   # Deep merges by default
+          options: !reset {c: 3}     # Replaces entirely: options = {c: 3}
+
+    Without !reset, the result would be: options = {a: 1, b: 2, c: 3}
+    With !reset, the result is: options = {c: 3}
+    """
+
+    __slots__ = ("value",)
+
+    def __init__(self, value: Any) -> None:
+        """Initialize with value to use as complete replacement."""
+        self.value = value
+
+    def __repr__(self) -> str:
+        return f"ResetValue({self.value!r})"

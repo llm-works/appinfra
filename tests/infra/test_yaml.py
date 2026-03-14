@@ -1214,10 +1214,12 @@ data_dir: !path ~/data/files
     def test_path_tag_expands_tilde_with_subdirs(self):
         """Test that !path expands ~ in paths with multiple subdirectories."""
         yaml_content = """
-config: !path ~/ops/models/selected.yaml
+config: !path ~/._appinfra_test_nonexistent/subdir/config.yaml
 """
         data = load(StringIO(yaml_content))
-        expected = str(Path.home() / "ops" / "models" / "selected.yaml")
+        expected = str(
+            Path.home() / "._appinfra_test_nonexistent" / "subdir" / "config.yaml"
+        )
         assert data["config"] == expected
 
     def test_path_tag_absolute_path_unchanged(self):
@@ -2080,6 +2082,544 @@ level1:
         assert result["level1"]["service"]["level2"]["handler"]["retries"] == 3
         assert result["level1"]["service"]["level2"]["handler"]["endpoint"] == "/api"
         assert source_map is not None
+
+
+# =============================================================================
+# Deep Merge Tag Tests (!deep)
+# =============================================================================
+
+
+@pytest.mark.unit
+class TestDeepMergeTag:
+    """Test !deep tag for recursive deep merging with YAML merge keys (<<)."""
+
+    def test_deep_merge_basic(self):
+        """Test basic deep merge preserves nested keys from template."""
+        content = """
+templates:
+  defaults: &defaults
+    nested:
+      a: 1
+      b: 2
+
+config:
+  <<: !deep *defaults
+  nested:
+    c: 3
+"""
+        result = load(StringIO(content), track_sources=False)
+        # Deep merge should preserve a, b from template and add c
+        assert result["config"]["nested"] == {"a": 1, "b": 2, "c": 3}
+
+    def test_deep_merge_hyphenated_anchor(self):
+        """Test deep merge works with hyphenated anchor names (kebab-case)."""
+        content = """
+templates:
+  my-defaults: &my-defaults
+    nested:
+      a: 1
+      b: 2
+
+config:
+  <<: !deep *my-defaults
+  nested:
+    c: 3
+"""
+        result = load(StringIO(content), track_sources=False)
+        assert result["config"]["nested"] == {"a": 1, "b": 2, "c": 3}
+
+    def test_deep_merge_inline_mapping(self):
+        """Test !deep with inline mapping (no anchor reference)."""
+        content = """
+config:
+  <<: !deep {nested: {a: 1, b: 2}}
+  nested:
+    c: 3
+"""
+        result = load(StringIO(content), track_sources=False)
+        # Inline mapping should also deep merge
+        assert result["config"]["nested"] == {"a": 1, "b": 2, "c": 3}
+
+    def test_deep_merge_override(self):
+        """Test deep merge allows overriding specific nested values."""
+        content = """
+templates:
+  server_default: &server_default
+    timeout: 30
+    options:
+      debug: false
+      max_connections: 100
+
+servers:
+  api:
+    <<: !deep *server_default
+    options:
+      port: 8080
+      debug: true
+"""
+        result = load(StringIO(content), track_sources=False)
+        server = result["servers"]["api"]
+        assert server["timeout"] == 30
+        assert server["options"]["debug"] is True  # overridden
+        assert server["options"]["max_connections"] == 100  # preserved from template
+        assert server["options"]["port"] == 8080  # added
+
+    def test_deep_merge_deeply_nested(self):
+        """Test deep merge works with deeply nested structures."""
+        content = """
+base: &base
+  level1:
+    level2:
+      level3:
+        a: 1
+        b: 2
+
+config:
+  <<: !deep *base
+  level1:
+    level2:
+      level3:
+        c: 3
+      new_key: value
+"""
+        result = load(StringIO(content), track_sources=False)
+        assert result["config"]["level1"]["level2"]["level3"] == {
+            "a": 1,
+            "b": 2,
+            "c": 3,
+        }
+        assert result["config"]["level1"]["level2"]["new_key"] == "value"
+
+    def test_deep_merge_vs_shallow_merge(self):
+        """Test that !deep behaves differently from standard merge."""
+        # Standard merge (shallow)
+        shallow_content = """
+base: &base
+  nested:
+    a: 1
+    b: 2
+
+config:
+  <<: *base
+  nested:
+    c: 3
+"""
+        # Deep merge
+        deep_content = """
+base: &base
+  nested:
+    a: 1
+    b: 2
+
+config:
+  <<: !deep *base
+  nested:
+    c: 3
+"""
+        shallow_result = load(StringIO(shallow_content), track_sources=False)
+        deep_result = load(StringIO(deep_content), track_sources=False)
+
+        # Shallow: nested is completely replaced
+        assert shallow_result["config"]["nested"] == {"c": 3}
+
+        # Deep: nested is merged
+        assert deep_result["config"]["nested"] == {"a": 1, "b": 2, "c": 3}
+
+    def test_deep_merge_multiple_anchors(self):
+        """Test deep merge with multiple anchors in sequence."""
+        content = """
+base1: &base1
+  shared:
+    a: 1
+  only_in_base1: true
+
+base2: &base2
+  shared:
+    b: 2
+  only_in_base2: true
+
+config:
+  <<: !deep *base1
+  <<: !deep *base2
+  shared:
+    c: 3
+"""
+        result = load(StringIO(content), track_sources=False)
+        # Both bases should be deep merged, then local overrides
+        assert result["config"]["only_in_base1"] is True
+        assert result["config"]["only_in_base2"] is True
+        assert result["config"]["shared"] == {"a": 1, "b": 2, "c": 3}
+
+    def test_deep_merge_with_lists(self):
+        """Test that lists are replaced, not merged (list merge is ambiguous)."""
+        content = """
+base: &base
+  items:
+    - a
+    - b
+
+config:
+  <<: !deep *base
+  items:
+    - c
+"""
+        result = load(StringIO(content), track_sources=False)
+        # Lists should be replaced, not concatenated
+        assert result["config"]["items"] == ["c"]
+
+    def test_deep_merge_with_source_tracking(self):
+        """Test deep merge works with source tracking enabled."""
+        content = """
+base: &base
+  nested:
+    a: 1
+
+config:
+  <<: !deep *base
+  nested:
+    b: 2
+"""
+        result, source_map = load(StringIO(content), track_sources=True)
+        assert result["config"]["nested"] == {"a": 1, "b": 2}
+        assert source_map is not None
+
+    def test_include_always_deep_merges(self, tmp_path):
+        """Test !include always deep merges (no !deep needed)."""
+        # Create base config file
+        base_file = tmp_path / "base.yaml"
+        base_file.write_text("""
+nested:
+  a: 1
+  b: 2
+top_level: value
+""")
+
+        # !include now always deep merges - no !deep prefix needed
+        main_content = f"""
+config:
+  <<: !include "{base_file}"
+  nested:
+    c: 3
+"""
+        result = load(StringIO(main_content), current_file=tmp_path / "main.yaml")
+        assert result["config"]["top_level"] == "value"
+        # Deep merged - all nested keys present
+        assert result["config"]["nested"] == {"a": 1, "b": 2, "c": 3}
+
+    def test_deep_merge_non_dict_raises_error(self):
+        """Test that !deep on non-dict value raises clear error."""
+        content = """
+list_anchor: &list_anchor
+  - item1
+  - item2
+
+config:
+  <<: !deep *list_anchor
+"""
+        with pytest.raises(yaml.YAMLError) as exc_info:
+            load(StringIO(content), track_sources=False)
+        assert "requires a mapping" in str(exc_info.value)
+        assert "list" in str(exc_info.value)
+
+    def test_deep_merge_preserves_types(self):
+        """Test that deep merge preserves value types correctly."""
+        content = """
+base: &base
+  nested:
+    string_val: hello
+    int_val: 42
+    float_val: 3.14
+    bool_val: true
+    null_val: null
+
+config:
+  <<: !deep *base
+  nested:
+    new_val: added
+"""
+        result = load(StringIO(content), track_sources=False)
+        nested = result["config"]["nested"]
+        assert nested["string_val"] == "hello"
+        assert nested["int_val"] == 42
+        assert nested["float_val"] == 3.14
+        assert nested["bool_val"] is True
+        assert nested["null_val"] is None
+        assert nested["new_val"] == "added"
+
+    def test_deep_merge_empty_override(self):
+        """Test deep merge when local dict is empty (inherits all)."""
+        content = """
+base: &base
+  nested:
+    a: 1
+    b: 2
+
+config:
+  <<: !deep *base
+"""
+        result = load(StringIO(content), track_sources=False)
+        assert result["config"]["nested"] == {"a": 1, "b": 2}
+
+    def test_deep_merge_list_syntax(self):
+        """Test <<: !deep [*a, *b] applies deep merge to all items."""
+        content = """
+a: &a
+  nested:
+    x: 1
+b: &b
+  nested:
+    y: 2
+
+config:
+  <<: !deep [*a, *b]
+  nested:
+    z: 3
+"""
+        result = load(StringIO(content), track_sources=False)
+        # All nested keys should be merged
+        assert result["config"]["nested"] == {"x": 1, "y": 2, "z": 3}
+
+    def test_deep_merge_mixed_list_syntax(self):
+        """Test <<: [*a, !deep *b] for mixed shallow/deep merge."""
+        content = """
+a: &a
+  top_level: from_a
+
+b: &b
+  nested:
+    x: 1
+
+config:
+  <<: [*a, !deep *b]
+  nested:
+    y: 2
+"""
+        result = load(StringIO(content), track_sources=False)
+        assert result["config"]["top_level"] == "from_a"
+        # Only *b is deep merged, so nested should have both x and y
+        assert result["config"]["nested"] == {"x": 1, "y": 2}
+
+    def test_deep_merge_multiple_merge_keys(self):
+        """Test multiple <<: keys with mixed shallow and deep merge."""
+        content = """
+behavior: &behavior
+  logging:
+    enabled: true
+
+settings: &settings
+  timeout: 30
+  database:
+    pool_size: 10
+
+service:
+  <<: *behavior
+  <<: !deep *settings
+  database:
+    host: localhost
+"""
+        result = load(StringIO(content), track_sources=False)
+        service = result["service"]
+        # behavior is shallow merged
+        assert service["logging"] == {"enabled": True}
+        # settings.timeout is inherited
+        assert service["timeout"] == 30
+        # database is deep merged
+        assert service["database"]["pool_size"] == 10
+        assert service["database"]["host"] == "localhost"
+
+    def test_deep_merge_in_included_file(self, tmp_path):
+        """Test !deep *anchor works inside an included file."""
+        # Create services.yaml with anchors and !deep usage
+        services_file = tmp_path / "services.yaml"
+        services_file.write_text("""
+templates:
+  small_server: &small_server
+    max_connections: 100
+    options:
+      debug: true
+
+services:
+  api:
+    <<: !deep *small_server
+    options:
+      port: 8080
+""")
+
+        # Create main config that includes services.yaml
+        main_content = f"""
+config: !include "{services_file}"
+"""
+        result = load(StringIO(main_content), current_file=tmp_path / "main.yaml")
+
+        service = result["config"]["services"]["api"]
+        # Inherited from anchor
+        assert service["max_connections"] == 100
+        # Deep merged - both keys present
+        assert service["options"]["debug"] is True
+        assert service["options"]["port"] == 8080
+
+
+# =============================================================================
+# Reset Tag Tests
+# =============================================================================
+
+
+@pytest.mark.unit
+class TestResetTag:
+    """Tests for !reset tag that bypasses deep merge."""
+
+    def test_reset_bypasses_deep_merge_with_include(self, tmp_path):
+        """Test !reset prevents deep merge when using !include."""
+        base_file = tmp_path / "base.yaml"
+        base_file.write_text("""
+options:
+  retries: 3
+  timeout: 30
+  debug: true
+""")
+
+        main_content = f"""
+config:
+  <<: !include "{base_file}"
+  options: !reset {{cache: true}}
+"""
+        result = load(StringIO(main_content), current_file=tmp_path / "main.yaml")
+        # !reset should completely replace options, not merge
+        assert result["config"]["options"] == {"cache": True}
+        assert "retries" not in result["config"]["options"]
+        assert "timeout" not in result["config"]["options"]
+
+    def test_reset_bypasses_deep_merge_with_anchor(self):
+        """Test !reset prevents deep merge when using !deep *anchor."""
+        content = """
+defaults: &defaults
+  options:
+    a: 1
+    b: 2
+
+config:
+  <<: !deep *defaults
+  options: !reset {c: 3}
+"""
+        result = load(StringIO(content), track_sources=False)
+        # !reset should completely replace options
+        assert result["config"]["options"] == {"c": 3}
+        assert "a" not in result["config"]["options"]
+
+    def test_reset_with_scalar_value(self):
+        """Test !reset works with scalar values."""
+        content = """
+defaults: &defaults
+  count: 10
+
+config:
+  <<: !deep *defaults
+  count: !reset 0
+"""
+        result = load(StringIO(content), track_sources=False)
+        assert result["config"]["count"] == 0
+
+    def test_reset_with_list_value(self):
+        """Test !reset works with list values."""
+        content = """
+defaults: &defaults
+  items:
+    - a
+    - b
+
+config:
+  <<: !deep *defaults
+  items: !reset [c]
+"""
+        result = load(StringIO(content), track_sources=False)
+        assert result["config"]["items"] == ["c"]
+
+    def test_without_reset_deep_merges(self):
+        """Test that without !reset, deep merge happens normally."""
+        content = """
+defaults: &defaults
+  options:
+    a: 1
+    b: 2
+
+config:
+  <<: !deep *defaults
+  options:
+    c: 3
+"""
+        result = load(StringIO(content), track_sources=False)
+        # Without !reset, options should be deep merged
+        assert result["config"]["options"] == {"a": 1, "b": 2, "c": 3}
+
+    def test_reset_in_nested_structure(self):
+        """Test !reset works in nested structures."""
+        content = """
+defaults: &defaults
+  level1:
+    level2:
+      a: 1
+      b: 2
+
+config:
+  <<: !deep *defaults
+  level1:
+    level2: !reset {c: 3}
+"""
+        result = load(StringIO(content), track_sources=False)
+        # level2 should be completely replaced
+        assert result["config"]["level1"]["level2"] == {"c": 3}
+
+
+# =============================================================================
+# DeepMergeWrapper Unit Tests
+# =============================================================================
+
+
+@pytest.mark.unit
+class TestDeepMergeWrapper:
+    """Unit tests for DeepMergeWrapper class."""
+
+    def test_wrapper_accepts_dict(self):
+        """Test wrapper accepts dict input."""
+        from appinfra.yaml import DeepMergeWrapper
+
+        data = {"key": "value"}
+        wrapper = DeepMergeWrapper(data)
+        assert wrapper.data == data
+
+    def test_wrapper_rejects_list(self):
+        """Test wrapper rejects list input."""
+        from appinfra.yaml import DeepMergeWrapper
+
+        with pytest.raises(TypeError) as exc_info:
+            DeepMergeWrapper(["a", "b"])
+        assert "requires a mapping" in str(exc_info.value)
+        assert "list" in str(exc_info.value)
+
+    def test_wrapper_rejects_string(self):
+        """Test wrapper rejects string input."""
+        from appinfra.yaml import DeepMergeWrapper
+
+        with pytest.raises(TypeError) as exc_info:
+            DeepMergeWrapper("string")
+        assert "requires a mapping" in str(exc_info.value)
+        assert "str" in str(exc_info.value)
+
+    def test_wrapper_rejects_none(self):
+        """Test wrapper rejects None input."""
+        from appinfra.yaml import DeepMergeWrapper
+
+        with pytest.raises(TypeError) as exc_info:
+            DeepMergeWrapper(None)
+        assert "requires a mapping" in str(exc_info.value)
+
+    def test_wrapper_repr(self):
+        """Test wrapper has useful repr."""
+        from appinfra.yaml import DeepMergeWrapper
+
+        wrapper = DeepMergeWrapper({"a": 1})
+        assert "DeepMergeWrapper" in repr(wrapper)
+        assert "a" in repr(wrapper)
 
 
 # =============================================================================

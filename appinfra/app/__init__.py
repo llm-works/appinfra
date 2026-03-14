@@ -120,8 +120,8 @@ __all__ = [
     "MissingParentError",
     "AttrNotFoundError",
     "ToolRegistrationError",
-    "ConfigurationError",
+    "ConfigError",
     "LifecycleError",
-    "ApplicationError",
+    "AppError",
     "CommandError",
 ]

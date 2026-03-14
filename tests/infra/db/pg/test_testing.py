@@ -8,7 +8,11 @@ from unittest.mock import Mock
 
 import pytest
 
-from appinfra.db.pg.testing import make_migrate_fixture
+from appinfra.db.pg.testing import (
+    _create_extensions_in_db,
+    _setup_database_with_lock,
+    make_migrate_fixture,
+)
 
 
 @pytest.mark.unit
@@ -40,3 +44,29 @@ class TestMakeMigrateFixture:
 
         # Should be different function objects
         assert fixture1 is not fixture2
+
+
+@pytest.mark.unit
+class TestSetupDatabaseWithLock:
+    """Test _setup_database_with_lock helper."""
+
+    def test_skips_when_create_db_false(self):
+        """Test that function returns early when create_db is False."""
+        config = {"url": "postgresql://localhost/test", "create_db": False}
+        # Should not raise - just returns early (no DB connection attempted)
+        _setup_database_with_lock(config)
+
+    def test_skips_when_create_db_not_present(self):
+        """Test that function returns early when create_db key is missing."""
+        config = {"url": "postgresql://localhost/test"}
+        _setup_database_with_lock(config)
+
+
+@pytest.mark.unit
+class TestCreateExtensionsInDb:
+    """Test _create_extensions_in_db helper."""
+
+    def test_skips_when_no_extensions(self):
+        """Test that function returns early with empty extensions."""
+        # Should not raise or try to connect
+        _create_extensions_in_db("postgresql://localhost/test", [])

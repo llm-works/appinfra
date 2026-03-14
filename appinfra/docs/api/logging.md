@@ -159,8 +159,8 @@ from appinfra.log import capture_all_loggers
 # Capture all loggers at INFO level
 capture_all_loggers(level="info")
 
-# Now logs from torch, httpx, vllm, etc. use appinfra format
-import torch  # Its logs will now use appinfra formatting
+# Now logs from requests, sqlalchemy, boto3, etc. use appinfra format
+import requests  # Its logs will now use appinfra formatting
 ```
 
 **Parameters:**
@@ -193,10 +193,10 @@ from appinfra.log import capture_all_loggers, capture_logger
 capture_all_loggers(level="info")
 
 # Pre-capture before import - logger will be ready when library uses it
-capture_logger("flashinfer", level="warning")
-capture_logger("vllm.engine")
+capture_logger("urllib3", level="warning")
+capture_logger("sqlalchemy.engine")
 
-import flashinfer  # Logger already configured with appinfra formatting
+import sqlalchemy  # Logger already configured with appinfra formatting
 ```
 
 ## Topic-Based Logging

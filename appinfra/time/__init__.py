@@ -2,7 +2,7 @@
 
 # Date range utilities
 # Ticker exceptions
-from appinfra.exceptions import (
+from appinfra.errors import (
     TickerAPIError,
     TickerConfigError,
     TickerError,
@@ -19,7 +19,7 @@ from .eta import ETA
 
 # Scheduler
 from .sched import (
-    InvalidConfigurationError,
+    InvalidConfigError,
     InvalidTimeFormatError,
     Period,
     Sched,
@@ -63,7 +63,7 @@ __all__ = [
     "SchedulerError",
     "UnsupportedPeriodError",
     "InvalidTimeFormatError",
-    "InvalidConfigurationError",
+    "InvalidConfigError",
     # Ticker
     "Ticker",
     "TickerHandler",

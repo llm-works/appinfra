@@ -22,7 +22,7 @@ class InvalidLogLevelError(LogError):
         super().__init__(f"Invalid log level: {level}")
 
 
-class LogConfigurationError(LogError):
+class LogConfigError(LogError):
     """Raised when there's an error in logger configuration."""
 
     pass

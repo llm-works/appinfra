@@ -70,7 +70,7 @@ from enum import Enum
 from types import FrameType
 from typing import Any, Self
 
-from appinfra.exceptions import TickerAPIError, TickerConfigError, TickerStateError
+from appinfra.errors import TickerAPIError, TickerConfigError, TickerStateError
 from appinfra.log import Logger
 
 
