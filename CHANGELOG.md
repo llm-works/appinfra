@@ -10,6 +10,31 @@ For API stability guarantees and deprecation policy, see
 
 ## [Unreleased]
 
+### Added
+- Service execution framework (`appinfra.service`) for managing service lifecycles:
+  - **Three-layer architecture**: Service (what to run), Runner (how to run), Manager (orchestration)
+  - **State machine**: Explicit states (CREATED, INITD, STARTING, RUNNING, IDLE, STOPPING, STOPPED,
+    FAILED, DONE) with validated transitions and state change hooks
+  - **ThreadRunner**: Runs `service.execute()` in a daemon thread
+  - **ProcessRunner**: Runs `service.execute()` in a subprocess using `multiprocessing.Process`
+    - Queue-based logging forwarded to parent process via `LogQueueListener`
+    - IPC for shutdown signaling and health status
+  - **ScheduledService**: Base class for services with periodic `tick()` execution
+  - **Manager**: Orchestrates multiple services with dependency ordering and parallel start/stop
+  - **RestartPolicy**: Configurable restart behavior with exponential backoff
+  - **Dependency graph**: Uses stdlib `graphlib.TopologicalSorter` for cycle detection and ordering
+  - **Bidirectional channels** for service communication:
+    - `ThreadChannel`: Queue-based channel for thread communication
+    - `ProcessChannel`: Multiprocessing queue-based channel for cross-process IPC
+    - `Message`: Generic message with id for request/response correlation
+    - `submit()`: Blocking request/response pattern with timeout
+    - `send()`/`recv()`: Fire-and-forget messaging
+  - **Factory classes** for centralized component creation:
+    - `ChannelFactory`: Creates channel pairs with consistent configuration
+    - `RunnerFactory`: Creates runners with optional channel wiring
+    - `ServiceFactory`: Registry-based service creation with dependency injection
+- `Service.lg` property for accessing the logger instance
+
 ## [0.5.0] - 2026-03-14
 
 ### Fixed

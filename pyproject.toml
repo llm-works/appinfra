@@ -64,6 +64,9 @@ sql = [
     "sqlalchemy-utils>=0.42.0,<1.0.0",
     "psycopg2-binary>=2.9.0,<3.0.0",
 ]
+service = [
+    "httpx>=0.24.0,<1.0.0",
+]
 all = [
     "appinfra[dev]",
     "appinfra[docs]",
@@ -72,6 +75,7 @@ all = [
     "appinfra[fastapi]",
     "appinfra[validation]",
     "appinfra[hotreload]",
+    "appinfra[service]",
 ]
 
 [project.scripts]
