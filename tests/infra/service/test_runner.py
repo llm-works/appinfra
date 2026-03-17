@@ -335,10 +335,10 @@ class TestProcessRunner:
     def test_start_transitions_states(self, lg):
         """start() transitions through INITD -> STARTING."""
         with (
-            patch("appinfra.service.runner.mp.Process") as mock_process,
-            patch("appinfra.service.runner.mp.Event"),
-            patch("appinfra.service.runner.mp.Queue"),
-            patch("appinfra.service.runner.LogQueueListener"),
+            patch("appinfra.service.runner.process.mp.Process") as mock_process,
+            patch("appinfra.service.runner.process.mp.Event"),
+            patch("appinfra.service.runner.process.mp.Queue"),
+            patch("appinfra.service.runner.process.LogQueueListener"),
         ):
             mock_process.return_value.is_alive.return_value = True
             mock_process.return_value.pid = 12345
@@ -388,10 +388,10 @@ class TestProcessRunner:
     def test_state_hooks_called(self, lg):
         """State hooks are called on transitions."""
         with (
-            patch("appinfra.service.runner.mp.Process"),
-            patch("appinfra.service.runner.mp.Event"),
-            patch("appinfra.service.runner.mp.Queue"),
-            patch("appinfra.service.runner.LogQueueListener"),
+            patch("appinfra.service.runner.process.mp.Process"),
+            patch("appinfra.service.runner.process.mp.Event"),
+            patch("appinfra.service.runner.process.mp.Queue"),
+            patch("appinfra.service.runner.process.LogQueueListener"),
         ):
             transitions = []
 
@@ -435,10 +435,10 @@ class TestProcessRunner:
     def test_stop_running_process(self, lg):
         """stop() terminates a running process."""
         with (
-            patch("appinfra.service.runner.mp.Process") as mock_process,
-            patch("appinfra.service.runner.mp.Event") as mock_event,
-            patch("appinfra.service.runner.mp.Queue"),
-            patch("appinfra.service.runner.LogQueueListener"),
+            patch("appinfra.service.runner.process.mp.Process") as mock_process,
+            patch("appinfra.service.runner.process.mp.Event") as mock_event,
+            patch("appinfra.service.runner.process.mp.Queue"),
+            patch("appinfra.service.runner.process.LogQueueListener"),
         ):
             mock_process.return_value.is_alive.return_value = False
             mock_event.return_value.set = lambda: None
@@ -456,10 +456,10 @@ class TestProcessRunner:
     def test_is_alive_when_running(self, lg):
         """is_alive() returns True when process is alive."""
         with (
-            patch("appinfra.service.runner.mp.Process") as mock_process,
-            patch("appinfra.service.runner.mp.Event"),
-            patch("appinfra.service.runner.mp.Queue"),
-            patch("appinfra.service.runner.LogQueueListener"),
+            patch("appinfra.service.runner.process.mp.Process") as mock_process,
+            patch("appinfra.service.runner.process.mp.Event"),
+            patch("appinfra.service.runner.process.mp.Queue"),
+            patch("appinfra.service.runner.process.LogQueueListener"),
         ):
             mock_process.return_value.is_alive.return_value = True
 
@@ -472,10 +472,10 @@ class TestProcessRunner:
     def test_is_healthy_when_running(self, lg):
         """is_healthy() returns True when process alive and healthy event set."""
         with (
-            patch("appinfra.service.runner.mp.Process") as mock_process,
-            patch("appinfra.service.runner.mp.Event") as mock_event,
-            patch("appinfra.service.runner.mp.Queue"),
-            patch("appinfra.service.runner.LogQueueListener"),
+            patch("appinfra.service.runner.process.mp.Process") as mock_process,
+            patch("appinfra.service.runner.process.mp.Event") as mock_event,
+            patch("appinfra.service.runner.process.mp.Queue"),
+            patch("appinfra.service.runner.process.LogQueueListener"),
         ):
             mock_process.return_value.is_alive.return_value = True
             mock_event.return_value.is_set.return_value = True
@@ -489,10 +489,10 @@ class TestProcessRunner:
     def test_pid_when_running(self, lg):
         """pid returns process ID when running."""
         with (
-            patch("appinfra.service.runner.mp.Process") as mock_process,
-            patch("appinfra.service.runner.mp.Event"),
-            patch("appinfra.service.runner.mp.Queue"),
-            patch("appinfra.service.runner.LogQueueListener"),
+            patch("appinfra.service.runner.process.mp.Process") as mock_process,
+            patch("appinfra.service.runner.process.mp.Event"),
+            patch("appinfra.service.runner.process.mp.Queue"),
+            patch("appinfra.service.runner.process.LogQueueListener"),
         ):
             mock_process.return_value.is_alive.return_value = True
             mock_process.return_value.pid = 12345
@@ -506,10 +506,10 @@ class TestProcessRunner:
     def test_exit_code_when_stopped(self, lg):
         """exit_code returns code when process stopped."""
         with (
-            patch("appinfra.service.runner.mp.Process") as mock_process,
-            patch("appinfra.service.runner.mp.Event"),
-            patch("appinfra.service.runner.mp.Queue"),
-            patch("appinfra.service.runner.LogQueueListener"),
+            patch("appinfra.service.runner.process.mp.Process") as mock_process,
+            patch("appinfra.service.runner.process.mp.Event"),
+            patch("appinfra.service.runner.process.mp.Queue"),
+            patch("appinfra.service.runner.process.LogQueueListener"),
         ):
             mock_process.return_value.is_alive.return_value = False
             mock_process.return_value.exitcode = 0
@@ -523,10 +523,10 @@ class TestProcessRunner:
     def test_exception_from_queue(self, lg):
         """exception property reads from error queue."""
         with (
-            patch("appinfra.service.runner.mp.Process"),
-            patch("appinfra.service.runner.mp.Event"),
-            patch("appinfra.service.runner.mp.Queue") as mock_queue,
-            patch("appinfra.service.runner.LogQueueListener"),
+            patch("appinfra.service.runner.process.mp.Process"),
+            patch("appinfra.service.runner.process.mp.Event"),
+            patch("appinfra.service.runner.process.mp.Queue") as mock_queue,
+            patch("appinfra.service.runner.process.LogQueueListener"),
         ):
             # Setup queue to return an exception
             mock_queue.return_value.empty.side_effect = [False, True]
@@ -543,10 +543,10 @@ class TestProcessRunner:
     def test_stop_with_stubborn_process(self, lg):
         """stop() kills a process that won't terminate."""
         with (
-            patch("appinfra.service.runner.mp.Process") as mock_process,
-            patch("appinfra.service.runner.mp.Event") as mock_event,
-            patch("appinfra.service.runner.mp.Queue"),
-            patch("appinfra.service.runner.LogQueueListener"),
+            patch("appinfra.service.runner.process.mp.Process") as mock_process,
+            patch("appinfra.service.runner.process.mp.Event") as mock_event,
+            patch("appinfra.service.runner.process.mp.Queue"),
+            patch("appinfra.service.runner.process.LogQueueListener"),
         ):
             # Process stays alive through terminate, dies on kill()
             # Calls: 1) after join (alive->terminate), 2) after terminate (alive->kill), 3) final check (dead)
