@@ -29,12 +29,8 @@ class Manager:
 
         mgr = Manager(lg)
         mgr.add(ThreadRunner(db_service))
-        mgr.add(ProcessRunner(
-            name="cache",
-            command=["redis-server"],
-            depends_on=["database"],
-        ))
-        mgr.add(ThreadRunner(api_service))
+        mgr.add(ProcessRunner(cache_service), depends_on=["database"])
+        mgr.add(ThreadRunner(api_service), depends_on=["database", "cache"])
 
         with mgr:
             # Starts in dependency order
@@ -145,6 +141,11 @@ class Manager:
         """
         if not self._runners:
             return
+
+        # Re-register atexit handler if needed (for restart after stop)
+        if not self._atexit_registered:
+            atexit.register(self._atexit_stop)
+            self._atexit_registered = True
 
         self._failed.clear()
         self._started.clear()

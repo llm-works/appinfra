@@ -540,8 +540,9 @@ class TestProcessRunner:
             patch("appinfra.service.runner.mp.Queue"),
             patch("appinfra.service.runner.LogQueueListener"),
         ):
-            # Process stays alive through terminate, killed on kill()
-            mock_process.return_value.is_alive.side_effect = [True, True, True, False]
+            # Process stays alive through terminate, dies on kill()
+            # Calls: 1) after join (alive->terminate), 2) after terminate (alive->kill), 3) final check (dead)
+            mock_process.return_value.is_alive.side_effect = [True, True, False]
             mock_event.return_value.set = lambda: None
 
             svc = MPSimpleService(lg)

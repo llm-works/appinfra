@@ -152,7 +152,10 @@ class Runner(ABC):
             True if a restart was initiated.
         """
         if self._state == State.FAILED:
-            return self._maybe_restart()
+            # Only restart if not alive (avoid spawning on top of running process)
+            if not self.is_alive():
+                return self._maybe_restart()
+            return False
 
         if self._state != State.RUNNING:
             return False
@@ -161,7 +164,10 @@ class Runner(ABC):
             return False
 
         self._transition(State.FAILED)
-        return self._maybe_restart()
+        # Only restart if not alive
+        if not self.is_alive():
+            return self._maybe_restart()
+        return False
 
     def _maybe_restart(self) -> bool:
         """Attempt restart based on policy."""
@@ -272,19 +278,20 @@ class ThreadRunner(Runner):
             return
 
         self._transition(State.STOPPING)
-        try:
-            self.service.teardown()
-            if self._thread is not None:
-                self._thread.join(timeout=timeout)
-                if self._thread.is_alive():
-                    # Thread didn't exit within timeout - it's a daemon thread
-                    # so it will be terminated when the process exits
-                    self.service.lg.warning(
-                        f"service thread did not exit within {timeout}s, "
-                        "will be terminated on process exit"
-                    )
-        finally:
-            self._transition(State.STOPPED)
+        self.service.teardown()
+        if self._thread is not None:
+            self._thread.join(timeout=timeout)
+            if self._thread.is_alive():
+                # Thread didn't exit within timeout - it's a daemon thread
+                # so it will be terminated when the process exits
+                self.service.lg.warning(
+                    f"service thread did not exit within {timeout}s, "
+                    "will be terminated on process exit"
+                )
+                # Stay in STOPPING state since thread is still alive
+                return
+
+        self._transition(State.STOPPED)
 
     def is_alive(self) -> bool:
         """Check if thread is running."""
@@ -306,26 +313,31 @@ class ProcessRunner(Runner):
     Similar to ThreadRunner but uses a subprocess for isolation.
     The service must be picklable for this to work.
 
+    Note:
+        Services should use ``_shutdown_event`` (injected by ProcessRunner) to
+        detect shutdown signals from the parent process. Do NOT create your own
+        multiprocessing.Event - it won't be shared across processes.
+
     Example:
         from appinfra.service import Service, ProcessRunner
 
         class MyService(Service):
             def __init__(self, lg: Logger):
                 self._lg = lg
-                self._stop = mp.Event()
+                self._shutdown_event: mp.Event | None = None  # Injected
 
             @property
             def name(self) -> str:
                 return "worker"
 
             def execute(self) -> None:
-                while not self._stop.is_set():
+                while not self._shutdown_event.is_set():
                     self._lg.debug("doing work")
                     do_work()
-                    self._stop.wait(1.0)
+                    self._shutdown_event.wait(1.0)
 
             def teardown(self) -> None:
-                self._stop.set()
+                pass  # _shutdown_event already set by ProcessRunner.stop()
 
         runner = ProcessRunner(MyService(lg))
         runner.start()
@@ -421,23 +433,26 @@ class ProcessRunner(Runner):
         self._transition(State.STOPPING)
         timeout = timeout or self.stop_timeout
 
-        try:
-            # Signal shutdown
-            if self._shutdown_event is not None:
-                self._shutdown_event.set()
+        # Signal shutdown
+        if self._shutdown_event is not None:
+            self._shutdown_event.set()
 
-            # Wait for graceful exit
-            if self._process is not None:
-                self._process.join(timeout=timeout)
-                if self._process.is_alive():
-                    self._process.terminate()
-                    self._process.join(timeout=2.0)
-                if self._process.is_alive():
-                    self._process.kill()
-                    self._process.join(timeout=1.0)
-        finally:
-            self._cleanup_ipc()
+        # Wait for graceful exit
+        process_stopped = True
+        if self._process is not None:
+            self._process.join(timeout=timeout)
+            if self._process.is_alive():
+                self._process.terminate()
+                self._process.join(timeout=2.0)
+            if self._process.is_alive():
+                self._process.kill()
+                self._process.join(timeout=1.0)
+            process_stopped = not self._process.is_alive()
+
+        self._cleanup_ipc()
+        if process_stopped:
             self._transition(State.STOPPED)
+        # If process still alive after kill, stay in STOPPING state
 
     def _cleanup_ipc(self) -> None:
         """Clean up IPC resources."""
@@ -508,14 +523,15 @@ class ProcessRunner(Runner):
 def _start_health_poller(
     service: Any, shutdown_event: MPEvent, healthy_event: MPEvent
 ) -> None:
-    """Start background thread to poll service health and signal when ready."""
+    """Start background thread to continuously poll service health."""
     import threading
 
     def poll() -> None:
         while not shutdown_event.is_set():
             if service.is_healthy():
                 healthy_event.set()
-                return
+            else:
+                healthy_event.clear()
             time.sleep(0.05)
 
     threading.Thread(target=poll, daemon=True).start()

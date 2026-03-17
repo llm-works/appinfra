@@ -279,6 +279,28 @@ class TestManagerLifecycle:
         mgr.add_service(SimpleService("a"))
         mgr.stop()
 
+    def test_restart_after_stop(self, lg):
+        """Manager can be restarted after stop."""
+        mgr = Manager(lg)
+        svc = SimpleService("a")
+        mgr.add_service(svc)
+
+        # First start/stop cycle
+        mgr.start()
+        assert mgr.is_running("a")
+        mgr.stop()
+        assert not mgr.is_running("a")
+
+        # Reset service state for second cycle
+        svc._stop_event.clear()
+        svc._healthy = False
+
+        # Second start/stop cycle - should re-register atexit
+        mgr.start()
+        assert mgr.is_running("a")
+        mgr.stop()
+        assert not mgr.is_running("a")
+
 
 @pytest.mark.unit
 class TestManagerIsRunning:
@@ -309,6 +331,27 @@ class TestManagerIsRunning:
             assert mgr.is_running("a")
 
         assert not mgr.is_running("a")
+
+    def test_is_running_unknown_service(self, lg):
+        """is_running returns False for unknown service."""
+        mgr = Manager(lg)
+        assert not mgr.is_running("nonexistent")
+
+
+@pytest.mark.unit
+class TestManagerCheckAll:
+    """Test check_all method."""
+
+    def test_check_all_healthy(self, lg):
+        """check_all returns False for all healthy services."""
+        mgr = Manager(lg)
+        mgr.add_service(SimpleService("a"))
+        mgr.add_service(SimpleService("b"))
+
+        with mgr:
+            results = mgr.check_all()
+
+        assert results == {"a": False, "b": False}
 
 
 class UnhealthyService(Service):
