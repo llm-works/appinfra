@@ -131,13 +131,17 @@ class Runner(ABC):
 
             time.sleep(interval)
 
-        self._transition(State.FAILED)
+        # Guard transition - _run() may have already transitioned
+        if self._state not in (State.FAILED, State.STOPPED, State.DONE):
+            self._transition(State.FAILED)
         raise HealthTimeoutError(self.name, timeout)
 
     def _handle_execution_exit(self) -> None:
         """Handle execution exit during health wait."""
         exc = self.exception
-        self._transition(State.FAILED)
+        # Guard transition - _run() may have already transitioned to FAILED
+        if self._state != State.FAILED:
+            self._transition(State.FAILED)
         if exc:
             raise RunError(self.name, f"exited during startup: {exc}") from exc
         raise RunError(self.name, "exited during startup")
@@ -169,7 +173,11 @@ class Runner(ABC):
         return False
 
     def _maybe_restart(self) -> bool:
-        """Attempt restart based on policy."""
+        """Attempt restart based on policy.
+
+        Performs cleanup via stop() before restarting to ensure no residual
+        state from the failed execution.
+        """
         if not self.policy.restart_on_failure:
             return False
 
@@ -182,6 +190,8 @@ class Runner(ABC):
         time.sleep(backoff)
 
         try:
+            # Ensure cleanup before restart (handles residual state)
+            self.stop()
             self.start()
             self.wait_healthy()
             return True

@@ -123,6 +123,8 @@ class FailOnFirstExecute(Service):
         self._runs += 1
         if self._runs == 1:
             raise RuntimeError("first run fails")
+        # Clear stop event in case it was set during previous teardown
+        self._stop_event.clear()
         self._healthy = True
         self._stop_event.wait()
         self._healthy = False
@@ -522,23 +524,40 @@ class TestProcessRunner:
 
     def test_exception_from_queue(self, lg):
         """exception property reads from error queue."""
+        from queue import Empty
+
         with (
             patch("appinfra.service.runner.process.mp.Process"),
             patch("appinfra.service.runner.process.mp.Event"),
-            patch("appinfra.service.runner.process.mp.Queue") as mock_queue,
+            patch("appinfra.service.runner.process.mp.Queue") as mock_queue_cls,
             patch("appinfra.service.runner.process.LogQueueListener"),
         ):
-            # Setup queue to return an exception
-            mock_queue.return_value.empty.side_effect = [False, True]
-            mock_queue.return_value.get_nowait.return_value = RuntimeError("test error")
+            # Create separate mocks for log queue and error queue
+            log_queue_mock = MagicMock()
+            error_queue_mock = MagicMock()
+            mock_queue_cls.side_effect = [log_queue_mock, error_queue_mock]
+
+            # Setup error queue: return exception first, then raise Empty
+            # (side_effect with exception instances raises them, so use a list
+            # with the value to return, then a callable that raises)
+            test_error = RuntimeError("test error")
+            call_count = 0
+
+            def get_nowait_effect():
+                nonlocal call_count
+                call_count += 1
+                if call_count == 1:
+                    return test_error  # Return the exception object
+                raise Empty()  # Then raise Empty
+
+            error_queue_mock.get_nowait.side_effect = get_nowait_effect
 
             svc = MPSimpleService(lg)
             runner = ProcessRunner(svc)
             runner.start()
 
             exc = runner.exception
-            assert isinstance(exc, RuntimeError)
-            assert str(exc) == "test error"
+            assert exc is test_error
 
     def test_stop_with_stubborn_process(self, lg):
         """stop() kills a process that won't terminate."""

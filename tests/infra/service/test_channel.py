@@ -343,9 +343,10 @@ class TestProcessChannel:
         """recv() on closed ProcessChannel raises ChannelClosedError."""
         pair = ChannelFactory().create_process_pair()
 
-        # ProcessChannel.close() closes underlying mp.Queue, so recv raises
-        with pytest.raises(ChannelClosedError):
+        try:
+            # ProcessChannel.close() closes underlying mp.Queue, so recv raises
             pair.child.close()
-            pair.child.recv(timeout=0.1)
-
-        pair.parent.close()
+            with pytest.raises(ChannelClosedError):
+                pair.child.recv(timeout=0.1)
+        finally:
+            pair.parent.close()

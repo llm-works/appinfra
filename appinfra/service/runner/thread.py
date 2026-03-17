@@ -41,6 +41,13 @@ class ThreadRunner(Runner):
 
     def start(self) -> None:
         """Start the service in a background thread."""
+        # Validate state under lock before setup to prevent concurrent starts
+        with self._lock:
+            if self._state not in (State.CREATED, State.STOPPED, State.FAILED):
+                from ..errors import InvalidTransitionError
+
+                raise InvalidTransitionError(self.name, self._state, State.INITD)
+
         # Setup phase
         try:
             self.service.setup()
@@ -63,11 +70,29 @@ class ThreadRunner(Runner):
         self._thread.start()
 
     def _run(self) -> None:
-        """Thread target."""
+        """Thread target.
+
+        Updates state on exit (clean or exception). Transitions are guarded
+        to handle races with stop() or wait_healthy().
+        """
+        from ..errors import InvalidTransitionError
+
         try:
             self.service.execute()
+            # Clean exit - transition to DONE if in RUNNING state
+            try:
+                if self._state == State.RUNNING:
+                    self._transition(State.DONE)
+            except InvalidTransitionError:
+                pass  # Already transitioned by stop()
         except BaseException as e:
             self._exception = e
+            # Transition to FAILED if possible
+            try:
+                if self._state in (State.STARTING, State.RUNNING):
+                    self._transition(State.FAILED)
+            except InvalidTransitionError:
+                pass  # Already transitioned by stop()
 
     def stop(self, timeout: float = 5.0) -> None:
         """Stop the service."""
@@ -75,7 +100,15 @@ class ThreadRunner(Runner):
             return
 
         self._transition(State.STOPPING)
-        self.service.teardown()
+
+        # Teardown with exception handling - continue to join even if teardown fails
+        try:
+            self.service.teardown()
+        except Exception as e:
+            self.service.lg.warning(
+                "teardown failed", extra={"exception": e, "service": self.name}
+            )
+
         if self._thread is not None:
             self._thread.join(timeout=timeout)
             if self._thread.is_alive():

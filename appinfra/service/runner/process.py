@@ -208,13 +208,18 @@ class ProcessRunner(Runner):
 
         Returns the first exception encountered (root cause).
         """
-        # Drain queue, keep first exception (root cause)
+        # Drain queue using exception-based loop (Queue.empty() is unreliable)
         if self._error_queue is not None:
+            from queue import Empty
+
             try:
-                while not self._error_queue.empty():
-                    exc = self._error_queue.get_nowait()
-                    if self._exception is None:
-                        self._exception = exc
+                while True:
+                    try:
+                        exc = self._error_queue.get_nowait()
+                        if self._exception is None:
+                            self._exception = exc
+                    except Empty:
+                        break
             except Exception:
                 pass
         return self._exception
@@ -266,7 +271,9 @@ def _process_entry(
     """
     try:
         lg = Logger.from_queue_config(log_config, name=f"svc/{service.name}")
-        service._lg = lg
+        # Inject runtime dependencies (services must have these attributes)
+        if hasattr(service, "_lg"):
+            service._lg = lg
         if hasattr(service, "_shutdown_event"):
             service._shutdown_event = shutdown_event
 
