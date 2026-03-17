@@ -70,12 +70,13 @@ Scheduled services:
 
 from .base import ScheduledService, Service
 from .channel import (
+    AsyncChannel,
+    AsyncProcessChannel,
+    AsyncThreadChannel,
     Channel,
     Message,
     ProcessChannel,
     ThreadChannel,
-    create_process_channel_pair,
-    create_thread_channel_pair,
 )
 from .errors import (
     ChannelClosedError,
@@ -90,6 +91,8 @@ from .errors import (
     SetupError,
 )
 from .factory import (
+    AsyncChannelPair,
+    AsyncProcessChannelPair,
     ChannelConfig,
     ChannelFactory,
     ChannelPair,
@@ -110,13 +113,16 @@ __all__ = [
     "ThreadRunner",
     "ProcessRunner",
     "Manager",
-    # Channel communication
+    # Channel communication (sync)
     "Channel",
     "ThreadChannel",
     "ProcessChannel",
     "Message",
-    "create_thread_channel_pair",
-    "create_process_channel_pair",
+    # Channel communication (async)
+    "AsyncChannel",
+    "AsyncThreadChannel",
+    "AsyncProcessChannel",
+    # Channel errors
     "ChannelError",
     "ChannelTimeoutError",
     "ChannelClosedError",
@@ -124,6 +130,8 @@ __all__ = [
     "ChannelFactory",
     "ChannelConfig",
     "ChannelPair",
+    "AsyncChannelPair",
+    "AsyncProcessChannelPair",
     "RunnerFactory",
     "RunnerWithChannel",
     "ServiceFactory",

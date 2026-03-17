@@ -23,14 +23,17 @@ For API stability guarantees and deprecation policy, see
   - **Manager**: Orchestrates multiple services with dependency ordering and parallel start/stop
   - **RestartPolicy**: Configurable restart behavior with exponential backoff
   - **Dependency graph**: Uses stdlib `graphlib.TopologicalSorter` for cycle detection and ordering
-  - **Bidirectional channels** for service communication:
-    - `ThreadChannel`: Queue-based channel for thread communication
-    - `ProcessChannel`: Multiprocessing queue-based channel for cross-process IPC
+  - **Bidirectional channels** for service communication (sync and async):
+    - Sync: `ThreadChannel`, `ProcessChannel` for threaded code
+    - Async: `AsyncThreadChannel`, `AsyncProcessChannel` for asyncio code
     - `Message`: Generic message with id for request/response correlation
-    - `submit()`: Blocking request/response pattern with timeout
+    - `submit()`: Request/response pattern with timeout (blocking or async)
     - `send()`/`recv()`: Fire-and-forget messaging
   - **Factory classes** for centralized component creation:
     - `ChannelFactory`: Creates channel pairs with consistent configuration
+      - `create_thread_pair()`, `create_process_pair()` for sync channels
+      - `create_async_thread_pair()`, `create_async_process_pair()` for async channels
+    - `ChannelPair`, `AsyncChannelPair`, `AsyncProcessChannelPair`: Typed pair containers
     - `RunnerFactory`: Creates runners with optional channel wiring
     - `ServiceFactory`: Registry-based service creation with dependency injection
 - `Service.lg` property for accessing the logger instance

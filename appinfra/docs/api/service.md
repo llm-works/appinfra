@@ -254,33 +254,61 @@ mgr.add(runner, depends_on=["database", "cache"])
 
 ## Channels
 
-For bidirectional communication between services and their runners:
+For bidirectional communication between services and their runners.
+
+### Sync Channels
+
+For threaded code with blocking calls:
 
 ```python
-from appinfra.service import (
-    ThreadChannel,
-    ProcessChannel,
-    create_thread_channel_pair,
-    Message,
-)
+from appinfra.service import ChannelFactory, Message
 
 # Create paired channels
-parent_ch, service_ch = create_thread_channel_pair()
+factory = ChannelFactory()
+pair = factory.create_thread_pair()
 
 # Fire-and-forget
-parent_ch.send(Message(payload="hello"))
+pair.parent.send(Message(payload="hello"))
 
-# Request/response
-response = parent_ch.submit(Request(id="1", data="work"), timeout=5.0)
+# Request/response (blocking)
+response = pair.parent.submit(Request(id="1", data="work"), timeout=5.0)
 
 # Receive messages
-msg = service_ch.recv(timeout=1.0)
-service_ch.send(Response(id=msg.id, result="done"))
+msg = pair.child.recv(timeout=1.0)
+pair.child.send(Response(id=msg.id, result="done"))
 ```
 
-Channel types:
-- `ThreadChannel` - Uses `queue.Queue` for thread-based communication
-- `ProcessChannel` - Uses `multiprocessing.Queue` for process isolation
+### Async Channels
+
+For asyncio code with async/await:
+
+```python
+from appinfra.service import ChannelFactory
+
+# Async channels for coroutine communication
+factory = ChannelFactory()
+pair = factory.create_async_thread_pair()
+
+# Fire-and-forget (async)
+await pair.parent.send(Message(payload="hello"))
+
+# Request/response (async)
+response = await pair.parent.submit(Request(id="1", data="work"), timeout=5.0)
+
+# For subprocess communication (async parent, sync child)
+pair = factory.create_async_process_pair()
+await pair.parent.send(request)  # Parent uses async
+pair.child.recv()                 # Child uses sync in subprocess
+```
+
+### Channel Types
+
+| Channel | Queue Type | Use Case |
+|---------|-----------|----------|
+| `ThreadChannel` | `queue.Queue` | Sync thread communication |
+| `ProcessChannel` | `mp.Queue` | Sync cross-process IPC |
+| `AsyncThreadChannel` | `asyncio.Queue` | Async coroutine communication |
+| `AsyncProcessChannel` | `mp.Queue` (async wrapped) | Async parent, sync child subprocess |
 
 ## Factories
 
@@ -321,17 +349,30 @@ worker = svc_factory.create("worker")
 - `RestartPolicy` - Restart configuration
 - `State` - State enum
 
-### Channel Classes
+### Channel Classes (Sync)
 
-- `Channel` - Abstract base for bidirectional communication
+- `Channel` - Abstract base for sync bidirectional communication
 - `ThreadChannel` - Thread-safe queue-based channel
 - `ProcessChannel` - Multiprocessing queue-based channel
 - `Message` - Generic message with id for correlation
+
+### Channel Classes (Async)
+
+- `AsyncChannel` - Abstract base for async bidirectional communication
+- `AsyncThreadChannel` - Async queue-based channel for coroutines
+- `AsyncProcessChannel` - Async wrapper around mp.Queue
+
+### Factories
+
 - `ChannelFactory` - Creates channel pairs with configuration
+  - `create_thread_pair()` - Create sync ThreadChannel pair
+  - `create_process_pair()` - Create sync ProcessChannel pair
+  - `create_async_thread_pair()` - Create async AsyncThreadChannel pair
+  - `create_async_process_pair()` - Create async parent + sync child pair
 - `ChannelConfig` - Channel configuration (timeout, queue size)
-
-### Factory Classes
-
+- `ChannelPair` - Sync channel pair (parent, child)
+- `AsyncChannelPair` - Async channel pair (parent, child)
+- `AsyncProcessChannelPair` - Mixed async parent + sync child pair
 - `RunnerFactory` - Creates runners with optional channels
 - `ServiceFactory` - Registry-based service creation
 
@@ -339,5 +380,3 @@ worker = svc_factory.create("worker")
 
 - `validate_dependencies()` - Check for missing deps and cycles
 - `dependency_levels()` - Get parallel execution groups
-- `create_thread_channel_pair()` - Create connected ThreadChannel pair
-- `create_process_channel_pair()` - Create connected ProcessChannel pair

@@ -26,7 +26,13 @@ Example:
     worker = svc_factory.create("worker")
 """
 
-from .channel import ChannelConfig, ChannelFactory, ChannelPair
+from .channel import (
+    AsyncChannelPair,
+    AsyncProcessChannelPair,
+    ChannelConfig,
+    ChannelFactory,
+    ChannelPair,
+)
 from .runner import RunnerFactory, RunnerWithChannel
 from .service import ServiceFactory, ServiceRegistration
 
@@ -35,6 +41,8 @@ __all__ = [
     "ChannelFactory",
     "ChannelConfig",
     "ChannelPair",
+    "AsyncChannelPair",
+    "AsyncProcessChannelPair",
     # Runner factory
     "RunnerFactory",
     "RunnerWithChannel",
