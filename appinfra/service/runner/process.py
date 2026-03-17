@@ -297,6 +297,11 @@ class ProcessRunner(Runner):
             return self._process.exitcode
         return None
 
+    @property
+    def process(self) -> mp.Process | None:
+        """Underlying process, or None if not started."""
+        return self._process
+
 
 def _start_health_poller(
     service: Any, shutdown_event: MPEvent, healthy_event: MPEvent

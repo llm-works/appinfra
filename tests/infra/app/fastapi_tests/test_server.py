@@ -203,7 +203,7 @@ class TestServerSubprocessMode:
 
         mock_proc = MagicMock()
         mock_proc.pid = 12345
-        mock_dependencies["instance"]._process = mock_proc
+        mock_dependencies["instance"].process = mock_proc
 
         server = Server(
             mock_lg,
@@ -227,7 +227,7 @@ class TestServerSubprocessMode:
 
         mock_proc = MagicMock()
         mock_proc.pid = 12345
-        mock_dependencies["instance"]._process = mock_proc
+        mock_dependencies["instance"].process = mock_proc
 
         config = ApiConfig()
         assert config.ipc is None
@@ -250,10 +250,13 @@ class TestServerSubprocessMode:
         self, mock_dependencies, mock_lg
     ):
         """Test start_subprocess starts monitor thread when auto_restart is True."""
-        from appinfra.app.fastapi.runtime.server import Server
+        from appinfra.app.fastapi.runtime.server import (
+            PROCESS_MONITOR_INTERVAL,
+            Server,
+        )
 
         mock_proc = MagicMock()
-        mock_dependencies["instance"]._process = mock_proc
+        mock_dependencies["instance"].process = mock_proc
 
         server = Server(
             mock_lg,
@@ -267,7 +270,7 @@ class TestServerSubprocessMode:
         server.start_subprocess()
 
         mock_dependencies["instance"].start_monitor.assert_called_once_with(
-            interval=1.0
+            interval=PROCESS_MONITOR_INTERVAL
         )
 
     def test_start_subprocess_no_monitor_when_auto_restart_disabled(
@@ -277,7 +280,7 @@ class TestServerSubprocessMode:
         from appinfra.app.fastapi.runtime.server import Server
 
         mock_proc = MagicMock()
-        mock_dependencies["instance"]._process = mock_proc
+        mock_dependencies["instance"].process = mock_proc
 
         server = Server(
             mock_lg,

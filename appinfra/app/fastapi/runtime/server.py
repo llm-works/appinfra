@@ -11,6 +11,9 @@ from ..config.api import ApiConfig
 from ..config.ipc import IPCConfig
 from .service import UvicornService
 
+#: Default interval (seconds) for process health monitor checks
+PROCESS_MONITOR_INTERVAL = 1.0
+
 if TYPE_CHECKING:
     from ....log import Logger
     from .adapter import FastAPIAdapter
@@ -213,7 +216,7 @@ class Server:
 
         # Start monitor for auto-restart if enabled
         if self._config.auto_restart:
-            self._runner.start_monitor(interval=1.0)
+            self._runner.start_monitor(interval=PROCESS_MONITOR_INTERVAL)
 
         self._lg.info(
             "server started in subprocess",
@@ -226,8 +229,9 @@ class Server:
         )
 
         # Return the process for compatibility with existing code
-        assert self._runner._process is not None
-        return self._runner._process
+        proc = self._runner.process
+        assert proc is not None
+        return proc
 
     def stop(self, timeout: float = 5.0) -> None:
         """
