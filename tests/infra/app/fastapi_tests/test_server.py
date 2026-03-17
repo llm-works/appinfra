@@ -160,12 +160,12 @@ class TestServerSubprocessMode:
             patch("appinfra.app.fastapi.runtime.server.FASTAPI_AVAILABLE", True),
             patch("appinfra.app.fastapi.runtime.server.FastAPI"),
             patch(
-                "appinfra.app.fastapi.runtime.server.SubprocessManager"
-            ) as mock_manager,
+                "appinfra.app.fastapi.runtime.server.ProcessRunner"
+            ) as mock_runner_cls,
         ):
-            mock_manager_instance = MagicMock()
-            mock_manager.return_value = mock_manager_instance
-            yield {"SubprocessManager": mock_manager, "instance": mock_manager_instance}
+            mock_runner = MagicMock()
+            mock_runner_cls.return_value = mock_runner
+            yield {"ProcessRunner": mock_runner_cls, "instance": mock_runner}
 
     def test_start_subprocess_requires_subprocess_mode(
         self, mock_dependencies, mock_lg
@@ -192,18 +192,18 @@ class TestServerSubprocessMode:
         )
 
         mock_dependencies["instance"].is_alive.return_value = True
-        server._subprocess_manager = mock_dependencies["instance"]
+        server._runner = mock_dependencies["instance"]
 
         with pytest.raises(RuntimeError, match="already running"):
             server.start_subprocess()
 
-    def test_start_subprocess_creates_manager(self, mock_dependencies, mock_lg):
-        """Test start_subprocess creates SubprocessManager."""
+    def test_start_subprocess_creates_runner(self, mock_dependencies, mock_lg):
+        """Test start_subprocess creates ProcessRunner."""
         from appinfra.app.fastapi.runtime.server import Server
 
         mock_proc = MagicMock()
         mock_proc.pid = 12345
-        mock_dependencies["instance"].start.return_value = mock_proc
+        mock_dependencies["instance"].process = mock_proc
 
         server = Server(
             mock_lg,
@@ -217,8 +217,9 @@ class TestServerSubprocessMode:
         proc = server.start_subprocess()
 
         assert proc is mock_proc
-        mock_dependencies["SubprocessManager"].assert_called_once()
+        mock_dependencies["ProcessRunner"].assert_called_once()
         mock_dependencies["instance"].start.assert_called_once()
+        mock_dependencies["instance"].wait_healthy.assert_called_once()
 
     def test_start_subprocess_sets_default_ipc_config(self, mock_dependencies, mock_lg):
         """Test start_subprocess sets default IPCConfig if not set."""
@@ -226,7 +227,7 @@ class TestServerSubprocessMode:
 
         mock_proc = MagicMock()
         mock_proc.pid = 12345
-        mock_dependencies["instance"].start.return_value = mock_proc
+        mock_dependencies["instance"].process = mock_proc
 
         config = ApiConfig()
         assert config.ipc is None
@@ -245,8 +246,57 @@ class TestServerSubprocessMode:
         assert server._config.ipc is not None
         assert isinstance(server._config.ipc, IPCConfig)
 
-    def test_stop_clears_subprocess_manager(self, mock_dependencies, mock_lg):
-        """Test stop clears subprocess manager."""
+    def test_start_subprocess_starts_monitor_when_auto_restart(
+        self, mock_dependencies, mock_lg
+    ):
+        """Test start_subprocess starts monitor thread when auto_restart is True."""
+        from appinfra.app.fastapi.runtime.server import (
+            PROCESS_MONITOR_INTERVAL,
+            Server,
+        )
+
+        mock_proc = MagicMock()
+        mock_dependencies["instance"].process = mock_proc
+
+        server = Server(
+            mock_lg,
+            name="test",
+            config=ApiConfig(auto_restart=True),
+            adapter=MagicMock(),
+            request_q=mp.Queue(),
+            response_q=mp.Queue(),
+        )
+
+        server.start_subprocess()
+
+        mock_dependencies["instance"].start_monitor.assert_called_once_with(
+            interval=PROCESS_MONITOR_INTERVAL
+        )
+
+    def test_start_subprocess_no_monitor_when_auto_restart_disabled(
+        self, mock_dependencies, mock_lg
+    ):
+        """Test start_subprocess doesn't start monitor when auto_restart is False."""
+        from appinfra.app.fastapi.runtime.server import Server
+
+        mock_proc = MagicMock()
+        mock_dependencies["instance"].process = mock_proc
+
+        server = Server(
+            mock_lg,
+            name="test",
+            config=ApiConfig(auto_restart=False),
+            adapter=MagicMock(),
+            request_q=mp.Queue(),
+            response_q=mp.Queue(),
+        )
+
+        server.start_subprocess()
+
+        mock_dependencies["instance"].start_monitor.assert_not_called()
+
+    def test_stop_clears_runner(self, mock_dependencies, mock_lg):
+        """Test stop clears runner."""
         from appinfra.app.fastapi.runtime.server import Server
 
         server = Server(
@@ -258,12 +308,12 @@ class TestServerSubprocessMode:
             response_q=mp.Queue(),
         )
 
-        server._subprocess_manager = mock_dependencies["instance"]
+        server._runner = mock_dependencies["instance"]
 
         server.stop()
 
         mock_dependencies["instance"].stop.assert_called_once()
-        assert server._subprocess_manager is None
+        assert server._runner is None
 
     def test_stop_does_nothing_if_not_running(self, mock_dependencies, mock_lg):
         """Test stop does nothing if subprocess not running."""
@@ -315,9 +365,9 @@ class TestServerValidation:
             response_q=mp.Queue(),
         )
 
-        mock_manager = MagicMock()
-        mock_manager.is_alive.return_value = True
-        server._subprocess_manager = mock_manager
+        mock_runner = MagicMock()
+        mock_runner.is_alive.return_value = True
+        server._runner = mock_runner
 
         with pytest.raises(RuntimeError, match="already running"):
             server._validate_subprocess_mode()
@@ -406,14 +456,14 @@ class TestServerStart:
             response_q=mp.Queue(),
         )
 
-        mock_manager = MagicMock()
-        mock_manager.is_alive.return_value = True
-        server._subprocess_manager = mock_manager
+        mock_runner = MagicMock()
+        mock_runner.is_alive.return_value = True
+        server._runner = mock_runner
 
         assert server.is_running is True
 
     def test_start_subprocess_mode(self, mock_dependencies, mock_lg):
-        """Test start() in subprocess mode."""
+        """Test start() in subprocess mode blocks until process exits."""
         from appinfra.app.fastapi.runtime.server import Server
 
         server = Server(
@@ -425,12 +475,20 @@ class TestServerStart:
             response_q=mp.Queue(),
         )
 
-        # Mock start_subprocess to return a mock process
-        mock_proc = MagicMock()
-        with patch.object(server, "start_subprocess", return_value=mock_proc):
+        # Mock start_subprocess and _runner to simulate exit
+        mock_runner = MagicMock()
+        # Simulate process exiting after first check
+        mock_runner.is_alive.side_effect = [True, False]
+
+        with (
+            patch.object(server, "start_subprocess"),
+            patch("time.sleep"),
+        ):
+            server._runner = mock_runner
             server.start()
 
-            mock_proc.join.assert_called_once()
+            # Should have checked is_alive until it returned False
+            assert mock_runner.is_alive.call_count == 2
 
     def test_start_direct_mode(self, mock_dependencies, mock_lg):
         """Test start() in direct mode."""

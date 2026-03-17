@@ -390,7 +390,8 @@ server.stop()            # Stop subprocess
 
 ## IPCChannel
 
-Async IPC for FastAPI route handlers to communicate with the main process.
+Async IPC for FastAPI route handlers to communicate with the main process. Wraps
+`AsyncProcessChannel` from the service package.
 
 ```python
 from fastapi import Request
@@ -399,9 +400,9 @@ async def process_handler(request: Request):
     ipc: IPCChannel = request.app.state.ipc_channel
 
     # Submit request and wait for response
+    # Request object must have an `id` attribute for routing
     response = await ipc.submit(
-        request_id="unique-id",
-        request={"data": "..."},
+        request=WorkRequest(id="unique-id", data="..."),
         timeout=30.0  # Optional, defaults to config
     )
 
@@ -417,7 +418,7 @@ async def stream_handler(request: Request):
     ipc: IPCChannel = request.app.state.ipc_channel
 
     async def generate():
-        async for chunk in ipc.submit_streaming("req-id", {"prompt": "..."}):
+        async for chunk in ipc.submit_stream(WorkRequest(id="req-id", prompt="...")):
             yield chunk.data
             if chunk.is_final:
                 break
@@ -473,12 +474,11 @@ router = APIRouter()
 async def generate(body: GenerateRequest, request: Request):
     ipc = request.app.state.ipc_channel
 
-    # Create request with unique ID
-    req_id = str(uuid4())
-    work_request = WorkRequest(id=req_id, prompt=body.prompt, max_tokens=body.max_tokens)
+    # Create request with unique ID (id attribute required for routing)
+    work_request = WorkRequest(id=str(uuid4()), prompt=body.prompt, max_tokens=body.max_tokens)
 
     # Submit and wait for response
-    response = await ipc.submit(req_id, work_request, timeout=60.0)
+    response = await ipc.submit(work_request, timeout=60.0)
 
     if response.error:
         raise HTTPException(status_code=500, detail=response.error)
@@ -493,11 +493,10 @@ from fastapi.responses import StreamingResponse
 @router.post("/stream")
 async def stream(body: GenerateRequest, request: Request):
     ipc = request.app.state.ipc_channel
-    req_id = str(uuid4())
-    work_request = WorkRequest(id=req_id, prompt=body.prompt, max_tokens=body.max_tokens)
+    work_request = WorkRequest(id=str(uuid4()), prompt=body.prompt, max_tokens=body.max_tokens)
 
     async def generate():
-        async for chunk in ipc.submit_streaming(req_id, work_request):
+        async for chunk in ipc.submit_stream(work_request):
             yield chunk.data
             if chunk.is_final:
                 break

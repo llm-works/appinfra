@@ -5,14 +5,17 @@ from __future__ import annotations
 import multiprocessing as mp
 from typing import TYPE_CHECKING, Any
 
+from ....service import ProcessRunner
+from ....service.state import RestartPolicy
 from ..config.api import ApiConfig
 from ..config.ipc import IPCConfig
-from .logging import setup_subprocess_logging
-from .subprocess import SubprocessManager
+from .service import UvicornService
+
+#: Default interval (seconds) for process health monitor checks
+PROCESS_MONITOR_INTERVAL = 1.0
 
 if TYPE_CHECKING:
     from ....log import Logger
-    from ....log.mp import LogQueueListener
     from .adapter import FastAPIAdapter
 
 # Guard imports for optional dependency
@@ -39,47 +42,6 @@ def _build_uvicorn_log_config(config: ApiConfig) -> dict[str, Any]:
             "uvicorn.error": {"level": uv.log_level.upper()},
         },
     }
-
-
-def _uvicorn_subprocess_entry(
-    adapter: FastAPIAdapter,
-    config: ApiConfig,
-    request_q: mp.Queue[Any],
-    response_q: mp.Queue[Any],
-    log_config: dict[str, Any],
-) -> None:
-    """
-    Entry point for uvicorn subprocess.
-
-    Runs inside subprocess: sets up logging, creates IPC channel,
-    builds FastAPI app, and runs uvicorn (blocking).
-    """
-    import uvicorn
-
-    from ....log import Logger
-    from ....subprocess import SubprocessContext
-    from .ipc import IPCChannel
-
-    # Set up queue-based logging forwarding to parent process
-    setup_subprocess_logging(config.log_file, log_level=log_config.get("level", "info"))
-    lg = Logger.from_queue_config(log_config, name="fastapi.subprocess")
-    adapter.inject_subprocess_logger(lg)
-
-    with SubprocessContext(
-        lg=lg,
-        etc_dir=config.etc_dir,
-        config_file=config.config_file,
-        handle_signals=False,  # uvicorn handles SIGTERM/SIGINT
-    ):
-        assert config.ipc is not None  # We're in subprocess mode
-        ipc_channel = IPCChannel(request_q, response_q, config.ipc)
-        # IPC lifecycle (start_polling/stop_polling) is now integrated into
-        # the adapter's lifespan, so no separate event registration needed
-        app = adapter.build(ipc_channel=ipc_channel)
-
-        uvicorn_kwargs = config.uvicorn.to_uvicorn_kwargs()
-        uvicorn_kwargs["log_config"] = _build_uvicorn_log_config(config)
-        uvicorn.run(app, host=config.host, port=config.port, **uvicorn_kwargs)
 
 
 class Server:
@@ -138,13 +100,8 @@ class Server:
         self._request_q = request_q
         self._response_q = response_q
         self._lg = lg
-        self._subprocess_manager: SubprocessManager | None = None
+        self._runner: ProcessRunner | None = None
         self._app: FastAPI | None = None
-
-        # Queue-based logging for subprocess (only if logger provided)
-        self._log_queue: mp.Queue[Any] | None = None
-        self._log_config: dict[str, Any] | None = None
-        self._log_listener: LogQueueListener | None = None
 
     @property
     def name(self) -> str:
@@ -176,8 +133,8 @@ class Server:
     @property
     def is_running(self) -> bool:
         """Check if server is running."""
-        if self._subprocess_manager:
-            return self._subprocess_manager.is_alive()
+        if self._runner:
+            return self._runner.is_alive()
         return False
 
     @property
@@ -195,11 +152,16 @@ class Server:
         Start server (blocking).
 
         In direct mode: calls uvicorn.run() directly.
-        In subprocess mode: starts subprocess and blocks on join().
+        In subprocess mode: starts subprocess and blocks waiting.
         """
         if self.is_subprocess_mode:
-            proc = self.start_subprocess()
-            proc.join()
+            self.start_subprocess()
+            # Block until process exits
+            if self._runner:
+                while self._runner.is_alive():
+                    import time
+
+                    time.sleep(0.5)
         else:
             self._run_direct()
 
@@ -210,67 +172,31 @@ class Server:
                 "start_subprocess() requires subprocess mode. "
                 "Configure IPC with .subprocess.with_ipc() first."
             )
-        if self._subprocess_manager and self._subprocess_manager.is_alive():
+        if self._runner and self._runner.is_alive():
             raise RuntimeError("Server subprocess is already running")
 
-    def _setup_subprocess_logging(self) -> None:
-        """Set up queue-based logging for subprocess.
-
-        Idempotent: tears down existing logging before setting up new.
-        """
-        from ....log.mp import LogQueueListener
-
-        # Tear down any existing logging first (idempotent)
-        if self._log_listener is not None or self._log_queue is not None:
-            self._teardown_subprocess_logging()
-
-        self._log_queue = mp.Queue()
-        self._log_config = self._lg.queue_config(self._log_queue)
-        self._log_listener = LogQueueListener(self._log_queue, self._lg)
-        self._log_listener.start()
-
-    def _teardown_subprocess_logging(self) -> None:
-        """Tear down queue-based logging.
-
-        Idempotent: safe to call multiple times. Properly closes queue resources.
-        """
-        if self._log_listener is not None:
-            self._log_listener.stop()
-            self._log_listener = None
-        if self._log_queue is not None:
-            self._log_queue.close()
-            self._log_queue.join_thread()
-            self._log_queue = None
-        self._log_config = None
-
-    def _create_subprocess_manager(self) -> SubprocessManager:
-        """Create subprocess manager with current configuration."""
-        assert self._request_q is not None
-        assert self._response_q is not None
-
-        if self._log_config is None:
-            raise RuntimeError(
-                "Subprocess log configuration not initialized. "
-                "Call _setup_subprocess_logging() before creating subprocess manager."
-            )
-
+    def _create_runner(self) -> ProcessRunner:
+        """Create ProcessRunner with UvicornService."""
         if self._config.ipc is None:
             self._config.ipc = IPCConfig()
 
-        return SubprocessManager(
-            target=_uvicorn_subprocess_entry,
-            args=(
-                self._adapter,
-                self._config,
-                self._request_q,
-                self._response_q,
-                self._log_config,
-            ),
-            shutdown_timeout=5.0,
-            auto_restart=self._config.auto_restart,
-            restart_delay=self._config.restart_delay,
-            max_restarts=self._config.max_restarts,
+        service = UvicornService(
+            lg=self._lg,
+            adapter=self._adapter,
+            config=self._config,
+            request_q=self._request_q,
+            response_q=self._response_q,
         )
+
+        # Map config to RestartPolicy
+        policy = RestartPolicy(
+            max_retries=self._config.max_restarts,
+            backoff=self._config.restart_delay,
+            backoff_multiplier=1.0,  # Linear backoff like SubprocessManager
+            restart_on_failure=self._config.auto_restart,
+        )
+
+        return ProcessRunner(service, policy=policy, stop_timeout=5.0)
 
     def start_subprocess(self) -> mp.Process:
         """
@@ -283,22 +209,28 @@ class Server:
             RuntimeError: If not in subprocess mode or already running
         """
         self._validate_subprocess_mode()
-        self._setup_subprocess_logging()
-        try:
-            self._subprocess_manager = self._create_subprocess_manager()
-            proc = self._subprocess_manager.start()
-        except Exception:
-            self._teardown_subprocess_logging()
-            raise
+
+        self._runner = self._create_runner()
+        self._runner.start()
+        self._runner.wait_healthy(timeout=30.0)
+
+        # Start monitor for auto-restart if enabled
+        if self._config.auto_restart:
+            self._runner.start_monitor(interval=PROCESS_MONITOR_INTERVAL)
+
         self._lg.info(
             "server started in subprocess",
             extra={
                 "server": self._name,
-                "pid": proc.pid,
+                "pid": self._runner.pid,
                 "host": self._config.host,
                 "port": self._config.port,
             },
         )
+
+        # Return the process for compatibility with existing code
+        proc = self._runner.process
+        assert proc is not None
         return proc
 
     def stop(self, timeout: float = 5.0) -> None:
@@ -310,11 +242,10 @@ class Server:
         Args:
             timeout: Seconds to wait for graceful shutdown
         """
-        if self._subprocess_manager:
+        if self._runner:
             self._lg.debug("stopping server...", extra={"server": self._name})
-            self._subprocess_manager.stop()
-            self._subprocess_manager = None
-            self._teardown_subprocess_logging()
+            self._runner.stop(timeout=timeout)
+            self._runner = None
             self._lg.info("server stopped", extra={"server": self._name})
 
     def _run_direct(self) -> None:

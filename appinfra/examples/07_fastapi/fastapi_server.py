@@ -18,6 +18,8 @@ Usage:
     python fastapi_server.py --cli serve
 """
 
+from __future__ import annotations
+
 import argparse
 import multiprocessing as mp
 import pathlib
