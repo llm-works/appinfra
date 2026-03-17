@@ -285,11 +285,11 @@ class AsyncProcessChannel(_BaseAsyncChannel[TRequest, TResponse]):
     async def send(self, message: TRequest) -> None:
         if self._closed:
             raise ChannelClosedError("Channel is closed")
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         await loop.run_in_executor(None, self._outbound.put, message)
 
     async def _get_from_queue(self, timeout: float | None) -> Any:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         try:
             return await loop.run_in_executor(
                 None, lambda: self._inbound.get(timeout=timeout)
@@ -305,7 +305,7 @@ class AsyncProcessChannel(_BaseAsyncChannel[TRequest, TResponse]):
 
         if self._closed:
             try:
-                loop = asyncio.get_event_loop()
+                loop = asyncio.get_running_loop()
                 return cast(
                     TResponse,
                     await loop.run_in_executor(None, self._inbound.get_nowait),

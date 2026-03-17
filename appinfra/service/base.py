@@ -133,6 +133,11 @@ class ScheduledService(Service):
     interval: float = 1.0
     """Seconds between tick() calls."""
 
+    def __init__(self) -> None:
+        import threading
+
+        self._stop_event = threading.Event()
+
     @abstractmethod
     def tick(self) -> None:
         """Execute one iteration of work.
@@ -143,13 +148,10 @@ class ScheduledService(Service):
 
     def execute(self) -> None:
         """Default execute() that loops calling tick()."""
-        import time
-
-        self._stop_flag = False
-        while not getattr(self, "_stop_flag", False):
+        while not self._stop_event.is_set():
             self.tick()
-            time.sleep(self.interval)
+            self._stop_event.wait(self.interval)
 
     def teardown(self) -> None:
         """Signal the service to stop."""
-        self._stop_flag = True
+        self._stop_event.set()

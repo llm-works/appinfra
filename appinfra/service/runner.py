@@ -276,6 +276,13 @@ class ThreadRunner(Runner):
             self.service.teardown()
             if self._thread is not None:
                 self._thread.join(timeout=timeout)
+                if self._thread.is_alive():
+                    # Thread didn't exit within timeout - it's a daemon thread
+                    # so it will be terminated when the process exits
+                    self.service.lg.warning(
+                        f"service thread did not exit within {timeout}s, "
+                        "will be terminated on process exit"
+                    )
         finally:
             self._transition(State.STOPPED)
 
@@ -434,6 +441,7 @@ class ProcessRunner(Runner):
         self._healthy_event = None
         if self._error_queue is not None:
             try:
+                self._error_queue.cancel_join_thread()
                 self._error_queue.close()
             except Exception:
                 pass
@@ -447,6 +455,7 @@ class ProcessRunner(Runner):
             self._log_listener = None
         if self._log_queue is not None:
             try:
+                self._log_queue.cancel_join_thread()
                 self._log_queue.close()
             except Exception:
                 pass

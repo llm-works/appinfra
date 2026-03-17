@@ -54,6 +54,7 @@ class Manager:
         self._started: list[str] = []
         self._failed: set[str] = set()
         self._lock = threading.Lock()
+        self._atexit_registered = True
 
         atexit.register(self._atexit_stop)
 
@@ -168,6 +169,11 @@ class Manager:
         Errors during shutdown are logged but don't prevent other
         services from stopping.
         """
+        # Unregister atexit handler since we're stopping explicitly
+        if self._atexit_registered:
+            atexit.unregister(self._atexit_stop)
+            self._atexit_registered = False
+
         if not self._started:
             return
 
