@@ -301,6 +301,17 @@ class TestManagerLifecycle:
         mgr.stop()
         assert not mgr.is_running("a")
 
+    def test_start_while_running_raises(self, lg):
+        """Calling start() while running raises RuntimeError."""
+        mgr = Manager(lg)
+        mgr.add_service(SimpleService("a"))
+        mgr.start()
+
+        with pytest.raises(RuntimeError, match="already running"):
+            mgr.start()
+
+        mgr.stop()
+
 
 @pytest.mark.unit
 class TestManagerIsRunning:

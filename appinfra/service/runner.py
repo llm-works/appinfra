@@ -449,10 +449,11 @@ class ProcessRunner(Runner):
                 self._process.join(timeout=1.0)
             process_stopped = not self._process.is_alive()
 
-        self._cleanup_ipc()
         if process_stopped:
+            self._cleanup_ipc()
             self._transition(State.STOPPED)
         # If process still alive after kill, stay in STOPPING state
+        # and preserve IPC handles so supervisor can retry/monitor
 
     def _cleanup_ipc(self) -> None:
         """Clean up IPC resources."""

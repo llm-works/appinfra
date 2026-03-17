@@ -127,6 +127,13 @@ class Manager:
         """
         return self._runners[name]
 
+    def _is_active(self) -> bool:
+        """Check if any runners are in an active state."""
+        return any(
+            r.state in (State.STARTING, State.RUNNING, State.STOPPING)
+            for r in self._runners.values()
+        )
+
     def start(self) -> None:
         """Start all services in dependency order.
 
@@ -138,11 +145,14 @@ class Manager:
             RunError: If execution fails to start.
             HealthTimeoutError: If health check times out.
             DependencyFailedError: If a dependency failed.
+            RuntimeError: If manager is already running.
         """
         if not self._runners:
             return
 
-        # Re-register atexit handler if needed (for restart after stop)
+        if self._is_active():
+            raise RuntimeError("Manager is already running")
+
         if not self._atexit_registered:
             atexit.register(self._atexit_stop)
             self._atexit_registered = True
