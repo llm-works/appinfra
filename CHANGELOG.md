@@ -10,6 +10,16 @@ For API stability guarantees and deprecation policy, see
 
 ## [Unreleased]
 
+### Changed
+- **BREAKING:** `IPCChannel.submit()` no longer takes a separate `request_id` parameter. The ID is
+  now extracted from the request object's `id` attribute. This simplifies the API and prevents
+  mismatches between the request ID and the request object.
+  - Old: `await ipc.submit(request_id, request, timeout=30.0)`
+  - New: `await ipc.submit(request, timeout=30.0)` (request must have `.id` attribute)
+- FastAPI subprocess mode now uses `ProcessRunner` from the service package instead of the internal
+  `SubprocessManager`. This provides better integration with the service execution framework and
+  enables monitor-based auto-restart.
+
 ### Added
 - Service execution framework (`appinfra.service`) for managing service lifecycles:
   - **Three-layer architecture**: Service (what to run), Runner (how to run), Manager (orchestration)

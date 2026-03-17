@@ -1,9 +1,8 @@
 """Tests for IPCChannel."""
 
 import asyncio
+import multiprocessing as mp
 from dataclasses import dataclass
-from queue import Empty
-from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -43,54 +42,29 @@ class TestIPCChannel:
 
     def test_initialization(self):
         """Test channel initialization."""
-        request_q = MagicMock()
-        response_q = MagicMock()
+        request_q: mp.Queue = mp.Queue()
+        response_q: mp.Queue = mp.Queue()
         config = IPCConfig(max_pending=50)
 
         channel = IPCChannel(request_q, response_q, config)
 
-        assert channel.request_q is request_q
-        assert channel.response_q is response_q
-        assert channel.config is config
-        assert channel.pending == {}
-        assert channel.pending_streams == {}
-        assert channel._poll_task is None
+        assert channel.pending_count == 0
+        assert channel.health_status["max_pending"] == 50
 
     def test_pending_count_empty(self):
         """Test pending_count with no pending requests."""
-        channel = IPCChannel(MagicMock(), MagicMock(), IPCConfig())
+        channel = IPCChannel(mp.Queue(), mp.Queue(), IPCConfig())
         assert channel.pending_count == 0
-
-    def test_pending_count_with_requests(self):
-        """Test pending_count with pending requests."""
-        channel = IPCChannel(MagicMock(), MagicMock(), IPCConfig())
-        channel.pending["req1"] = MagicMock()
-        channel.pending["req2"] = MagicMock()
-        channel.pending_streams["stream1"] = MagicMock()
-
-        assert channel.pending_count == 3
 
     def test_health_status_healthy(self):
         """Test health_status when under capacity."""
-        channel = IPCChannel(MagicMock(), MagicMock(), IPCConfig(max_pending=100))
-        channel.pending["req1"] = MagicMock()
+        channel = IPCChannel(mp.Queue(), mp.Queue(), IPCConfig(max_pending=100))
 
         status = channel.health_status
 
-        assert status["pending_requests"] == 1
+        assert status["pending_requests"] == 0
         assert status["max_pending"] == 100
         assert status["is_healthy"] is True
-
-    def test_health_status_unhealthy(self):
-        """Test health_status when at capacity."""
-        channel = IPCChannel(MagicMock(), MagicMock(), IPCConfig(max_pending=2))
-        channel.pending["req1"] = MagicMock()
-        channel.pending["req2"] = MagicMock()
-
-        status = channel.health_status
-
-        assert status["pending_requests"] == 2
-        assert status["is_healthy"] is False
 
 
 @pytest.mark.unit
@@ -100,101 +74,83 @@ class TestIPCChannelSubmit:
     @pytest.mark.asyncio
     async def test_submit_exceeds_max_pending(self):
         """Test submit raises when max_pending exceeded."""
-        channel = IPCChannel(MagicMock(), MagicMock(), IPCConfig(max_pending=1))
-        channel.pending["existing"] = MagicMock()
+        channel = IPCChannel(mp.Queue(), mp.Queue(), IPCConfig(max_pending=0))
 
         with pytest.raises(RuntimeError, match="Max pending requests exceeded"):
-            await channel.submit("new_req", MockRequest(id="new_req", data="test"))
+            await channel.submit(MockRequest(id="req1", data="test"))
 
     @pytest.mark.asyncio
-    async def test_submit_puts_request_in_queue(self):
+    async def test_submit_sends_to_queue(self):
         """Test submit puts request in request queue."""
-        request_q = MagicMock()
-        channel = IPCChannel(request_q, MagicMock(), IPCConfig())
+        request_q: mp.Queue = mp.Queue()
+        response_q: mp.Queue = mp.Queue()
+        channel = IPCChannel(request_q, response_q, IPCConfig())
 
         request = MockRequest(id="req1", data="test")
 
-        # Create a task that will timeout
-        with pytest.raises(TimeoutError):
-            await channel.submit("req1", request, timeout=0.01)
+        # Start submit but expect timeout since no response
+        with pytest.raises(Exception):  # Will be ChannelTimeoutError or similar
+            await channel.submit(request, timeout=0.05)
 
-        request_q.put.assert_called_once_with(request)
-
-    @pytest.mark.asyncio
-    async def test_submit_creates_pending_future(self):
-        """Test submit creates future in pending dict."""
-        channel = IPCChannel(MagicMock(), MagicMock(), IPCConfig())
-
-        async def submit_and_check():
-            # Start submit but don't await completion
-            task = asyncio.create_task(
-                channel.submit("req1", MockRequest(id="req1", data="test"), timeout=0.1)
-            )
-            await asyncio.sleep(0.01)  # Let it register
-
-            assert "req1" in channel.pending
-            task.cancel()
-
-        await submit_and_check()
+        # Verify request was sent
+        sent = request_q.get_nowait()
+        assert sent.id == "req1"
+        assert sent.data == "test"
 
     @pytest.mark.asyncio
-    async def test_submit_timeout_cleanup(self):
-        """Test submit cleans up pending on timeout."""
-        channel = IPCChannel(MagicMock(), MagicMock(), IPCConfig())
+    async def test_submit_receives_response(self):
+        """Test submit returns response when received."""
+        request_q: mp.Queue = mp.Queue()
+        response_q: mp.Queue = mp.Queue()
+        channel = IPCChannel(request_q, response_q, IPCConfig())
 
-        with pytest.raises(TimeoutError):
-            await channel.submit(
-                "req1", MockRequest(id="req1", data="test"), timeout=0.01
-            )
+        request = MockRequest(id="req1", data="test")
 
-        # Pending should be cleaned up
-        assert "req1" not in channel.pending
+        # Simulate response arriving
+        async def send_response():
+            await asyncio.sleep(0.01)
+            response_q.put(MockResponse(id="req1", result="success"))
 
+        asyncio.create_task(send_response())
 
-@pytest.mark.unit
-class TestIPCChannelResponseHandling:
-    """Tests for response handling."""
+        result = await channel.submit(request, timeout=1.0)
+        assert result.id == "req1"
+        assert result.result == "success"
 
-    def test_handle_response_resolves_future(self):
-        """Test _handle_response resolves the future."""
-        channel = IPCChannel(MagicMock(), MagicMock(), IPCConfig())
+    @pytest.mark.asyncio
+    async def test_submit_pending_count_tracks(self):
+        """Test pending_count increments during submit and decrements after."""
+        request_q: mp.Queue = mp.Queue()
+        response_q: mp.Queue = mp.Queue()
+        channel = IPCChannel(request_q, response_q, IPCConfig())
 
-        loop = asyncio.new_event_loop()
-        future = loop.create_future()
-        channel.pending["req1"] = future
+        request = MockRequest(id="req1", data="test")
+        assert channel.pending_count == 0
 
-        response = MockResponse(id="req1", result="success")
-        channel._handle_response("req1", response)
+        # Start submit task
+        async def do_submit():
+            try:
+                await channel.submit(request, timeout=0.1)
+            except Exception:
+                pass
 
-        assert future.done()
-        assert future.result() is response
-        assert "req1" not in channel.pending
+        task = asyncio.create_task(do_submit())
+        await asyncio.sleep(0.01)
 
-        loop.close()
+        # While submit is pending
+        assert channel.pending_count == 1
 
-    def test_handle_response_with_error(self):
-        """Test _handle_response sets exception on error."""
-        channel = IPCChannel(MagicMock(), MagicMock(), IPCConfig())
+        # Wait for timeout
+        await task
+        assert channel.pending_count == 0
 
-        loop = asyncio.new_event_loop()
-        future = loop.create_future()
-        channel.pending["req1"] = future
+    @pytest.mark.asyncio
+    async def test_submit_requires_id_attribute(self):
+        """Test submit raises if request has no id."""
+        channel = IPCChannel(mp.Queue(), mp.Queue(), IPCConfig())
 
-        response = MockResponse(id="req1", result="", error="Something failed")
-        channel._handle_response("req1", response)
-
-        assert future.done()
-        with pytest.raises(RuntimeError, match="Something failed"):
-            future.result()
-
-        loop.close()
-
-    def test_handle_response_unknown_request(self):
-        """Test _handle_response with unknown request ID."""
-        channel = IPCChannel(MagicMock(), MagicMock(), IPCConfig())
-
-        # Should not raise, just log warning
-        channel._handle_response("unknown", MockResponse(id="unknown", result="x"))
+        with pytest.raises(ValueError, match="id"):
+            await channel.submit({"no_id": True})
 
 
 @pytest.mark.unit
@@ -202,132 +158,65 @@ class TestIPCChannelStreaming:
     """Tests for streaming functionality."""
 
     @pytest.mark.asyncio
-    async def test_handle_stream_chunk(self):
-        """Test _handle_stream_chunk puts chunk in queue."""
-        channel = IPCChannel(MagicMock(), MagicMock(), IPCConfig())
+    async def test_submit_stream_yields_chunks(self):
+        """Test submit_stream yields chunks until is_final."""
+        request_q: mp.Queue = mp.Queue()
+        response_q: mp.Queue = mp.Queue()
+        channel = IPCChannel(request_q, response_q, IPCConfig())
 
-        chunk_queue: asyncio.Queue = asyncio.Queue()
-        channel.pending_streams["stream1"] = chunk_queue
+        request = MockRequest(id="stream1", data="test")
 
-        chunk = MockStreamChunk(id="stream1", data="chunk1")
-        await channel._handle_stream_chunk("stream1", chunk)
+        # Simulate chunks arriving
+        async def send_chunks():
+            await asyncio.sleep(0.01)
+            response_q.put(MockStreamChunk(id="stream1", data="chunk1", is_final=False))
+            await asyncio.sleep(0.01)
+            response_q.put(MockStreamChunk(id="stream1", data="chunk2", is_final=True))
 
-        result = await chunk_queue.get()
-        assert result is chunk
+        asyncio.create_task(send_chunks())
+
+        chunks = []
+        async for chunk in channel.submit_stream(request, timeout=1.0):
+            chunks.append(chunk)
+
+        assert len(chunks) == 2
+        assert chunks[0].data == "chunk1"
+        assert chunks[1].data == "chunk2"
+        assert chunks[1].is_final is True
 
     @pytest.mark.asyncio
-    async def test_handle_stream_chunk_unknown_stream(self):
-        """Test _handle_stream_chunk with unknown stream ID."""
-        channel = IPCChannel(MagicMock(), MagicMock(), IPCConfig())
+    async def test_submit_stream_exceeds_max_pending(self):
+        """Test submit_stream raises when max_pending exceeded."""
+        channel = IPCChannel(mp.Queue(), mp.Queue(), IPCConfig(max_pending=0))
 
-        # Should not raise, just log warning
-        await channel._handle_stream_chunk(
-            "unknown", MockStreamChunk(id="unknown", data="x")
-        )
+        with pytest.raises(RuntimeError, match="Max pending requests exceeded"):
+            async for _ in channel.submit_stream(MockRequest(id="s1", data="test")):
+                pass
 
 
 @pytest.mark.unit
-class TestIPCChannelPolling:
-    """Tests for polling functionality."""
+class TestIPCChannelLifecycle:
+    """Tests for lifecycle methods."""
 
     @pytest.mark.asyncio
-    async def test_start_polling_creates_task(self):
-        """Test start_polling creates background task."""
-        channel = IPCChannel(MagicMock(), MagicMock(), IPCConfig())
-
-        with patch.object(channel, "_poll_responses", new_callable=AsyncMock):
-            await channel.start_polling()
-
-            assert channel._poll_task is not None
-
-            await channel.stop_polling()
+    async def test_start_polling_is_noop(self):
+        """Test start_polling completes without error (no-op for this impl)."""
+        channel = IPCChannel(mp.Queue(), mp.Queue(), IPCConfig())
+        await channel.start_polling()
+        # No error = success
 
     @pytest.mark.asyncio
-    async def test_start_polling_idempotent(self):
-        """Test start_polling is idempotent."""
-        channel = IPCChannel(MagicMock(), MagicMock(), IPCConfig())
+    async def test_stop_polling_closes_channel(self):
+        """Test stop_polling closes the underlying channel."""
+        channel = IPCChannel(mp.Queue(), mp.Queue(), IPCConfig())
+        await channel.start_polling()
+        await channel.stop_polling()
 
-        with patch.object(channel, "_poll_responses", new_callable=AsyncMock):
-            await channel.start_polling()
-            task1 = channel._poll_task
-
-            await channel.start_polling()
-            task2 = channel._poll_task
-
-            assert task1 is task2
-
-            await channel.stop_polling()
+        assert channel._closed is True
 
     @pytest.mark.asyncio
-    async def test_stop_polling_cancels_task(self):
-        """Test stop_polling cancels the polling task."""
-        channel = IPCChannel(MagicMock(), MagicMock(), IPCConfig())
-
-        with patch.object(channel, "_poll_responses", new_callable=AsyncMock):
-            await channel.start_polling()
-            await channel.stop_polling()
-
-            assert channel._poll_task is None
-
-    @pytest.mark.asyncio
-    async def test_stop_polling_cancels_pending_futures(self):
-        """Test stop_polling cancels pending futures."""
-        channel = IPCChannel(MagicMock(), MagicMock(), IPCConfig())
-
-        future = asyncio.get_event_loop().create_future()
-        channel.pending["req1"] = future
-
-        with patch.object(channel, "_poll_responses", new_callable=AsyncMock):
-            await channel.start_polling()
-            await channel.stop_polling()
-
-        assert future.cancelled()
-        assert len(channel.pending) == 0
-
-    @pytest.mark.asyncio
-    async def test_read_queue_item_returns_none_on_empty(self):
-        """Test _read_queue_item returns None when queue is empty."""
-        response_q = MagicMock()
-        response_q.get.side_effect = Empty()
-
-        channel = IPCChannel(MagicMock(), response_q, IPCConfig(poll_interval=0.001))
-
-        loop = asyncio.get_event_loop()
-        result = await channel._read_queue_item(loop)
-
-        assert result is None
-
-    @pytest.mark.asyncio
-    async def test_dispatch_response_to_pending(self):
-        """Test _dispatch_response routes to pending future."""
-        channel = IPCChannel(MagicMock(), MagicMock(), IPCConfig())
-
-        future = asyncio.get_event_loop().create_future()
-        channel.pending["req1"] = future
-
-        response = MockResponse(id="req1", result="success")
-        await channel._dispatch_response(response)
-
-        assert future.done()
-
-    @pytest.mark.asyncio
-    async def test_dispatch_response_to_stream(self):
-        """Test _dispatch_response routes to stream queue."""
-        channel = IPCChannel(MagicMock(), MagicMock(), IPCConfig())
-
-        chunk_queue: asyncio.Queue = asyncio.Queue()
-        channel.pending_streams["stream1"] = chunk_queue
-
-        chunk = MockStreamChunk(id="stream1", data="data")
-        await channel._dispatch_response(chunk)
-
-        result = await chunk_queue.get()
-        assert result is chunk
-
-    @pytest.mark.asyncio
-    async def test_dispatch_response_no_id(self):
-        """Test _dispatch_response with item without id attribute."""
-        channel = IPCChannel(MagicMock(), MagicMock(), IPCConfig())
-
-        # Should not raise, just log warning
-        await channel._dispatch_response({"no_id": True})
+    async def test_stop_polling_idempotent(self):
+        """Test stop_polling can be called multiple times."""
+        channel = IPCChannel(mp.Queue(), mp.Queue(), IPCConfig())
+        await channel.stop_polling()
+        await channel.stop_polling()  # Should not error

@@ -2,10 +2,10 @@
 
 from .ipc import IPCChannel
 from .server import Server
-from .subprocess import SubprocessManager
+from .service import UvicornService
 
 __all__ = [
     "IPCChannel",
     "Server",
-    "SubprocessManager",
+    "UvicornService",
 ]

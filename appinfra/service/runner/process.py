@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import multiprocessing as mp
+import threading
 import time
 from multiprocessing.synchronize import Event as MPEvent
 from typing import Any
@@ -77,6 +78,9 @@ class ProcessRunner(Runner):
         # Logging infrastructure for subprocess
         self._log_queue: mp.Queue[Any] | None = None
         self._log_listener: LogQueueListener | None = None
+        # Monitor thread for auto-restart
+        self._monitor_thread: threading.Thread | None = None
+        self._stop_monitor_event: threading.Event = threading.Event()
 
     def start(self) -> None:
         """Start the service in a subprocess."""
@@ -138,6 +142,9 @@ class ProcessRunner(Runner):
         if self._state in (State.CREATED, State.STOPPED, State.STOPPING, State.DONE):
             return
 
+        # Stop monitor thread first
+        self.stop_monitor()
+
         self._transition(State.STOPPING)
         timeout = timeout or self.stop_timeout
 
@@ -162,6 +169,50 @@ class ProcessRunner(Runner):
             self._transition(State.STOPPED)
         # If process still alive after kill, stay in STOPPING state
         # and preserve IPC handles so supervisor can retry/monitor
+
+    def start_monitor(self, interval: float = 1.0) -> None:
+        """Start background monitor thread for auto-restart.
+
+        The monitor periodically calls check() to detect failures and
+        trigger restarts according to the restart policy.
+
+        Args:
+            interval: Seconds between health checks (default: 1.0)
+        """
+        if self._monitor_thread is not None and self._monitor_thread.is_alive():
+            return  # Already monitoring
+
+        self._stop_monitor_event.clear()
+        self._monitor_thread = threading.Thread(
+            target=self._monitor_loop,
+            args=(interval,),
+            daemon=True,
+            name=f"monitor-{self.name}",
+        )
+        self._monitor_thread.start()
+
+    def stop_monitor(self, timeout: float = 2.0) -> None:
+        """Stop the monitor thread.
+
+        Args:
+            timeout: Seconds to wait for thread to stop.
+        """
+        self._stop_monitor_event.set()
+        if self._monitor_thread is not None and self._monitor_thread.is_alive():
+            self._monitor_thread.join(timeout=timeout)
+        self._monitor_thread = None
+
+    def _monitor_loop(self, interval: float) -> None:
+        """Monitor loop that checks health and triggers restarts."""
+        while not self._stop_monitor_event.is_set():
+            if self._state == State.STOPPED:
+                break
+
+            # check() handles failure detection and restart
+            self.check()
+
+            # Wait for interval or stop signal
+            self._stop_monitor_event.wait(timeout=interval)
 
     def _cleanup_ipc(self) -> None:
         """Clean up IPC resources."""

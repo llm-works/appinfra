@@ -243,13 +243,12 @@ class TestFastAPIIPCWithLifecycleCallbacks:
 
         # Route handler that uses IPC
         async def ipc_echo_handler(data: str, ipc: IPCChannel = Depends(get_ipc)):
-            request_id = str(uuid.uuid4())
-            ipc_request = IPCRequest(id=request_id, data=data)
+            ipc_request = IPCRequest(id=str(uuid.uuid4()), data=data)
 
             # This submit will:
             # 1. Put request in request_q
-            # 2. Wait for response in response_q (via IPC polling)
-            response = await ipc.submit(request_id, ipc_request, timeout=5.0)
+            # 2. Wait for response in response_q
+            response = await ipc.submit(ipc_request, timeout=5.0)
             return {"result": response.result}
 
         # Startup callback - this is what triggered the bug
