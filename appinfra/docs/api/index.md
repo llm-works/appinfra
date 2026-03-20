@@ -10,6 +10,7 @@ The Infra framework is organized into several major modules, each providing spec
 |--------|-------------|
 | [Application Framework](app.md) | Core application classes, lifecycle management, and tool framework |
 | [AppBuilder](app-builder.md) | Fluent API for constructing CLI applications with builders |
+| [FastAPI Integration](fastapi.md) | HTTP server with subprocess isolation and service orchestration |
 | [CLI Framework](cli.md) | Output abstractions and built-in CLI tools |
 | [Configuration](config.md) | Config loading, environment overrides, hot-reload watching |
 | [Logging System](logging.md) | Advanced logging with structured output, builders, and handlers |
@@ -23,7 +24,7 @@ The Infra framework is organized into several major modules, each providing spec
 | [Service](service.md) | Service execution with dependency ordering and state management |
 | [Subprocess](subprocess.md) | Context manager for subprocess lifecycle management |
 | [Utilities](utilities.md) | Core utilities (DotDict, rate limiting, EWMA, etc.) |
-| [Exceptions](exceptions.md) | Exception hierarchy for error handling |
+| [Exceptions](errors.md) | Exception hierarchy for error handling |
 
 ## Design Patterns
 
@@ -147,6 +148,7 @@ def get(self, path: str, default: Any = None) -> Any:
 ### Application Development
 - [Application Framework](app.md) - Core classes and lifecycle
 - [AppBuilder](app-builder.md) - Fluent builder API
+- [FastAPI Integration](fastapi.md) - HTTP server with subprocess isolation
 - [CLI Framework](cli.md) - Output abstractions and CLI tools
 - [Service](service.md) - Service execution and orchestration
 - [Subprocess](subprocess.md) - Subprocess lifecycle management
@@ -170,7 +172,7 @@ def get(self, path: str, default: Any = None) -> Any:
 - [Core Utilities](utilities.md) - DotDict, rate limiting
 
 ### Error Handling
-- [Exceptions](exceptions.md) - Exception hierarchy
+- [Exceptions](errors.md) - Exception hierarchy
 
 ## Next Steps
 

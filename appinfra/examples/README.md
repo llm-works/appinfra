@@ -63,11 +63,38 @@ Advanced topics and utilities:
 - `tcp_server.py` - TCP server with ticker
 - `ticker_standalone.py` - Standalone ticker usage
 
+### 7. FastAPI → [07_fastapi/](07_fastapi/)
+HTTP server framework with FastAPI:
+- `fastapi_server.py` - Direct, subprocess, and CLI modes
+
 ### 8. Decorators → [08_decorators/](08_decorators/)
 Decorator-based tool definitions:
 - `simple_decorator.py` - Basic @tool decorator usage
 - `hierarchical_commands.py` - Nested command groups
 - `mixed_approach.py` - Combining decorators with classes
+
+### 9. UI → [09_ui/](09_ui/)
+Interactive UI components:
+- `progress_logger_example.py` - Progress bars with logging
+- `spinners_and_progress.py` - Spinners and progress indicators
+- `interactive_prompts.py` - User input prompts
+- `rich_output.py` - Styled terminal output
+- `scrollable_selection.py` - Scrollable menu selection
+- `secret_masking.py` - Secret redaction in output
+- `deploy_tool.py` - Complete UI integration example
+
+### 10. Plugins → [10_plugins/](10_plugins/)
+Plugin system examples:
+- `example_plugins.py` - Plugin architecture patterns
+
+### 11. Docs → [11_docs/](11_docs/)
+Documentation generation:
+- `docs_generation.py` - Auto-generate CLI docs from tools
+
+### 12. Version Tracking → [12_version_tracking/](12_version_tracking/)
+Version and commit tracking:
+- `version_tracking_demo.py` - Version info in applications
+- `standalone_tracker.py` - Using VersionTracker independently
 
 ## Running Examples
 
@@ -122,11 +149,29 @@ Note: For direct execution, ensure `python3` resolves to your venv. See
 
 ### Network
 - TCP server: `06_advanced/tcp_server.py`
+- FastAPI server: `07_fastapi/fastapi_server.py`
 
 ### Decorators
 - Simple decorator: `08_decorators/simple_decorator.py`
 - Hierarchical commands: `08_decorators/hierarchical_commands.py`
 - Mixed approach: `08_decorators/mixed_approach.py`
+
+### UI Components
+- Progress bars: `09_ui/progress_logger_example.py`
+- Spinners: `09_ui/spinners_and_progress.py`
+- Prompts: `09_ui/interactive_prompts.py`
+- Rich output: `09_ui/rich_output.py`
+- Secret masking: `09_ui/secret_masking.py`
+
+### Plugins
+- Plugin architecture: `10_plugins/example_plugins.py`
+
+### Documentation
+- Docs generation: `11_docs/docs_generation.py`
+
+### Version Tracking
+- Version demo: `12_version_tracking/version_tracking_demo.py`
+- Standalone tracker: `12_version_tracking/standalone_tracker.py`
 
 ## Documentation
 
@@ -137,7 +182,12 @@ Each topic folder contains a README with detailed explanations:
 - [04_configuration/README.md](04_configuration/README.md) - Config management
 - [05_database/README.md](05_database/README.md) - Database integration
 - [06_advanced/README.md](06_advanced/README.md) - Advanced topics
+- [07_fastapi/README.md](07_fastapi/README.md) - FastAPI server integration
 - [08_decorators/README.md](08_decorators/README.md) - Decorator-based tools
+- [09_ui/README.md](09_ui/README.md) - UI components
+- [10_plugins/README.md](10_plugins/README.md) - Plugin system
+- [11_docs/README.md](11_docs/README.md) - Documentation generation
+- [12_version_tracking/README.md](12_version_tracking/README.md) - Version tracking
 
 ## Related Documentation
 
