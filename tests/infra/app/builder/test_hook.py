@@ -444,8 +444,8 @@ class TestBuiltinHooks:
 
         BuiltinHooks.log_startup(context)
 
-        app.lg.info.assert_called_once()
-        assert "starting" in app.lg.info.call_args[0][0]
+        app.lg.debug.assert_called_once()
+        assert "starting" in app.lg.debug.call_args[0][0]
 
     def test_log_startup_no_logger(self):
         """Test log_startup with no logger."""
@@ -462,8 +462,8 @@ class TestBuiltinHooks:
 
         BuiltinHooks.log_shutdown(context)
 
-        app.lg.info.assert_called_once()
-        assert "shutting down" in app.lg.info.call_args[0][0]
+        app.lg.debug.assert_called_once()
+        assert "shutting down" in app.lg.debug.call_args[0][0]
 
     def test_log_tool_start(self):
         """Test log_tool_start hook (lines 252-256)."""
@@ -474,8 +474,8 @@ class TestBuiltinHooks:
 
         BuiltinHooks.log_tool_start(context)
 
-        tool.lg.info.assert_called_once()
-        assert "mytool" in tool.lg.info.call_args[0][0]
+        tool.lg.debug.assert_called_once()
+        assert "tool" in tool.lg.debug.call_args[1]["extra"]
 
     def test_log_tool_end(self):
         """Test log_tool_end hook (lines 258-262)."""
@@ -486,8 +486,8 @@ class TestBuiltinHooks:
 
         BuiltinHooks.log_tool_end(context)
 
-        tool.lg.info.assert_called_once()
-        assert "mytool" in tool.lg.info.call_args[0][0]
+        tool.lg.debug.assert_called_once()
+        assert "tool" in tool.lg.debug.call_args[1]["extra"]
 
     def test_log_error_with_app_logger(self):
         """Test log_error with app logger (lines 264-269)."""

@@ -588,14 +588,14 @@ class App(Traceable):
             # Execute the selected tool
             tool = self.registry.get_tool(tool_name)
             if not tool:
-                self.lg.error(f"tool '{tool_name}' not found")
+                self.lg.error("tool not found", extra={"tool": tool_name})
                 return 1
 
             self.lifecycle.setup_tool(tool, start=self.lifecycle._start_time)
             return_code = self.lifecycle.execute_tool(tool, args=self._parsed_args)
         else:
             # Handle case where no tool is selected
-            self.lg.trace("running in no-tool mode...")  # type: ignore[attr-defined]
+            self.lg.trace("running in no-tool mode")  # type: ignore[attr-defined]
             return_code = self.run_no_tool()
 
         return return_code

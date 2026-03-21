@@ -255,25 +255,25 @@ class BuiltinHooks:
     def log_startup(context: HookContext) -> None:
         """Log application startup."""
         if context.application and hasattr(context.application, "lg"):
-            context.application.lg.info("application starting up")
+            context.application.lg.debug("starting application")
 
     @staticmethod
     def log_shutdown(context: HookContext) -> None:
         """Log application shutdown."""
         if context.application and hasattr(context.application, "lg"):
-            context.application.lg.info("application shutting down")
+            context.application.lg.debug("shutting down application...")
 
     @staticmethod
     def log_tool_start(context: HookContext) -> None:
         """Log tool start."""
         if context.tool and hasattr(context.tool, "lg"):
-            context.tool.lg.info(f"starting tool: {context.tool.name}")
+            context.tool.lg.debug("starting tool...", extra={"tool": context.tool.name})
 
     @staticmethod
     def log_tool_end(context: HookContext) -> None:
         """Log tool end."""
         if context.tool and hasattr(context.tool, "lg"):
-            context.tool.lg.info(f"finished tool: {context.tool.name}")
+            context.tool.lg.debug("finished tool", extra={"tool": context.tool.name})
 
     @staticmethod
     def log_error(context: HookContext) -> None:

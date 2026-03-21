@@ -223,8 +223,10 @@ class TestLoggingMiddlewareProcessRequest:
 
         logger.info.assert_called_once()
         log_message = logger.info.call_args[0][0]
-        assert "POST" in log_message
-        assert "/api/test" in log_message
+        assert "incoming request" in log_message
+        extra = logger.info.call_args[1]["extra"]
+        assert extra["method"] == "POST"
+        assert extra["path"] == "/api/test"
         assert result is request
 
     @pytest.mark.asyncio
@@ -237,9 +239,9 @@ class TestLoggingMiddlewareProcessRequest:
         result = await middleware.process_request(request)
 
         logger.info.assert_called_once()
-        log_message = logger.info.call_args[0][0]
-        assert "GET" in log_message  # Default method
-        assert "/" in log_message  # Default path
+        extra = logger.info.call_args[1]["extra"]
+        assert extra["method"] == "GET"  # Default method
+        assert extra["path"] == "/"  # Default path
 
 
 @pytest.mark.unit
@@ -256,8 +258,8 @@ class TestLoggingMiddlewareProcessResponse:
         result = await middleware.process_response(response)
 
         logger.info.assert_called_once()
-        log_message = logger.info.call_args[0][0]
-        assert "201" in log_message
+        extra = logger.info.call_args[1]["extra"]
+        assert extra["status"] == 201
         assert result is response
 
     @pytest.mark.asyncio
@@ -269,8 +271,8 @@ class TestLoggingMiddlewareProcessResponse:
 
         result = await middleware.process_response(response)
 
-        log_message = logger.info.call_args[0][0]
-        assert "200" in log_message  # Default status
+        extra = logger.info.call_args[1]["extra"]
+        assert extra["status"] == 200  # Default status
 
 
 # =============================================================================

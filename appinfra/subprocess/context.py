@@ -133,5 +133,5 @@ class SubprocessContext:
     def _handle_stop_signal(self, signum: int, frame: FrameType | None) -> None:
         """Handle SIGTERM/SIGINT by setting running to False."""
         sig_name = signal.Signals(signum).name
-        self._lg.debug(f"received {sig_name}, stopping")
+        self._lg.debug("received signal, stopping", extra={"signal": sig_name})
         self._running = False

@@ -152,9 +152,11 @@ async def _run_startup_callbacks(
     for cb in callbacks:
         name = cb.name or cb.callback.__name__
         if lg is not None:
-            lg.debug(f"running startup callback: {name}")
+            lg.trace("running startup callback...", extra={"callback": name})
         try:
             await cb.callback(app)
+            if lg is not None:
+                lg.debug("startup callback completed", extra={"callback": name})
         except Exception as e:
             raise CallbackError(f"Startup callback '{name}' failed") from e
 
@@ -170,12 +172,17 @@ async def _run_shutdown_callbacks(
     for cb in callbacks:
         name = cb.name or cb.callback.__name__
         if lg is not None:
-            lg.debug(f"running shutdown callback: {name}")
+            lg.trace("running shutdown callback...", extra={"callback": name})
         try:
             await cb.callback(app)
+            if lg is not None:
+                lg.debug("shutdown callback completed", extra={"callback": name})
         except Exception as e:
             if lg is not None:
-                lg.error(f"error in shutdown callback '{name}'", extra={"exception": e})
+                lg.error(
+                    "error in shutdown callback",
+                    extra={"callback": name, "exception": e},
+                )
             raise CallbackError(f"Shutdown callback '{name}' failed") from e
 
 

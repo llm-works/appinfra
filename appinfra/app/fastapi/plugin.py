@@ -62,7 +62,8 @@ class ServeTool(Tool):
             Exit code (0 for success, non-zero for error)
         """
         self.lg.info(
-            f"Starting server on {self._server.config.host}:{self._server.config.port}"
+            "starting server...",
+            extra={"host": self._server.config.host, "port": self._server.config.port},
         )
 
         try:
@@ -149,5 +150,5 @@ class ServerPlugin(Plugin):
         Called during app shutdown phase.
         """
         if self._server.is_running:
-            logger.info("stopping server during app cleanup")
+            logger.info("stopping server...")
             self._server.stop()

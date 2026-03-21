@@ -323,6 +323,11 @@ class LifecycleManager:
     def _log_shutdown_complete(self, return_code: int) -> None:
         """Log shutdown completion with elapsed time."""
         assert self._lifecycle_logger is not None
+
+        # Log application-level shutdown completion
+        if self.application and hasattr(self.application, "lg"):
+            self.application.lg.debug("application shut down")
+
         self._lifecycle_logger.debug(
             "done",
             extra={

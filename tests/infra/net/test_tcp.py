@@ -340,7 +340,7 @@ class TestServerInitialization:
     def test_init_logs_debug_message(self, mock_logger, mock_handler):
         """Test initialization logs debug message."""
         Server(mock_logger, 8080, mock_handler)
-        mock_logger.debug.assert_called_with("Server initialized on port 8080")
+        mock_logger.debug.assert_called_with("server initialized", extra={"port": 8080})
 
 
 # =============================================================================
@@ -368,7 +368,7 @@ class TestServerRunInProcess:
 
         assert result == 0
         mock_logger.debug.assert_any_call(
-            "running server in process...", extra={"port": 8080}
+            "running server in process", extra={"port": 8080}
         )
         mock_start_ticker.assert_called_once_with(mock_handler, mock_logger)
         mock_run_http.assert_called_once()

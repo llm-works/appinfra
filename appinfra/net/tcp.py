@@ -233,7 +233,7 @@ class Server:
             self._port = port
             self._handler = handler
             self._ticker = ticker
-            self._lg.debug(f"Server initialized on port {port}")
+            self._lg.debug("server initialized", extra={"port": port})
         except Exception as e:
             raise ServerStartupError(f"Server initialization failed: {e}") from e
 
@@ -328,7 +328,7 @@ class Server:
             ServerStartupError: If server fails to start
             ServerShutdownError: If server fails to shutdown gracefully
         """
-        self._lg.debug("running server in process...", extra={"port": self._port})
+        self._lg.debug("running server in process", extra={"port": self._port})
 
         try:
             try:

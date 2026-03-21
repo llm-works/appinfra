@@ -164,11 +164,13 @@ class ToolGroup:
             return 0
 
         if cmd in self._funcs:
-            self.lg.debug("running cmd", extra={"cmd": cmd})
-            return cast(int, self._funcs[cmd]())
+            self.lg.trace("running cmd...", extra={"cmd": cmd})
+            result = cast(int, self._funcs[cmd]())
+            self.lg.debug("cmd completed", extra={"cmd": cmd})
+            return result
 
         # No command found - use exit code 127 (command not found, Unix convention)
-        self.lg.error(f"no command found for '{cmd}'")
+        self.lg.error("command not found", extra={"command": cmd})
         return 127
 
     def _check_run_tool(self, tool: Tool, **kwargs: Any) -> tuple[bool, int | None]:
@@ -176,14 +178,17 @@ class ToolGroup:
         if not self._is_tool_selected(self._parent.args, tool):
             return False, None
 
-        self.lg.debug("running subtool", extra={"tool": tool.name})
+        self.lg.debug("running subtool...", extra={"tool": tool.name})
 
         if tool.name in self._funcs:
             self.lg.trace2("using passed run func", extra={"tool": tool.name})
-            return True, self._funcs[tool.name]()
+            result = self._funcs[tool.name]()
         else:
             self.lg.trace2("using tool run func", extra={"tool": tool.name})
-            return True, tool.run(**kwargs)
+            result = tool.run(**kwargs)
+
+        self.lg.debug("subtool completed", extra={"tool": tool.name})
+        return True, result
 
     def get_server_routes(self) -> Any:
         """Get server routes from tools in the group."""

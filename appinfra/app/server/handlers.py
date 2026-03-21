@@ -115,13 +115,13 @@ class LoggingMiddleware(Middleware):
         """Log incoming request."""
         path = getattr(request, "path", "/")
         method = getattr(request, "method", "GET")
-        self.logger.info(f"incoming request: {method} {path}")
+        self.logger.info("incoming request", extra={"method": method, "path": path})
         return request
 
     async def process_response(self, response: Any) -> Any:
         """Log outgoing response."""
         status = getattr(response, "status", 200)
-        self.logger.info(f"outgoing response: {status}")
+        self.logger.info("outgoing response", extra={"status": status})
         return response
 
 

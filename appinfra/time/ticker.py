@@ -981,5 +981,5 @@ class Ticker:
     def _handle_iter_signal(self, signum: int, frame: FrameType | None) -> None:
         """Handle signal by stopping iteration."""
         sig_name = signal.Signals(signum).name
-        self._lg.debug(f"received {sig_name}, stopping ticker")
+        self._lg.debug("received signal, stopping ticker", extra={"signal": sig_name})
         self._stop_event.set()

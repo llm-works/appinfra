@@ -255,7 +255,7 @@ class Server:
         app = self._adapter.build()
 
         self._lg.info(
-            "Starting server",
+            "starting server...",
             extra={
                 "server": self._name,
                 "host": self._config.host,

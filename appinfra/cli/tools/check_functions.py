@@ -728,7 +728,7 @@ class CheckFunctionsTool(Tool):
             Exit code: 0 on success, 1 if violations found in strict mode
         """
         limit = self.args.limit
-        self.lg.info(f"Checking function sizes (limit: {limit} lines)")  # type: ignore[union-attr]
+        self.lg.info("checking function sizes", extra={"limit": limit})  # type: ignore[union-attr]
 
         python_files = self._collect_python_files(
             [self.args.dir], self.args.exclude or [], self.args.include_tests

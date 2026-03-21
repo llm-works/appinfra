@@ -182,13 +182,14 @@ class Manager:
 
         levels = self._get_dependency_levels()
         self._lg.debug(
-            "starting services",
+            "starting services...",
             extra={"levels": [[s for s in lvl] for lvl in levels]},
         )
 
         try:
             for level in levels:
                 self._start_level(level)
+            self._lg.info("services started")
         except Exception:
             self._lg.warning("startup failed, stopping started services")
             self._stop_started()
@@ -265,7 +266,7 @@ class Manager:
 
         # Start all (non-blocking)
         for name in names:
-            self._lg.info(f"starting {name}")
+            self._lg.debug("starting service...", extra={"service": name})
             self._runners[name].start()
             # Track immediately after start() so cleanup can stop it if needed
             with self._lock:
@@ -277,7 +278,9 @@ class Manager:
             runner = self._runners[name]
             try:
                 runner.wait_healthy()
-                self._lg.info(f"{name} is healthy")
+                self._lg.info(
+                    "service started", extra={"service": name, "healthy": True}
+                )
             except Exception:
                 # Keep in _started so _stop_started() can stop the running process
                 self._failed.add(name)
@@ -313,11 +316,14 @@ class Manager:
         """Stop all services in a level."""
         for name in names:
             runner = self._runners[name]
-            self._lg.info(f"stopping {name}")
+            self._lg.debug("stopping service...", extra={"service": name})
             try:
                 runner.stop()
+                self._lg.info("service stopped", extra={"service": name})
             except Exception as e:
-                self._lg.warning(f"error stopping {name}", extra={"exception": e})
+                self._lg.warning(
+                    "error stopping service", extra={"service": name, "exception": e}
+                )
 
     def _atexit_stop(self) -> None:
         """Stop services on interpreter exit."""

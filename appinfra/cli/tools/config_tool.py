@@ -91,7 +91,7 @@ class ConfigTool(Tool):
 
         path = Path(config_path)
         if not path.exists():
-            self.lg.error(f"Config file not found: {config_path}")  # type: ignore[union-attr]
+            self.lg.error("config file not found", extra={"path": config_path})  # type: ignore[union-attr]
             return None
 
         try:
@@ -116,7 +116,7 @@ class ConfigTool(Tool):
         current: Any = data
         for part in section.split("."):
             if not isinstance(current, dict) or part not in current:
-                self.lg.error(f"Section not found: {section}")  # type: ignore[union-attr]
+                self.lg.error("section not found", extra={"section": section})  # type: ignore[union-attr]
                 return None
             current = current[part]
 
