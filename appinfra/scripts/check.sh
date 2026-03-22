@@ -117,9 +117,11 @@ fi
 if [ "$CQ_STRICT" = "true" ]; then
     CQ_CMD="${PYTHON} -m appinfra.cli.cli -l error cq cf --strict ${CQ_EXCLUDE_FLAGS}"
     CQ_LABEL="Function size check (strict)"
+    CQ_TARGET="cq.strict"
 else
     CQ_CMD="${PYTHON} -m appinfra.cli.cli -l error cq cf ${CQ_EXCLUDE_FLAGS}"
     CQ_LABEL="Function size check (non-strict)"
+    CQ_TARGET="cq"
 fi
 
 # Docstring coverage check command (only if threshold > 0)
@@ -127,7 +129,7 @@ DOCSTRING_CMD="${PYTHON} -m interrogate -v ${PKG_NAME}/ --ignore-init-module --i
 
 # Add remaining checks
 CHECKS+=(
-    "${CQ_LABEL}|cq.strict|${CQ_CMD}|"
+    "${CQ_LABEL}|${CQ_TARGET}|${CQ_CMD}|"
 )
 
 # Add docstring check only if threshold > 0
