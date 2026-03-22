@@ -9,6 +9,7 @@ from ....service import ProcessRunner
 from ....service.state import RestartPolicy
 from ..config.api import ApiConfig
 from ..config.ipc import IPCConfig
+from .adapter import LifecycleCallbackDefinition
 from .service import UvicornService
 
 #: Default interval (seconds) for process health monitor checks
@@ -252,9 +253,10 @@ class Server:
         """Run uvicorn directly in current process (blocking)."""
         import uvicorn
 
+        self._adapter.add_startup_callback(self._make_server_started_callback())
         app = self._adapter.build()
 
-        self._lg.info(
+        self._lg.debug(
             "starting server...",
             extra={
                 "server": self._name,
@@ -269,3 +271,18 @@ class Server:
             port=self._config.port,
             **self._config.uvicorn.to_uvicorn_kwargs(),
         )
+
+    def _make_server_started_callback(self) -> LifecycleCallbackDefinition:
+        """Create callback to log when server is actually listening."""
+        lg = self._lg
+        name = self._name
+        host = self._config.host
+        port = self._config.port
+
+        async def log_server_started(_app: Any) -> None:
+            lg.info(
+                "server started",
+                extra={"server": name, "host": host, "port": port},
+            )
+
+        return LifecycleCallbackDefinition(log_server_started, "_server_started")
