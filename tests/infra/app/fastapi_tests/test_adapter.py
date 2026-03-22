@@ -573,8 +573,8 @@ class TestFastAPIAdapterLifecycleCallbacks:
         call_kwargs = mock_fastapi["FastAPI"].call_args.kwargs
         assert call_kwargs["lifespan"] is my_lifespan
 
-    def test_build_with_lifespan_and_callbacks_raises(self, mock_fastapi):
-        """Test build raises when both lifespan and startup/shutdown callbacks are set."""
+    def test_build_with_lifespan_and_callbacks_chains_them(self, mock_fastapi):
+        """Test build chains lifespan and callbacks when both are set."""
         from contextlib import asynccontextmanager
 
         adapter = FastAPIAdapter(ApiConfig())
@@ -589,10 +589,8 @@ class TestFastAPIAdapterLifecycleCallbacks:
         adapter.set_lifespan(LifespanDefinition(lifespan=my_lifespan))
         adapter.add_startup_callback(LifecycleCallbackDefinition(callback=startup))
 
-        from appinfra.app.fastapi.errors import ConfigError
-
-        with pytest.raises(ConfigError, match="Cannot use both lifespan"):
-            adapter.build()
+        # Should not raise - callbacks wrap the lifespan
+        adapter.build()
 
     def test_build_with_request_response_callbacks_adds_middleware(self, mock_fastapi):
         """Test build adds middleware for request/response callbacks."""
@@ -642,7 +640,7 @@ class TestLifecycleCallbackExecution:
                 LifecycleCallbackDefinition(callback=startup2, name="s2")
             )
 
-            lifespan = adapter._create_lifespan_from_callbacks()
+            lifespan = adapter._wrap_lifespan_with_callbacks(None)
 
             # Run the lifespan context manager
             mock_app = MagicMock()
@@ -674,7 +672,7 @@ class TestLifecycleCallbackExecution:
                 LifecycleCallbackDefinition(callback=shutdown1)
             )
 
-            lifespan = adapter._create_lifespan_from_callbacks()
+            lifespan = adapter._wrap_lifespan_with_callbacks(None)
 
             mock_app = MagicMock()
             async with lifespan(mock_app):
@@ -804,7 +802,7 @@ class TestLifecycleCallbackExecution:
 
             from appinfra.app.fastapi.errors import CallbackError
 
-            lifespan = adapter._create_lifespan_from_callbacks()
+            lifespan = adapter._wrap_lifespan_with_callbacks(None)
 
             mock_app = MagicMock()
             with pytest.raises(
@@ -844,7 +842,7 @@ class TestLifecycleCallbackExecution:
                 LifecycleCallbackDefinition(callback=second_shutdown, name="second")
             )
 
-            lifespan = adapter._create_lifespan_from_callbacks()
+            lifespan = adapter._wrap_lifespan_with_callbacks(None)
 
             mock_app = MagicMock()
             with pytest.raises(

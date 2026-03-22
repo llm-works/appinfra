@@ -382,36 +382,29 @@ class FastAPIAdapter:
         """
         Build lifespan context manager from user callbacks and IPC lifecycle.
 
-        If user provided a lifespan, use it directly.
-        Otherwise, wrap startup/shutdown callbacks into a lifespan.
+        If both lifespan and callbacks are provided, callbacks wrap the lifespan.
         If ipc_channel is provided, wrap the result with IPC start/stop.
         Returns None if no lifecycle callbacks configured and no IPC channel.
         """
-        # Get user-provided lifespan or create one from callbacks
-        user_lifespan: LifespanCallable | None = None
-
+        # Start with user-provided lifespan (may be None)
+        result: LifespanCallable | None = None
         if self._lifespan is not None:
-            if self._startup_callbacks or self._shutdown_callbacks:
-                from ..errors import ConfigError
+            result = self._lifespan.lifespan
 
-                raise ConfigError(
-                    "Cannot use both lifespan and startup/shutdown callbacks. "
-                    "Use either with_lifespan() or with_on_startup()/with_on_shutdown(), not both."
-                )
-            user_lifespan = self._lifespan.lifespan
-        elif self._startup_callbacks or self._shutdown_callbacks:
-            user_lifespan = self._create_lifespan_from_callbacks()
+        # Wrap with startup/shutdown callbacks if any
+        if self._startup_callbacks or self._shutdown_callbacks:
+            result = self._wrap_lifespan_with_callbacks(result)
 
-        # If no IPC channel, just return user lifespan (may be None)
-        if ipc_channel is None:
-            return user_lifespan
+        # Wrap with IPC lifecycle if channel provided
+        if ipc_channel is not None:
+            result = self._wrap_lifespan_with_ipc(result, ipc_channel)
 
-        # Wrap with IPC lifecycle - IPC polling must be integrated into lifespan
-        # because FastAPI ignores on_event() handlers when a lifespan is present
-        return self._wrap_lifespan_with_ipc(user_lifespan, ipc_channel)
+        return result
 
-    def _create_lifespan_from_callbacks(self) -> LifespanCallable:
-        """Create a lifespan context manager from startup/shutdown callbacks."""
+    def _wrap_lifespan_with_callbacks(
+        self, inner: LifespanCallable | None
+    ) -> LifespanCallable:
+        """Wrap a lifespan with startup/shutdown callbacks."""
         startup_callbacks = self._startup_callbacks
         shutdown_callbacks = self._shutdown_callbacks
         lg = self._subprocess_lg
@@ -419,7 +412,11 @@ class FastAPIAdapter:
         @asynccontextmanager
         async def lifespan(app: Any) -> AsyncIterator[None]:
             await _run_startup_callbacks(startup_callbacks, app, lg)
-            yield
+            if inner is not None:
+                async with inner(app):
+                    yield
+            else:
+                yield
             await _run_shutdown_callbacks(shutdown_callbacks, app, lg)
 
         return lifespan
