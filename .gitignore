@@ -26,6 +26,9 @@ build/
 # Hypothesis test cache
 .hypothesis/
 
+# Mypy cache
+.mypy_cache/
+
 # Local Makefile overrides (custom PYTHON path, etc.)
 Makefile.local
 # Claude Code local settings and commands
