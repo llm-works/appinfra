@@ -17,6 +17,11 @@ class RateLimiter(ABC):
     All methods are synchronous. In-memory rate limiting is pure math that
     completes in microseconds, so async is unnecessary. Thread safety is
     the implementation's responsibility.
+
+    Note:
+        This is the HTTP/ASGI rate limiter interface, distinct from
+        ``appinfra.rate_limit.RateLimiter`` which is a general-purpose
+        blocking rate limiter for controlling operation frequency.
     """
 
     @abstractmethod

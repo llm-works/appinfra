@@ -59,6 +59,12 @@ class RateLimitMiddleware:
             await self.app(scope, receive, send)
             return
 
+        # Skip CORS preflight requests so OPTIONS responses carry CORS
+        # headers even when the rate limit is exhausted.
+        if scope.get("method") == "OPTIONS":
+            await self.app(scope, receive, send)
+            return
+
         path = scope.get("path", "")
         if path in self.exempt_paths:
             await self.app(scope, receive, send)

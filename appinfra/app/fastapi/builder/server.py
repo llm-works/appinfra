@@ -8,6 +8,8 @@ from collections.abc import Awaitable, Callable
 from contextlib import AbstractAsyncContextManager
 from typing import TYPE_CHECKING, Any
 
+from ..ratelimit.interface import RateLimiter
+
 if TYPE_CHECKING:
     from fastapi import FastAPI
     from starlette.requests import Request
@@ -361,7 +363,7 @@ class ServerBuilder:
 
     def with_rate_limiter(
         self,
-        limiter: Any,
+        limiter: RateLimiter,
         exempt_paths: list[str] | None = None,
         cleanup_interval: float = 60.0,
     ) -> ServerBuilder:

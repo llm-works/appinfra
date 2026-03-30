@@ -129,13 +129,12 @@ class TokenBucketLimiter(RateLimiter):
             bucket = self._get_or_create_bucket(key, now)
             self._refill(bucket, now)
 
-            headers = self._build_headers(bucket)
-
             if bucket.tokens >= 1.0:
                 bucket.tokens -= 1.0
-                return True, headers
+                return True, self._build_headers(bucket)
 
             # Denied - calculate retry delay
+            headers = self._build_headers(bucket)
             tokens_needed = 1.0 - bucket.tokens
             retry_after = tokens_needed / self._refill_rate
             headers["Retry-After"] = str(int(retry_after) + 1)

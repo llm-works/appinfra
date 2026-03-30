@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, cast
 
 from ..config.api import ApiConfig
+from ..ratelimit.interface import RateLimiter
 
 if TYPE_CHECKING:
     from starlette.requests import Request
@@ -63,7 +64,7 @@ class MiddlewareDefinition:
 class RateLimitDefinition:
     """Definition for rate limiting configuration."""
 
-    limiter: Any  # RateLimiter (deferred import to avoid circular deps)
+    limiter: RateLimiter
     exempt_paths: list[str] = field(default_factory=list)
     cleanup_interval: float = 60.0
 

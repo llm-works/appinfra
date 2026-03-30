@@ -236,6 +236,24 @@ class TestRateLimitMiddleware:
         assert app.called is True
 
     @pytest.mark.asyncio
+    async def test_options_bypasses_rate_limiting(self):
+        """Test that OPTIONS requests bypass rate limiting (CORS preflight)."""
+        app = MockApp()
+        limiter = TokenBucketLimiter(rate=1, window=60.0)
+        middleware = RateLimitMiddleware(app, limiter=limiter)
+
+        # Exhaust limit with a normal request
+        c = MessageCollector()
+        await middleware(_http_scope(), None, c)
+
+        # OPTIONS should still pass through even though limit is exhausted
+        scope = _http_scope()
+        scope["method"] = "OPTIONS"
+        collector = MessageCollector()
+        await middleware(scope, None, collector)
+        assert collector.status == 200
+
+    @pytest.mark.asyncio
     async def test_injects_rate_limit_headers(self):
         """Test that rate limit headers are injected on 200 responses."""
         app = MockApp()
