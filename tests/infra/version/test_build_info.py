@@ -4,11 +4,54 @@ Tests for build_info CLI tool.
 Tests the git commit info generator used by git hooks and CI/CD.
 """
 
-from unittest.mock import patch
+import subprocess
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-from appinfra.version.build_info import generate, get_git_commit, main
+from appinfra.version.build_info import _run_git, generate, get_git_commit, main
+
+# =============================================================================
+# Test _run_git
+# =============================================================================
+
+
+@pytest.mark.unit
+class TestRunGit:
+    """Test _run_git helper function."""
+
+    @patch("subprocess.run")
+    def test_returns_stdout_on_success(self, mock_run):
+        """Test returns stdout when git succeeds."""
+        mock_run.return_value = MagicMock(returncode=0, stdout="output\n")
+
+        result = _run_git("status")
+        assert result == "output"
+
+    @patch("subprocess.run")
+    def test_returns_none_on_failure(self, mock_run):
+        """Test returns None when git fails."""
+        mock_run.return_value = MagicMock(returncode=1)
+
+        result = _run_git("status")
+        assert result is None
+
+    @patch("subprocess.run")
+    def test_handles_subprocess_error(self, mock_run):
+        """Test handles subprocess errors."""
+        mock_run.side_effect = subprocess.SubprocessError("error")
+
+        result = _run_git("status")
+        assert result is None
+
+    @patch("subprocess.run")
+    def test_handles_file_not_found(self, mock_run):
+        """Test handles missing git command."""
+        mock_run.side_effect = FileNotFoundError("git not found")
+
+        result = _run_git("status")
+        assert result is None
+
 
 # =============================================================================
 # Test get_git_commit
