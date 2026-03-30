@@ -287,22 +287,31 @@ class TestRateLimitMiddleware:
 
     @pytest.mark.asyncio
     async def test_cleanup_triggered(self):
-        """Test that cleanup is called periodically."""
+        """Test that cleanup removes stale buckets."""
         app = MockApp()
-        limiter = TokenBucketLimiter(rate=10, window=60.0, stale_ttl=0.01)
+        limiter = TokenBucketLimiter(rate=1, window=60.0, stale_ttl=0.01)
         middleware = RateLimitMiddleware(app, limiter=limiter, cleanup_interval=0.01)
 
-        # Make a request to create a bucket
+        # Make a request to create a bucket and exhaust its token
         c = MessageCollector()
-        await middleware(_http_scope(), None, c)
+        await middleware(_http_scope(client_ip="1.1.1.1"), None, c)
+        assert c.status == 200
+
+        # Verify the bucket exists and is exhausted
+        assert "1.1.1.1" in limiter._buckets
 
         import time
 
         time.sleep(0.02)
 
-        # Next request should trigger cleanup
+        # Next request from different IP triggers cleanup
         c = MessageCollector()
         await middleware(_http_scope(client_ip="2.2.2.2"), None, c)
 
         # The original client's bucket should have been cleaned up
-        # (verified by checking the limiter has fresh state for that key)
+        assert "1.1.1.1" not in limiter._buckets
+
+        # A new request from the original IP gets a fresh bucket (allowed)
+        c = MessageCollector()
+        await middleware(_http_scope(client_ip="1.1.1.1"), None, c)
+        assert c.status == 200

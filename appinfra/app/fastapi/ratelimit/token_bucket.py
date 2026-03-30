@@ -89,6 +89,8 @@ class TokenBucketLimiter(RateLimiter):
         else:
             if rate <= 0:
                 raise ValueError(f"Rate must be positive, got: {rate}")
+            if window <= 0:
+                raise ValueError(f"Window must be positive, got: {window}")
             self._max_requests = rate
             self._window = window
 
@@ -149,9 +151,16 @@ class TokenBucketLimiter(RateLimiter):
         return _extract_ip_from_scope(scope)
 
     def cleanup(self) -> None:
-        """Remove buckets that have been idle longer than stale_ttl."""
-        now = time.monotonic()
-        with self._lock:
+        """Remove buckets that have been idle longer than stale_ttl.
+
+        Uses non-blocking lock acquisition so cleanup never stalls the
+        request path. If the lock is held (a request is being processed),
+        cleanup is silently skipped and retried on the next interval.
+        """
+        if not self._lock.acquire(blocking=False):
+            return
+        try:
+            now = time.monotonic()
             stale_keys = [
                 key
                 for key, bucket in self._buckets.items()
@@ -159,6 +168,8 @@ class TokenBucketLimiter(RateLimiter):
             ]
             for key in stale_keys:
                 del self._buckets[key]
+        finally:
+            self._lock.release()
 
     def _get_or_create_bucket(self, key: str, now: float) -> _Bucket:
         """Get existing bucket or create a new one at full capacity."""
@@ -183,10 +194,11 @@ class TokenBucketLimiter(RateLimiter):
         }
 
     def __getstate__(self) -> dict[str, Any]:
-        """Pickle support: strip lock and buckets for subprocess mode."""
+        """Pickle support: strip lock, buckets, and key_func for subprocess mode."""
         state = self.__dict__.copy()
         del state["_lock"]
         state["_buckets"] = {}
+        state["_key_func"] = None
         return state
 
     def __setstate__(self, state: dict[str, Any]) -> None:

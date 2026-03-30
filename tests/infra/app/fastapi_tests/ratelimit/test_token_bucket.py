@@ -112,6 +112,13 @@ class TestTokenBucketInit:
         with pytest.raises(ValueError, match="positive"):
             TokenBucketLimiter(rate="60/min", burst=-1)
 
+    def test_invalid_window(self):
+        """Test error on non-positive window."""
+        with pytest.raises(ValueError, match="Window must be positive"):
+            TokenBucketLimiter(rate=10, window=0)
+        with pytest.raises(ValueError, match="Window must be positive"):
+            TokenBucketLimiter(rate=10, window=-1.0)
+
 
 # =============================================================================
 # Test is_allowed
@@ -310,3 +317,15 @@ class TestPickle:
         # Restored limiter should have fresh buckets
         allowed, _ = restored.is_allowed("client1")
         assert allowed is True
+
+    def test_pickle_with_key_func(self):
+        """Test that non-picklable key_func is stripped during pickle."""
+        limiter = TokenBucketLimiter(rate="60/min", key_func=lambda scope: "global")
+        # Lambda is not picklable, but __getstate__ strips it
+        data = pickle.dumps(limiter)
+        restored = pickle.loads(data)
+
+        # Restored limiter falls back to default IP extraction
+        assert restored._key_func is None
+        scope = {"client": ("1.2.3.4", 80), "headers": []}
+        assert restored.extract_key(scope) == "1.2.3.4"

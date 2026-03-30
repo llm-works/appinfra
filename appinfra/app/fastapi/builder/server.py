@@ -394,10 +394,14 @@ class ServerBuilder:
                 .routes.with_route("/health", health).done()
                 .build())
         """
+        if cleanup_interval <= 0:
+            raise ValueError(
+                f"cleanup_interval must be positive, got: {cleanup_interval}"
+            )
         self._rate_limiters.append(
             RateLimitDefinition(
                 limiter=limiter,
-                exempt_paths=exempt_paths or [],
+                exempt_paths=list(exempt_paths) if exempt_paths else [],
                 cleanup_interval=cleanup_interval,
             )
         )
