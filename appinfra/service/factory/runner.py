@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
 
 from ...log import Logger
 from ..base import Service
@@ -30,8 +29,8 @@ class RunnerWithChannel:
     """
 
     runner: Runner
-    channel: Channel[Any, Any]
-    service_channel: Channel[Any, Any]
+    channel: Channel
+    service_channel: Channel
 
 
 class RunnerFactory:

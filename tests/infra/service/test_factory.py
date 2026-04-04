@@ -8,6 +8,7 @@ import pytest
 
 from appinfra.log import Logger
 from appinfra.service import (
+    BufferedChannel,
     Channel,
     ChannelConfig,
     ChannelPair,
@@ -451,8 +452,8 @@ def _stub_pair() -> ChannelPair:
     parent_buf: list[Any] = []
     child_buf: list[Any] = []
     return ChannelPair(
-        parent=Channel(StubTransport(inbox=parent_buf, outbox=child_buf)),
-        child=Channel(StubTransport(inbox=child_buf, outbox=parent_buf)),
+        parent=BufferedChannel(StubTransport(inbox=parent_buf, outbox=child_buf)),
+        child=BufferedChannel(StubTransport(inbox=child_buf, outbox=parent_buf)),
     )
 
 

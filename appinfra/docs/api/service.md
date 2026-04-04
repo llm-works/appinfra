@@ -397,10 +397,15 @@ worker = svc_factory.create("worker")
 - `AsyncQueueTransport` - Wraps `asyncio.Queue` for async coroutine communication
 - `AsyncProcessQueueTransport` - Wraps `mp.Queue` with async interface
 
-### Channel Classes
+### Channel Protocols
 
-- `Channel` - Concrete sync channel wrapping any `Transport`
-- `AsyncChannel` - Concrete async channel wrapping any `AsyncTransport`
+- `Channel` - Sync channel protocol (implement directly for smart transports)
+- `AsyncChannel` - Async channel protocol (implement directly for smart transports)
+
+### Built-in Channels
+
+- `BufferedChannel` - Wraps a `Transport` with request/response correlation and redelivery
+- `AsyncBufferedChannel` - Wraps an `AsyncTransport` with correlation, streaming, and redelivery
 - `Message` - Generic message with id for correlation
 
 ### Factories

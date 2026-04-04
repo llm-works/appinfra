@@ -9,11 +9,17 @@ from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
 
 from ..channel.async_ import (
+    AsyncBufferedChannel,
     AsyncChannel,
     AsyncProcessQueueTransport,
     AsyncQueueTransport,
 )
-from ..channel.sync import Channel, ProcessQueueTransport, QueueTransport
+from ..channel.sync import (
+    BufferedChannel,
+    Channel,
+    ProcessQueueTransport,
+    QueueTransport,
+)
 
 
 @dataclass
@@ -38,8 +44,8 @@ class ChannelPair:
         child: Channel for the child/service side
     """
 
-    parent: Channel[Any, Any]
-    child: Channel[Any, Any]
+    parent: Channel
+    child: Channel
 
     def close(self) -> None:
         """Close both channels."""
@@ -56,8 +62,8 @@ class AsyncChannelPair:
         child: Async channel for the child/service side
     """
 
-    parent: AsyncChannel[Any, Any]
-    child: AsyncChannel[Any, Any]
+    parent: AsyncChannel
+    child: AsyncChannel
 
     async def close(self) -> None:
         """Close both channels."""
@@ -74,8 +80,8 @@ class AsyncProcessChannelPair:
         child: Sync channel for the subprocess (blocking)
     """
 
-    parent: AsyncChannel[Any, Any]
-    child: Channel[Any, Any]
+    parent: AsyncChannel
+    child: Channel
 
     async def close(self) -> None:
         """Close both channels."""
@@ -137,10 +143,10 @@ class QueueChannelFactory:
         q1, q2 = _make_queues(queue.Queue, self._config.max_queue_size)
         timeout = self._config.response_timeout
 
-        parent: Channel[Any, Any] = Channel(
+        parent: BufferedChannel[Any, Any] = BufferedChannel(
             QueueTransport(outbound=q1, inbound=q2), timeout
         )
-        child: Channel[Any, Any] = Channel(
+        child: BufferedChannel[Any, Any] = BufferedChannel(
             QueueTransport(outbound=q2, inbound=q1), timeout
         )
 
@@ -173,10 +179,10 @@ class ProcessQueueChannelFactory:
         q1, q2 = _make_queues(mp.Queue, self._config.max_queue_size)
         timeout = self._config.response_timeout
 
-        parent: Channel[Any, Any] = Channel(
+        parent: BufferedChannel[Any, Any] = BufferedChannel(
             ProcessQueueTransport(outbound=q1, inbound=q2), timeout
         )
-        child: Channel[Any, Any] = Channel(
+        child: BufferedChannel[Any, Any] = BufferedChannel(
             ProcessQueueTransport(outbound=q2, inbound=q1), timeout
         )
 
@@ -194,10 +200,10 @@ class AsyncQueueChannelFactory:
         q1, q2 = _make_queues(asyncio.Queue, self._config.max_queue_size)
         timeout = self._config.response_timeout
 
-        parent: AsyncChannel[Any, Any] = AsyncChannel(
+        parent: AsyncBufferedChannel[Any, Any] = AsyncBufferedChannel(
             AsyncQueueTransport(outbound=q1, inbound=q2), timeout
         )
-        child: AsyncChannel[Any, Any] = AsyncChannel(
+        child: AsyncBufferedChannel[Any, Any] = AsyncBufferedChannel(
             AsyncQueueTransport(outbound=q2, inbound=q1), timeout
         )
 
@@ -215,10 +221,10 @@ class AsyncProcessQueueChannelFactory:
         q1, q2 = _make_queues(mp.Queue, self._config.max_queue_size)
         timeout = self._config.response_timeout
 
-        parent: AsyncChannel[Any, Any] = AsyncChannel(
+        parent: AsyncBufferedChannel[Any, Any] = AsyncBufferedChannel(
             AsyncProcessQueueTransport(outbound=q1, inbound=q2), timeout
         )
-        child: Channel[Any, Any] = Channel(
+        child: BufferedChannel[Any, Any] = BufferedChannel(
             ProcessQueueTransport(outbound=q2, inbound=q1), timeout
         )
 

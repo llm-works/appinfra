@@ -1,36 +1,27 @@
 """Synchronous channel implementations.
 
 This module provides:
-- Transport: Protocol for custom wire transports (implement send/recv/close)
-- Channel: Concrete channel with submit/recv correlation on top of a Transport
+- Channel: Protocol for sync bidirectional communication (implement directly
+  for smart transports like ZMQ that handle their own correlation)
+- Transport: Protocol for dumb wire transports (send/recv/close)
+- BufferedChannel: Concrete Channel wrapping a Transport with correlation and
+  redelivery buffering
 - QueueTransport: Transport using queue.Queue (in-process threads)
 - ProcessQueueTransport: Transport using multiprocessing.Queue (cross-process)
 
-Custom transport example::
+Smart transport (implements Channel directly)::
 
-    class ZMQTransport:
-        def __init__(self, socket: zmq.Socket) -> None:
-            self._socket = socket
-            self._closed = False
-
-        def send(self, message: Any) -> None:
-            self._socket.send_pyobj(message)
-
-        def recv(self, timeout: float | None = None) -> Any:
-            ms = int((timeout or 0) * 1000)
-            if self._socket.poll(timeout=ms):
-                return self._socket.recv_pyobj()
-            raise ChannelTimeoutError(f"Timeout ({timeout}s)")
-
-        def close(self) -> None:
-            self._closed = True
-            self._socket.close()
-
+    class ZMQChannel:
+        def send(self, message): ...
+        def recv(self, timeout=None): ...
+        def submit(self, request, timeout=None): ...
+        def close(self): ...
         @property
-        def is_closed(self) -> bool:
-            return self._closed
+        def is_closed(self) -> bool: ...
 
-    channel = Channel(ZMQTransport(socket), response_timeout=30.0)
+Dumb transport (wrap in BufferedChannel)::
+
+    channel = BufferedChannel(QueueTransport(outbound, inbound))
 """
 
 from __future__ import annotations
@@ -46,6 +37,40 @@ from .base import RedeliveryBuffer, validate_response
 
 TRequest = TypeVar("TRequest")
 TResponse = TypeVar("TResponse")
+
+
+@runtime_checkable
+class Channel(Protocol):
+    """
+    Sync bidirectional channel protocol.
+
+    Implement this directly for smart transports (e.g., ZMQ, gRPC) that
+    handle their own request/response correlation.  For dumb transports
+    that only provide raw send/recv, use ``BufferedChannel`` which wraps a
+    ``Transport`` and adds correlation, redelivery buffering, and close
+    management.
+    """
+
+    def send(self, message: Any) -> None:
+        """Send message without waiting for response."""
+        ...
+
+    def recv(self, timeout: float | None = None) -> Any:
+        """Receive next incoming message."""
+        ...
+
+    def submit(self, request: Any, timeout: float | None = None) -> Any:
+        """Send request and wait for matching response."""
+        ...
+
+    def close(self) -> None:
+        """Close the channel."""
+        ...
+
+    @property
+    def is_closed(self) -> bool:
+        """True if channel has been closed."""
+        ...
 
 
 @runtime_checkable
@@ -96,9 +121,9 @@ class Transport(Protocol):
         ...
 
 
-class Channel(Generic[TRequest, TResponse]):
+class BufferedChannel(Generic[TRequest, TResponse]):
     """
-    Bidirectional channel for service communication.
+    Sync channel wrapping a Transport with correlation and redelivery.
 
     Wraps a ``Transport`` and adds:
     - **Request/response correlation**: ``submit()`` sends a request and waits

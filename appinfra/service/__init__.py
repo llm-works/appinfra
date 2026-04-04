@@ -70,10 +70,12 @@ Scheduled services:
 
 from .base import ScheduledService, Service
 from .channel import (
+    AsyncBufferedChannel,
     AsyncChannel,
     AsyncProcessQueueTransport,
     AsyncQueueTransport,
     AsyncTransport,
+    BufferedChannel,
     Channel,
     Message,
     ProcessQueueTransport,
@@ -126,9 +128,11 @@ __all__ = [
     "AsyncTransport",
     "AsyncQueueTransport",
     "AsyncProcessQueueTransport",
-    # Channel (protocol level)
+    # Channel (protocol + concrete)
     "Channel",
+    "BufferedChannel",
     "AsyncChannel",
+    "AsyncBufferedChannel",
     "Message",
     # Channel errors
     "ChannelError",

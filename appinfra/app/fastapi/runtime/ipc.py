@@ -13,7 +13,7 @@ import multiprocessing as mp
 from collections.abc import AsyncIterator
 from typing import Any
 
-from ....service.channel import AsyncChannel, AsyncProcessQueueTransport
+from ....service.channel import AsyncBufferedChannel, AsyncProcessQueueTransport
 from ..config.ipc import IPCConfig
 
 
@@ -53,7 +53,7 @@ class IPCChannel:
             response_q: Queue for receiving responses from main process
             config: IPC configuration
         """
-        self._channel: AsyncChannel[Any, Any] = AsyncChannel(
+        self._channel: AsyncBufferedChannel[Any, Any] = AsyncBufferedChannel(
             AsyncProcessQueueTransport(outbound=request_q, inbound=response_q),
             response_timeout=config.response_timeout,
         )

@@ -1,8 +1,11 @@
 """Asynchronous channel implementations.
 
 This module provides:
-- AsyncTransport: Protocol for custom async wire transports
-- AsyncChannel: Concrete async channel with submit/recv correlation
+- AsyncChannel: Protocol for async bidirectional communication (implement
+  directly for smart transports like ZMQ that handle their own correlation)
+- AsyncTransport: Protocol for dumb async wire transports (send/recv/close)
+- AsyncBufferedChannel: Concrete AsyncChannel wrapping an AsyncTransport with
+  correlation, streaming, and redelivery buffering
 - AsyncQueueTransport: Transport using asyncio.Queue (coroutines)
 - AsyncProcessQueueTransport: Transport wrapping mp.Queue (cross-process)
 """
@@ -21,6 +24,46 @@ from .base import RedeliveryBuffer, validate_response
 
 TRequest = TypeVar("TRequest")
 TResponse = TypeVar("TResponse")
+
+
+@runtime_checkable
+class AsyncChannel(Protocol):
+    """
+    Async bidirectional channel protocol.
+
+    Implement this directly for smart transports (e.g., ZMQ, gRPC) that
+    handle their own request/response correlation.  For dumb transports
+    that only provide raw send/recv, use ``AsyncBufferedChannel`` which
+    wraps an ``AsyncTransport`` and adds correlation, streaming, redelivery
+    buffering, and close management.
+    """
+
+    async def send(self, message: Any) -> None:
+        """Send message without waiting for response."""
+        ...
+
+    async def recv(self, timeout: float | None = None) -> Any:
+        """Receive next incoming message."""
+        ...
+
+    async def submit(self, request: Any, timeout: float | None = None) -> Any:
+        """Send request and wait for matching response."""
+        ...
+
+    def submit_stream(
+        self, request: Any, timeout: float | None = None
+    ) -> AsyncIterator[Any]:
+        """Send request and yield streaming response chunks."""
+        ...
+
+    async def close(self) -> None:
+        """Close the channel."""
+        ...
+
+    @property
+    def is_closed(self) -> bool:
+        """True if channel has been closed."""
+        ...
 
 
 @runtime_checkable
@@ -59,9 +102,9 @@ class AsyncTransport(Protocol):
         ...
 
 
-class AsyncChannel(Generic[TRequest, TResponse]):
+class AsyncBufferedChannel(Generic[TRequest, TResponse]):
     """
-    Async bidirectional channel for service communication.
+    Async channel wrapping an AsyncTransport with correlation and redelivery.
 
     Wraps an ``AsyncTransport`` and adds request/response correlation,
     streaming, redelivery buffering, and close management.
