@@ -96,12 +96,12 @@ class ChannelPairFactory(Protocol):
     Implement this to provide custom channel pairs (e.g., ZMQ, gRPC)
     instead of the built-in queue-based channels.
 
-    Example::
+    Example (smart transport implementing Channel directly)::
 
         class ZMQChannelFactory:
             def create_pair(self) -> ChannelPair:
-                parent = Channel(ZMQTransport(ctx, endpoint))
-                child = Channel(ZMQTransport(ctx, endpoint))
+                parent = ZMQChannel(ctx, parent_endpoint)
+                child = ZMQChannel(ctx, child_endpoint)
                 return ChannelPair(parent=parent, child=child)
 
         factory = RunnerFactory(lg, channel_factory=ZMQChannelFactory())

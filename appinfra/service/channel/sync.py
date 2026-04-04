@@ -79,7 +79,7 @@ class Transport(Protocol):
     Wire-level transport protocol.
 
     Implement this protocol to plug in a custom transport (e.g., ZMQ, gRPC,
-    shared memory). The ``Channel`` class wraps a Transport and adds
+    shared memory). The ``BufferedChannel`` class wraps a Transport and adds
     request/response correlation, redelivery buffering, and close management.
 
     All four methods must be implemented. No base class required — any object

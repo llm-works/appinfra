@@ -312,14 +312,31 @@ await pair.parent.send(request)  # Parent uses async
 pair.child.recv()                 # Child uses sync in subprocess
 ```
 
-### Custom Transports
+### Custom Channels and Transports
 
-Implement the `Transport` protocol for custom wire-level communication:
+Smart transports (ZMQ, gRPC) that handle their own correlation can implement
+the `Channel` protocol directly:
 
 ```python
-from appinfra.service import Channel, Transport
+from appinfra.service import Channel
 
-class ZMQTransport:
+class ZMQChannel:
+    """Implements Channel protocol directly — no BufferedChannel needed."""
+    def send(self, message): ...
+    def recv(self, timeout=None): ...
+    def submit(self, request, timeout=None): ...
+    def close(self): ...
+    @property
+    def is_closed(self) -> bool: ...
+```
+
+For dumb transports that only provide raw send/recv, wrap in `BufferedChannel`
+to get request/response correlation and redelivery:
+
+```python
+from appinfra.service import BufferedChannel, Transport
+
+class SharedMemTransport:
     """Any object satisfying the Transport protocol."""
     def send(self, message): ...
     def recv(self, timeout=None): ...
@@ -327,7 +344,7 @@ class ZMQTransport:
     @property
     def is_closed(self) -> bool: ...
 
-channel = Channel(ZMQTransport(socket))
+channel = BufferedChannel(SharedMemTransport(shm_region))
 ```
 
 ### Transports and Channel Types

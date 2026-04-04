@@ -72,8 +72,9 @@ class AsyncTransport(Protocol):
     Async wire-level transport protocol.
 
     Implement this protocol to plug in a custom async transport. The
-    ``AsyncChannel`` class wraps an AsyncTransport and adds request/response
-    correlation, streaming, redelivery buffering, and close management.
+    ``AsyncBufferedChannel`` class wraps an AsyncTransport and adds
+    request/response correlation, streaming, redelivery buffering, and close
+    management.
     """
 
     async def send(self, message: Any) -> None:
