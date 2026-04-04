@@ -128,6 +128,7 @@ class Channel(Generic[TRequest, TResponse]):
         self._response_timeout = response_timeout
         self._closed = False
         self._redelivery: queue.Queue[Any] = queue.Queue()
+        self.redelivery_drops: int = 0
 
     @property
     def transport(self) -> Transport:
@@ -239,6 +240,7 @@ class Channel(Generic[TRequest, TResponse]):
         if self._redelivery.qsize() >= self._MAX_REDELIVERY:
             try:
                 self._redelivery.get_nowait()
+                self.redelivery_drops += 1
             except queue.Empty:
                 pass
         self._redelivery.put(message)

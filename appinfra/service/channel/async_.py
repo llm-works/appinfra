@@ -88,6 +88,7 @@ class AsyncChannel(Generic[TRequest, TResponse]):
         self._response_timeout = response_timeout
         self._closed = False
         self._redelivery: asyncio.Queue[Any] = asyncio.Queue()
+        self.redelivery_drops: int = 0
 
     @property
     def transport(self) -> AsyncTransport:
@@ -270,6 +271,7 @@ class AsyncChannel(Generic[TRequest, TResponse]):
         if self._redelivery.qsize() >= self._MAX_REDELIVERY:
             try:
                 self._redelivery.get_nowait()
+                self.redelivery_drops += 1
             except asyncio.QueueEmpty:
                 pass
         await self._redelivery.put(message)

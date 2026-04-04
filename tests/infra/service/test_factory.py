@@ -1,6 +1,7 @@
 """Tests for service factories."""
 
 import threading
+import time
 from typing import Any
 
 import pytest
@@ -429,9 +430,13 @@ class StubTransport:
         self._outbox.append(message)
 
     def recv(self, timeout: float | None = None) -> Any:
-        if self._inbox:
-            return self._inbox.pop(0)
-        raise ChannelTimeoutError(f"No messages ({timeout}s)")
+        deadline = None if timeout is None else time.monotonic() + timeout
+        while True:
+            if self._inbox:
+                return self._inbox.pop(0)
+            if deadline is not None and time.monotonic() >= deadline:
+                raise ChannelTimeoutError(f"No messages ({timeout}s)")
+            time.sleep(0.01)
 
     def close(self) -> None:
         self._closed = True
