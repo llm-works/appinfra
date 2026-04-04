@@ -15,6 +15,7 @@ from appinfra.service import (
     ProcessQueueChannelFactory,
     QueueChannelFactory,
 )
+from appinfra.service.channel.base import RedeliveryBuffer, validate_response
 
 
 @dataclass
@@ -63,6 +64,84 @@ class TestMessage:
         """Message is_final defaults to True."""
         m = Message()
         assert m.is_final is True
+
+
+class TestRedeliveryBuffer:
+    """Tests for RedeliveryBuffer shared helper."""
+
+    def test_put_and_check(self) -> None:
+        """Messages can be stored and retrieved by id."""
+        buf = RedeliveryBuffer()
+        buf.put(Message(id="a", payload="hello"))
+        buf.put(Message(id="b", payload="world"))
+
+        assert buf.check("b").payload == "world"
+        assert buf.check("a").payload == "hello"
+        assert buf.check("a") is None
+
+    def test_pop_any(self) -> None:
+        """pop_any returns next available message."""
+        buf = RedeliveryBuffer()
+        buf.put(Message(id="x", payload="first"))
+        assert buf.pop_any().payload == "first"
+        assert buf.pop_any() is None
+
+    def test_unkeyed_messages(self) -> None:
+        """Messages without id go to unkeyed list."""
+        buf = RedeliveryBuffer()
+        buf.put("plain string")
+        assert buf.check("anything") is None
+        assert buf.pop_any() == "plain string"
+
+    def test_eviction_at_capacity(self) -> None:
+        """Oldest message is evicted when buffer is full."""
+        buf = RedeliveryBuffer(max_size=3)
+        buf.put(Message(id="1", payload="a"))
+        buf.put(Message(id="2", payload="b"))
+        buf.put(Message(id="3", payload="c"))
+        buf.put(Message(id="4", payload="d"))
+
+        assert buf.drops == 1
+        assert buf.size == 3
+        assert buf.check("1") is None  # evicted
+        assert buf.check("4").payload == "d"
+
+    def test_eviction_unkeyed(self) -> None:
+        """Unkeyed messages are evicted after keyed ones."""
+        buf = RedeliveryBuffer(max_size=2)
+        buf.put("no-id-1")
+        buf.put("no-id-2")
+        buf.put("no-id-3")
+
+        assert buf.drops == 1
+        assert buf.pop_any() == "no-id-2"
+
+    def test_size_tracking(self) -> None:
+        """Size is accurate after put/check/pop_any."""
+        buf = RedeliveryBuffer()
+        assert buf.size == 0
+        buf.put(Message(id="a"))
+        assert buf.size == 1
+        buf.check("a")
+        assert buf.size == 0
+        buf.put(Message(id="b"))
+        buf.pop_any()
+        assert buf.size == 0
+
+
+class TestValidateResponse:
+    """Tests for validate_response helper."""
+
+    def test_passes_normal_message(self) -> None:
+        """Normal message passes through."""
+        msg = Message(payload="ok")
+        assert validate_response(msg) is msg
+
+    def test_raises_on_error(self) -> None:
+        """Message with error raises ChannelError."""
+        msg = Message(error="fail")
+        with pytest.raises(ChannelError, match="fail"):
+            validate_response(msg)
 
 
 class TestQueueChannel:

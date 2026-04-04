@@ -16,7 +16,8 @@ import time
 from collections.abc import AsyncIterator
 from typing import Any, Generic, Protocol, TypeVar, cast, runtime_checkable
 
-from ..errors import ChannelClosedError, ChannelError, ChannelTimeoutError
+from ..errors import ChannelClosedError, ChannelTimeoutError
+from .base import RedeliveryBuffer, validate_response
 
 TRequest = TypeVar("TRequest")
 TResponse = TypeVar("TResponse")
@@ -77,8 +78,6 @@ class AsyncChannel(Generic[TRequest, TResponse]):
         response_timeout: Default timeout for ``submit()`` calls (seconds).
     """
 
-    _MAX_REDELIVERY = 4096
-
     def __init__(
         self,
         transport: AsyncTransport,
@@ -87,13 +86,17 @@ class AsyncChannel(Generic[TRequest, TResponse]):
         self._transport = transport
         self._response_timeout = response_timeout
         self._closed = False
-        self._redelivery: asyncio.Queue[Any] = asyncio.Queue()
-        self.redelivery_drops: int = 0
+        self._redelivery = RedeliveryBuffer()
 
     @property
     def transport(self) -> AsyncTransport:
         """The underlying async wire transport."""
         return self._transport
+
+    @property
+    def redelivery_drops(self) -> int:
+        """Number of messages dropped due to redelivery buffer overflow."""
+        return self._redelivery.drops
 
     @property
     def is_closed(self) -> bool:
@@ -114,10 +117,9 @@ class AsyncChannel(Generic[TRequest, TResponse]):
         with periodic close checks. When closed, attempts to drain one
         remaining buffered message before raising ``ChannelClosedError``.
         """
-        try:
-            return cast(TResponse, self._redelivery.get_nowait())
-        except asyncio.QueueEmpty:
-            pass
+        msg = self._redelivery.pop_any()
+        if msg is not None:
+            return cast(TResponse, msg)
 
         if self.is_closed:
             return await self._drain_or_raise()
@@ -215,18 +217,18 @@ class AsyncChannel(Generic[TRequest, TResponse]):
                     f"Request {request_id} timed out after {timeout}s"
                 )
 
-            message = await self._check_redelivery(request_id)
+            message = self._redelivery.check(request_id)
             if message is not None:
-                return self._validate_response(message)
+                return cast(TResponse, validate_response(message))
 
             message = await self._try_recv(min(poll_interval, remaining))
             if message is None:
                 continue
 
             if hasattr(message, "id") and message.id == request_id:
-                return self._validate_response(message)
+                return cast(TResponse, validate_response(message))
 
-            await self._buffer_for_redelivery(message)
+            self._redelivery.put(message)
 
     async def _poll_for_stream(
         self, request_id: str, timeout: float
@@ -253,28 +255,18 @@ class AsyncChannel(Generic[TRequest, TResponse]):
                     f"Stream {request_id} timed out waiting for chunk"
                 )
 
-            message = await self._check_redelivery(request_id)
+            message = self._redelivery.check(request_id)
             if message is not None:
-                return self._validate_response(message)
+                return cast(TResponse, validate_response(message))
 
             message = await self._try_recv(min(poll_interval, remaining))
             if message is None:
                 continue
 
             if hasattr(message, "id") and message.id == request_id:
-                return self._validate_response(message)
+                return cast(TResponse, validate_response(message))
 
-            await self._buffer_for_redelivery(message)
-
-    async def _buffer_for_redelivery(self, message: Any) -> None:
-        """Buffer a message for redelivery, discarding oldest if at capacity."""
-        if self._redelivery.qsize() >= self._MAX_REDELIVERY:
-            try:
-                self._redelivery.get_nowait()
-                self.redelivery_drops += 1
-            except asyncio.QueueEmpty:
-                pass
-        await self._redelivery.put(message)
+            self._redelivery.put(message)
 
     async def _try_recv(self, timeout: float) -> Any | None:
         """Try to receive, returning None on timeout."""
@@ -282,32 +274,6 @@ class AsyncChannel(Generic[TRequest, TResponse]):
             return await self._transport.recv(timeout)
         except ChannelTimeoutError:
             return None
-
-    def _validate_response(self, message: Any) -> TResponse:
-        """Validate response and raise ChannelError if it contains an error."""
-        if hasattr(message, "error") and message.error:
-            raise ChannelError(f"Request failed: {message.error}")
-        return cast(TResponse, message)
-
-    async def _check_redelivery(self, request_id: str) -> Any | None:
-        """Check redelivery queue for a matching response."""
-        recheck: list[Any] = []
-        result = None
-
-        while True:
-            try:
-                msg = self._redelivery.get_nowait()
-                if result is None and hasattr(msg, "id") and msg.id == request_id:
-                    result = msg
-                else:
-                    recheck.append(msg)
-            except asyncio.QueueEmpty:
-                break
-
-        for msg in recheck:
-            await self._redelivery.put(msg)
-
-        return result
 
 
 # ---------------------------------------------------------------------------
@@ -366,11 +332,17 @@ class AsyncProcessQueueTransport(Generic[TRequest, TResponse]):
         await loop.run_in_executor(None, self._outbound.put, message)
 
     async def recv(self, timeout: float | None = None) -> TResponse:
-        """Get next message from the inbound mp.Queue via executor."""
+        """Get next message from the inbound mp.Queue via executor.
+
+        When timeout is None, uses a large finite timeout (86400s) to avoid
+        blocking the executor thread indefinitely — mp.Queue.get(timeout=None)
+        cannot be interrupted by close().
+        """
+        effective = timeout if timeout is not None else 86400.0
         loop = asyncio.get_running_loop()
         try:
             return await loop.run_in_executor(
-                None, lambda: self._inbound.get(timeout=timeout)
+                None, lambda: self._inbound.get(timeout=effective)
             )
         except queue.Empty:
             raise ChannelTimeoutError(f"Timeout waiting for message ({timeout}s)")

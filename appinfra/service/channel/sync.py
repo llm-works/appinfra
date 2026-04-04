@@ -40,7 +40,8 @@ import queue
 import time
 from typing import Any, Generic, Protocol, TypeVar, cast, runtime_checkable
 
-from ..errors import ChannelClosedError, ChannelError, ChannelTimeoutError
+from ..errors import ChannelClosedError, ChannelTimeoutError
+from .base import RedeliveryBuffer, validate_response
 
 TRequest = TypeVar("TRequest")
 TResponse = TypeVar("TResponse")
@@ -117,8 +118,6 @@ class Channel(Generic[TRequest, TResponse]):
         response_timeout: Default timeout for ``submit()`` calls (seconds).
     """
 
-    _MAX_REDELIVERY = 4096
-
     def __init__(
         self,
         transport: Transport,
@@ -127,13 +126,17 @@ class Channel(Generic[TRequest, TResponse]):
         self._transport = transport
         self._response_timeout = response_timeout
         self._closed = False
-        self._redelivery: queue.Queue[Any] = queue.Queue()
-        self.redelivery_drops: int = 0
+        self._redelivery = RedeliveryBuffer()
 
     @property
     def transport(self) -> Transport:
         """The underlying wire transport."""
         return self._transport
+
+    @property
+    def redelivery_drops(self) -> int:
+        """Number of messages dropped due to redelivery buffer overflow."""
+        return self._redelivery.drops
 
     @property
     def is_closed(self) -> bool:
@@ -154,10 +157,9 @@ class Channel(Generic[TRequest, TResponse]):
         with periodic close checks. When closed, attempts to drain one
         remaining buffered message before raising ``ChannelClosedError``.
         """
-        try:
-            return cast(TResponse, self._redelivery.get_nowait())
-        except queue.Empty:
-            pass
+        msg = self._redelivery.pop_any()
+        if msg is not None:
+            return cast(TResponse, msg)
 
         if self.is_closed:
             return self._drain_or_raise()
@@ -222,28 +224,18 @@ class Channel(Generic[TRequest, TResponse]):
                     f"Request {request_id} timed out after {timeout}s"
                 )
 
-            message = self._check_redelivery(request_id)
+            message = self._redelivery.check(request_id)
             if message is not None:
-                return self._validate_response(message)
+                return cast(TResponse, validate_response(message))
 
             message = self._try_recv(min(poll_interval, remaining))
             if message is None:
                 continue
 
             if hasattr(message, "id") and message.id == request_id:
-                return self._validate_response(message)
+                return cast(TResponse, validate_response(message))
 
-            self._buffer_for_redelivery(message)
-
-    def _buffer_for_redelivery(self, message: Any) -> None:
-        """Buffer a message for redelivery, discarding oldest if at capacity."""
-        if self._redelivery.qsize() >= self._MAX_REDELIVERY:
-            try:
-                self._redelivery.get_nowait()
-                self.redelivery_drops += 1
-            except queue.Empty:
-                pass
-        self._redelivery.put(message)
+            self._redelivery.put(message)
 
     def _try_recv(self, timeout: float) -> Any | None:
         """Try to receive, returning None on timeout."""
@@ -251,32 +243,6 @@ class Channel(Generic[TRequest, TResponse]):
             return self._transport.recv(timeout)
         except ChannelTimeoutError:
             return None
-
-    def _validate_response(self, message: Any) -> TResponse:
-        """Validate response and raise ChannelError if it contains an error."""
-        if hasattr(message, "error") and message.error:
-            raise ChannelError(f"Request failed: {message.error}")
-        return cast(TResponse, message)
-
-    def _check_redelivery(self, request_id: str) -> Any | None:
-        """Check redelivery queue for a matching response."""
-        recheck: list[Any] = []
-        result = None
-
-        while True:
-            try:
-                msg = self._redelivery.get_nowait()
-                if result is None and hasattr(msg, "id") and msg.id == request_id:
-                    result = msg
-                else:
-                    recheck.append(msg)
-            except queue.Empty:
-                break
-
-        for msg in recheck:
-            self._redelivery.put(msg)
-
-        return result
 
     def _calc_wait_time(
         self, poll_interval: float, deadline: float | None, timeout: float | None
