@@ -4,6 +4,9 @@ Mixed approach example.
 
 Demonstrates mixing decorator-based tools with traditional class-based tools.
 Use decorators for simple tools, classes for complex ones.
+
+Pattern: Build app with AppBuilder (infrastructure + class-based tools),
+then define simple tools via @app.tool() decorators on the built app.
 """
 
 import pathlib
@@ -16,41 +19,11 @@ sys.path.insert(0, project_root) if project_root not in sys.path else None
 from appinfra.app import AppBuilder, Tool, ToolConfig
 from appinfra.dot_dict import DotDict
 
-# Create builder
-builder = (
-    AppBuilder()
-    .with_name("mixed-app")
-    .with_version("1.0.0")
-    .with_config(
-        DotDict(
-            logging=DotDict(level="info"), server=DotDict(host="0.0.0.0", port=8080)
-        )
-    )
-)
-
-
-# Simple tools use decorators
-@builder.tool(name="analyze", help="Analyze data quickly")
-@builder.argument("--file", required=True)
-@builder.argument("--format", choices=["json", "csv"])
-def analyze(self):
-    """Quick data analysis tool."""
-    self.lg.info(f"Analyzing {self.args.file} as {self.args.format}")
-    # Simple analysis logic
-    return 0
-
-
-@builder.tool(name="export", help="Export results")
-@builder.argument("--output", required=True)
-@builder.argument("--format", choices=["json", "csv", "xml"], default="json")
-def export(self):
-    """Export data to file."""
-    self.lg.info(f"Exporting to {self.args.output} as {self.args.format}")
-    # Simple export logic
-    return 0
-
-
+# ============================================================================
 # Complex tools use classes (when you need more control)
+# ============================================================================
+
+
 class ServerTool(Tool):
     """
     Complex server tool with extensive state management.
@@ -137,11 +110,6 @@ class ServerTool(Tool):
         return 0
 
 
-# Register the complex class-based tool
-builder.tools.with_tool(ServerTool())
-
-
-# Can also have another complex tool
 class ProcessorTool(Tool):
     """Data processor with complex pipeline."""
 
@@ -204,9 +172,47 @@ class ProcessorTool(Tool):
         pass  # Save logic
 
 
-builder.tools.with_tool(ProcessorTool())
+# ============================================================================
+# Build app: AppBuilder for infrastructure + class tools, then decorators
+# ============================================================================
 
-# Build and run
+app = (
+    AppBuilder()
+    .with_name("mixed-app")
+    .with_version("1.0.0")
+    .with_config(
+        DotDict(
+            logging=DotDict(level="info"), server=DotDict(host="0.0.0.0", port=8080)
+        )
+    )
+    .tools.with_tool(ServerTool())
+    .with_tool(ProcessorTool())
+    .done()
+    .build()
+)
+
+
+# Simple tools use decorators on the built app
+@app.tool(name="analyze", help="Analyze data quickly")
+@app.argument("--file", required=True)
+@app.argument("--format", choices=["json", "csv"])
+def analyze(self):
+    """Quick data analysis tool."""
+    self.lg.info(f"Analyzing {self.args.file} as {self.args.format}")
+    # Simple analysis logic
+    return 0
+
+
+@app.tool(name="export", help="Export results")
+@app.argument("--output", required=True)
+@app.argument("--format", choices=["json", "csv", "xml"], default="json")
+def export(self):
+    """Export data to file."""
+    self.lg.info(f"Exporting to {self.args.output} as {self.args.format}")
+    # Simple export logic
+    return 0
+
+
+# Run
 if __name__ == "__main__":
-    app = builder.build()
     sys.exit(app.main())

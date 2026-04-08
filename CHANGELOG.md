@@ -11,6 +11,9 @@ For API stability guarantees and deprecation policy, see
 ## [Unreleased]
 
 ### Added
+- Guide: [Decorator API with Config Files](appinfra/docs/guides/decorator-config-pattern.md) —
+  canonical pattern for combining `AppBuilder` config file loading with decorator-based tool
+  definitions
 - `Channel` and `AsyncChannel` are now **protocols** — smart transports (ZMQ, gRPC) can implement
   the channel interface directly without wrapping in a `BufferedChannel`
 - `BufferedChannel` and `AsyncBufferedChannel` are the concrete implementations that wrap a
@@ -23,6 +26,9 @@ For API stability guarantees and deprecation policy, see
   `AsyncProcessQueueTransport`
 
 ### Changed
+- **Breaking:** Removed `tool()` and `argument` decorator methods from `AppBuilder`. Use
+  `@app.tool()` / `@app.argument()` on the built `App` instead — build first, then decorate.
+  See [Decorator API with Config Files](appinfra/docs/guides/decorator-config-pattern.md).
 - **Breaking**: `Channel` and `AsyncChannel` are now **protocols** — smart transports (ZMQ, gRPC)
   can implement the interface directly; the concrete implementations are `BufferedChannel` and
   `AsyncBufferedChannel` which wrap a `Transport` with correlation and redelivery;

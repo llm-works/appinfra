@@ -405,23 +405,21 @@ class TestMainToolPositionalArgsConflict:
 
 @pytest.mark.e2e
 class TestMainToolWithDecorators:
-    """E2E tests for with_main_tool() with @builder.tool decorator."""
+    """E2E tests for with_main_tool() with @app.tool decorator post-build."""
 
     def test_decorated_tool_as_main_tool(self):
-        """Test that @builder.tool decorator works with with_main_tool().
+        """Test that @app.tool decorator works with with_main_tool() post-build.
 
         Regression test for bug where DecoratedTool.set_args() didn't accept
         skip_positional parameter, causing TypeError when used as main tool.
         """
-        builder = AppBuilder("proxy").without_standard_args()
+        app = AppBuilder("proxy").without_standard_args().with_main_tool("run").build()
 
-        @builder.tool(name="run", help="Run the proxy")
-        @builder.argument("--port", type=int, default=8080, help="Port")
+        @app.tool(name="run", help="Run the proxy")
+        @app.argument("--port", type=int, default=8080, help="Port")
         def run_proxy(self):
             self.captured_port = self.args.port
             return 0
-
-        app = builder.with_main_tool("run").build()
 
         with patch.object(sys, "argv", ["proxy", "--port", "9000"]):
             app.setup()
@@ -434,20 +432,18 @@ class TestMainToolWithDecorators:
 
     def test_decorated_main_tool_with_other_subcommands(self):
         """Test decorated main tool works with other subcommand tools."""
-        builder = AppBuilder("cli").without_standard_args()
+        app = AppBuilder("cli").without_standard_args().with_main_tool("serve").build()
 
-        @builder.tool(name="serve", help="Start server")
-        @builder.argument("--port", type=int, default=8000, help="Port")
+        @app.tool(name="serve", help="Start server")
+        @app.argument("--port", type=int, default=8000, help="Port")
         def serve(self):
             self.serve_called = True
             return 0
 
-        @builder.tool(name="check", help="Health check")
+        @app.tool(name="check", help="Health check")
         def check(self):
             self.check_called = True
             return 42
-
-        app = builder.with_main_tool("serve").build()
 
         # Without subcommand - main tool runs
         with patch.object(sys, "argv", ["cli", "--port", "5000"]):
@@ -457,8 +453,20 @@ class TestMainToolWithDecorators:
         assert result == 0
         assert app.registry.get_tool("serve").serve_called
 
-        # Reset and test explicit subcommand
-        app2 = builder.with_main_tool("serve").build()
+        # Reset: need a fresh app since setup() was already called
+        app2 = AppBuilder("cli").without_standard_args().with_main_tool("serve").build()
+
+        @app2.tool(name="serve", help="Start server")
+        @app2.argument("--port", type=int, default=8000, help="Port")
+        def serve2(self):
+            self.serve_called = True
+            return 0
+
+        @app2.tool(name="check", help="Health check")
+        def check2(self):
+            self.check_called = True
+            return 42
+
         with patch.object(sys, "argv", ["cli", "check"]):
             app2.setup()
             result2 = app2.run()

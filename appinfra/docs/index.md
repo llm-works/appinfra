@@ -16,6 +16,7 @@ appinfra docs find <text>        # Search documentation for text
 
 ## Guides
 
+- [Decorator API with Config Files](guides/decorator-config-pattern.md) - Build app, then decorate
 - [Configuration Precedence](guides/configuration-precedence.md) - CLI > Env > YAML override rules
 - [Logging Builder](guides/logging-builder.md) - Fluent API for logging configuration
 - [Config-Based Logging](guides/config-based-logging.md) - YAML-based logging setup

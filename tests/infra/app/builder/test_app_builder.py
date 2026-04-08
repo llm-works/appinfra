@@ -667,27 +667,18 @@ class TestAppBuilderFluentMethods:
 
 
 @pytest.mark.unit
-class TestAppBuilderDecoratorAPI:
-    """Test AppBuilder decorator API."""
+class TestAppBuilderNoDecoratorAPI:
+    """Test that AppBuilder does not expose decorator methods."""
 
-    def test_tool_decorator(self):
-        """Test tool decorator delegates to DecoratorAPI."""
+    def test_no_tool_method(self):
+        """Builder should not have tool() — use @app.tool() post-build."""
         builder = AppBuilder()
+        assert not hasattr(builder, "tool")
 
-        with patch.object(builder._decorators, "tool") as mock_tool:
-            mock_tool.return_value = Mock()
-
-            result = builder.tool(name="test")
-
-            mock_tool.assert_called_once_with(name="test")
-
-    def test_argument_property(self):
-        """Test argument property returns callable."""
+    def test_no_argument_property(self):
+        """Builder should not have argument — use @app.argument post-build."""
         builder = AppBuilder()
-
-        result = builder.argument
-
-        assert callable(result)
+        assert not hasattr(builder, "argument")
 
 
 # =============================================================================

@@ -252,25 +252,21 @@ def _create_tool_instance_from_func(tool_func: ToolFunction) -> Tool:
 
 def _register_tool_with_target(target: Any, tool_instance: Tool) -> None:
     """
-    Register tool instance with App or AppBuilder target.
+    Register tool instance with an App.
 
     Args:
-        target: App or AppBuilder instance
+        target: App instance
         tool_instance: Tool to register
 
     Raises:
-        TypeError: If target is not App or AppBuilder
+        TypeError: If target does not support add_tool()
     """
     if hasattr(target, "add_tool"):
-        # App instance
         target.add_tool(tool_instance)
-    elif hasattr(target, "tools"):
-        # AppBuilder instance
-        target.tools.with_tool(tool_instance).done()
     else:
         raise TypeError(
             f"Cannot register tool with {type(target).__name__}. "
-            f"Expected App or AppBuilder instance."
+            f"Expected App instance with add_tool() method."
         )
 
 
@@ -456,8 +452,7 @@ class DecoratorAPI:
     Provides @tool, @argument, and related decorators that generate
     proper Tool classes while offering a simpler syntax.
 
-    This class is instantiated by App and AppBuilder to provide
-    decorator methods.
+    This class is instantiated by App to provide decorator methods.
 
     Example:
         >>> from appinfra.app import App
@@ -478,7 +473,7 @@ class DecoratorAPI:
         Initialize decorator API.
 
         Args:
-            target: App or AppBuilder instance to register tools with
+            target: App instance to register tools with
         """
         self._target = target
         self._tool_functions: list[ToolFunction] = []
@@ -534,7 +529,7 @@ class DecoratorAPI:
             # Convert to Tool class and instantiate
             tool_instance = _create_tool_instance_from_func(tool_func)
 
-            # Register with app or builder
+            # Register with app
             _register_tool_with_target(self._target, tool_instance)
 
             # Store ToolFunction for reference
