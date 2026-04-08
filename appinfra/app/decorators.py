@@ -252,25 +252,21 @@ def _create_tool_instance_from_func(tool_func: ToolFunction) -> Tool:
 
 def _register_tool_with_target(target: Any, tool_instance: Tool) -> None:
     """
-    Register tool instance with App or AppBuilder target.
+    Register tool instance with an App.
 
     Args:
-        target: App or AppBuilder instance
+        target: App instance
         tool_instance: Tool to register
 
     Raises:
-        TypeError: If target is not App or AppBuilder
+        TypeError: If target does not support add_tool()
     """
     if hasattr(target, "add_tool"):
-        # App instance
         target.add_tool(tool_instance)
-    elif hasattr(target, "tools"):
-        # AppBuilder instance
-        target.tools.with_tool(tool_instance).done()
     else:
         raise TypeError(
             f"Cannot register tool with {type(target).__name__}. "
-            f"Expected App or AppBuilder instance."
+            f"Expected App instance with add_tool() method."
         )
 
 

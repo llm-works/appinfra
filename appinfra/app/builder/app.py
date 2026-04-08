@@ -19,7 +19,6 @@ from typing import Any, Self
 from ...config import Config
 from ...dot_dict import DotDict
 from ..core.app import App
-from ..decorators import DecoratorAPI
 from ..server.handlers import Middleware
 from ..tools.base import Tool, ToolConfig
 from ..tracing.traceable import Traceable
@@ -321,7 +320,6 @@ class AppBuilder:
         self._version: str | None = None
         self._main_cls: type | None = None
         self._standard_args: dict[str, bool] = self._DEFAULT_STANDARD_ARGS.copy()
-        self._decorators: DecoratorAPI = DecoratorAPI(self)
         self._main_tool: str | None = None
         # Version tracking
         self._version_tracker: Any | None = None
@@ -526,53 +524,6 @@ class AppBuilder:
         for key in self._standard_args:
             self._standard_args[key] = False
         return self
-
-    def tool(self, *args: Any, **kwargs: Any) -> Callable:
-        """
-        Decorator to register a tool from a function.
-
-        Provides a decorator-based API for creating tools with less boilerplate.
-        The decorated function receives `self` as the first parameter, which is
-        the generated Tool instance with full framework access (lg, config, args).
-
-        Example:
-            builder = AppBuilder()
-
-            @builder.tool(name="analyze", help="Analyze data")
-            @builder.argument('--file', required=True)
-            def analyze(self):
-                self.lg.info(f"Analyzing {self.args.file}")
-                return 0
-
-            app = builder.build()
-
-        Args:
-            *args: Positional arguments passed to DecoratorAPI.tool()
-            **kwargs: Keyword arguments passed to DecoratorAPI.tool()
-
-        Returns:
-            Decorator function
-        """
-        return self._decorators.tool(*args, **kwargs)
-
-    @property
-    def argument(self) -> Callable:
-        """
-        Decorator to add command-line arguments to a tool.
-
-        Returns the argument decorator from DecoratorAPI.
-
-        Example:
-            @builder.tool()
-            @builder.argument('--file', required=True)
-            @builder.argument('--verbose', action='store_true')
-            def process(self):
-                self.lg.info(f"Processing {self.args.file}")
-
-        Returns:
-            Argument decorator function
-        """
-        return self._decorators.argument
 
     def build(self) -> App:
         """Build the application with all configured components."""

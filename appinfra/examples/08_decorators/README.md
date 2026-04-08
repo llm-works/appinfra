@@ -1,10 +1,13 @@
 # Decorator API Examples
 
-This directory contains examples demonstrating the decorator-based API for creating CLI tools in the `infra.app` framework.
+This directory contains examples demonstrating the decorator-based API for creating CLI tools in the
+`infra.app` framework.
 
 ## Overview
 
-The decorator API provides a more concise syntax for creating simple CLI tools while maintaining full compatibility with the class-based Tool architecture. All decorated tools generate proper Tool classes under the hood.
+The decorator API provides a more concise syntax for creating simple CLI tools while maintaining
+full compatibility with the class-based Tool architecture. All decorated tools generate proper Tool
+classes under the hood.
 
 ## When to Use Decorators vs Classes
 
@@ -72,8 +75,8 @@ Mixing decorators and classes for optimal flexibility.
 ```
 
 **Key Concepts:**
-- Use decorators for simple tools
-- Use classes for complex tools
+- Build app with AppBuilder, then define simple tools via `@app.tool()` decorators
+- Use classes for complex tools (registered via builder before `build()`)
 - Both approaches work together seamlessly
 - Choose based on complexity, not preference
 
@@ -160,23 +163,34 @@ def sub2(self):
 # Usage: app.py parent sub1 --option value
 ```
 
-### With AppBuilder
+### With AppBuilder (Config Files, Logging, etc.)
+
+When you need AppBuilder features (config files, logging config, etc.), build the app first,
+then apply decorators:
 
 ```python
 from appinfra.app import AppBuilder
 
-builder = AppBuilder() \
-    .with_name("myapp") \
-    .with_config(config)
+app = (
+    AppBuilder()
+    .with_name("myapp")
+    .with_config_file("myapp.yaml")       # deferred: resolved from --etc-dir at runtime
+    .logging.with_level("info").done()
+    .build()
+)
 
-@builder.tool(name="tool1")
-@builder.argument('--file')
+@app.tool(name="tool1")
+@app.argument('--file')
 def tool1(self):
+    backend = self.app.config.get("backend", "default")  # from YAML + env overrides
     return 0
 
-app = builder.build()
-app.main()
+if __name__ == "__main__":
+    app.main()
 ```
+
+The config file is loaded during `app.main()` → `setup()`, so `self.app.config` is fully
+resolved (YAML + `INFRA_*` env var overrides) by the time any tool runs.
 
 ## Type Hints for IDE Support
 

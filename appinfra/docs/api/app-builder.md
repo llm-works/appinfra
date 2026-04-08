@@ -207,14 +207,12 @@ Disable with `.without_standard_args()` or selectively with `.with_standard_args
 For single-purpose apps, use `with_main_tool()` to run a tool without requiring a subcommand:
 
 ```python
-builder = AppBuilder("proxy")
+app = AppBuilder("proxy").with_main_tool("run").build()
 
-@builder.tool(name="run")
+@app.tool(name="run")
 def run_proxy(self):
     self.lg.info("Starting proxy...")
     return 0
-
-app = builder.with_main_tool("run").build()
 ```
 
 Now the app can be invoked without the subcommand:
@@ -225,8 +223,8 @@ Now the app can be invoked without the subcommand:
 
 Accepts either a tool name (string) or Tool object:
 ```python
-builder.with_main_tool("run")      # by name
-builder.with_main_tool(my_tool)    # by object
+AppBuilder("proxy").with_main_tool("run")      # by name
+AppBuilder("proxy").with_main_tool(my_tool)    # by object
 ```
 
 ## Hot-Reload Logging
@@ -249,6 +247,7 @@ See [Hot-Reload Logging Guide](../guides/hot-reload-logging.md) for full documen
 
 ## See Also
 
+- [Decorator API with Config Files](../guides/decorator-config-pattern.md) - Build app, then decorate
 - [Application Framework](app.md) - Tool and ToolConfig
 - [Logging System](logging.md) - LoggingBuilder
 - [Hot-Reload Logging](../guides/hot-reload-logging.md) - Dynamic config reloading

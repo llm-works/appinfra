@@ -279,23 +279,9 @@ class TestRegisterToolWithTarget:
 
         target.add_tool.assert_called_once_with(tool)
 
-    def test_registers_with_app_builder(self):
-        """Test registers tool using AppBuilder's tools configurer."""
-        target = Mock()
-        # Remove add_tool to force tools path
-        del target.add_tool
-        target.tools = Mock()
-        target.tools.with_tool.return_value = target.tools
-        tool = Mock()
-
-        _register_tool_with_target(target, tool)
-
-        target.tools.with_tool.assert_called_once_with(tool)
-        target.tools.done.assert_called_once()
-
     def test_raises_type_error_for_unknown_target(self):
         """Test raises TypeError for unsupported target type."""
-        target = Mock(spec=[])  # No relevant methods
+        target = Mock(spec=[])  # No add_tool method
         tool = Mock()
 
         with pytest.raises(TypeError) as exc_info:

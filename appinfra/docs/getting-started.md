@@ -216,15 +216,13 @@ if __name__ == "__main__":
 ```python
 from appinfra.app.builder import AppBuilder
 
-builder = AppBuilder("myapp")
+app = AppBuilder("myapp").build()
 
-@builder.tool(name="greet", help="Greet someone")
-@builder.argument('--name', required=True)
+@app.tool(name="greet", help="Greet someone")
+@app.argument('--name', required=True)
 def greet(self):
     self.lg.info(f"Hello, {self.args.name}!")
     return 0
-
-app = builder.build()
 
 if __name__ == "__main__":
     app.run()
