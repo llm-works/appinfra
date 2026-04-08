@@ -473,7 +473,7 @@ class DecoratorAPI:
         Initialize decorator API.
 
         Args:
-            target: App or AppBuilder instance to register tools with
+            target: App instance to register tools with
         """
         self._target = target
         self._tool_functions: list[ToolFunction] = []
@@ -529,7 +529,7 @@ class DecoratorAPI:
             # Convert to Tool class and instantiate
             tool_instance = _create_tool_instance_from_func(tool_func)
 
-            # Register with app or builder
+            # Register with app
             _register_tool_with_target(self._target, tool_instance)
 
             # Store ToolFunction for reference

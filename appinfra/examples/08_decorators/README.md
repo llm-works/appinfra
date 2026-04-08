@@ -1,7 +1,7 @@
 # Decorator API Examples
 
 This directory contains examples demonstrating the decorator-based API for creating CLI tools in the
-`infra.app` framework.
+`appinfra.app` framework.
 
 ## Overview
 
