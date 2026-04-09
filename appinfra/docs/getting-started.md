@@ -478,14 +478,14 @@ print(config["database"]["port"])  # 5432
 
 ```python
 from appinfra.rate_limit import RateLimiter
-import time
+from appinfra.log import Logger
 
-limiter = RateLimiter(max_calls=5, period=10.0)
+lg = Logger("my_app")
+limiter = RateLimiter(lg, per_minute=30)  # 30 calls per minute
 
 for i in range(10):
-    with limiter:
-        print(f"Call {i}")
-        time.sleep(0.5)
+    limiter.next()  # blocks until next slot is available
+    print(f"Call {i}")
 ```
 
 ## Troubleshooting

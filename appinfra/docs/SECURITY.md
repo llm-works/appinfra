@@ -233,15 +233,15 @@ config = Config('etc/config.yaml')
 - **Rate limiting:** Available via `RateLimiter` utility
 
 ```python
-from appinfra import RateLimiter
+from appinfra.rate_limit import RateLimiter
+from appinfra.log import Logger
 
-# Limit expensive operations
-limiter = RateLimiter(max_calls=10, period=60)  # 10 calls per minute
+lg = Logger("my_app")
+limiter = RateLimiter(lg, per_minute=10)  # 10 calls per minute
 
-@limiter.limit
 def expensive_operation():
+    limiter.next()  # blocks until next slot is available
     # Protected operation
-    pass
 ```
 
 ---

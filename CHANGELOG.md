@@ -11,9 +11,9 @@ For API stability guarantees and deprecation policy, see
 ## [Unreleased]
 
 ### Added
-- `RateLimiter(initial=True)` parameter — first call goes through immediately by default.
-  Set `initial=False` for the previous behavior (wait one interval before first call).
-  Matches `Ticker(initial=...)` semantics.
+- `RateLimiter(initial=...)` parameter — controls whether the first call goes through
+  immediately (`True`) or waits one interval (`False`, the default). Matches
+  `Ticker(initial=...)` semantics.
 - Guide: [Decorator API with Config Files](appinfra/docs/guides/decorator-config-pattern.md) —
   canonical pattern for combining `AppBuilder` config file loading with decorator-based tool
   definitions

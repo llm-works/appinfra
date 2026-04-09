@@ -23,16 +23,16 @@ class RateLimiter:
     All methods are safe to call concurrently from multiple threads.
     """
 
-    def __init__(self, lg: Logger, per_minute: float, initial: bool = True) -> None:
+    def __init__(self, lg: Logger, per_minute: float, initial: bool = False) -> None:
         """
         Initialize the rate limiter.
 
         Args:
             lg: Logger instance for rate limiting operations
             per_minute: Maximum number of operations per minute (e.g., 1/60 for once per hour)
-            initial: Whether the first call goes through immediately (default True).
-                If False, the first call also waits for a full interval — useful for
-                steady-state loops where you want uniform spacing from the start.
+            initial: Whether the first call goes through immediately (default False).
+                If True, the first call skips the wait — useful when you want an
+                immediate first execution. Matches ``Ticker(initial=...)`` semantics.
 
         Raises:
             ValueError: If per_minute is not positive.
