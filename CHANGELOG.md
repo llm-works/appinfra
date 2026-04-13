@@ -10,23 +10,19 @@ For API stability guarantees and deprecation policy, see
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-04-13
+
 ### Added
-- `RateLimiter(initial=...)` parameter — controls whether the first call goes through
-  immediately (`True`) or waits one interval (`False`, the default). Matches
-  `Ticker(initial=...)` semantics.
-- Guide: [Decorator API with Config Files](appinfra/docs/guides/decorator-config-pattern.md) —
-  canonical pattern for combining `AppBuilder` config file loading with decorator-based tool
-  definitions
-- `Channel` and `AsyncChannel` are now **protocols** — smart transports (ZMQ, gRPC) can implement
-  the channel interface directly without wrapping in a `BufferedChannel`
-- `BufferedChannel` and `AsyncBufferedChannel` are the concrete implementations that wrap a
-  `Transport`/`AsyncTransport` with request/response correlation and redelivery buffering
-- Pluggable transport for `appinfra.service`: `Transport` and `AsyncTransport` protocols define
-  the wire level (`send`/`recv`/`close`/`is_closed`)
-- `ChannelPairFactory` protocol and injection points (`channel_factory` on `RunnerFactory`,
-  per-call `channel_pair` on `create_*_with_channel()` methods)
-- Built-in transports: `QueueTransport`, `ProcessQueueTransport`, `AsyncQueueTransport`,
-  `AsyncProcessQueueTransport`
+- `RateLimiter(initial=...)` parameter — controls whether first call waits or goes through
+  immediately
+- Guide: [Decorator API with Config Files](appinfra/docs/guides/decorator-config-pattern.md)
+- HTTP rate limiting middleware for FastAPI (`appinfra.app.fastapi.ratelimit`) with
+  `TokenBucketLimiter`
+- Service execution framework (`appinfra.service`) — runners, channels, and lifecycle management
+  for background services
+- `Channel` and `AsyncChannel` are now protocols — custom transports can implement the interface
+  directly
+- `Service.lg` property for accessing the logger instance
 
 ### Changed
 - **Breaking:** Removed `tool()` and `argument` decorator methods from `AppBuilder`. Use
@@ -59,48 +55,6 @@ For API stability guarantees and deprecation policy, see
 - Missing API doc reference for `fastapi.md` in `docs/api/index.md`
 - Missing guides in `docs/index.md`: api-stability, framework-integration, pytest-plugin
 - Missing example sections in `docs/index.md` and `examples/README.md` for examples 07-12
-
-
-### Added
-- HTTP rate limiting middleware for FastAPI servers (`appinfra.app.fastapi.ratelimit`):
-  - `RateLimiter` ABC defining the interface for pluggable rate limiting strategies
-  - `TokenBucketLimiter`: O(1) per-request rate limiting with configurable burst, per-IP or global
-    keying, proxy header support (`X-Forwarded-For`, `CF-Connecting-IP`), and automatic stale entry
-    cleanup
-  - Raw ASGI middleware (not BaseHTTPMiddleware) for correct streaming/background task behavior
-  - `ServerBuilder.with_rate_limiter()` integration with exempt path support
-  - Multiple limiters can be chained (e.g., global + per-IP); first to deny wins
-  - 429 responses with `Retry-After` header; `X-RateLimit-Limit`/`X-RateLimit-Remaining` on 200s
-  - Pickle-safe for subprocess mode (fresh state per worker)
-- README documentation for `examples/07_fastapi/` (FastAPI server modes)
-- README documentation for `examples/11_docs/` (documentation generation)
-- Service execution framework (`appinfra.service`) for managing service lifecycles:
-  - **Three-layer architecture**: Service (what to run), Runner (how to run), Manager (orchestration)
-  - **State machine**: Explicit states (CREATED, INITD, STARTING, RUNNING, IDLE, STOPPING, STOPPED,
-    FAILED, DONE) with validated transitions and state change hooks
-  - **ThreadRunner**: Runs `service.execute()` in a daemon thread
-  - **ProcessRunner**: Runs `service.execute()` in a subprocess using `multiprocessing.Process`
-    - Queue-based logging forwarded to parent process via `LogQueueListener`
-    - IPC for shutdown signaling and health status
-  - **ScheduledService**: Base class for services with periodic `tick()` execution
-  - **Manager**: Orchestrates multiple services with dependency ordering and parallel start/stop
-  - **RestartPolicy**: Configurable restart behavior with exponential backoff
-  - **Dependency graph**: Uses stdlib `graphlib.TopologicalSorter` for cycle detection and ordering
-  - **Bidirectional channels** for service communication (sync and async):
-    - Sync: `ThreadChannel`, `ProcessChannel` for threaded code
-    - Async: `AsyncThreadChannel`, `AsyncProcessChannel` for asyncio code
-    - `Message`: Generic message with id for request/response correlation
-    - `submit()`: Request/response pattern with timeout (blocking or async)
-    - `submit_stream()`: Streaming responses (yields chunks until `is_final=True`)
-    - `send()`/`recv()`: Fire-and-forget messaging
-  - **Factory classes** for centralized component creation:
-    - `ChannelFactory`: Creates channel pairs with consistent configuration
-      - `create_thread_pair()`, `create_process_pair()` for sync channels
-      - `create_async_thread_pair()`, `create_async_process_pair()` for async channels
-    - `ChannelPair`, `AsyncChannelPair`, `AsyncProcessChannelPair`: Typed pair containers
-    - `RunnerFactory`: Creates runners with optional channel wiring
-    - `ServiceFactory`: Registry-based service creation with dependency injection
-- `Service.lg` property for accessing the logger instance
 
 ## [0.5.0] - 2026-03-14
 
@@ -580,7 +534,8 @@ as config. Affected: `ConfigValidator`, `PG.readonly`, `PG.migrate()`,
 ### Changed
 - Package renamed to `appinfra` (install and import both use `appinfra`)
 
-[Unreleased]: https://github.com/llm-works/appinfra/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/llm-works/appinfra/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/llm-works/appinfra/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/llm-works/appinfra/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/llm-works/appinfra/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/llm-works/appinfra/compare/v0.3.5...v0.4.0
