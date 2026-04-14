@@ -33,6 +33,36 @@ class LogConstants:
         "false": False,  # Special value to disable all logging
     }
 
+    # Reserved keys that cannot be used in 'extra' dict
+    # These are LogRecord attributes that would be overwritten
+    RESERVED_EXTRA_KEYS: frozenset[str] = frozenset(
+        {
+            "args",
+            "created",
+            "exc_info",
+            "exc_text",
+            "filename",
+            "funcName",
+            "levelname",
+            "levelno",
+            "lineno",
+            "module",
+            "msecs",
+            "msg",
+            "name",
+            "pathname",
+            "process",
+            "processName",
+            "relativeCreated",
+            "stack_info",
+            "taskName",
+            "thread",
+            "threadName",
+            # Also reserve 'message' which is used by LogRecord.getMessage()
+            "message",
+        }
+    )
+
     # ANSI escape sequences
     RESET: str = "\x1b[0m"
 

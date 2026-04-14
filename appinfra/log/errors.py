@@ -38,3 +38,19 @@ class CallbackError(LogError):
     """Raised when there's an error in callback execution."""
 
     pass
+
+
+class ReservedKeyError(LogError):
+    """Raised when a reserved key is used in log extra dict.
+
+    Reserved keys are LogRecord attributes like 'name', 'message', 'levelname',
+    etc. that cannot be overwritten via the 'extra' parameter.
+    """
+
+    def __init__(self, keys: set[str]) -> None:
+        self.keys = keys
+        keys_str = ", ".join(sorted(keys))
+        super().__init__(
+            f"Reserved key(s) in log extra: {keys_str}. "
+            f"These are LogRecord attributes and cannot be used."
+        )

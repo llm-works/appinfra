@@ -10,6 +10,10 @@ For API stability guarantees and deprecation policy, see
 
 ## [Unreleased]
 
+### Added
+- `ReservedKeyError` exception — raised immediately when reserved LogRecord keys (e.g., `name`,
+  `message`, `levelname`) are used in log `extra` dict, preventing silent overwrites
+
 ## [0.6.1] - 2026-04-14
 
 ### Added

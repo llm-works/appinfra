@@ -22,6 +22,7 @@ from appinfra.log.config import LogConfig
 from appinfra.log.errors import (
     CallbackError,
     InvalidLogLevelError,
+    ReservedKeyError,
 )
 from appinfra.log.logger import Logger
 
@@ -581,6 +582,59 @@ class TestLoggerMakeRecord:
         )
 
         assert isinstance(getattr(record, "__infra__extra"), collections.OrderedDict)
+
+
+# =============================================================================
+# Test Reserved Key Validation
+# =============================================================================
+
+
+@pytest.mark.unit
+class TestReservedKeyValidation:
+    """Test validation of reserved keys in extra dict."""
+
+    def test_reserved_key_in_log_call_raises_error(self):
+        """Test reserved key in log call raises ReservedKeyError."""
+        logger = Logger("test")
+        logger.addHandler(logging.NullHandler())
+
+        with pytest.raises(ReservedKeyError) as excinfo:
+            logger.info("test message", extra={"name": "foo"})
+
+        assert "name" in str(excinfo.value)
+
+    def test_reserved_key_in_init_extra_raises_error(self):
+        """Test reserved key in pre-populated extra raises ReservedKeyError."""
+        with pytest.raises(ReservedKeyError) as excinfo:
+            Logger("test", extra={"message": "bar"})
+
+        assert "message" in str(excinfo.value)
+
+    def test_multiple_reserved_keys_all_reported(self):
+        """Test multiple reserved keys are all reported in error."""
+        with pytest.raises(ReservedKeyError) as excinfo:
+            Logger("test", extra={"name": "foo", "msg": "bar", "levelname": "baz"})
+
+        error_msg = str(excinfo.value)
+        assert "levelname" in error_msg
+        assert "msg" in error_msg
+        assert "name" in error_msg
+
+    def test_valid_keys_work_normally(self):
+        """Test valid keys (non-reserved) work without error."""
+        logger = Logger("test", extra={"request_id": "123"})
+        logger.addHandler(logging.NullHandler())
+
+        # Should not raise
+        logger.info("test", extra={"user_id": "456", "entity_type": "document"})
+
+    def test_common_problematic_keys_are_reserved(self):
+        """Test commonly problematic LogRecord attribute keys are reserved."""
+        from appinfra.log.constants import LogConstants
+
+        # These are the most likely to cause confusion
+        expected_reserved = {"name", "message", "msg", "levelname", "args", "exc_info"}
+        assert expected_reserved.issubset(LogConstants.RESERVED_EXTRA_KEYS)
 
 
 # =============================================================================
