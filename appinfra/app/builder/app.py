@@ -192,10 +192,6 @@ def _initialize_foundation(app: App, builder: AppBuilder) -> None:
     """Initialize app foundation: flags and metadata."""
     # Copy config file specs for deferred loading
     app._config_files = builder._config_files.copy()  # type: ignore[attr-defined]
-    # Legacy scalar fields for backward compat
-    app._config_path = builder._config_path  # type: ignore[attr-defined, assignment]
-    app._config_from_etc_dir = builder._config_from_etc_dir  # type: ignore[attr-defined]
-    app._config_optional = builder._config_optional  # type: ignore[attr-defined]
     # Copy etc_dir and config_file for hot-reload support (set for absolute paths)
     if hasattr(builder, "_etc_dir"):
         app._etc_dir = builder._etc_dir  # type: ignore[attr-defined]
@@ -319,10 +315,6 @@ class AppBuilder:
         self._name: str | None = name
         self._config: Config | DotDict | None = None
         self._config_files: list[ConfigFileSpec] = []  # Track all config files
-        # Legacy scalar fields (derived from _config_files for backward compat)
-        self._config_path: str | Path | None = None
-        self._config_from_etc_dir: bool = False
-        self._config_optional: bool = False
         self._server_config: ServerConfig | None = None
         self._logging_config: LoggingConfig | None = None
         self._tools: list[Tool] = []
@@ -358,8 +350,6 @@ class AppBuilder:
 
     def _load_config_immediately(self, path: str, optional: bool) -> bool:
         """Load config file immediately. Returns True if loaded, False if skipped."""
-        from pathlib import Path
-
         path_obj = Path(path).resolve()
         try:
             new_config = Config(path)
@@ -375,8 +365,6 @@ class AppBuilder:
             self._config = new_config
 
         # Track path for hot-reload (last loaded file)
-        self._config_path = path
-        self._config_from_etc_dir = False
         self._etc_dir = str(path_obj.parent)
         self._config_file = path_obj.name
         return True
@@ -408,6 +396,11 @@ class AppBuilder:
 
         By default, relative paths are resolved from --etc-dir at runtime.
         Absolute paths are always loaded immediately.
+
+        Hot-reload:
+            When using create_config_watcher() or subprocess_context(), all loaded
+            config files are watched. Changes to any file trigger a reload that
+            merges all configs in order (later files override earlier ones).
 
         Args:
             path: Path to configuration YAML file. If None, uses the default
@@ -460,21 +453,14 @@ class AppBuilder:
 
         if os.path.isabs(path) or not from_etc_dir:
             self._load_config_immediately(path, optional)
-        else:
-            # Defer loading - will be resolved from --etc-dir at runtime
-            # Legacy scalar fields updated for backward compat (last deferred wins)
-            self._config_path = path
-            self._config_from_etc_dir = True
-            self._config_optional = optional
+        # else: Deferred loading - will be resolved from --etc-dir at runtime
+        # Config specs are tracked in _config_files list
 
         return self
 
     def with_config(self, config: Config | DotDict) -> Self:
         """Set the application configuration."""
         self._config = config
-        # Track path if Config has it
-        if hasattr(config, "_config_path"):
-            self._config_path = config._config_path
         return self
 
     def with_main_cls(self, cls: type) -> Self:

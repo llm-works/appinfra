@@ -27,7 +27,7 @@ class SubprocessContext:
 
     1. Loop-based (e.g., worker processes):
         ```python
-        with SubprocessContext(lg=logger, etc_dir="/etc/myapp", config_file="config.yaml") as ctx:
+        with SubprocessContext(lg=logger, config_files=["/etc/myapp/config.yaml"]) as ctx:
             while ctx.running:
                 msg = queue.get(timeout=1.0)
                 process(msg)
@@ -35,14 +35,14 @@ class SubprocessContext:
 
     2. Blocking call (e.g., uvicorn):
         ```python
-        with SubprocessContext(lg=logger, etc_dir=etc_dir, config_file=config_file, handle_signals=False):
+        with SubprocessContext(lg=logger, config_files=paths, handle_signals=False):
             uvicorn.run(app)  # uvicorn handles its own signals
         ```
 
     Args:
         lg: Logger instance for this subprocess
-        etc_dir: Base directory for config files (from --etc-dir). Required for hot-reload.
-        config_file: Config filename relative to etc_dir (e.g., "config.yaml"). Required for hot-reload.
+        config_files: List of config file paths (absolute). First file is primary,
+            rest are overlays merged in order. Required for hot-reload.
         handle_signals: Whether to install signal handlers (default: True).
             Set to False when the subprocess runs a framework that handles
             its own signals (e.g., uvicorn).
@@ -51,13 +51,11 @@ class SubprocessContext:
     def __init__(
         self,
         lg: Logger,
-        etc_dir: str | None = None,
-        config_file: str | None = None,
+        config_files: list[str] | None = None,
         handle_signals: bool = True,
     ) -> None:
         self._lg = lg
-        self._etc_dir = etc_dir
-        self._config_file = config_file
+        self._config_files = config_files or []
         self._handle_signals = handle_signals
         self._running = True
         self._watcher: ConfigWatcher | None = None
@@ -85,7 +83,7 @@ class SubprocessContext:
             signal.signal(signal.SIGTERM, self._handle_stop_signal)
             signal.signal(signal.SIGINT, self._handle_stop_signal)
 
-        if self._etc_dir and self._config_file:
+        if self._config_files:
             self._start_config_watcher()
 
         return self
@@ -103,32 +101,29 @@ class SubprocessContext:
 
     def _start_config_watcher(self) -> None:
         """Start config file watcher for hot-reload."""
-        if self._etc_dir is None or self._config_file is None:
+        if not self._config_files:
             return
 
         try:
+            from pathlib import Path
+
             from ..config import ConfigWatcher
             from ..log import LogConfigReloader
 
-            # Create reloader callback for logger config updates
+            first_path = Path(self._config_files[0])
             reloader = LogConfigReloader(self._lg, section="logging")
+            self._watcher = ConfigWatcher(lg=self._lg, etc_dir=str(first_path.parent))
 
-            # Create watcher (uses same logger for its own logging)
-            self._watcher = ConfigWatcher(lg=self._lg, etc_dir=self._etc_dir)
-            self._watcher.configure(
-                self._config_file,
-                on_change=reloader,
-            )
+            for config_path in self._config_files:
+                self._watcher.add_config_file(config_path)
+
+            self._watcher.configure(first_path.name, on_change=reloader)
             self._watcher.start()
             self._lg.debug("subprocess config watcher started")
         except ImportError:
-            self._lg.debug(
-                "watchdog not installed, config hot-reload disabled in subprocess"
-            )
+            self._lg.debug("watchdog not installed, hot-reload disabled")
         except Exception as e:
-            self._lg.warning(
-                "failed to start config watcher in subprocess", extra={"error": str(e)}
-            )
+            self._lg.warning("failed to start config watcher", extra={"error": str(e)})
 
     def _handle_stop_signal(self, signum: int, frame: FrameType | None) -> None:
         """Handle SIGTERM/SIGINT by setting running to False."""

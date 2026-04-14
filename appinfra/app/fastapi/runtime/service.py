@@ -105,10 +105,16 @@ class UvicornService(Service):
 
         self._setup_subprocess_logging()
 
+        # Build config_files list from etc_dir + config_file
+        config_files: list[str] = []
+        if self._config.etc_dir and self._config.config_file:
+            from pathlib import Path
+
+            config_files = [str(Path(self._config.etc_dir) / self._config.config_file)]
+
         with SubprocessContext(
             lg=self._lg,
-            etc_dir=self._config.etc_dir,
-            config_file=self._config.config_file,
+            config_files=config_files,
             handle_signals=False,  # uvicorn handles SIGTERM/SIGINT
         ):
             ipc_channel = self._create_ipc_channel()

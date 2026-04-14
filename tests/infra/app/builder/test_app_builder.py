@@ -614,8 +614,9 @@ class TestAppBuilderFluentMethods:
 
         result = builder.with_config_file()
 
-        assert builder._config_path == "infra.yaml"
-        assert builder._config_from_etc_dir is True
+        assert len(builder._config_files) == 1
+        assert builder._config_files[0].path == "infra.yaml"
+        assert builder._config_files[0].from_etc_dir is True
         assert result is builder
 
     def test_with_config_file_with_explicit_path(self):
@@ -624,8 +625,9 @@ class TestAppBuilderFluentMethods:
 
         result = builder.with_config_file("custom.yaml")
 
-        assert builder._config_path == "custom.yaml"
-        assert builder._config_from_etc_dir is True
+        assert len(builder._config_files) == 1
+        assert builder._config_files[0].path == "custom.yaml"
+        assert builder._config_files[0].from_etc_dir is True
         assert result is builder
 
     def test_with_config_file_multiple_immediate_merges(self):

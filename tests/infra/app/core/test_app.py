@@ -905,15 +905,19 @@ class TestDeferredConfigLoading:
 
     def test_load_deferred_config_raises_for_missing_required_file(self):
         """Test that _load_deferred_config raises FileNotFoundError for missing required file."""
+        from appinfra.app.builder.app import ConfigFileSpec
+
         with tempfile.TemporaryDirectory() as tmpdir:
             etc_dir = Path(tmpdir) / "etc"
             etc_dir.mkdir()
             # Don't create the config file
 
             app = App()
-            app._config_path = "nonexistent.yaml"  # type: ignore[attr-defined]
-            app._config_from_etc_dir = True  # type: ignore[attr-defined]
-            app._config_optional = False  # type: ignore[attr-defined]
+            app._config_files = [  # type: ignore[attr-defined]
+                ConfigFileSpec(
+                    path="nonexistent.yaml", from_etc_dir=True, optional=False
+                )
+            ]
             app.create_args()
 
             with patch.object(sys, "argv", ["test", "--etc-dir", str(etc_dir)]):
@@ -923,15 +927,19 @@ class TestDeferredConfigLoading:
 
     def test_load_deferred_config_returns_none_for_missing_optional_file(self):
         """Test that _load_deferred_config returns None for missing optional file."""
+        from appinfra.app.builder.app import ConfigFileSpec
+
         with tempfile.TemporaryDirectory() as tmpdir:
             etc_dir = Path(tmpdir) / "etc"
             etc_dir.mkdir()
             # Don't create the config file
 
             app = App()
-            app._config_path = "nonexistent.yaml"  # type: ignore[attr-defined]
-            app._config_from_etc_dir = True  # type: ignore[attr-defined]
-            app._config_optional = True  # type: ignore[attr-defined]
+            app._config_files = [  # type: ignore[attr-defined]
+                ConfigFileSpec(
+                    path="nonexistent.yaml", from_etc_dir=True, optional=True
+                )
+            ]
             app.create_args()
 
             with patch.object(sys, "argv", ["test", "--etc-dir", str(etc_dir)]):
@@ -948,6 +956,8 @@ class TestDeferredConfigLoading:
         """Test that _load_deferred_config raises for required configs with YAML errors."""
         import yaml
 
+        from appinfra.app.builder.app import ConfigFileSpec
+
         with tempfile.TemporaryDirectory() as tmpdir:
             etc_dir = Path(tmpdir) / "etc"
             etc_dir.mkdir()
@@ -955,9 +965,9 @@ class TestDeferredConfigLoading:
             (etc_dir / "invalid.yaml").write_text("invalid: yaml: content: [")
 
             app = App()
-            app._config_path = "invalid.yaml"  # type: ignore[attr-defined]
-            app._config_from_etc_dir = True  # type: ignore[attr-defined]
-            app._config_optional = False  # type: ignore[attr-defined]  # Required (default)
+            app._config_files = [  # type: ignore[attr-defined]
+                ConfigFileSpec(path="invalid.yaml", from_etc_dir=True, optional=False)
+            ]
             app.create_args()
 
             with patch.object(sys, "argv", ["test", "--etc-dir", str(etc_dir)]):
@@ -968,6 +978,8 @@ class TestDeferredConfigLoading:
 
     def test_load_deferred_config_stores_error_for_optional_yaml_error(self):
         """Test that _load_deferred_config stores errors for optional configs."""
+        from appinfra.app.builder.app import ConfigFileSpec
+
         with tempfile.TemporaryDirectory() as tmpdir:
             etc_dir = Path(tmpdir) / "etc"
             etc_dir.mkdir()
@@ -975,9 +987,9 @@ class TestDeferredConfigLoading:
             (etc_dir / "invalid.yaml").write_text("invalid: yaml: content: [")
 
             app = App()
-            app._config_path = "invalid.yaml"  # type: ignore[attr-defined]
-            app._config_from_etc_dir = True  # type: ignore[attr-defined]
-            app._config_optional = True  # type: ignore[attr-defined]  # Optional
+            app._config_files = [  # type: ignore[attr-defined]
+                ConfigFileSpec(path="invalid.yaml", from_etc_dir=True, optional=True)
+            ]
             app.create_args()
 
             with patch.object(sys, "argv", ["test", "--etc-dir", str(etc_dir)]):
@@ -996,14 +1008,17 @@ class TestDeferredConfigLoading:
 
     def test_load_deferred_config_loads_and_merges_config(self):
         """Test that _load_deferred_config loads and returns config info."""
+        from appinfra.app.builder.app import ConfigFileSpec
+
         with tempfile.TemporaryDirectory() as tmpdir:
             etc_dir = Path(tmpdir) / "etc"
             etc_dir.mkdir()
             (etc_dir / "app.yaml").write_text("test_key: test_value\n")
 
             app = App()
-            app._config_path = "app.yaml"  # type: ignore[attr-defined]
-            app._config_from_etc_dir = True  # type: ignore[attr-defined]
+            app._config_files = [  # type: ignore[attr-defined]
+                ConfigFileSpec(path="app.yaml", from_etc_dir=True, optional=False)
+            ]
             app.create_args()
 
             with patch.object(sys, "argv", ["test", "--etc-dir", str(etc_dir)]):
@@ -1254,30 +1269,30 @@ class TestSubprocessContextMethod:
         # Clean up
         ctx._lg.handlers.clear()
 
-    def test_subprocess_context_passes_etc_dir_and_config_file(self):
-        """Test that subprocess_context() passes etc_dir and config_file."""
+    def test_subprocess_context_passes_config_files(self):
+        """Test that subprocess_context() passes config_files."""
         app = App()
         app.config = DotDict(logging=DotDict(level="info", location=0))
-        app._etc_dir = "/etc/myapp"  # type: ignore[attr-defined]
-        app._config_file = "config.yaml"  # type: ignore[attr-defined]
+        # Simulate loaded config paths
+        app._loaded_config_paths = [  # type: ignore[attr-defined]
+            ("/etc/myapp", "config.yaml", "/etc/myapp/config.yaml")
+        ]
 
         ctx = app.subprocess_context()
 
-        assert ctx._etc_dir == "/etc/myapp"
-        assert ctx._config_file == "config.yaml"
+        assert ctx._config_files == ["/etc/myapp/config.yaml"]
         # Clean up
         ctx._lg.handlers.clear()
 
     def test_subprocess_context_handles_missing_config(self):
-        """Test subprocess_context() works without etc_dir/config_file."""
+        """Test subprocess_context() works without loaded config paths."""
         app = App()
         app.config = DotDict(logging=DotDict(level="info", location=0))
-        # No _etc_dir or _config_file set
+        # No _loaded_config_paths set
 
         ctx = app.subprocess_context()
 
-        assert ctx._etc_dir is None
-        assert ctx._config_file is None
+        assert ctx._config_files == []
         # Clean up
         ctx._lg.handlers.clear()
 
@@ -1315,40 +1330,40 @@ class TestCreateConfigWatcherMethod:
 
         app = App()
         app.lifecycle._logger = Mock()
-        app._etc_dir = "/etc/myapp"  # type: ignore[attr-defined]
-        app._config_file = "config.yaml"  # type: ignore[attr-defined]
+        # Simulate loaded config paths
+        app._loaded_config_paths = [  # type: ignore[attr-defined]
+            ("/etc/myapp", "config.yaml", "/etc/myapp/config.yaml")
+        ]
 
         watcher = app.create_config_watcher()
 
         assert isinstance(watcher, ConfigWatcher)
 
-    def test_create_config_watcher_returns_none_when_no_etc_dir(self):
-        """Test that create_config_watcher() returns None without etc_dir."""
+    def test_create_config_watcher_returns_none_when_no_loaded_paths(self):
+        """Test that create_config_watcher() returns None without loaded paths."""
         app = App()
         app.lifecycle._logger = Mock()
-        app._config_file = "config.yaml"  # type: ignore[attr-defined]
-        # No _etc_dir
+        # No _loaded_config_paths
 
         watcher = app.create_config_watcher()
 
         assert watcher is None
 
-    def test_create_config_watcher_returns_none_when_no_config_file(self):
-        """Test that create_config_watcher() returns None without config_file."""
+    def test_create_config_watcher_returns_none_when_empty_loaded_paths(self):
+        """Test that create_config_watcher() returns None with empty loaded paths."""
         app = App()
         app.lifecycle._logger = Mock()
-        app._etc_dir = "/etc/myapp"  # type: ignore[attr-defined]
-        # No _config_file
+        app._loaded_config_paths = []  # type: ignore[attr-defined]
 
         watcher = app.create_config_watcher()
 
         assert watcher is None
 
-    def test_create_config_watcher_returns_none_when_both_missing(self):
-        """Test that create_config_watcher() returns None when both are missing."""
+    def test_create_config_watcher_returns_none_when_no_paths(self):
+        """Test that create_config_watcher() returns None when paths are missing."""
         app = App()
         app.lifecycle._logger = Mock()
-        # No _etc_dir or _config_file
+        # No _loaded_config_paths
 
         watcher = app.create_config_watcher()
 
@@ -1359,8 +1374,9 @@ class TestCreateConfigWatcherMethod:
         app = App()
         mock_logger = Mock()
         app.lifecycle._logger = mock_logger
-        app._etc_dir = "/etc/myapp"  # type: ignore[attr-defined]
-        app._config_file = "config.yaml"  # type: ignore[attr-defined]
+        app._loaded_config_paths = [  # type: ignore[attr-defined]
+            ("/etc/myapp", "config.yaml", "/etc/myapp/config.yaml")
+        ]
 
         watcher = app.create_config_watcher()
 

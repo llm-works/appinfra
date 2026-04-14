@@ -435,10 +435,13 @@ class TestWithHotReload:
 
     def test_enables_hot_reload_writes_to_config(self):
         """Test with_hot_reload writes hot_reload config to _config.logging.hot_reload."""
+        from appinfra.app.builder.app import ConfigFileSpec
 
         app_builder = Mock()
         app_builder._config = None  # Will be created by with_hot_reload
-        app_builder._config_path = "/etc/app.yaml"
+        app_builder._config_files = [
+            ConfigFileSpec(path="/etc/app.yaml", from_etc_dir=False)
+        ]
         configurer = LoggingConfigurer(app_builder)
 
         configurer.with_hot_reload(True)
@@ -452,11 +455,14 @@ class TestWithHotReload:
 
     def test_disables_hot_reload(self):
         """Test with_hot_reload(False) writes enabled=False to config."""
+        from appinfra.app.builder.app import ConfigFileSpec
         from appinfra.dot_dict import DotDict
 
         app_builder = Mock()
         app_builder._config = DotDict(logging=DotDict(hot_reload=DotDict(enabled=True)))
-        app_builder._config_path = "/etc/app.yaml"
+        app_builder._config_files = [
+            ConfigFileSpec(path="/etc/app.yaml", from_etc_dir=False)
+        ]
         configurer = LoggingConfigurer(app_builder)
 
         configurer.with_hot_reload(False)
@@ -464,11 +470,11 @@ class TestWithHotReload:
         # Verify hot_reload.enabled is False
         assert app_builder._config.logging.hot_reload.enabled is False
 
-    def test_raises_when_no_config_path_available(self):
-        """Test with_hot_reload raises when no config path available."""
+    def test_raises_when_no_config_files_available(self):
+        """Test with_hot_reload raises when no config files available."""
         app_builder = Mock()
         app_builder._config = None
-        app_builder._config_path = None
+        app_builder._config_files = []  # Empty list
         configurer = LoggingConfigurer(app_builder)
 
         with pytest.raises(ValueError, match="with_config_file.*must be called"):
@@ -476,10 +482,13 @@ class TestWithHotReload:
 
     def test_custom_debounce(self):
         """Test with_hot_reload with custom debounce."""
+        from appinfra.app.builder.app import ConfigFileSpec
 
         app_builder = Mock()
         app_builder._config = None
-        app_builder._config_path = "/etc/app.yaml"
+        app_builder._config_files = [
+            ConfigFileSpec(path="/etc/app.yaml", from_etc_dir=False)
+        ]
         configurer = LoggingConfigurer(app_builder)
 
         configurer.with_hot_reload(True, debounce_ms=1000)
@@ -488,9 +497,13 @@ class TestWithHotReload:
 
     def test_returns_self_for_chaining(self):
         """Test with_hot_reload returns self."""
+        from appinfra.app.builder.app import ConfigFileSpec
+
         app_builder = Mock()
         app_builder._config = None
-        app_builder._config_path = "/etc/app.yaml"
+        app_builder._config_files = [
+            ConfigFileSpec(path="/etc/app.yaml", from_etc_dir=False)
+        ]
         configurer = LoggingConfigurer(app_builder)
 
         result = configurer.with_hot_reload(True)

@@ -597,6 +597,18 @@ class TestEnvironmentOverrides:
         assert config.db.connection_pool.size == 50
         assert config.db.connection_pool.timeout == 60
 
+    def test_env_override_creates_nested_dicts(self, tmp_path, clean_env):
+        """Test env override creates intermediate dicts for new paths."""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("logging:\n  level: info\n")
+        # This creates a new nested path
+        os.environ["INFRA_LOGGING_EXTRA_NESTED_VALUE"] = "test"
+        config = Config(str(config_file))
+        # Should create the nested structure
+        assert config.logging.extra.nested.value == "test"
+        # Original value preserved
+        assert config.logging.level == "info"
+
 
 # =============================================================================
 # Test Path Resolution
