@@ -23,6 +23,7 @@ from typing import Any
 import yaml  # type: ignore[import-untyped]
 
 from ._include import _extract_section_data
+from ._utils import _file_exists
 from .types import (
     ENV_VAR_PATTERN,
     DeepMergeDict,
@@ -342,13 +343,6 @@ class Loader(yaml.SafeLoader):
 
         return include_path.resolve()
 
-    def _file_exists(self, include_path: Path) -> bool:
-        """Check if include file exists (no error raised)."""
-        try:
-            return include_path.exists()
-        except (PermissionError, OSError):
-            return False
-
     def _check_project_root_security(
         self, include_path: Path, ctx: IncludeContext
     ) -> None:
@@ -374,7 +368,7 @@ class Loader(yaml.SafeLoader):
             True if file exists and passes validation, False if optional and missing.
         """
         # For optional includes, check existence first
-        if optional and not self._file_exists(include_path):
+        if optional and not _file_exists(include_path):
             return False
 
         location = ctx.format_location()
@@ -387,7 +381,7 @@ class Loader(yaml.SafeLoader):
             )
 
         # Check if file exists (for required includes)
-        if not optional and not self._file_exists(include_path):
+        if not optional and not _file_exists(include_path):
             raise yaml.YAMLError(f"Include file not found: {include_path} ({location})")
 
         self._check_project_root_security(include_path, ctx)

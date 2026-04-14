@@ -375,12 +375,12 @@ class App(Traceable):
         Load configuration from etc directory and merge with CLI args.
 
         Returns:
-            Dict with 'etc_dir' and 'file' if config was loaded, None otherwise
+            Dict with 'etc_dir' and 'files' if config was loaded, None otherwise
         """
-        # Load deferred config from etc-dir if configured
+        # Load deferred configs from etc-dir if any are configured
         load_result = None
-        if getattr(self, "_config_from_etc_dir", False):
-            load_result = self._load_deferred_config()
+        if self._has_deferred_configs():
+            load_result = self._load_deferred_configs()
 
         # Apply command-line args to config, preserving loaded YAML sections
         # CLI args override anything loaded from etc directory
@@ -390,6 +390,15 @@ class App(Traceable):
         )
 
         return load_result
+
+    def _has_deferred_configs(self) -> bool:
+        """Check if there are any deferred config files to load."""
+        # New: check _config_files list for deferred configs
+        config_files = getattr(self, "_config_files", [])
+        if config_files:
+            return any(spec.from_etc_dir for spec in config_files)
+        # Legacy: fall back to scalar flag
+        return getattr(self, "_config_from_etc_dir", False)
 
     def _log_config_loading(self, load_result: dict | None) -> None:
         """Log configuration loading results."""
@@ -412,9 +421,11 @@ class App(Traceable):
             self._config_load_errors.clear()
 
         if load_result:
+            # Handle both new format (files list) and legacy (single file)
+            files = load_result.get("files") or [load_result.get("file")]
             self.lg.debug(
                 "loaded config from etc",
-                extra={"etc_dir": load_result["etc_dir"], "file": load_result["file"]},
+                extra={"etc_dir": load_result["etc_dir"], "files": files},
             )
 
     def _check_tool_selection(self) -> None:
@@ -465,26 +476,6 @@ class App(Traceable):
 
         return result
 
-    def _merge_loaded_and_programmatic_config(self, loaded_config: DotDict) -> DotDict:
-        """Merge loaded config with programmatic config, programmatic takes precedence."""
-        if self.config and dict(self.config):
-            # Deep merge: loaded as base, programmatic takes precedence
-            loaded_dict = (
-                loaded_config.to_dict()
-                if hasattr(loaded_config, "to_dict")
-                else dict(loaded_config)
-            )
-            config_dict = (
-                self.config.to_dict()
-                if hasattr(self.config, "to_dict")
-                else dict(self.config)
-            )
-            merged = App._deep_merge(loaded_dict, config_dict)
-            return DotDict(**merged)
-        else:
-            # No programmatic config, just use loaded
-            return loaded_config
-
     def _add_config_error(self, filename: str, error: Exception) -> None:
         """Store a config loading error to be logged later."""
         if not hasattr(self, "_config_load_errors"):
@@ -503,36 +494,102 @@ class App(Traceable):
         self._config_file = filename  # type: ignore[attr-defined]
         self._config_path = str(full_path)  # type: ignore[attr-defined]
 
-    def _load_deferred_config(self) -> dict | None:
-        """Load deferred config file from etc directory (for from_etc_dir=True)."""
-        import yaml
+    def _get_deferred_config_specs(self) -> list:
+        """Get deferred config specs from _config_files or legacy scalar fields."""
+        config_files = getattr(self, "_config_files", [])
+        deferred_specs = [s for s in config_files if s.from_etc_dir]
 
-        from .config import create_config, resolve_etc_dir
+        if deferred_specs:
+            return deferred_specs
 
+        # Legacy fallback: use scalar fields
         config_filename = getattr(self, "_config_path", None)
         if not config_filename:
-            return None
+            return []
+
+        from ..builder.app import ConfigFileSpec
 
         is_optional = getattr(self, "_config_optional", False)
+        return [
+            ConfigFileSpec(
+                path=config_filename, from_etc_dir=True, optional=is_optional
+            )
+        ]
+
+    def _load_deferred_configs(self) -> dict | None:
+        """Load deferred config files from etc directory (for from_etc_dir=True)."""
+        from .config import resolve_etc_dir
+
+        deferred_specs = self._get_deferred_config_specs()
+        if not deferred_specs:
+            return None
+
         custom_etc_dir = getattr(self._parsed_args, "etc_dir", None)
         etc_dir = str(resolve_etc_dir(custom_etc_dir))
-        config_path = Path(etc_dir) / config_filename
 
-        # Load atomically via try/except (avoids TOCTOU race with exists() check)
+        # Save programmatic config to re-apply after file loading
+        programmatic_config = self.config
+        self.config = DotDict()
+
+        loaded_files: list[str] = []
+        for spec in deferred_specs:
+            config_path = Path(etc_dir) / spec.path
+            if self._load_single_deferred_config(
+                spec.path, config_path, spec.optional, etc_dir
+            ):
+                loaded_files.append(spec.path)
+
+        # Re-apply programmatic config (highest precedence after CLI args)
+        if programmatic_config and dict(programmatic_config):
+            self.config = self._merge_config_layers(self.config, programmatic_config)
+
+        return {"etc_dir": etc_dir, "files": loaded_files} if loaded_files else None
+
+    def _load_single_deferred_config(
+        self, filename: str, config_path: Path, optional: bool, etc_dir: str
+    ) -> bool:
+        """
+        Load a single deferred config file.
+
+        Returns True if loaded, False if skipped (optional missing or YAML error).
+
+        Note:
+            Only FileNotFoundError and yaml.YAMLError are handled gracefully.
+            Other errors (PermissionError, file too large, etc.) propagate as
+            uncaught exceptions for fail-fast behavior on unexpected conditions.
+        """
+        import yaml
+
+        from .config import create_config
+
         try:
             loaded_config = create_config(file_path=str(config_path), lg=None)
-            self.config = self._merge_loaded_and_programmatic_config(loaded_config)
-            self._store_config_paths(etc_dir, config_filename, config_path)
-            return {"etc_dir": etc_dir, "file": config_filename}
+            # For layered configs: new file overrides existing (later wins)
+            self.config = self._merge_config_layers(self.config, loaded_config)
+            self._store_config_paths(etc_dir, filename, config_path)
+            return True
         except FileNotFoundError:
-            if is_optional:
-                self._add_config_warning(config_filename, f"not found: {config_path}")
-                return None
+            if optional:
+                self._add_config_warning(filename, f"not found: {config_path}")
+                return False
             raise FileNotFoundError(f"Config file not found: {config_path}") from None
         except yaml.YAMLError as e:
             # YAML errors (!include failures, syntax errors) are stored for later logging
-            self._add_config_error(config_filename, e)
-            return None
+            self._add_config_error(filename, e)
+            return False
+
+    def _merge_config_layers(self, base: DotDict | None, overlay: DotDict) -> DotDict:
+        """Merge config layers, overlay takes precedence (for layered config files)."""
+        if not base or not dict(base):
+            return overlay
+
+        base_dict = base.to_dict() if hasattr(base, "to_dict") else dict(base)
+        overlay_dict = (
+            overlay.to_dict() if hasattr(overlay, "to_dict") else dict(overlay)
+        )
+        # Overlay wins over base
+        merged = App._deep_merge(base_dict, overlay_dict)
+        return DotDict(**merged)
 
     def run_no_tool(self) -> int:
         """

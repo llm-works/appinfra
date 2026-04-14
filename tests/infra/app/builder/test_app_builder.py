@@ -627,6 +627,58 @@ class TestAppBuilderFluentMethods:
         assert builder._config_from_etc_dir is True
         assert result is builder
 
+    def test_with_config_file_multiple_immediate_merges(self):
+        """Test that multiple immediate config files are merged correctly."""
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Create base config
+            base_path = Path(tmpdir) / "base.yaml"
+            base_path.write_text("key1: base\nnested:\n  a: 1\n  b: 2\n")
+
+            # Create overlay config
+            overlay_path = Path(tmpdir) / "overlay.yaml"
+            overlay_path.write_text("key2: overlay\nnested:\n  b: 3\n  c: 4\n")
+
+            builder = AppBuilder("test")
+            builder.with_config_file(str(base_path))  # Absolute path = immediate
+            builder.with_config_file(str(overlay_path))  # Absolute path = immediate
+
+            # Both should be merged (overlay wins)
+            assert builder._config.key1 == "base"  # From base
+            assert builder._config.key2 == "overlay"  # From overlay
+            assert builder._config.nested.a == 1  # From base only
+            assert builder._config.nested.b == 3  # Overridden by overlay
+            assert builder._config.nested.c == 4  # From overlay only
+
+    def test_with_config_file_optional_missing_returns_false(self):
+        """Test that optional config file returns False when missing."""
+        builder = AppBuilder("test")
+
+        result = builder._load_config_immediately(
+            "/nonexistent/path.yaml", optional=True
+        )
+
+        assert result is False
+        assert builder._config is None
+
+    def test_with_config_file_required_missing_raises(self):
+        """Test that required config file raises FileNotFoundError."""
+        builder = AppBuilder("test")
+
+        with pytest.raises(FileNotFoundError, match="Config file not found"):
+            builder._load_config_immediately("/nonexistent/path.yaml", optional=False)
+
+    def test_deep_merge_dict_recursive(self):
+        """Test that _deep_merge_dict merges nested dicts recursively."""
+        base = {"a": 1, "nested": {"x": 1, "y": 2}}
+        override = {"b": 2, "nested": {"y": 3, "z": 4}}
+
+        result = AppBuilder._deep_merge_dict(base, override)
+
+        assert result == {"a": 1, "b": 2, "nested": {"x": 1, "y": 3, "z": 4}}
+
     def test_with_main_cls(self):
         """Test with_main_cls sets main class."""
         builder = AppBuilder()

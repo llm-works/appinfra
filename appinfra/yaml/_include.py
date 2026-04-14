@@ -17,6 +17,7 @@ from typing import Any
 
 import yaml  # type: ignore[import-untyped]
 
+from ._utils import _file_exists
 from .types import DOCUMENT_INCLUDE_PATTERN, ErrorContext
 
 
@@ -140,14 +141,6 @@ def _check_include_depth(
             f"Include chain: {chain_str} -> {include_path}{location}"
         )
         raise yaml.YAMLError(msg)
-
-
-def _file_exists(include_path: Path) -> bool:
-    """Check if include file exists (no error raised)."""
-    try:
-        return include_path.exists()
-    except (PermissionError, OSError):
-        return False
 
 
 def _check_file_exists(

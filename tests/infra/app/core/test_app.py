@@ -899,7 +899,7 @@ class TestDeferredConfigLoading:
             app._parsed_args = app.parser.parse_args()
 
         # No _config_path set, should return None
-        result = app._load_deferred_config()
+        result = app._load_deferred_configs()
         assert result is None
 
     def test_load_deferred_config_raises_for_missing_required_file(self):
@@ -918,7 +918,7 @@ class TestDeferredConfigLoading:
             with patch.object(sys, "argv", ["test", "--etc-dir", str(etc_dir)]):
                 app._parsed_args = app.parser.parse_args()
                 with pytest.raises(FileNotFoundError, match="nonexistent.yaml"):
-                    app._load_deferred_config()
+                    app._load_deferred_configs()
 
     def test_load_deferred_config_returns_none_for_missing_optional_file(self):
         """Test that _load_deferred_config returns None for missing optional file."""
@@ -935,7 +935,7 @@ class TestDeferredConfigLoading:
 
             with patch.object(sys, "argv", ["test", "--etc-dir", str(etc_dir)]):
                 app._parsed_args = app.parser.parse_args()
-                result = app._load_deferred_config()
+                result = app._load_deferred_configs()
 
             # Should return None, not raise
             assert result is None
@@ -958,7 +958,7 @@ class TestDeferredConfigLoading:
 
             with patch.object(sys, "argv", ["test", "--etc-dir", str(etc_dir)]):
                 app._parsed_args = app.parser.parse_args()
-                result = app._load_deferred_config()
+                result = app._load_deferred_configs()
 
             # Should return None, not raise
             assert result is None
@@ -984,11 +984,11 @@ class TestDeferredConfigLoading:
 
             with patch.object(sys, "argv", ["test", "--etc-dir", str(etc_dir)]):
                 app._parsed_args = app.parser.parse_args()
-                result = app._load_deferred_config()
+                result = app._load_deferred_configs()
 
             # Should return config info
             assert result is not None
-            assert result["file"] == "app.yaml"
+            assert result["files"] == ["app.yaml"]
             assert result["etc_dir"] == str(etc_dir)
             # Config should be loaded
             assert hasattr(app.config, "test_key")

@@ -367,6 +367,90 @@ class TestConfigFileWorkflow:
             # Verify topics
             assert hasattr(app.config.logging, "topics")
 
+    def test_multiple_config_files_merged(self):
+        """Test that multiple with_config_file() calls merge configs."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            etc_dir = Path(tmpdir) / "etc"
+            etc_dir.mkdir()
+
+            # Base config
+            (etc_dir / "base.yaml").write_text(
+                "app_name: base-app\n"
+                "feature_a: from_base\n"
+                "nested:\n"
+                "  key1: base_value1\n"
+                "  key2: base_value2\n"
+            )
+
+            # Overlay config - overrides some values
+            (etc_dir / "overlay.yaml").write_text(
+                "feature_a: from_overlay\n"
+                "feature_b: only_in_overlay\n"
+                "nested:\n"
+                "  key2: overlay_value2\n"
+                "  key3: overlay_value3\n"
+            )
+
+            # Chain multiple config files
+            app = (
+                AppBuilder("test-app")
+                .with_config_file("base.yaml")
+                .with_config_file("overlay.yaml")
+                .build()
+            )
+
+            with patch.object(sys, "argv", ["test", "--etc-dir", str(etc_dir)]):
+                app.create_args()
+                app._parsed_args = app.parser.parse_args()
+                app._load_and_merge_config()
+
+            # Values from base that weren't overridden
+            assert app.config.app_name == "base-app"
+
+            # Value overridden by overlay
+            assert app.config.feature_a == "from_overlay"
+
+            # Value only in overlay
+            assert app.config.feature_b == "only_in_overlay"
+
+            # Nested values - should deep merge
+            assert app.config.nested.key1 == "base_value1"  # Only in base
+            assert app.config.nested.key2 == "overlay_value2"  # Overridden
+            assert app.config.nested.key3 == "overlay_value3"  # Only in overlay
+
+    def test_multiple_config_with_optional_overlay(self):
+        """Test that optional overlay config is skipped if missing."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            etc_dir = Path(tmpdir) / "etc"
+            etc_dir.mkdir()
+
+            # Only create base config, not the overlay
+            (etc_dir / "config.yaml").write_text(
+                "from_base: true\nlogging:\n  level: info\n"
+            )
+
+            # Chain: required base + optional overlay (missing)
+            app = (
+                AppBuilder("test-app")
+                .with_config_file("config.yaml")
+                .with_config_file("env.yaml", optional=True)
+                .build()
+            )
+
+            with patch.object(sys, "argv", ["test", "--etc-dir", str(etc_dir)]):
+                app.create_args()
+                app._parsed_args = app.parser.parse_args()
+                app._load_and_merge_config()
+
+            # Base config should be loaded
+            assert app.config.from_base is True
+            assert app.config.logging.level == "info"
+
+            # Warning about missing optional config
+            assert hasattr(app, "_config_load_warnings")
+            assert len(app._config_load_warnings) == 1
+            assert "env.yaml" in app._config_load_warnings[0][0]
+
     def test_absolute_path_loads_immediately(self):
         """Test that absolute path config loads immediately, not from etc-dir."""
         with tempfile.TemporaryDirectory() as tmpdir:

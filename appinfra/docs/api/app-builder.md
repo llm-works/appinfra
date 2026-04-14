@@ -166,14 +166,18 @@ app = (
     .build()
 )
 
-# Optional config overlay (skips if file doesn't exist)
+# Layered config: base + optional environment overlay
 app = (
     AppBuilder("myapp")
-    .with_config_file("config.yaml")                              # Required
+    .with_config_file("config.yaml")                              # Required base
     .with_config_file(".env.yaml", from_etc_dir=False, optional=True)  # Optional overlay
     .build()
 )
 ```
+
+**Layered Configuration:** Multiple `with_config_file()` calls are merged in order, with later
+files overriding earlier ones (deep merge). Programmatic config via builder methods takes
+precedence over all file configs.
 
 **Note:** By default, `with_config_file()` raises `FileNotFoundError` if the file is missing.
 Use `optional=True` to silently skip missing files.
