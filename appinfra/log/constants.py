@@ -58,8 +58,9 @@ class LogConstants:
             "taskName",
             "thread",
             "threadName",
-            # Also reserve 'message' which is used by LogRecord.getMessage()
+            # Also reserve 'message' and 'asctime' which are checked by makeRecord()
             "message",
+            "asctime",
         }
     )
 

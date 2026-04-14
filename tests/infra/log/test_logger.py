@@ -633,7 +633,16 @@ class TestReservedKeyValidation:
         from appinfra.log.constants import LogConstants
 
         # These are the most likely to cause confusion
-        expected_reserved = {"name", "message", "msg", "levelname", "args", "exc_info"}
+        # asctime is explicitly checked by stdlib's makeRecord()
+        expected_reserved = {
+            "name",
+            "message",
+            "msg",
+            "levelname",
+            "args",
+            "exc_info",
+            "asctime",
+        }
         assert expected_reserved.issubset(LogConstants.RESERVED_EXTRA_KEYS)
 
 
