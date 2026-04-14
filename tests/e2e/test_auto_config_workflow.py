@@ -631,14 +631,48 @@ class TestConfigSectionIncludeWorkflow:
 class TestConfigIncludeErrorWorkflow:
     """E2E tests for config file include error handling workflow."""
 
-    def test_include_error_logged_with_location(self):
-        """Test that !include errors are logged with file and line info.
+    def test_include_error_raises_for_required_config(self):
+        """Test that !include errors raise immediately for required config files.
 
-        This tests the full workflow:
-        1. AppBuilder.with_config_file() with a config containing bad !include
-        2. App loads config, include fails
-        3. Error is stored during loading (before logger available)
-        4. Error is logged with location info once logger is initialized
+        Required config files (optional=False) should fail fast on YAML errors
+        including !include failures, ensuring the app doesn't run with incomplete
+        configuration.
+        """
+        import yaml
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            etc_dir = Path(tmpdir) / "etc"
+            etc_dir.mkdir()
+
+            # Create config with a !include that references a missing file
+            config_content = """name: test-app
+database: !include "./missing-db.yaml"
+logging:
+  level: info
+"""
+            (etc_dir / "app.yaml").write_text(config_content)
+
+            # Build app with required config file (default)
+            app = AppBuilder("test-app").with_config_file("app.yaml").build()
+
+            with patch.object(sys, "argv", ["test", "--etc-dir", str(etc_dir)]):
+                app.create_args()
+                app._parsed_args = app.parser.parse_args()
+
+                # Load config - this should RAISE for required configs
+                with pytest.raises(yaml.YAMLError) as exc_info:
+                    app._load_and_merge_config()
+
+                # Error should include location info
+                error_str = str(exc_info.value)
+                assert "missing-db.yaml" in error_str
+                assert "line 2" in error_str
+
+    def test_include_error_logged_for_optional_config(self):
+        """Test that !include errors are logged (not raised) for optional config files.
+
+        Optional config files should store errors and continue, allowing
+        the app to run with partial configuration while warning the user.
         """
         from unittest.mock import MagicMock
 
@@ -654,14 +688,18 @@ logging:
 """
             (etc_dir / "app.yaml").write_text(config_content)
 
-            # Build app with config file
-            app = AppBuilder("test-app").with_config_file("app.yaml").build()
+            # Build app with OPTIONAL config file
+            app = (
+                AppBuilder("test-app")
+                .with_config_file("app.yaml", optional=True)
+                .build()
+            )
 
             with patch.object(sys, "argv", ["test", "--etc-dir", str(etc_dir)]):
                 app.create_args()
                 app._parsed_args = app.parser.parse_args()
 
-                # Load config - this should store the error
+                # Load config - should store error, not raise
                 app._load_and_merge_config()
 
                 # Verify error was stored
@@ -690,8 +728,10 @@ logging:
                 assert call_args[1]["extra"]["file"] == "app.yaml"
                 assert "missing-db.yaml" in str(call_args[1]["extra"]["exception"])
 
-    def test_document_level_include_error_has_location(self):
-        """Test that document-level !include errors include line info."""
+    def test_document_level_include_error_raises_for_required(self):
+        """Test that document-level !include errors raise for required configs."""
+        import yaml
+
         with tempfile.TemporaryDirectory() as tmpdir:
             etc_dir = Path(tmpdir) / "etc"
             etc_dir.mkdir()
@@ -708,13 +748,13 @@ name: test-app
             with patch.object(sys, "argv", ["test", "--etc-dir", str(etc_dir)]):
                 app.create_args()
                 app._parsed_args = app.parser.parse_args()
-                app._load_and_merge_config()
 
-                # Verify error was stored with location info
-                assert hasattr(app, "_config_load_errors")
-                assert len(app._config_load_errors) == 1
-                _, error = app._config_load_errors[0]
-                error_str = str(error)
+                # Should raise for required config
+                with pytest.raises(yaml.YAMLError) as exc_info:
+                    app._load_and_merge_config()
+
+                # Verify error includes location info
+                error_str = str(exc_info.value)
                 assert "missing-base.yaml" in error_str
                 # Document-level include should have line 1
                 assert "line 1" in error_str

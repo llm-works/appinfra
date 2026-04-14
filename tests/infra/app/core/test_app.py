@@ -22,6 +22,7 @@ from appinfra.app.core.app import App
 from appinfra.app.core.config import ConfigLoader
 from appinfra.app.tools.base import Tool, ToolConfig
 from appinfra.dot_dict import DotDict
+from appinfra.yaml import deep_merge
 
 
 def create_test_tool(name: str, aliases: list = None):
@@ -943,8 +944,10 @@ class TestDeferredConfigLoading:
             assert hasattr(app, "_config_load_warnings")
             assert len(app._config_load_warnings) == 1
 
-    def test_load_deferred_config_handles_generic_exception(self):
-        """Test that _load_deferred_config handles generic exceptions gracefully."""
+    def test_load_deferred_config_raises_for_required_yaml_error(self):
+        """Test that _load_deferred_config raises for required configs with YAML errors."""
+        import yaml
+
         with tempfile.TemporaryDirectory() as tmpdir:
             etc_dir = Path(tmpdir) / "etc"
             etc_dir.mkdir()
@@ -954,13 +957,34 @@ class TestDeferredConfigLoading:
             app = App()
             app._config_path = "invalid.yaml"  # type: ignore[attr-defined]
             app._config_from_etc_dir = True  # type: ignore[attr-defined]
+            app._config_optional = False  # type: ignore[attr-defined]  # Required (default)
+            app.create_args()
+
+            with patch.object(sys, "argv", ["test", "--etc-dir", str(etc_dir)]):
+                app._parsed_args = app.parser.parse_args()
+                # Required configs should raise on YAML errors
+                with pytest.raises(yaml.YAMLError):
+                    app._load_deferred_configs()
+
+    def test_load_deferred_config_stores_error_for_optional_yaml_error(self):
+        """Test that _load_deferred_config stores errors for optional configs."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            etc_dir = Path(tmpdir) / "etc"
+            etc_dir.mkdir()
+            # Create an invalid YAML file
+            (etc_dir / "invalid.yaml").write_text("invalid: yaml: content: [")
+
+            app = App()
+            app._config_path = "invalid.yaml"  # type: ignore[attr-defined]
+            app._config_from_etc_dir = True  # type: ignore[attr-defined]
+            app._config_optional = True  # type: ignore[attr-defined]  # Optional
             app.create_args()
 
             with patch.object(sys, "argv", ["test", "--etc-dir", str(etc_dir)]):
                 app._parsed_args = app.parser.parse_args()
                 result = app._load_deferred_configs()
 
-            # Should return None, not raise
+            # Should return None, not raise (optional)
             assert result is None
 
             # Error should be stored for later logging
@@ -1094,14 +1118,14 @@ class TestAddArgumentAfterParser:
 
 @pytest.mark.unit
 class TestDeepMerge:
-    """Test App._deep_merge() utility method."""
+    """Test yaml.deep_merge() utility function (consolidated from App and yaml modules)."""
 
     def test_deep_merge_simple_dicts(self):
         """Test deep merge with simple non-nested dicts."""
         base = {"a": 1, "b": 2}
         override = {"b": 3, "c": 4}
 
-        result = App._deep_merge(base, override)
+        result = deep_merge(base, override)
 
         assert result == {"a": 1, "b": 3, "c": 4}
 
@@ -1110,7 +1134,7 @@ class TestDeepMerge:
         base = {"a": 1, "b": {"x": 1, "y": 2}}
         override = {"b": {"y": 3, "z": 4}, "c": 5}
 
-        result = App._deep_merge(base, override)
+        result = deep_merge(base, override)
 
         assert result == {"a": 1, "b": {"x": 1, "y": 3, "z": 4}, "c": 5}
 
@@ -1119,7 +1143,7 @@ class TestDeepMerge:
         base = {"logging": {"location_color": "grey-12"}}
         override = {"logging": {"level": "info", "micros": False}}
 
-        result = App._deep_merge(base, override)
+        result = deep_merge(base, override)
 
         assert "location_color" in result["logging"]
         assert result["logging"]["location_color"] == "grey-12"
@@ -1131,7 +1155,7 @@ class TestDeepMerge:
         base = {"a": 1, "b": {"x": 1}}
         override = {"a": 2, "b": {"x": 2}}
 
-        result = App._deep_merge(base, override)
+        result = deep_merge(base, override)
 
         assert result["a"] == 2
         assert result["b"]["x"] == 2
@@ -1141,7 +1165,7 @@ class TestDeepMerge:
         base = {"a": [1, 2, 3], "b": "string"}
         override = {"a": [4, 5], "c": True}
 
-        result = App._deep_merge(base, override)
+        result = deep_merge(base, override)
 
         # Lists are replaced, not merged
         assert result["a"] == [4, 5]
@@ -1153,16 +1177,16 @@ class TestDeepMerge:
         base = {"a": {"x": 1}}
         override = {"a": "string"}
 
-        result = App._deep_merge(base, override)
+        result = deep_merge(base, override)
 
         # Override replaces when types mismatch
         assert result["a"] == "string"
 
     def test_deep_merge_empty_dicts(self):
         """Test deep merge with empty dictionaries."""
-        assert App._deep_merge({}, {}) == {}
-        assert App._deep_merge({"a": 1}, {}) == {"a": 1}
-        assert App._deep_merge({}, {"a": 1}) == {"a": 1}
+        assert deep_merge({}, {}) == {}
+        assert deep_merge({"a": 1}, {}) == {"a": 1}
+        assert deep_merge({}, {"a": 1}) == {"a": 1}
 
     def test_deep_merge_realistic_config_scenario(self):
         """Test deep merge with realistic config scenario from auto-loading."""
@@ -1179,7 +1203,7 @@ class TestDeepMerge:
         # Simulates default hardcoded config
         default_config = {"logging": {"level": "info", "location": 0, "micros": False}}
 
-        result = App._deep_merge(yaml_config, default_config)
+        result = deep_merge(yaml_config, default_config)
 
         # YAML fields should be preserved
         assert result["logging"]["location_color"] == "grey-12"

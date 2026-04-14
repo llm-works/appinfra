@@ -18,6 +18,7 @@ from typing import Any, Self
 
 from ...config import Config
 from ...dot_dict import DotDict
+from ...yaml import deep_merge
 from ..core.app import App
 from ..server.handlers import Middleware
 from ..tools.base import Tool, ToolConfig
@@ -388,23 +389,8 @@ class AppBuilder:
         override_dict = (
             override.to_dict() if hasattr(override, "to_dict") else dict(override)
         )
-        merged = self._deep_merge_dict(base_dict, override_dict)
+        merged = deep_merge(base_dict, override_dict)
         return DotDict(**merged)
-
-    @staticmethod
-    def _deep_merge_dict(base: dict, override: dict) -> dict:
-        """Deep merge two dicts, override takes precedence."""
-        result = base.copy()
-        for key, value in override.items():
-            if (
-                key in result
-                and isinstance(result[key], dict)
-                and isinstance(value, dict)
-            ):
-                result[key] = AppBuilder._deep_merge_dict(result[key], value)
-            else:
-                result[key] = value
-        return result
 
     def with_config_file(
         self, path: str | None = None, from_etc_dir: bool = True, optional: bool = False

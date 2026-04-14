@@ -27,6 +27,7 @@ from appinfra.app.builder.app import (
     _register_tools_and_commands,
     _set_app_metadata,
 )
+from appinfra.yaml import deep_merge
 
 # =============================================================================
 # Test Helper Functions
@@ -671,11 +672,11 @@ class TestAppBuilderFluentMethods:
             builder._load_config_immediately("/nonexistent/path.yaml", optional=False)
 
     def test_deep_merge_dict_recursive(self):
-        """Test that _deep_merge_dict merges nested dicts recursively."""
+        """Test that yaml.deep_merge merges nested dicts recursively."""
         base = {"a": 1, "nested": {"x": 1, "y": 2}}
         override = {"b": 2, "nested": {"y": 3, "z": 4}}
 
-        result = AppBuilder._deep_merge_dict(base, override)
+        result = deep_merge(base, override)
 
         assert result == {"a": 1, "b": 2, "nested": {"x": 1, "y": 3, "z": 4}}
 

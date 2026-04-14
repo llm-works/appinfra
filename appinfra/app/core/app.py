@@ -23,6 +23,7 @@ if TYPE_CHECKING:
     from ...subprocess import SubprocessContext
 
 from ... import time
+from ...yaml import deep_merge
 from ..cli.commands import CommandHandler
 from ..cli.parser import CLIParser
 from ..decorators import DecoratorAPI
@@ -439,43 +440,6 @@ class App(Traceable):
             self.parser.print_help(sys.stderr)
             sys.exit(0)
 
-    @staticmethod
-    def _deep_merge(base: dict, override: dict) -> dict:
-        """
-        Deep merge two dictionaries recursively.
-
-        Fields in 'override' take precedence over 'base', but nested dictionaries
-        are merged recursively rather than replaced entirely. This preserves all
-        fields from both sources while maintaining precedence.
-
-        Precedence example:
-            base = {"a": 1, "b": {"x": 1, "y": 2}}
-            override = {"b": {"y": 3, "z": 4}, "c": 5}
-            result = {"a": 1, "b": {"x": 1, "y": 3, "z": 4}, "c": 5}
-
-        Args:
-            base: Base dictionary (lower precedence)
-            override: Override dictionary (higher precedence)
-
-        Returns:
-            Merged dictionary with all fields from both sources
-        """
-        result = dict(base)  # Start with base
-
-        for key, value in override.items():
-            if (
-                key in result
-                and isinstance(result[key], dict)
-                and isinstance(value, dict)
-            ):
-                # Both are dicts - merge recursively
-                result[key] = App._deep_merge(result[key], value)
-            else:
-                # Override takes precedence (non-dict or only in override)
-                result[key] = value
-
-        return result
-
     def _add_config_error(self, filename: str, error: Exception) -> None:
         """Store a config loading error to be logged later."""
         if not hasattr(self, "_config_load_errors"):
@@ -551,12 +515,12 @@ class App(Traceable):
         """
         Load a single deferred config file.
 
-        Returns True if loaded, False if skipped (optional missing or YAML error).
+        Returns True if loaded, False if skipped (optional and missing/invalid).
 
         Note:
-            Only FileNotFoundError and yaml.YAMLError are handled gracefully.
-            Other errors (PermissionError, file too large, etc.) propagate as
-            uncaught exceptions for fail-fast behavior on unexpected conditions.
+            Only FileNotFoundError and yaml.YAMLError are handled gracefully for
+            optional files. Required files raise on any error for fail-fast behavior.
+            Other errors (PermissionError, file too large, etc.) always propagate.
         """
         import yaml
 
@@ -574,9 +538,11 @@ class App(Traceable):
                 return False
             raise FileNotFoundError(f"Config file not found: {config_path}") from None
         except yaml.YAMLError as e:
-            # YAML errors (!include failures, syntax errors) are stored for later logging
-            self._add_config_error(filename, e)
-            return False
+            if optional:
+                # Optional files: log and continue
+                self._add_config_error(filename, e)
+                return False
+            raise  # Required files: fail fast on YAML errors
 
     def _merge_config_layers(self, base: DotDict | None, overlay: DotDict) -> DotDict:
         """Merge config layers, overlay takes precedence (for layered config files)."""
@@ -588,7 +554,7 @@ class App(Traceable):
             overlay.to_dict() if hasattr(overlay, "to_dict") else dict(overlay)
         )
         # Overlay wins over base
-        merged = App._deep_merge(base_dict, overlay_dict)
+        merged = deep_merge(base_dict, overlay_dict)
         return DotDict(**merged)
 
     def run_no_tool(self) -> int:

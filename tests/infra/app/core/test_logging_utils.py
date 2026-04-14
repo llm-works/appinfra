@@ -671,13 +671,13 @@ logging:
 
         # After merge, location should be 1 from config file (not 0 from defaults)
         # The builder's _merge_logging_into_config should skip None values
-        from appinfra.app.core.app import App
+        from appinfra.yaml import deep_merge
 
         # Deep merge: loaded as base, programmatic takes precedence
         loaded_dict = loaded_config.to_dict()
         prog_dict = app.config.to_dict() if app.config else {}
 
-        merged = App._deep_merge(loaded_dict, prog_dict)
+        merged = deep_merge(loaded_dict, prog_dict)
 
         assert merged["logging"]["location"] == 1, (
             f"location should be 1 from config file, got {merged['logging'].get('location')}"

@@ -388,6 +388,7 @@ def load_file(
     track_sources: bool = False,
     project_root: Path | None = None,
     max_include_depth: int = 10,
+    optional: bool = False,
 ) -> Any | tuple[Any, dict[str, Path | None]]:
     """
     Load YAML from a file with automatic file context for includes.
@@ -401,11 +402,16 @@ def load_file(
         track_sources: If True, return (data, source_map) tuple
         project_root: Restrict includes to this directory
         max_include_depth: Max nested include depth (default: 10)
+        optional: If True, return empty dict (or ({}, {}) with track_sources)
+            when file doesn't exist instead of raising FileNotFoundError
 
     Example:
         config = load_file('etc/config.yaml')
+        optional_config = load_file('overrides.yaml', optional=True)
     """
     path = Path(path)
+    if optional and not path.exists():
+        return ({}, {}) if track_sources else {}
     with open(path, encoding="utf-8") as f:
         return load(
             f,
