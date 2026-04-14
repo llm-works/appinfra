@@ -16,7 +16,7 @@ Public API:
 
 from io import StringIO
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal, overload
 
 from ._include import (
     _create_document_error_context,
@@ -380,6 +380,28 @@ def load(
     )
 
     return (final_data, final_source_map) if track_sources else final_data
+
+
+@overload
+def load_file(
+    path: str | Path,
+    merge_strategy: str = ...,
+    track_sources: Literal[False] = ...,
+    project_root: Path | None = ...,
+    max_include_depth: int = ...,
+    optional: bool = ...,
+) -> Any: ...
+
+
+@overload
+def load_file(
+    path: str | Path,
+    merge_strategy: str = ...,
+    track_sources: Literal[True] = ...,
+    project_root: Path | None = ...,
+    max_include_depth: int = ...,
+    optional: bool = ...,
+) -> tuple[Any, dict[str, Path | None]]: ...
 
 
 def load_file(

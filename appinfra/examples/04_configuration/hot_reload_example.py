@@ -138,7 +138,7 @@ class StatusCommand(Tool):
         if watcher:
             print("Hot-reload enabled: Yes")
             print(f"Watcher running: {watcher.is_running()}")
-            print(f"Config path: {watcher._config_path}")
+            print(f"Config paths: {watcher._config_paths}")
             print(f"Debounce: {watcher._debounce_ms}ms")
             return 0
         else:

@@ -42,7 +42,7 @@ class TestConfigWatcher:
         result = watcher.configure("test.yaml")
 
         assert result is watcher  # Fluent API
-        assert watcher._config_path == config_file
+        assert config_file in watcher._config_paths
 
     def test_configure_sets_debounce(self, tmp_path, mock_logger):
         """Test configure sets debounce."""

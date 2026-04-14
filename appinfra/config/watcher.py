@@ -59,7 +59,6 @@ class ConfigWatcher:
         self._lg = lg
         self._etc_dir = Path(etc_dir).resolve()
         self._observer: Any = None  # watchdog Observer
-        self._config_path: Path | None = None
         self._config_paths: list[
             Path
         ] = []  # All root config files (for layered configs)
@@ -85,12 +84,12 @@ class ConfigWatcher:
         Configure the watcher callback and debounce settings.
 
         If no config files have been added via add_config_file(), this also
-        sets the primary config file. Otherwise, this just configures the
-        callback and debounce settings without modifying the file list.
+        adds the config file to the watch list. Otherwise, this just configures
+        the callback and debounce settings without modifying the file list.
 
         Args:
             config_file: Config filename relative to etc_dir (e.g., "config.yaml").
-                        Used as primary config if no files were pre-added.
+                        Added as first config file if no files were pre-added.
             debounce_ms: Milliseconds to wait before applying changes (default: 500)
             on_change: Callback called with full merged config dict when any
                       watched file changes.
@@ -103,10 +102,10 @@ class ConfigWatcher:
             >>> watcher.configure("config.yaml", on_change=reloader).start()
         """
         with self._lock:
-            self._config_path = self._etc_dir / config_file
             # Only add if no files pre-configured (e.g., by create_config_watcher)
             if not self._config_paths:
-                self._config_paths.append(self._config_path)
+                config_path = self._etc_dir / config_file
+                self._config_paths.append(config_path)
             self._debounce_ms = debounce_ms
             self._on_change = on_change
         return self
@@ -216,8 +215,8 @@ class ConfigWatcher:
         with self._lock:  # pragma: no cover
             if self._running:
                 return
-            if self._config_path is None:
-                raise ValueError("Config path not set. Call configure() first.")
+            if not self._config_paths:
+                raise ValueError("No config files configured. Call configure() first.")
 
             # Get all source files (main config + includes)
             self._watched_files = self._get_source_files_from_config()
@@ -351,32 +350,6 @@ class ConfigWatcher:
         with self._lock:
             self._watched_files = new_source_files
             self._update_watched_directories()
-
-    def _notify_section_callbacks(self, config: Any) -> None:
-        """Notify all section callbacks with their respective section values.
-
-        Each callback is wrapped in try/except to prevent one failure from
-        breaking others.
-        """
-        with self._lock:
-            section_callbacks = {
-                section: list(callbacks)
-                for section, callbacks in self._section_callbacks.items()
-            }
-
-        for section, callbacks in section_callbacks.items():
-            section_value = config.get(section)
-            if section_value is None:
-                continue  # Section doesn't exist, skip callbacks
-
-            for callback in callbacks:
-                try:
-                    callback(section_value)
-                except Exception as e:
-                    self._lg.warning(
-                        "section callback failed",
-                        extra={"section": section, "exception": e},
-                    )
 
     def _notify_section_callbacks_from_dict(self, config_dict: dict[str, Any]) -> None:
         """Notify section callbacks using a merged config dict."""
