@@ -38,6 +38,7 @@ from .types import (
 # Public API exports
 __all__ = [
     "load",
+    "load_file",
     "Loader",
     "deep_merge",
     "DeepMergeWrapper",
@@ -379,3 +380,38 @@ def load(
     )
 
     return (final_data, final_source_map) if track_sources else final_data
+
+
+def load_file(
+    path: str | Path,
+    merge_strategy: str = "replace",
+    track_sources: bool = False,
+    project_root: Path | None = None,
+    max_include_depth: int = 10,
+) -> Any | tuple[Any, dict[str, Path | None]]:
+    """
+    Load YAML from a file with automatic file context for includes.
+
+    Convenience wrapper around load() that sets up current_file automatically,
+    enabling relative path resolution for !include and !include? directives.
+
+    Args:
+        path: Path to YAML file
+        merge_strategy: Strategy for merging - "replace" or "merge"
+        track_sources: If True, return (data, source_map) tuple
+        project_root: Restrict includes to this directory
+        max_include_depth: Max nested include depth (default: 10)
+
+    Example:
+        config = load_file('etc/config.yaml')
+    """
+    path = Path(path)
+    with open(path, encoding="utf-8") as f:
+        return load(
+            f,
+            current_file=path,
+            merge_strategy=merge_strategy,
+            track_sources=track_sources,
+            project_root=project_root,
+            max_include_depth=max_include_depth,
+        )

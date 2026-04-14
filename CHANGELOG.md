@@ -14,6 +14,7 @@ For API stability guarantees and deprecation policy, see
 - `!include?` YAML tag for optional includes — returns `{}` if file is missing instead of raising
 - `AppBuilder.with_config_file(optional=True)` parameter — skips missing config files instead of
   raising
+- `load_file(path)` convenience function — loads YAML with automatic file context for includes
 
 ### Changed
 - **Breaking:** `with_config_file()` now raises `FileNotFoundError` if the config file is missing.

@@ -11,7 +11,13 @@ from pathlib import Path
 import pytest
 import yaml
 
-from appinfra.yaml import ErrorContext, SecretLiteralWarning, deep_merge, load
+from appinfra.yaml import (
+    ErrorContext,
+    SecretLiteralWarning,
+    deep_merge,
+    load,
+    load_file,
+)
 
 # =============================================================================
 # Unit Tests for ErrorContext
@@ -439,6 +445,54 @@ name: test
         result = load(StringIO(yaml_content), current_file=tmp_path / "test.yaml")
         assert result["name"] == "test"
         assert result["base_key"] == "base_value"
+
+
+# =============================================================================
+# load_file() Convenience Function Tests
+# =============================================================================
+
+
+@pytest.mark.unit
+class TestLoadFile:
+    """Test load_file() convenience function."""
+
+    def test_load_file_basic(self, tmp_path):
+        """Test basic file loading."""
+        (tmp_path / "config.yaml").write_text("name: test\nvalue: 42\n")
+        result = load_file(tmp_path / "config.yaml")
+        assert result["name"] == "test"
+        assert result["value"] == 42
+
+    def test_load_file_with_relative_include(self, tmp_path):
+        """Test that load_file enables relative includes automatically."""
+        (tmp_path / "base.yaml").write_text("base_key: base_value\n")
+        (tmp_path / "config.yaml").write_text('data: !include "./base.yaml"\n')
+        result = load_file(tmp_path / "config.yaml")
+        assert result["data"]["base_key"] == "base_value"
+
+    def test_load_file_with_optional_include(self, tmp_path):
+        """Test that load_file works with optional includes."""
+        (tmp_path / "config.yaml").write_text(
+            'name: test\noverrides: !include? "./missing.yaml"\n'
+        )
+        result = load_file(tmp_path / "config.yaml")
+        assert result["name"] == "test"
+        assert result["overrides"] == {}
+
+    def test_load_file_with_parent_relative_include(self, tmp_path):
+        """Test that load_file resolves ../ paths correctly."""
+        subdir = tmp_path / "etc"
+        subdir.mkdir()
+        (tmp_path / "env.yaml").write_text("env: production\n")
+        (subdir / "config.yaml").write_text('settings: !include "../env.yaml"\n')
+        result = load_file(subdir / "config.yaml")
+        assert result["settings"]["env"] == "production"
+
+    def test_load_file_string_path(self, tmp_path):
+        """Test that load_file accepts string paths."""
+        (tmp_path / "config.yaml").write_text("key: value\n")
+        result = load_file(str(tmp_path / "config.yaml"))
+        assert result["key"] == "value"
 
 
 # =============================================================================
