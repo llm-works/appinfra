@@ -48,7 +48,7 @@ class ReservedKeyError(LogError):
     """
 
     def __init__(self, keys: set[str]) -> None:
-        self.keys = keys
+        self.keys = frozenset(keys)
         keys_str = ", ".join(sorted(keys))
         super().__init__(
             f"Reserved key(s) in log extra: {keys_str}. "

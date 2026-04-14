@@ -71,7 +71,7 @@ class Logger(logging.Logger):
         self._config = config
         self._holder: LogConfigHolder | None = None  # Set by factory for hot-reload
         self._callbacks = callback_registry
-        self._extra = extra or {}
+        self._extra = extra.copy() if extra else {}  # Defensive copy, preserves type
         self._root_logger: Logger | None = None  # Set for derived "view" loggers
 
         # Validate pre-populated extra keys at init time
