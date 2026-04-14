@@ -22,7 +22,8 @@ from typing import Any
 
 import yaml  # type: ignore[import-untyped]
 
-from ._include import _resolve_variables_in_data
+from ._include import _extract_section_data
+from ._utils import _file_exists
 from .types import (
     ENV_VAR_PATTERN,
     DeepMergeDict,
@@ -37,6 +38,13 @@ from .types import (
 # YAML anchors allow alphanumeric, underscore, and hyphen (e.g., &my-defaults)
 _DEEP_ANCHOR_PATTERN = re.compile(r"!deep\s+\*([a-zA-Z0-9_-]+)")
 
+# Pattern to match !deep !include and !deep !include? and transform to combined tags
+# Captures: (1) optional '?' marker, (2) the path (quoted or unquoted)
+_DEEP_INCLUDE_PATTERN = re.compile(
+    r"!deep\s+!include(\??)\s+"
+    r'("(?:[^"\\]|\\.)*"|\'(?:[^\'\\]|\\.)*\'|\S+)'
+)
+
 
 def preprocess_deep_tags(content: str) -> str:
     """
@@ -44,8 +52,12 @@ def preprocess_deep_tags(content: str) -> str:
 
     Transforms:
     - !deep *anchor -> !deep anchor  (tag before alias not valid YAML)
+    - !deep !include "path" -> !deep-include "path"  (chained tags not valid YAML)
+    - !deep !include? "path" -> !deep-include? "path"
     """
-    return _DEEP_ANCHOR_PATTERN.sub(r"!deep \1", content)
+    content = _DEEP_ANCHOR_PATTERN.sub(r"!deep \1", content)
+    content = _DEEP_INCLUDE_PATTERN.sub(r"!deep-include\1 \2", content)
+    return content
 
 
 class Loader(yaml.SafeLoader):
@@ -331,17 +343,34 @@ class Loader(yaml.SafeLoader):
 
         return include_path.resolve()
 
-    def _validate_include(self, include_path: Path, ctx: IncludeContext) -> None:
+    def _check_project_root_security(
+        self, include_path: Path, ctx: IncludeContext
+    ) -> None:
+        """Raise error if include path is outside project root."""
+        if ctx.project_root is None:
+            return
+        try:
+            include_path.relative_to(ctx.project_root)
+        except (ValueError, TypeError):
+            location = ctx.format_location()
+            raise yaml.YAMLError(
+                f"Security: Include path '{include_path}' is outside project root "
+                f"'{ctx.project_root}'. This could be a path traversal attack. ({location})"
+            )
+
+    def _validate_include(
+        self, include_path: Path, ctx: IncludeContext, optional: bool = False
+    ) -> bool:
         """
         Validate include path for circular dependencies, existence, and security.
 
-        Args:
-            include_path: Path to validate
-            ctx: Include context for error reporting
-
-        Raises:
-            yaml.YAMLError: If circular include detected, file not found, or path traversal detected
+        Returns:
+            True if file exists and passes validation, False if optional and missing.
         """
+        # For optional includes, check existence first
+        if optional and not _file_exists(include_path):
+            return False
+
         location = ctx.format_location()
 
         # Check for circular includes
@@ -351,27 +380,12 @@ class Loader(yaml.SafeLoader):
                 f"Circular include detected: {chain_str} -> {include_path} ({location})"
             )
 
-        # Check if file exists
-        try:
-            file_exists = include_path.exists()
-        except (PermissionError, OSError):
-            # If we can't check existence due to permissions, treat as not found
+        # Check if file exists (for required includes)
+        if not optional and not _file_exists(include_path):
             raise yaml.YAMLError(f"Include file not found: {include_path} ({location})")
 
-        if not file_exists:
-            raise yaml.YAMLError(f"Include file not found: {include_path} ({location})")
-
-        # Security: Validate path stays within project root if specified
-        if ctx.project_root is not None:
-            try:
-                # is_relative_to() raises ValueError if not relative (Python 3.9+)
-                # Use try/except for compatibility
-                include_path.relative_to(ctx.project_root)
-            except (ValueError, TypeError):
-                raise yaml.YAMLError(
-                    f"Security: Include path '{include_path}' is outside project root "
-                    f"'{ctx.project_root}'. This could be a path traversal attack. ({location})"
-                )
+        self._check_project_root_security(include_path, ctx)
+        return True
 
     def _store_include_source_map(self, data: Any, loader: Loader) -> None:
         """Store source map from included file for later merging (complex types only)."""
@@ -430,6 +444,8 @@ class Loader(yaml.SafeLoader):
         """
         Extract a specific section from loaded data using dot notation.
 
+        Delegates to the shared _extract_section_data helper.
+
         Args:
             data: Loaded YAML data (typically a dict)
             section_path: Dot-separated path to section (e.g., "pgserver" or "database.postgres")
@@ -441,36 +457,7 @@ class Loader(yaml.SafeLoader):
         Raises:
             yaml.YAMLError: If section path is invalid or not found
         """
-        if not section_path:
-            return data
-
-        # Resolve ${var} references before extraction so sibling sections are accessible
-        if isinstance(data, dict):
-            data = _resolve_variables_in_data(data, data, pass_through_undefined=True)
-
-        location = ctx.format_location()
-        current = data
-        parts = section_path.split(".")
-
-        for i, part in enumerate(parts):
-            if not isinstance(current, dict):
-                traversed = ".".join(parts[:i])
-                raise yaml.YAMLError(
-                    f"Cannot navigate to '{section_path}': "
-                    f"'{traversed}' is not a mapping (got {type(current).__name__}) "
-                    f"({location})"
-                )
-
-            if part not in current:
-                raise yaml.YAMLError(
-                    f"Section '{section_path}' not found in included file. "
-                    f"Available keys at this level: {list(current.keys())} "
-                    f"({location})"
-                )
-
-            current = current[part]
-
-        return current
+        return _extract_section_data(data, section_path, ctx.format_location())
 
     def _create_error_context(self, node: Any) -> ErrorContext:
         """Create an ErrorContext from the current loader state and node position."""
@@ -494,6 +481,47 @@ class Loader(yaml.SafeLoader):
             project_root=self.project_root,
             max_include_depth=self.max_include_depth,
         )
+
+    def _construct_include(self, node: Any, optional: bool = False) -> Any:
+        """
+        Core include logic shared by !include and !include? constructors.
+
+        Args:
+            node: YAML node containing the include path
+            optional: If True, return DeepMergeDict({}) for missing files
+
+        Returns:
+            Content from the included file wrapped in DeepMergeDict,
+            or DeepMergeDict({}) if optional and missing
+        """
+        # Create context for error reporting
+        ctx = self._create_include_context(node)
+
+        # Parse include path and optional section anchor
+        include_spec = self.construct_scalar(node)
+
+        # Split on '#' to separate file path from section path
+        if "#" in include_spec:
+            include_path_str, section_path = include_spec.split("#", 1)
+        else:
+            include_path_str = include_spec
+            section_path = ""
+
+        # Simple pipeline: resolve → validate → load → extract section
+        include_path = self._resolve_include_path(include_path_str, ctx)
+
+        # Validation returns False for optional missing files
+        file_exists = self._validate_include(include_path, ctx, optional=optional)
+        if not file_exists:
+            return DeepMergeDict({})  # Consistent wrapping for missing optional
+
+        data = self._load_included_file(include_path, ctx)
+
+        # Extract specific section if requested
+        if section_path:
+            data = self._extract_section_from_data(data, section_path, ctx)
+
+        return self._wrap_include_for_deep_merge(data)
 
     def include_constructor(self, node: Any) -> Any:
         """
@@ -520,29 +548,29 @@ class Loader(yaml.SafeLoader):
             !include "config.yaml#database"       # Include only 'database' section
             !include "config.yaml#app.settings"   # Include nested 'app.settings' section
         """
-        # Create context for error reporting
-        ctx = self._create_include_context(node)
+        return self._construct_include(node, optional=False)
 
-        # Parse include path and optional section anchor
-        include_spec = self.construct_scalar(node)
+    def include_optional_constructor(self, node: Any) -> Any:
+        """
+        Construct included content from !include? tag (optional include).
 
-        # Split on '#' to separate file path from section path
-        if "#" in include_spec:
-            include_path_str, section_path = include_spec.split("#", 1)
-        else:
-            include_path_str = include_spec
-            section_path = ""
+        Same as !include, but returns {} if the file is missing instead of raising.
+        Syntax errors in existing files still raise.
 
-        # Simple pipeline: resolve → validate → load → extract section
-        include_path = self._resolve_include_path(include_path_str, ctx)
-        self._validate_include(include_path, ctx)
-        data = self._load_included_file(include_path, ctx)
+        Args:
+            node: YAML node containing the include path
 
-        # Extract specific section if requested
-        if section_path:
-            data = self._extract_section_from_data(data, section_path, ctx)
+        Returns:
+            Content from the included file, or {} if file is missing
 
-        return self._wrap_include_for_deep_merge(data)
+        Raises:
+            yaml.YAMLError: If circular include detected, syntax error, or section not found
+
+        Examples:
+            !include? ".env.yaml"                  # Returns {} if missing
+            !include? "local.yaml#overrides"       # Returns {} if file missing
+        """
+        return self._construct_include(node, optional=True)
 
     def _wrap_include_for_deep_merge(self, data: Any) -> Any:
         """Wrap dict data in DeepMergeDict and update source map tracking."""
@@ -556,6 +584,48 @@ class Loader(yaml.SafeLoader):
                 original_id
             )
         return wrapped
+
+    def _construct_deep_include(
+        self, node: Any, optional: bool = False
+    ) -> DeepMergeWrapper:
+        """
+        Core logic for !deep-include and !deep-include? constructors.
+
+        Loads include and wraps in DeepMergeWrapper with override=True,
+        so included values win over document values.
+        """
+        ctx = self._create_include_context(node)
+        include_spec = self.construct_scalar(node)
+
+        if "#" in include_spec:
+            include_path_str, section_path = include_spec.split("#", 1)
+        else:
+            include_path_str = include_spec
+            section_path = ""
+
+        include_path = self._resolve_include_path(include_path_str, ctx)
+        file_exists = self._validate_include(include_path, ctx, optional=optional)
+        if not file_exists:
+            return DeepMergeWrapper({}, override=True)
+
+        data = self._load_included_file(include_path, ctx)
+        if section_path:
+            data = self._extract_section_from_data(data, section_path, ctx)
+
+        if not isinstance(data, dict):
+            raise yaml.YAMLError(
+                f"!deep !include requires a mapping, got {type(data).__name__} "
+                f"({ctx.format_location()})"
+            )
+        return DeepMergeWrapper(data, override=True)
+
+    def deep_include_constructor(self, node: Any) -> DeepMergeWrapper:
+        """Construct from !deep-include tag (preprocessed from !deep !include)."""
+        return self._construct_deep_include(node, optional=False)
+
+    def deep_include_optional_constructor(self, node: Any) -> DeepMergeWrapper:
+        """Construct from !deep-include? tag (preprocessed from !deep !include?)."""
+        return self._construct_deep_include(node, optional=True)
 
     def secret_constructor(self, node: Any) -> str:
         """
@@ -772,46 +842,67 @@ class Loader(yaml.SafeLoader):
         are completely replaced. With !deep tag (<<: !deep *anchor), nested
         dicts are recursively merged.
 
+        Override mode (!deep !include): included values win over document values.
+
+        Algorithm flow (distributed across helper methods):
+          1. _extract_merge_keys: Scan pairs, separate merge keys from regular keys.
+             Build merge_base (document wins) and override_base (include wins).
+          2. _process_deep_merge_pairs: For keys in both regular pairs and bases,
+             perform deep merge. Document keys merge with merge_base, then override_base
+             applies on top.
+          3. _build_final_pairs: Assemble final node.value from bases + merged + remaining.
+
         Args:
             node: YAML MappingNode to process
         """
         # Import here to avoid circular import
         from . import deep_merge as deep_merge_func
 
-        merge_base, has_deep_merge, regular_pairs = self._extract_merge_keys(
-            node, deep_merge_func
+        merge_base, override_base, has_deep_merge, regular_pairs = (
+            self._extract_merge_keys(node, deep_merge_func)
         )
 
         regular_dict, new_regular_pairs = self._process_deep_merge_pairs(
-            regular_pairs, merge_base, has_deep_merge, deep_merge_func
+            regular_pairs, merge_base, override_base, has_deep_merge, deep_merge_func
         )
 
         node.value = self._build_final_pairs(
-            merge_base, regular_dict, new_regular_pairs, regular_pairs
+            merge_base, override_base, regular_dict, new_regular_pairs, regular_pairs
         )
 
     def _extract_merge_keys(
         self, node: yaml.MappingNode, deep_merge_func: Any
-    ) -> tuple[dict[str, Any], bool, list[tuple[yaml.Node, yaml.Node]]]:
-        """Extract merge key values and separate regular pairs."""
+    ) -> tuple[dict[str, Any], dict[str, Any], bool, list[tuple[yaml.Node, yaml.Node]]]:
+        """Extract merge key values and separate regular pairs.
+
+        Returns:
+            Tuple of (merge_base, override_base, has_deep_merge, regular_pairs).
+            merge_base: values from regular merge keys (document wins)
+            override_base: values from override merge keys (include wins)
+        """
         merge_base: dict[str, Any] = {}
+        override_base: dict[str, Any] = {}
         has_deep_merge = False
         regular_pairs: list[tuple[yaml.Node, yaml.Node]] = []
 
         for key_node, value_node in node.value:
             if self._is_merge_key(key_node):
                 is_deep = self._process_merge_value(
-                    value_node, merge_base, deep_merge_func
+                    value_node, merge_base, override_base, deep_merge_func
                 )
                 if is_deep:
                     has_deep_merge = True
             else:
                 regular_pairs.append((key_node, value_node))
 
-        return merge_base, has_deep_merge, regular_pairs
+        return merge_base, override_base, has_deep_merge, regular_pairs
 
     def _process_merge_value(
-        self, value_node: yaml.Node, merge_base: dict[str, Any], deep_merge_func: Any
+        self,
+        value_node: yaml.Node,
+        merge_base: dict[str, Any],
+        override_base: dict[str, Any],
+        deep_merge_func: Any,
     ) -> bool:
         """Process a merge key value, returning True if deep merge was used."""
         has_deep = False
@@ -822,7 +913,10 @@ class Loader(yaml.SafeLoader):
                 data = self._construct_node_directly(subnode)
                 if isinstance(data, dict):
                     self._apply_merge_value(
-                        DeepMergeWrapper(data), merge_base, deep_merge_func
+                        DeepMergeWrapper(data),
+                        merge_base,
+                        override_base,
+                        deep_merge_func,
                     )
             return True
 
@@ -830,14 +924,16 @@ class Loader(yaml.SafeLoader):
         if isinstance(value_node, yaml.SequenceNode):
             for subnode in value_node.value:
                 merge_value = self._construct_merge_item(subnode)
-                self._apply_merge_value(merge_value, merge_base, deep_merge_func)
+                self._apply_merge_value(
+                    merge_value, merge_base, override_base, deep_merge_func
+                )
                 if isinstance(merge_value, (DeepMergeWrapper, DeepMergeDict)):
                     has_deep = True
             return has_deep
 
         # Single value: <<: *anchor or <<: !deep *anchor or <<: !include
         merge_value = self._construct_merge_item(value_node)
-        self._apply_merge_value(merge_value, merge_base, deep_merge_func)
+        self._apply_merge_value(merge_value, merge_base, override_base, deep_merge_func)
         return isinstance(merge_value, (DeepMergeWrapper, DeepMergeDict))
 
     def _construct_merge_item(self, node: yaml.Node) -> Any:
@@ -877,10 +973,15 @@ class Loader(yaml.SafeLoader):
         self,
         regular_pairs: list[tuple[yaml.Node, yaml.Node]],
         merge_base: dict[str, Any],
+        override_base: dict[str, Any],
         has_deep_merge: bool,
         deep_merge_func: Any,
     ) -> tuple[dict[str, Any], list[tuple[yaml.Node, yaml.Node]]]:
-        """Process regular pairs, applying deep merge where keys conflict."""
+        """Process regular pairs, applying deep merge where keys conflict.
+
+        For merge_base keys: deep_merge(base, doc) - document wins.
+        For override_base keys: deep_merge(doc, override) - override wins.
+        """
         regular_dict: dict[str, Any] = {}
         new_regular_pairs: list[tuple[yaml.Node, yaml.Node]] = []
 
@@ -888,54 +989,90 @@ class Loader(yaml.SafeLoader):
             key = self.construct_object(key_node, deep=False)
             key = self._convert_key_to_string(key)
 
-            if has_deep_merge and key in merge_base:
+            in_merge = key in merge_base
+            in_override = key in override_base
+
+            if has_deep_merge and (in_merge or in_override):
                 # Check for !reset tag - bypasses deep merge entirely
                 if value_node.tag == "!reset":
                     reset_val = self._construct_node_directly(value_node)
-                    # Unwrap ResetValue at top level
                     regular_dict[key] = (
                         reset_val.value
                         if isinstance(reset_val, ResetValue)
                         else reset_val
                     )
-                elif isinstance(merge_base[key], dict):
-                    value = self._construct_node_directly(value_node)
-                    if isinstance(value, dict):
-                        regular_dict[key] = deep_merge_func(merge_base[key], value)
-                    else:
-                        regular_dict[key] = value
                 else:
-                    regular_dict[key] = self._construct_node_directly(value_node)
+                    doc_value = self._construct_node_directly(value_node)
+                    regular_dict[key] = self._merge_with_bases(
+                        key, doc_value, merge_base, override_base, deep_merge_func
+                    )
             else:
                 new_regular_pairs.append((key_node, value_node))
 
         return regular_dict, new_regular_pairs
 
+    def _merge_with_bases(
+        self,
+        key: str,
+        doc_value: Any,
+        merge_base: dict[str, Any],
+        override_base: dict[str, Any],
+        deep_merge_func: Any,
+    ) -> Any:
+        """Merge document value with base and override values for a key."""
+        result = doc_value
+
+        # First, merge with base (document wins over base)
+        if key in merge_base and isinstance(merge_base[key], dict):
+            if isinstance(result, dict):
+                result = deep_merge_func(merge_base[key], result)
+
+        # Then, merge with override (override wins over document)
+        if key in override_base and isinstance(override_base[key], dict):
+            if isinstance(result, dict):
+                result = deep_merge_func(result, override_base[key])
+            else:
+                result = override_base[key]
+
+        return result
+
+    def _add_dict_as_pairs(
+        self,
+        data: dict[str, Any],
+        pairs: list[tuple[yaml.Node, yaml.Node]],
+        skip_keys: set[str],
+    ) -> None:
+        """Add dict entries as YAML pairs, skipping keys in skip_keys."""
+        for key, value in data.items():
+            if key not in skip_keys:
+                key_node = yaml.ScalarNode(tag="tag:yaml.org,2002:str", value=str(key))
+                pairs.append((key_node, self._value_to_node(value)))
+
     def _build_final_pairs(
         self,
         merge_base: dict[str, Any],
+        override_base: dict[str, Any],
         regular_dict: dict[str, Any],
         new_regular_pairs: list[tuple[yaml.Node, yaml.Node]],
         original_regular_pairs: list[tuple[yaml.Node, yaml.Node]],
     ) -> list[tuple[yaml.Node, yaml.Node]]:
-        """Build final node pairs from merge base and regular pairs."""
-        if not merge_base and not regular_dict:
+        """Build final node pairs from merge base, override, and regular pairs."""
+        if not merge_base and not override_base and not regular_dict:
             return original_regular_pairs
 
         new_pairs: list[tuple[yaml.Node, yaml.Node]] = []
+        regular_keys = set(regular_dict.keys())
 
-        # Add merge base pairs (not deep-merged with regular pairs)
-        for key, value in merge_base.items():
-            if key not in regular_dict:
-                key_node = yaml.ScalarNode(tag="tag:yaml.org,2002:str", value=str(key))
-                new_pairs.append((key_node, self._value_to_node(value)))
-
-        # Add deep-merged pairs
-        for key, value in regular_dict.items():
-            key_node = yaml.ScalarNode(tag="tag:yaml.org,2002:str", value=str(key))
-            new_pairs.append((key_node, self._value_to_node(value)))
-
-        # Add remaining regular pairs
+        # merge_base: skip keys in regular_dict or override_base (those take precedence)
+        self._add_dict_as_pairs(
+            merge_base,
+            new_pairs,
+            regular_keys | set(override_base.keys()),
+        )
+        # override_base: skip keys in regular_dict (regular_dict has the merged result)
+        self._add_dict_as_pairs(override_base, new_pairs, regular_keys)
+        # regular_dict: add all (these are the deep-merged results)
+        self._add_dict_as_pairs(regular_dict, new_pairs, set())
         new_pairs.extend(new_regular_pairs)
         return new_pairs
 
@@ -943,39 +1080,44 @@ class Loader(yaml.SafeLoader):
         self,
         merge_value: Any,
         merge_base: dict[str, Any],
+        override_base: dict[str, Any],
         deep_merge_func: Any,
     ) -> None:
         """
-        Apply a merge value to the merge base dict.
+        Apply a merge value to the appropriate base dict.
 
         Args:
             merge_value: Value to merge (dict or DeepMergeWrapper)
-            merge_base: Dict to merge into
+            merge_base: Dict for non-override values (document wins)
+            override_base: Dict for override values (include wins)
             deep_merge_func: The deep_merge function for nested merging
         """
+        is_override = False
+        data = None
+
         if isinstance(merge_value, DeepMergeWrapper):
-            # Deep merge the wrapped data into base
             data = merge_value.data
+            is_override = merge_value.override
         elif isinstance(merge_value, DeepMergeDict):
-            # Deep merge the dict into base (includes always deep merge)
             data = merge_value
-        else:
-            data = None
+
+        # Choose target based on override flag
+        target = override_base if is_override else merge_base
 
         if data is not None:
             # Deep merge: recursively merge nested dicts
             for key, value in data.items():
                 if (
-                    key in merge_base
-                    and isinstance(merge_base[key], dict)
+                    key in target
+                    and isinstance(target[key], dict)
                     and isinstance(value, dict)
                 ):
-                    merge_base[key] = deep_merge_func(merge_base[key], value)
+                    target[key] = deep_merge_func(target[key], value)
                 else:
-                    merge_base[key] = value
+                    target[key] = value
         elif isinstance(merge_value, dict):
             # Shallow merge: later values override
-            merge_base.update(merge_value)
+            target.update(merge_value)
 
     def _value_to_node(self, value: Any) -> yaml.Node:
         """
@@ -1013,6 +1155,9 @@ class Loader(yaml.SafeLoader):
 
 # Register tag constructors with the Loader class
 Loader.add_constructor("!include", Loader.include_constructor)
+Loader.add_constructor("!include?", Loader.include_optional_constructor)
+Loader.add_constructor("!deep-include", Loader.deep_include_constructor)
+Loader.add_constructor("!deep-include?", Loader.deep_include_optional_constructor)
 Loader.add_constructor("!secret", Loader.secret_constructor)
 Loader.add_constructor("!path", Loader.path_constructor)
 Loader.add_constructor("!reset", Loader.reset_constructor)

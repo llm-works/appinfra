@@ -249,11 +249,8 @@ class LoggingConfigurer:
         """
         from ....dot_dict import DotDict
 
-        # Require config path from with_config_file()
-        if not (
-            hasattr(self._app_builder, "_config_path")
-            and self._app_builder._config_path
-        ):
+        # Require config files from with_config_file()
+        if not self._app_builder._config_files:
             raise ValueError(
                 "with_config_file() must be called before with_hot_reload(). "
                 "Example: AppBuilder('app').with_config_file('app.yaml').logging.with_hot_reload()"

@@ -11,7 +11,13 @@ from pathlib import Path
 import pytest
 import yaml
 
-from appinfra.yaml import ErrorContext, SecretLiteralWarning, deep_merge, load
+from appinfra.yaml import (
+    ErrorContext,
+    SecretLiteralWarning,
+    deep_merge,
+    load,
+    load_file,
+)
 
 # =============================================================================
 # Unit Tests for ErrorContext
@@ -373,6 +379,120 @@ other: value
         assert "test.yaml" in error_msg
         # Should include line number (line 2, 0-indexed = 1, displayed as 2)
         assert "line 2" in error_msg
+
+
+# =============================================================================
+# Optional Include Tests
+# =============================================================================
+
+
+@pytest.mark.unit
+class TestOptionalInclude:
+    """Test !include? optional include directive."""
+
+    def test_optional_include_returns_empty_dict_for_missing_file(self, tmp_path):
+        """Test that !include? returns {} when file is missing."""
+        yaml_content = """
+name: test
+data: !include? "./nonexistent.yaml"
+"""
+        result = load(StringIO(yaml_content), current_file=tmp_path / "test.yaml")
+        assert result["name"] == "test"
+        assert result["data"] == {}
+
+    def test_optional_include_loads_existing_file(self, tmp_path):
+        """Test that !include? loads file normally when it exists."""
+        (tmp_path / "exists.yaml").write_text("key: value\n")
+        yaml_content = """
+data: !include? "./exists.yaml"
+"""
+        result = load(StringIO(yaml_content), current_file=tmp_path / "test.yaml")
+        assert result["data"]["key"] == "value"
+
+    def test_optional_include_with_section_anchor(self, tmp_path):
+        """Test that !include? with section anchor returns {} when file missing."""
+        yaml_content = """
+data: !include? "./nonexistent.yaml#section"
+"""
+        result = load(StringIO(yaml_content), current_file=tmp_path / "test.yaml")
+        assert result["data"] == {}
+
+    def test_optional_include_still_validates_circular(self, tmp_path):
+        """Test that !include? still detects circular includes for existing files."""
+        (tmp_path / "circular.yaml").write_text('data: !include? "./circular.yaml"\n')
+        yaml_content = """
+data: !include? "./circular.yaml"
+"""
+        with pytest.raises(yaml.YAMLError, match="Circular include detected"):
+            load(StringIO(yaml_content), current_file=tmp_path / "circular.yaml")
+
+    def test_document_level_optional_include_missing(self, tmp_path):
+        """Test document-level !include? returns empty when file missing."""
+        yaml_content = """!include? "./nonexistent.yaml"
+
+name: test
+"""
+        result = load(StringIO(yaml_content), current_file=tmp_path / "test.yaml")
+        assert result["name"] == "test"
+
+    def test_document_level_optional_include_existing(self, tmp_path):
+        """Test document-level !include? loads and merges existing file."""
+        (tmp_path / "base.yaml").write_text("base_key: base_value\n")
+        yaml_content = """!include? "./base.yaml"
+
+name: test
+"""
+        result = load(StringIO(yaml_content), current_file=tmp_path / "test.yaml")
+        assert result["name"] == "test"
+        assert result["base_key"] == "base_value"
+
+
+# =============================================================================
+# load_file() Convenience Function Tests
+# =============================================================================
+
+
+@pytest.mark.unit
+class TestLoadFile:
+    """Test load_file() convenience function."""
+
+    def test_load_file_basic(self, tmp_path):
+        """Test basic file loading."""
+        (tmp_path / "config.yaml").write_text("name: test\nvalue: 42\n")
+        result = load_file(tmp_path / "config.yaml")
+        assert result["name"] == "test"
+        assert result["value"] == 42
+
+    def test_load_file_with_relative_include(self, tmp_path):
+        """Test that load_file enables relative includes automatically."""
+        (tmp_path / "base.yaml").write_text("base_key: base_value\n")
+        (tmp_path / "config.yaml").write_text('data: !include "./base.yaml"\n')
+        result = load_file(tmp_path / "config.yaml")
+        assert result["data"]["base_key"] == "base_value"
+
+    def test_load_file_with_optional_include(self, tmp_path):
+        """Test that load_file works with optional includes."""
+        (tmp_path / "config.yaml").write_text(
+            'name: test\noverrides: !include? "./missing.yaml"\n'
+        )
+        result = load_file(tmp_path / "config.yaml")
+        assert result["name"] == "test"
+        assert result["overrides"] == {}
+
+    def test_load_file_with_parent_relative_include(self, tmp_path):
+        """Test that load_file resolves ../ paths correctly."""
+        subdir = tmp_path / "etc"
+        subdir.mkdir()
+        (tmp_path / "env.yaml").write_text("env: production\n")
+        (subdir / "config.yaml").write_text('settings: !include "../env.yaml"\n')
+        result = load_file(subdir / "config.yaml")
+        assert result["settings"]["env"] == "production"
+
+    def test_load_file_string_path(self, tmp_path):
+        """Test that load_file accepts string paths."""
+        (tmp_path / "config.yaml").write_text("key: value\n")
+        result = load_file(str(tmp_path / "config.yaml"))
+        assert result["key"] == "value"
 
 
 # =============================================================================
@@ -2457,6 +2577,129 @@ config: !include "{services_file}"
         # Deep merged - both keys present
         assert service["options"]["debug"] is True
         assert service["options"]["port"] == 8080
+
+
+# =============================================================================
+# Deep Include Override Tests (!deep !include)
+# =============================================================================
+
+
+@pytest.mark.unit
+class TestDeepIncludeOverride:
+    """Test !deep !include for overlay pattern where include wins over document."""
+
+    def test_deep_include_override_basic(self, tmp_path):
+        """Test !deep !include? makes included values win over document values."""
+        overlay_file = tmp_path / "overlay.yaml"
+        overlay_file.write_text("""
+config:
+  key1: overlay_value
+  nested:
+    b: 20
+    c: 3
+""")
+        main_content = f"""
+config:
+  key1: base_value
+  key2: base_value
+  nested:
+    a: 1
+    b: 2
+
+<<: !deep !include? "{overlay_file}"
+"""
+        result = load(StringIO(main_content), current_file=tmp_path / "main.yaml")
+
+        # overlay wins for key1
+        assert result["config"]["key1"] == "overlay_value"
+        # document-only key preserved
+        assert result["config"]["key2"] == "base_value"
+        # nested: overlay wins for b, document provides a, overlay adds c
+        assert result["config"]["nested"]["a"] == 1
+        assert result["config"]["nested"]["b"] == 20
+        assert result["config"]["nested"]["c"] == 3
+
+    def test_deep_include_override_missing_file(self, tmp_path):
+        """Test !deep !include? returns empty for missing file."""
+        main_content = """
+config:
+  key1: base_value
+
+<<: !deep !include? "nonexistent.yaml"
+"""
+        result = load(StringIO(main_content), current_file=tmp_path / "main.yaml")
+        # Document value preserved when include is missing
+        assert result["config"]["key1"] == "base_value"
+
+    def test_deep_include_required(self, tmp_path):
+        """Test !deep !include (required) raises for missing file."""
+        main_content = """
+config:
+  key1: base_value
+
+<<: !deep !include "nonexistent.yaml"
+"""
+        with pytest.raises(yaml.YAMLError, match="Include file not found"):
+            load(StringIO(main_content), current_file=tmp_path / "main.yaml")
+
+    def test_deep_include_with_section(self, tmp_path):
+        """Test !deep !include with section selector."""
+        overlay_file = tmp_path / "overlay.yaml"
+        overlay_file.write_text("""
+overrides:
+  config:
+    key1: override_value
+    nested:
+      x: 10
+""")
+        main_content = f"""
+config:
+  key1: base_value
+  nested:
+    y: 20
+
+<<: !deep !include "{overlay_file}#overrides"
+"""
+        result = load(StringIO(main_content), current_file=tmp_path / "main.yaml")
+
+        # Override wins
+        assert result["config"]["key1"] == "override_value"
+        assert result["config"]["nested"]["x"] == 10
+        assert result["config"]["nested"]["y"] == 20
+
+    def test_deep_include_preserves_anchor_behavior(self, tmp_path):
+        """Test that regular !deep *anchor still has document-wins semantics."""
+        content = """
+defaults: &defaults
+  timeout: 30
+  options:
+    retries: 3
+
+config:
+  <<: !deep *defaults
+  timeout: 60
+  options:
+    cache: true
+"""
+        result = load(StringIO(content))
+
+        # Document wins for anchors (timeout overridden to 60)
+        assert result["config"]["timeout"] == 60
+        # Deep merge preserves anchor values, adds document values
+        assert result["config"]["options"]["retries"] == 3
+        assert result["config"]["options"]["cache"] is True
+
+    def test_preprocessing_transforms_syntax(self):
+        """Test that !deep !include is correctly preprocessed."""
+        from appinfra.yaml.loader import preprocess_deep_tags
+
+        content = '<<: !deep !include? "./overlay.yaml"'
+        result = preprocess_deep_tags(content)
+        assert result == '<<: !deep-include? "./overlay.yaml"'
+
+        content2 = "<<: !deep !include './base.yaml'"
+        result2 = preprocess_deep_tags(content2)
+        assert result2 == "<<: !deep-include './base.yaml'"
 
 
 # =============================================================================

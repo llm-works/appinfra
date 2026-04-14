@@ -18,6 +18,7 @@ from typing import Any, Self
 
 from ...config import Config
 from ...dot_dict import DotDict
+from ...yaml import deep_merge
 from ..core.app import App
 from ..server.handlers import Middleware
 from ..tools.base import Tool, ToolConfig
@@ -30,6 +31,16 @@ from .configurer.version import VersionConfigurer
 from .hook import HookManager
 from .plugin import PluginManager
 from .validation import ValidationRule
+
+
+@dataclass
+class ConfigFileSpec:
+    """Specification for a config file to load."""
+
+    path: str
+    from_etc_dir: bool = True
+    optional: bool = False
+
 
 # Helper functions for AppBuilder.build()
 
@@ -179,8 +190,8 @@ def _register_lifecycle_managers(app: App, hooks: Any, plugins: Any) -> None:
 
 def _initialize_foundation(app: App, builder: AppBuilder) -> None:
     """Initialize app foundation: flags and metadata."""
-    app._config_path = builder._config_path  # type: ignore[attr-defined, assignment]
-    app._config_from_etc_dir = builder._config_from_etc_dir  # type: ignore[attr-defined]
+    # Copy config file specs for deferred loading
+    app._config_files = builder._config_files.copy()  # type: ignore[attr-defined]
     # Copy etc_dir and config_file for hot-reload support (set for absolute paths)
     if hasattr(builder, "_etc_dir"):
         app._etc_dir = builder._etc_dir  # type: ignore[attr-defined]
@@ -303,10 +314,7 @@ class AppBuilder:
         """Initialize the application builder."""
         self._name: str | None = name
         self._config: Config | DotDict | None = None
-        self._config_path: str | Path | None = (
-            None  # Track config file path for hot-reload
-        )
-        self._config_from_etc_dir: bool = False  # Whether to resolve from --etc-dir
+        self._config_files: list[ConfigFileSpec] = []  # Track all config files
         self._server_config: ServerConfig | None = None
         self._logging_config: LoggingConfig | None = None
         self._tools: list[Tool] = []
@@ -340,14 +348,72 @@ class AppBuilder:
         self._version = version
         return self
 
+    def _load_config_immediately(self, path: str, optional: bool) -> bool:
+        """Load config file immediately. Returns True if loaded, False if skipped."""
+        path_obj = Path(path).resolve()
+        try:
+            new_config = Config(path)
+        except FileNotFoundError:
+            if optional:
+                return False
+            raise FileNotFoundError(f"Config file not found: {path_obj}") from None
+
+        # Merge with existing config (new overrides existing)
+        if self._config is not None:
+            self._config = self._merge_configs(self._config, new_config)
+        else:
+            self._config = new_config
+
+        # Track path for hot-reload (last loaded file)
+        self._etc_dir = str(path_obj.parent)
+        self._config_file = path_obj.name
+        return True
+
+    def _merge_configs(
+        self, base: Config | DotDict, override: Config | DotDict
+    ) -> DotDict:
+        """Merge two configs, override takes precedence."""
+        base_dict = base.to_dict() if hasattr(base, "to_dict") else dict(base)
+        override_dict = (
+            override.to_dict() if hasattr(override, "to_dict") else dict(override)
+        )
+        merged = deep_merge(base_dict, override_dict)
+        return DotDict(**merged)
+
     def with_config_file(
-        self, path: str | None = None, from_etc_dir: bool = True
+        self, path: str | None = None, from_etc_dir: bool = True, optional: bool = False
     ) -> Self:
         """
         Load configuration from a YAML file.
 
+        Multiple calls are supported - configs are merged in order, with later
+        files overriding earlier ones. This enables layered configuration:
+
+            app = (AppBuilder("myapp")
+                .with_config_file("base.yaml")           # Base config
+                .with_config_file("env.yaml", optional=True)  # Optional overlay
+                .build())
+
         By default, relative paths are resolved from --etc-dir at runtime.
         Absolute paths are always loaded immediately.
+
+        Precedence Rules:
+            Configs are loaded in two phases:
+            1. **Immediate**: Absolute paths or from_etc_dir=False - loaded at build time
+            2. **Deferred**: Relative paths with from_etc_dir=True - loaded at runtime
+
+            Within each phase, later calls override earlier ones. However, immediate
+            configs always take precedence over deferred configs because they are
+            merged into the programmatic config that gets re-applied after deferred
+            loading.
+
+            **Recommendation**: Keep all config files in the same mode (all immediate
+            or all deferred) to ensure call order matches merge order.
+
+        Hot-reload:
+            When using create_config_watcher() or subprocess_context(), all loaded
+            config files are watched. Changes to any file trigger a reload that
+            merges all configs in order (later files override earlier ones).
 
         Args:
             path: Path to configuration YAML file. If None, uses the default
@@ -355,6 +421,9 @@ class AppBuilder:
             from_etc_dir: If True (default), resolve relative paths from --etc-dir.
                           If False, resolve relative paths from current working directory.
                           Absolute paths ignore this parameter.
+            optional: If True, silently skip loading if the file doesn't exist.
+                      If False (default), raise an error if the file is missing.
+                      Note: Syntax errors in existing files still raise.
 
         Returns:
             Self for method chaining
@@ -377,39 +446,34 @@ class AppBuilder:
             app = (AppBuilder("myapp")
                 .with_config_file("./local.yaml", from_etc_dir=False)
                 .build())
+
+            # Layered config: base + optional environment overlay (both from etc-dir)
+            app = (AppBuilder("myapp")
+                .with_config_file("config.yaml")
+                .with_config_file(".env.yaml", optional=True)
+                .build())
         """
         import os
-        from pathlib import Path
 
         from ...config import DEFAULT_CONFIG_FILENAME
 
         if path is None:
             path = DEFAULT_CONFIG_FILENAME
 
-        is_absolute = os.path.isabs(path)
+        # Track all config files for reference
+        spec = ConfigFileSpec(path=path, from_etc_dir=from_etc_dir, optional=optional)
+        self._config_files.append(spec)
 
-        if is_absolute or not from_etc_dir:
-            # Load immediately
-            self._config = Config(path)
-            self._config_path = path
-            self._config_from_etc_dir = False
-            # Set etc_dir and config_file for hot-reload support
-            path_obj = Path(path).resolve()
-            self._etc_dir = str(path_obj.parent)
-            self._config_file = path_obj.name
-        else:
-            # Defer loading - will be resolved from --etc-dir at runtime
-            self._config_path = path
-            self._config_from_etc_dir = True
+        if os.path.isabs(path) or not from_etc_dir:
+            self._load_config_immediately(path, optional)
+        # else: Deferred loading - will be resolved from --etc-dir at runtime
+        # Config specs are tracked in _config_files list
 
         return self
 
     def with_config(self, config: Config | DotDict) -> Self:
         """Set the application configuration."""
         self._config = config
-        # Track path if Config has it
-        if hasattr(config, "_config_path"):
-            self._config_path = config._config_path
         return self
 
     def with_main_cls(self, cls: type) -> Self:

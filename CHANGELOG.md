@@ -10,6 +10,23 @@ For API stability guarantees and deprecation policy, see
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-04-14
+
+### Added
+- `!include?` YAML tag for optional includes — returns `{}` if file is missing instead of raising
+- `!deep !include` / `!deep !include?` syntax for overlay pattern — included values win over
+  document values (opposite of `!deep *anchor` where document wins)
+- `AppBuilder.with_config_file(optional=True)` parameter — skips missing config files instead of
+  raising
+- `load_file(path)` convenience function — loads YAML with automatic file context for includes
+
+### Changed
+- **Breaking:** `!include` YAML tag now raises an error if the included file is missing. Previously,
+  missing includes were silently ignored. Use `!include?` for optional includes that return `{}`
+  when the file is missing.
+- **Breaking:** `with_config_file()` now raises `FileNotFoundError` if the config file is missing.
+  Previously, missing files were silently ignored. Use `optional=True` for the old behavior.
+
 ## [0.6.0] - 2026-04-13
 
 ### Added
@@ -534,7 +551,8 @@ as config. Affected: `ConfigValidator`, `PG.readonly`, `PG.migrate()`,
 ### Changed
 - Package renamed to `appinfra` (install and import both use `appinfra`)
 
-[Unreleased]: https://github.com/llm-works/appinfra/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/llm-works/appinfra/compare/v0.6.1...HEAD
+[0.6.1]: https://github.com/llm-works/appinfra/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/llm-works/appinfra/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/llm-works/appinfra/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/llm-works/appinfra/compare/v0.4.0...v0.4.1

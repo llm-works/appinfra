@@ -17,12 +17,13 @@ from typing import Any
 
 import yaml  # type: ignore[import-untyped]
 
+from ._utils import _file_exists
 from .types import DOCUMENT_INCLUDE_PATTERN, ErrorContext
 
 
 def _preprocess_document_includes(
     content: str,
-) -> tuple[str, list[tuple[str, int]]]:
+) -> tuple[str, list[tuple[str, int, bool]]]:
     """
     Extract document-level !include directives from YAML content.
 
@@ -31,26 +32,32 @@ def _preprocess_document_includes(
     step is necessary because YAML parses !include as a tagged scalar, which
     cannot coexist with other root-level content without a document separator.
 
+    Supports both !include (required) and !include? (optional) directives.
+    Optional includes return {} if the file is missing.
+
     Args:
         content: Raw YAML content
 
     Returns:
-        Tuple of (remaining_content, list_of_(path, line_number) tuples)
+        Tuple of (remaining_content, list_of_(path, line_number, is_optional) tuples)
         Line numbers are 1-indexed for display.
+        is_optional is True if the directive was !include? (file may be missing).
 
     Example:
         Input:
             !include "./base.yaml"
+            !include? "./optional.yaml"
 
             name: app
             server:
               port: 8080
 
         Output:
-            ('\\nname: app\\nserver:\\n  port: 8080', [('./base.yaml', 1)])
+            ('\\nname: app\\nserver:\\n  port: 8080',
+             [('./base.yaml', 1, False), ('./optional.yaml', 2, True)])
     """
     lines = content.splitlines(keepends=True)
-    include_paths: list[tuple[str, int]] = []
+    include_paths: list[tuple[str, int, bool]] = []
     remaining_lines: list[str] = []
 
     for line_num, line in enumerate(lines, start=1):
@@ -59,10 +66,11 @@ def _preprocess_document_includes(
         if line == stripped:  # No leading whitespace = document level
             match = DOCUMENT_INCLUDE_PATTERN.match(line.rstrip())
             if match:
-                # Extract path from whichever group matched (double-quoted, single-quoted, or unquoted)
-                path = match.group(1) or match.group(2) or match.group(3)
+                # Group 1 is the optional marker '?', groups 2-4 are path variants
+                is_optional = match.group(1) == "?"
+                path = match.group(2) or match.group(3) or match.group(4)
                 if path:
-                    include_paths.append((path, line_num))
+                    include_paths.append((path, line_num, is_optional))
                 continue  # Don't add this line to remaining content
 
         remaining_lines.append(line)
@@ -141,11 +149,8 @@ def _check_file_exists(
 ) -> None:
     """Raise error if include file doesn't exist."""
     location = f" ({ctx.format_location()})" if ctx else ""
-    try:
-        if not include_path.exists():
-            raise yaml.YAMLError(f"Include file not found: {include_path}{location}")
-    except (PermissionError, OSError) as e:
-        raise yaml.YAMLError(f"Include file not found: {include_path}{location}") from e
+    if not _file_exists(include_path):
+        raise yaml.YAMLError(f"Include file not found: {include_path}{location}")
 
 
 def _check_project_root(
@@ -173,26 +178,54 @@ def _validate_include_standalone(
     project_root: Path | None,
     max_include_depth: int,
     ctx: ErrorContext | None = None,
-) -> None:
-    """Validate include path for circular dependencies, existence, and security."""
+    optional: bool = False,
+) -> bool:
+    """
+    Validate include path for circular dependencies, existence, and security.
+
+    Args:
+        include_path: Path to validate
+        include_chain: Set of files already in the include chain
+        project_root: Optional project root to restrict includes
+        max_include_depth: Maximum allowed include depth
+        ctx: Error context for location info
+        optional: If True, missing files return False instead of raising
+
+    Returns:
+        True if file exists and passes validation, False if optional and missing.
+
+    Raises:
+        yaml.YAMLError: If validation fails (except for optional missing files)
+    """
+    # For optional includes, check existence first
+    if optional and not _file_exists(include_path):
+        return False
+
     _check_circular_include(include_path, include_chain, ctx)
     _check_include_depth(include_path, include_chain, max_include_depth, ctx)
-    _check_file_exists(include_path, ctx)
+    if not optional:
+        _check_file_exists(include_path, ctx)
     _check_project_root(include_path, project_root, ctx)
+    return True
 
 
 def _extract_section_data(
     data: Any,
     section_path: str,
-    include_path: Path,
+    location: str,
+    resolve_variables: bool = True,
 ) -> Any:
     """
     Extract a specific section from data using dot-notation path.
 
+    Shared implementation used by both document-level includes (_include.py)
+    and inline includes (loader.py).
+
     Args:
         data: Data to extract from
         section_path: Dot-separated path (e.g., "server.http")
-        include_path: Path to included file (for error messages)
+        location: Human-readable location for error messages (file path or context)
+        resolve_variables: If True, resolve ${var} references before extraction
 
     Returns:
         Data at the specified section path
@@ -200,9 +233,12 @@ def _extract_section_data(
     Raises:
         yaml.YAMLError: If section path is invalid or not found
     """
+    if not section_path:
+        return data
+
     # Resolve variables within the full file context BEFORE extraction
     # This allows ${sibling.key} references to resolve before the section is extracted
-    if isinstance(data, dict):
+    if resolve_variables and isinstance(data, dict):
         data = _resolve_variables_in_data(data, data, pass_through_undefined=True)
 
     current = data
@@ -211,17 +247,17 @@ def _extract_section_data(
     for i, part in enumerate(parts):
         if not isinstance(current, dict):
             traversed = ".".join(parts[:i])
-            msg = (
+            raise yaml.YAMLError(
                 f"Cannot navigate to '{section_path}': "
-                f"'{traversed}' is not a mapping (got {type(current).__name__})"
+                f"'{traversed}' is not a mapping (got {type(current).__name__}) "
+                f"({location})"
             )
-            raise yaml.YAMLError(msg)
         if part not in current:
-            msg = (
-                f"Section '{section_path}' not found in included file '{include_path}'. "
-                f"Available keys at this level: {list(current.keys())}"
+            raise yaml.YAMLError(
+                f"Section '{section_path}' not found in included file. "
+                f"Available keys at this level: {list(current.keys())} "
+                f"({location})"
             )
-            raise yaml.YAMLError(msg)
         current = current[part]
 
     return current

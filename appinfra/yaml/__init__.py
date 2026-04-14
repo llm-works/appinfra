@@ -16,7 +16,7 @@ Public API:
 
 from io import StringIO
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal, overload
 
 from ._include import (
     _create_document_error_context,
@@ -38,6 +38,7 @@ from .types import (
 # Public API exports
 __all__ = [
     "load",
+    "load_file",
     "Loader",
     "deep_merge",
     "DeepMergeWrapper",
@@ -76,6 +77,46 @@ def deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]
     return result
 
 
+def _apply_section_filter(
+    data: Any,
+    source_map: dict[str, Path | None],
+    section_path: str,
+    include_path: Path,
+    track_sources: bool,
+) -> tuple[Any, dict[str, Path | None]]:
+    """Extract section from data and filter source map if applicable."""
+    if not section_path or data is None:
+        return data, source_map
+    data = _extract_section_data(data, section_path, str(include_path))
+    if track_sources:
+        source_map = _filter_source_map_for_section(source_map, section_path)
+    return data, source_map
+
+
+def _resolve_and_validate_include(
+    include_path_str: str,
+    current_file: Path | None,
+    include_chain: set[Path],
+    project_root: Path | None,
+    max_include_depth: int,
+    line: int | None,
+    optional: bool,
+) -> Path | None:
+    """Resolve and validate include path. Returns None if optional and missing."""
+    ctx = _create_document_error_context(current_file, line)
+    resolved_root = project_root.resolve() if project_root else None
+    include_path = _resolve_include_path_standalone(include_path_str, current_file, ctx)
+    file_exists = _validate_include_standalone(
+        include_path,
+        include_chain,
+        resolved_root,
+        max_include_depth,
+        ctx,
+        optional=optional,
+    )
+    return include_path if file_exists else None
+
+
 def _load_document_include(
     include_spec: str,
     current_file: Path | None,
@@ -85,21 +126,24 @@ def _load_document_include(
     project_root: Path | None,
     max_include_depth: int,
     line: int | None = None,
+    optional: bool = False,
 ) -> tuple[Any, dict[str, Path | None]]:
-    """Load a document-level include file with section extraction support."""
-    # Parse include path and optional section anchor
+    """Load a document-level include file. Returns (None, {}) if optional and missing."""
     include_path_str, section_path = (
         include_spec.split("#", 1) if "#" in include_spec else (include_spec, "")
     )
-
-    ctx = _create_document_error_context(current_file, line)
-    resolved_project_root = project_root.resolve() if project_root else None
-    include_path = _resolve_include_path_standalone(include_path_str, current_file, ctx)
-    _validate_include_standalone(
-        include_path, include_chain, resolved_project_root, max_include_depth, ctx
+    include_path = _resolve_and_validate_include(
+        include_path_str,
+        current_file,
+        include_chain,
+        project_root,
+        max_include_depth,
+        line,
+        optional,
     )
+    if include_path is None:
+        return None, {}
 
-    # Load the included file recursively
     data, source_map = _load_include_file(
         include_path,
         include_chain,
@@ -108,14 +152,9 @@ def _load_document_include(
         project_root,
         max_include_depth,
     )
-
-    # Extract section if specified
-    if section_path and data is not None:
-        data = _extract_section_data(data, section_path, include_path)
-        if track_sources:
-            source_map = _filter_source_map_for_section(source_map, section_path)
-
-    return data, source_map
+    return _apply_section_filter(
+        data, source_map, section_path, include_path, track_sources
+    )
 
 
 def _load_include_file(
@@ -157,8 +196,17 @@ def _load_include_file(
     return result, {}
 
 
+def _validate_include_data(include_data: Any, include_spec: str, line_num: int) -> None:
+    """Validate that include data is a dict."""
+    if not isinstance(include_data, dict):
+        raise ValueError(
+            f"Document-level include '{include_spec}' (line {line_num}) must resolve "
+            f"to a mapping, got {type(include_data).__name__}"
+        )
+
+
 def _merge_document_includes(
-    doc_include_paths: list[tuple[str, int]],
+    doc_include_paths: list[tuple[str, int, bool]],
     current_file: Path | None,
     include_chain: set[Path],
     merge_strategy: str,
@@ -166,26 +214,12 @@ def _merge_document_includes(
     project_root: Path | None,
     max_include_depth: int,
 ) -> tuple[dict[str, Any] | None, dict[str, Path | None]]:
-    """
-    Load and merge all document-level includes.
-
-    Args:
-        doc_include_paths: List of (include_path, line_number) tuples from preprocessing
-        current_file: Path to current file for relative path resolution
-        include_chain: Current include chain for circular detection
-        merge_strategy: Strategy for merging includes
-        track_sources: If True, track source files
-        project_root: Optional project root for security validation
-        max_include_depth: Maximum allowed include depth
-
-    Returns:
-        Tuple of (merged_data, merged_source_map)
-    """
+    """Load and merge all document-level includes."""
     merged_data: dict[str, Any] | None = None
     merged_source_map: dict[str, Path | None] = {}
 
-    for include_spec, line_num in doc_include_paths:
-        include_data, include_source_map = _load_document_include(
+    for include_spec, line_num, is_optional in doc_include_paths:
+        include_data, source_map = _load_document_include(
             include_spec,
             current_file,
             include_chain,
@@ -194,21 +228,17 @@ def _merge_document_includes(
             project_root,
             max_include_depth,
             line=line_num,
+            optional=is_optional,
         )
+        if include_data is None:
+            continue
 
-        if include_data is not None:
-            if not isinstance(include_data, dict):
-                raise ValueError(
-                    f"Document-level include '{include_spec}' (line {line_num}) must resolve "
-                    f"to a mapping, got {type(include_data).__name__}"
-                )
-            if merged_data is None:
-                merged_data = include_data
-            else:
-                merged_data = deep_merge(merged_data, include_data)
-
-            if track_sources:
-                merged_source_map.update(include_source_map)
+        _validate_include_data(include_data, include_spec, line_num)
+        merged_data = (
+            deep_merge(merged_data, include_data) if merged_data else include_data
+        )
+        if track_sources:
+            merged_source_map.update(source_map)
 
     return merged_data, merged_source_map
 
@@ -350,3 +380,69 @@ def load(
     )
 
     return (final_data, final_source_map) if track_sources else final_data
+
+
+@overload
+def load_file(
+    path: str | Path,
+    merge_strategy: str = ...,
+    track_sources: Literal[False] = ...,
+    project_root: Path | None = ...,
+    max_include_depth: int = ...,
+    optional: bool = ...,
+) -> Any: ...
+
+
+@overload
+def load_file(
+    path: str | Path,
+    merge_strategy: str = ...,
+    track_sources: Literal[True] = ...,
+    project_root: Path | None = ...,
+    max_include_depth: int = ...,
+    optional: bool = ...,
+) -> tuple[Any, dict[str, Path | None]]: ...
+
+
+def load_file(
+    path: str | Path,
+    merge_strategy: str = "replace",
+    track_sources: bool = False,
+    project_root: Path | None = None,
+    max_include_depth: int = 10,
+    optional: bool = False,
+) -> Any | tuple[Any, dict[str, Path | None]]:
+    """
+    Load YAML from a file with automatic file context for includes.
+
+    Convenience wrapper around load() that sets up current_file automatically,
+    enabling relative path resolution for !include and !include? directives.
+
+    Args:
+        path: Path to YAML file
+        merge_strategy: Strategy for merging - "replace" or "merge"
+        track_sources: If True, return (data, source_map) tuple
+        project_root: Restrict includes to this directory
+        max_include_depth: Max nested include depth (default: 10)
+        optional: If True, return empty dict (or ({}, {}) with track_sources)
+            when file doesn't exist instead of raising FileNotFoundError
+
+    Example:
+        config = load_file('etc/config.yaml')
+        optional_config = load_file('overrides.yaml', optional=True)
+    """
+    path = Path(path)
+    try:
+        with open(path, encoding="utf-8") as f:
+            return load(
+                f,
+                current_file=path,
+                merge_strategy=merge_strategy,
+                track_sources=track_sources,
+                project_root=project_root,
+                max_include_depth=max_include_depth,
+            )
+    except FileNotFoundError:
+        if optional:
+            return ({}, {}) if track_sources else {}
+        raise

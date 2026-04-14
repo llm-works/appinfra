@@ -102,6 +102,26 @@ settings: !include "shared.yaml#app.settings"  # Include specific section
 app_name: myapp
 ```
 
+**Optional Includes:**
+
+Use `!include?` for files that may or may not exist:
+
+```yaml
+# Required include (raises if missing)
+database: !include "./database.yaml"
+
+# Optional include (returns {} if missing)
+overrides: !include? "./.env.yaml"
+local_settings: !include? "./local.yaml#settings"
+
+# Document-level optional include
+!include? "./local-overrides.yaml"
+
+name: myapp
+```
+
+Optional includes are useful for environment-specific overrides that don't exist in all deployments.
+
 **Security:** Includes are protected against path traversal attacks and circular dependencies.
 
 ## Path Resolution

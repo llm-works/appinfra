@@ -96,6 +96,18 @@ class UvicornService(Service):
             self._config.ipc = IPCConfig()
         return IPCChannel(self._request_q, self._response_q, self._config.ipc)
 
+    def _get_config_files_for_watcher(self) -> list[str]:
+        """Get config files for hot-reload watcher.
+
+        Note: Currently only supports single config file from ApiConfig.
+        For layered configs, config_files should be passed via ApiConfig.
+        """
+        if self._config.etc_dir and self._config.config_file:
+            from pathlib import Path
+
+            return [str(Path(self._config.etc_dir) / self._config.config_file)]
+        return []
+
     def execute(self) -> None:
         """Run uvicorn (runs in subprocess)."""
         import uvicorn
@@ -107,8 +119,7 @@ class UvicornService(Service):
 
         with SubprocessContext(
             lg=self._lg,
-            etc_dir=self._config.etc_dir,
-            config_file=self._config.config_file,
+            config_files=self._get_config_files_for_watcher(),
             handle_signals=False,  # uvicorn handles SIGTERM/SIGINT
         ):
             ipc_channel = self._create_ipc_channel()

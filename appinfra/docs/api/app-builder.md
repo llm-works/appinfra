@@ -14,7 +14,7 @@ class AppBuilder:
 - `with_description(desc)` - Set description
 - `with_version(version)` - Set version string
 - `with_config(config)` - Set Config or DotDict configuration
-- `with_config_file(path=None, from_etc_dir=True)` - Load config from file (default: `infra.yaml` or `INFRA_DEFAULT_CONFIG_FILE`)
+- `with_config_file(path=None, from_etc_dir=True, optional=False)` - Load config from file (default: `infra.yaml` or `INFRA_DEFAULT_CONFIG_FILE`)
 - `with_main_cls(cls)` - Use custom App subclass
 - `with_main_tool(tool)` - Set main tool (runs when no subcommand specified)
 - `with_standard_args(**kwargs)` - Enable/disable standard CLI args
@@ -165,7 +165,22 @@ app = (
     .with_config_file("config.yaml", from_etc_dir=False)
     .build()
 )
+
+# Layered config: base + optional environment overlay (both from etc-dir)
+app = (
+    AppBuilder("myapp")
+    .with_config_file("config.yaml")                        # Required base from etc-dir
+    .with_config_file(".env.yaml", optional=True)           # Optional overlay from etc-dir
+    .build()
+)
 ```
+
+**Layered Configuration:** Multiple `with_config_file()` calls are merged in order, with later
+files overriding earlier ones (deep merge). Programmatic config via builder methods takes
+precedence over all file configs.
+
+**Note:** By default, `with_config_file()` raises `FileNotFoundError` if the file is missing.
+Use `optional=True` to silently skip missing files.
 
 This respects the `--etc-dir` CLI argument:
 ```bash

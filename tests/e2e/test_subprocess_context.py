@@ -15,8 +15,7 @@ import pytest
 
 
 def _worker_loop(
-    etc_dir: str,
-    config_file: str,
+    config_path: str,
     result_queue: mp.Queue,
     ready_event: mp.Event,
     check_event: mp.Event,
@@ -29,15 +28,21 @@ def _worker_loop(
     Creates its own logger and reports its holder's location value
     to the result queue when signaled.
     """
+    import logging
+
     from appinfra.log import LoggerFactory
     from appinfra.log.config import LogConfig
     from appinfra.subprocess import SubprocessContext
+
+    # Clear any forked logger from parent process (fork inherits loggerDict)
+    if "/" in logging.root.manager.loggerDict:
+        del logging.root.manager.loggerDict["/"]
 
     # Create a fresh logger for this subprocess
     config = LogConfig.from_params(level="debug", location=1)
     lg = LoggerFactory.create_root(config)
 
-    with SubprocessContext(lg=lg, etc_dir=etc_dir, config_file=config_file) as ctx:
+    with SubprocessContext(lg=lg, config_files=[config_path]) as ctx:
         # Signal that we're ready
         ready_event.set()
 
@@ -74,9 +79,7 @@ class TestSubprocessContextHotReload:
     def test_two_processes_see_config_change(self):
         """Test that both subprocess workers see config hot-reload changes."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            etc_dir = Path(tmpdir)
-            config_file = "config.yaml"
-            config_path = etc_dir / config_file
+            config_path = Path(tmpdir) / "config.yaml"
             config_path.write_text("logging:\n  level: debug\n  location: 1\n")
 
             # Create shared communication primitives
@@ -91,8 +94,7 @@ class TestSubprocessContextHotReload:
                 p = mp.Process(
                     target=_worker_loop,
                     args=(
-                        str(etc_dir),
-                        config_file,
+                        str(config_path),
                         result_queue,
                         ready_events[i],
                         check_events[i],
@@ -163,7 +165,7 @@ class TestSubprocessContextHotReload:
                         p.join()
 
     def test_subprocess_context_handles_missing_config(self):
-        """Test that SubprocessContext works without etc_dir/config_file (no watcher)."""
+        """Test that SubprocessContext works without config_files (no watcher)."""
         from appinfra.log import LoggerFactory
         from appinfra.log.config import LogConfig
         from appinfra.subprocess import SubprocessContext
@@ -172,7 +174,7 @@ class TestSubprocessContextHotReload:
         lg = LoggerFactory.create_root(config)
 
         # Should not raise - just skip watcher setup
-        with SubprocessContext(lg=lg, etc_dir=None, config_file=None) as ctx:
+        with SubprocessContext(lg=lg) as ctx:
             assert ctx.running is True
             assert ctx._watcher is None
 
@@ -188,9 +190,7 @@ class TestSubprocessContextHotReload:
         lg = LoggerFactory.create_root(config)
 
         # Should not raise - log warning and continue
-        with SubprocessContext(
-            lg=lg, etc_dir="/nonexistent", config_file="config.yaml"
-        ) as ctx:
+        with SubprocessContext(lg=lg, config_files=["/nonexistent/config.yaml"]) as ctx:
             assert ctx.running is True
             # Watcher may or may not be set depending on error handling
 
@@ -207,7 +207,7 @@ class TestSubprocessContextHotReload:
         config = LogConfig.from_params(level="info", location=0)
         lg = LoggerFactory.create_root(config)
 
-        with SubprocessContext(lg=lg, etc_dir=None, config_file=None) as ctx:
+        with SubprocessContext(lg=lg) as ctx:
             assert ctx.running is True
 
             # Simulate SIGTERM
@@ -230,9 +230,7 @@ class TestSubprocessContextHotReload:
         lg = LoggerFactory.create_root(config)
 
         with patch.object(signal, "signal") as mock_signal:
-            with SubprocessContext(
-                lg=lg, etc_dir=None, config_file=None, handle_signals=False
-            ) as ctx:
+            with SubprocessContext(lg=lg, handle_signals=False) as ctx:
                 # Signal handlers should not be installed
                 mock_signal.assert_not_called()
                 assert ctx.running is True
@@ -248,7 +246,7 @@ class TestSubprocessContextHotReload:
         config = LogConfig.from_params(level="info", location=0)
         lg = LoggerFactory.create_root(config)
 
-        ctx = SubprocessContext(lg=lg, etc_dir=None, config_file=None)
+        ctx = SubprocessContext(lg=lg)
         assert ctx.lg is lg
 
         lg.handlers.clear()
@@ -344,3 +342,48 @@ class TestSubprocessContextHotReload:
                 # Clean up logger from registry
                 if "/" in logging.root.manager.loggerDict:
                     del logging.root.manager.loggerDict["/"]
+
+
+@pytest.mark.unit
+class TestSubprocessContextUnit:
+    """Unit tests for SubprocessContext that run in-process (for coverage)."""
+
+    def test_start_config_watcher_no_files(self):
+        """Test _start_config_watcher returns early when no config files."""
+        from appinfra.log import LoggerFactory
+        from appinfra.log.config import LogConfig
+        from appinfra.subprocess import SubprocessContext
+
+        config = LogConfig.from_params(level="info", location=0)
+        lg = LoggerFactory.create_root(config)
+
+        try:
+            ctx = SubprocessContext(lg=lg, config_files=[])
+            # Call directly to cover early return
+            ctx._start_config_watcher()
+            assert ctx._watcher is None
+        finally:
+            lg.handlers.clear()
+
+    def test_start_config_watcher_with_valid_files(self):
+        """Test _start_config_watcher sets up watcher with config files."""
+        pytest.importorskip("watchdog")
+
+        from appinfra.log import LoggerFactory
+        from appinfra.log.config import LogConfig
+        from appinfra.subprocess import SubprocessContext
+
+        config = LogConfig.from_params(level="info", location=0)
+        lg = LoggerFactory.create_root(config)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "config.yaml"
+            config_path.write_text("logging:\n  level: debug\n")
+
+            try:
+                ctx = SubprocessContext(lg=lg, config_files=[str(config_path)])
+                ctx._start_config_watcher()
+                assert ctx._watcher is not None
+                ctx._watcher.stop()
+            finally:
+                lg.handlers.clear()

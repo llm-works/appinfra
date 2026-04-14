@@ -42,7 +42,7 @@ class TestConfigWatcher:
         result = watcher.configure("test.yaml")
 
         assert result is watcher  # Fluent API
-        assert watcher._config_path == config_file
+        assert config_file in watcher._config_paths
 
     def test_configure_sets_debounce(self, tmp_path, mock_logger):
         """Test configure sets debounce."""
@@ -86,6 +86,40 @@ class TestConfigWatcher:
         # Should not raise
         watcher.stop()
         assert watcher.is_running() is False
+
+    def test_add_config_file_relative_path(self, tmp_path, mock_logger):
+        """Test add_config_file with relative path joins with etc_dir."""
+        watcher = ConfigWatcher(mock_logger, etc_dir=tmp_path)
+
+        watcher.add_config_file("overlay.yaml")
+
+        assert (tmp_path / "overlay.yaml").resolve() in watcher._config_paths
+
+    def test_add_config_file_absolute_path(self, tmp_path, mock_logger):
+        """Test add_config_file with absolute path uses it directly."""
+        watcher = ConfigWatcher(mock_logger, etc_dir=tmp_path)
+        abs_path = tmp_path / "other" / "config.yaml"
+
+        watcher.add_config_file(str(abs_path))
+
+        assert abs_path.resolve() in watcher._config_paths
+
+    def test_add_config_file_deduplicates(self, tmp_path, mock_logger):
+        """Test add_config_file doesn't add duplicates."""
+        watcher = ConfigWatcher(mock_logger, etc_dir=tmp_path)
+
+        watcher.add_config_file("config.yaml")
+        watcher.add_config_file("config.yaml")
+
+        assert len(watcher._config_paths) == 1
+
+    def test_add_config_file_returns_self(self, tmp_path, mock_logger):
+        """Test add_config_file returns self for chaining."""
+        watcher = ConfigWatcher(mock_logger, etc_dir=tmp_path)
+
+        result = watcher.add_config_file("config.yaml")
+
+        assert result is watcher
 
 
 @pytest.mark.unit
@@ -526,7 +560,7 @@ class TestConfigWatcherIncludedFiles:
         # Don't create the file - will cause error
 
         watcher = ConfigWatcher(mock_logger, etc_dir=tmp_path)
-        watcher._config_path = config_file  # Set directly without loading
+        watcher._config_paths = [config_file]  # Set directly without loading
 
         source_files = watcher._get_source_files_from_config()
 
@@ -853,3 +887,92 @@ app:
         watcher.reload_now()
 
         assert results == [30]
+
+    def test_section_callback_path_through_non_dict(self, tmp_path, mock_logger):
+        """Test section callback when path goes through a non-dict value."""
+        config_file = tmp_path / "test.yaml"
+        config_file.write_text("logging:\n  level: info\n")
+
+        watcher = ConfigWatcher(mock_logger, etc_dir=tmp_path)
+        watcher.configure("test.yaml")
+
+        results = []
+        # "level" is a string, not a dict, so "level.nested" should not find anything
+        watcher.add_section_callback(
+            "logging.level.nested", lambda x: results.append(x)
+        )
+
+        watcher.reload_now()
+
+        # Callback should not be called (path goes through non-dict)
+        assert results == []
+
+
+@pytest.mark.unit
+class TestConfigWatcherMultiConfig:
+    """Tests for multi-config file scenarios."""
+
+    def test_reload_skips_unchanged_config(self, tmp_path, mock_logger):
+        """Test reload skips callbacks when config content unchanged."""
+        config_file = tmp_path / "test.yaml"
+        config_file.write_text("logging:\n  level: debug\n")
+
+        watcher = ConfigWatcher(mock_logger, etc_dir=tmp_path)
+        call_count = 0
+
+        def counting_callback(cfg):
+            nonlocal call_count
+            call_count += 1
+
+        watcher.configure("test.yaml", on_change=counting_callback)
+
+        # First reload should call callback
+        watcher.reload_now()
+        assert call_count == 1
+
+        # Second reload with same content should skip (unchanged)
+        watcher.reload_now()
+        assert call_count == 1  # Still 1, not called again
+
+        # Change content, should call again
+        config_file.write_text("logging:\n  level: info\n")
+        watcher.reload_now()
+        assert call_count == 2
+
+    def test_reload_handles_missing_overlay_file(self, tmp_path, mock_logger):
+        """Test reload handles missing overlay file gracefully."""
+        base_file = tmp_path / "base.yaml"
+        base_file.write_text("logging:\n  level: info\n")
+
+        watcher = ConfigWatcher(mock_logger, etc_dir=tmp_path)
+        watcher.add_config_file("base.yaml")
+        watcher.add_config_file("missing.yaml")  # This file doesn't exist
+        watcher.configure("base.yaml")
+
+        results = []
+        watcher.configure("base.yaml", on_change=lambda c: results.append(c))
+
+        # Should not raise, should skip missing file
+        watcher.reload_now()
+
+        # Should still get base config
+        assert len(results) == 1
+        assert results[0]["logging"]["level"] == "info"
+
+        # Should log debug about missing file
+        mock_logger.debug.assert_called()
+
+    def test_reload_with_all_files_missing(self, tmp_path, mock_logger):
+        """Test reload does nothing when all config files are missing."""
+        watcher = ConfigWatcher(mock_logger, etc_dir=tmp_path)
+        watcher.add_config_file("missing1.yaml")
+        watcher.add_config_file("missing2.yaml")
+        watcher.configure("missing1.yaml")
+
+        results = []
+        watcher.configure("missing1.yaml", on_change=lambda c: results.append(c))
+
+        # Should not raise, callback should not be called (empty merged dict)
+        watcher.reload_now()
+
+        assert results == []

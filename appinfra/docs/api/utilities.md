@@ -401,12 +401,37 @@ except InvalidSizeError as e:
 YAML loading with custom tag support.
 
 ```python
-from appinfra.yaml import load, Loader
+from appinfra.yaml import load, load_file, Loader
 from pathlib import Path
 
-# Load YAML with custom tag support
+# Load YAML file with automatic file context for includes
+config = load_file("config.yaml")
+
+# Or load from a stream with explicit file context
 with open("config.yaml") as f:
     config = load(f, current_file=Path("config.yaml"))
+```
+
+### load_file
+
+Convenience wrapper that sets up file context automatically for relative include resolution:
+
+```python
+from appinfra.yaml import load_file
+
+# Load with automatic relative path resolution for !include
+config = load_file("etc/config.yaml")
+
+# With source tracking
+config, sources = load_file("etc/config.yaml", track_sources=True)
+```
+
+This is equivalent to:
+
+```python
+path = Path("etc/config.yaml")
+with open(path) as f:
+    config = load(f, current_file=path)
 ```
 
 ### Custom Tags
@@ -428,6 +453,22 @@ server:
 
 Document-level includes (at column 0) merge included content with the main document. The included
 file provides defaults; main document content overrides. Nested includes are supported.
+
+**`!include?`** - Optional include (returns `{}` if file missing):
+
+```yaml
+# Key-level optional include
+overrides: !include? "./.env.yaml"           # {} if missing
+settings: !include? "local.yaml#settings"    # {} if missing
+
+# Document-level optional include
+!include? "./local-overrides.yaml"
+
+app_name: myapp
+```
+
+Optional includes are useful for environment-specific overrides that don't exist in all deployments.
+Unlike `!include`, missing files don't raise errors - they silently return an empty dict.
 
 **`!secret`** - Mark sensitive values (warns if not using env var syntax):
 
@@ -490,6 +531,26 @@ services:
 # Includes always deep merge (no !deep needed)
 <<: !include "./base.yaml"
 ```
+
+**`!deep !include` (overlay pattern)** - Include where included values win:
+
+```yaml
+# Normal !include: document values override included values (inheritance)
+# !deep !include: included values override document values (overlay)
+
+config:
+  factory: default_backend
+  options:
+    timeout: 30
+
+<<: !deep !include? "./.env.yaml"  # Overlay wins for conflicts
+```
+
+If `.env.yaml` contains `config: {factory: custom_backend}`, the result is
+`config.factory == "custom_backend"` (overlay wins), while `config.options.timeout == 30` is
+preserved from the document (deep merge preserves nested keys not present in the overlay).
+
+Use this pattern for local config overrides that should take precedence over checked-in defaults.
 
 **`!reset`** - Bypass deep merge for specific keys:
 

@@ -47,13 +47,16 @@ class IncludeContext(ErrorContext):
 ENV_VAR_PATTERN = re.compile(r"^\$\{[A-Za-z_][A-Za-z0-9_]*\}$")
 
 # Pattern for document-level !include directives (at column 0)
-# Matches: !include "./path.yaml" or !include './path.yaml' or !include path.yaml
+# Matches: !include "./path.yaml" or !include '/path.yaml' or !include path.yaml
+# Also matches: !include? for optional includes (return {} if file missing)
 # Optionally with section anchor: !include "./path.yaml#section"
 # Optionally with trailing comment: !include "./path.yaml"  # comment
+# Groups: (1) optional marker '?', (2) double-quoted path, (3) single-quoted path,
+#         (4) unquoted path
 DOCUMENT_INCLUDE_PATTERN = re.compile(
-    r"^!include\s+"
-    r'(?:"([^"]+)"|\'([^\']+)\'|(\S+?))'  # Quoted or unquoted path
-    r"\s*(?:#.*)?$"  # Optional trailing comment
+    r"^!include(\??)\s+"  # Capture optional '?' marker
+    r'(?:"([^"]+)"|\'([^\']+)\'|(\S+))'  # Quoted or unquoted path (greedy to include #fragment)
+    r"\s*(?:#.*)?$"  # Optional trailing comment (for quoted paths; unquoted paths capture # as part of path)
 )
 
 
@@ -70,37 +73,20 @@ class DeepMergeWrapper:
     When used with the !deep tag, signals that the wrapped data should be
     deep-merged into the parent mapping instead of shallow-merged.
 
-    Example:
-        templates:
-          defaults: &defaults
-            timeout: 30
-            options:
-              retries: 3
-              backoff: 1.5
-
-        services:
-          api:
-            <<: !deep *defaults
-            options:
-              cache: true   # Deep merged with template's options
-
-    Result:
-        api:
-          timeout: 30
-          options:
-            retries: 3        # Preserved from template
-            backoff: 1.5      # Preserved from template
-            cache: true       # Added locally
+    With override=False (default): document values win (inheritance pattern).
+    With override=True: merged values win (overlay pattern).
     """
 
-    __slots__ = ("data",)
+    __slots__ = ("data", "override")
 
-    def __init__(self, data: dict) -> None:
+    def __init__(self, data: dict, override: bool = False) -> None:
         """
         Initialize wrapper with data to deep merge.
 
         Args:
             data: Dictionary data to be deep merged. Must be a dict.
+            override: If True, this data wins over document values.
+                     If False, document values win (default).
 
         Raises:
             TypeError: If data is not a dictionary.
@@ -111,8 +97,11 @@ class DeepMergeWrapper:
                 "Use !deep with anchors or includes that resolve to mappings."
             )
         self.data = data
+        self.override = override
 
     def __repr__(self) -> str:
+        if self.override:
+            return f"DeepMergeWrapper({self.data!r}, override=True)"
         return f"DeepMergeWrapper({self.data!r})"
 
 
