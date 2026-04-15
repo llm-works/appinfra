@@ -167,9 +167,9 @@ class RateLimiter:
                 if limiter.try_next():
                     do_rate_limited_operation()
         """
-        if now is None:
-            now = time.monotonic()
         with self._lock:
+            if now is None:
+                now = time.monotonic()
             return max(0.0, self._last_t - now)
 
 
