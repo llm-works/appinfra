@@ -16,6 +16,10 @@ For API stability guarantees and deprecation policy, see
 - `RateLimiter.time_until_next()` — returns seconds until next slot is available, for event loops
   that need timeout values without consuming a slot (matches `Ticker.time_until_next_tick()`)
 
+### Fixed
+- `after` field in log `extra` dict is now only treated as timing at top level; nested dicts with
+  an `after` key are formatted normally (field name preserved, no time conversion)
+
 ## [0.6.1] - 2026-04-14
 
 ### Added

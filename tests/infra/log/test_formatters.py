@@ -109,8 +109,9 @@ class TestHelperFunctions:
         assert "test[" in result
 
     def test_format_header_for_after_field(self):
-        """Test format header for 'after' field (no name)."""
-        result = _format_header("\033[34", "after")
+        """Test format header for 'after' timing field (no name shown)."""
+        # With is_timing=True, the field name is omitted
+        result = _format_header("\033[34", "after", is_timing=True)
         assert "\x1b[0m" in result  # actual escape sequence
         assert "[" in result
         assert "after[" not in result  # Should not include 'after' text
@@ -130,11 +131,14 @@ class TestHelperFunctions:
         formatter._format_fields_dict.assert_called_once()
 
     def test_format_value_with_after_field_and_float(self):
-        """Test format value for 'after' field with float (duration)."""
+        """Test format value for 'after' timing field with float (duration)."""
         formatter = Mock()
         formatter._config = Mock(micros=False)
+        # With is_timing=True, float values are formatted as time deltas
         with patch("appinfra.time.delta.delta_str", return_value="1m30s"):
-            result = _format_value(formatter, 90.5, "col", "bold", "after")
+            result = _format_value(
+                formatter, 90.5, "col", "bold", "after", is_timing=True
+            )
             assert "1m30s" in result
 
     def test_cache_result_caches_when_key_provided(self):
@@ -736,6 +740,20 @@ class TestMissingCoverage:
         assert isinstance(result, str)
         # Should include the other field
         assert "other" in result or "value" in result
+
+    def test_format_fields_dict_nested_after_not_special(self, formatter_config):
+        """Test that 'after' in nested dicts is NOT treated specially."""
+        formatter = FieldFormatter(formatter_config)
+        # Top-level 'after' gets special timing formatting
+        # Nested 'after' should be treated as a normal field name
+        fields = {"nested": {"after": "some_value", "other": "data"}}
+
+        result = formatter._format_fields_dict(fields, "col", "bold")
+
+        # The nested dict should include "after" as a field name, not omit it
+        assert "after" in result
+        assert "some_value" in result
+        assert "other" in result
 
     def test_format_fields_dict_with_exception(self, formatter_config):
         """Test _format_fields_dict handles 'exception' field (line 264)."""
