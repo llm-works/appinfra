@@ -13,6 +13,7 @@ This module provides the Loader class that extends yaml.SafeLoader to:
 from __future__ import annotations
 
 import datetime
+import os
 import re
 import warnings
 from collections.abc import Hashable
@@ -1119,6 +1120,85 @@ class Loader(yaml.SafeLoader):
             # Shallow merge: later values override
             target.update(merge_value)
 
+    def _construct_env(self, node: Any, optional: bool = False) -> str | None:
+        """
+        Core logic for !env and !env? constructors.
+
+        Resolves environment variable references with optional default values.
+
+        Args:
+            node: YAML node containing the env var spec
+            optional: If True, return None for missing vars (instead of raising)
+
+        Returns:
+            Environment variable value, default value, or None (if optional and missing)
+
+        Raises:
+            yaml.YAMLError: If required env var is not set and no default provided
+        """
+        value: str = self.construct_scalar(node)
+
+        if ":" in value:
+            var_name, default = value.split(":", 1)
+            if not var_name:
+                ctx = self._create_error_context(node)
+                raise yaml.YAMLError(
+                    f"Empty environment variable name ({ctx.format_location()})"
+                )
+            return os.environ.get(var_name, default)
+
+        result = os.environ.get(value)
+        if result is None and not optional:
+            ctx = self._create_error_context(node)
+            raise yaml.YAMLError(
+                f"Environment variable '{value}' is not set ({ctx.format_location()})"
+            )
+        return result
+
+    def env_constructor(self, node: Any) -> str:
+        """
+        Construct value from !env tag with environment variable resolution.
+
+        Supports two syntaxes:
+        - !env VAR_NAME - raises if VAR_NAME is not set
+        - !env VAR_NAME:default - returns 'default' if VAR_NAME is not set
+
+        Args:
+            node: YAML node containing the env var spec
+
+        Returns:
+            Environment variable value or default
+
+        Raises:
+            yaml.YAMLError: If env var is not set and no default provided
+
+        Example:
+            api_key: !env GOOGLE_API_KEY           # Required
+            timeout: !env TIMEOUT:30               # With default
+        """
+        result = self._construct_env(node, optional=False)
+        assert result is not None  # _construct_env raises if None and not optional
+        return result
+
+    def env_optional_constructor(self, node: Any) -> str | None:
+        """
+        Construct value from !env? tag (optional environment variable).
+
+        Returns None if the environment variable is not set.
+        Also supports default values like !env.
+
+        Args:
+            node: YAML node containing the env var spec
+
+        Returns:
+            Environment variable value, default value, or None if not set
+
+        Example:
+            debug_key: !env? DEBUG_API_KEY         # None if not set
+            log_level: !env? LOG_LEVEL:INFO        # 'INFO' if not set
+        """
+        return self._construct_env(node, optional=True)
+
     def _value_to_node(self, value: Any) -> yaml.Node:
         """
         Convert a Python value to a YAML node for reconstruction.
@@ -1162,3 +1242,5 @@ Loader.add_constructor("!secret", Loader.secret_constructor)
 Loader.add_constructor("!path", Loader.path_constructor)
 Loader.add_constructor("!reset", Loader.reset_constructor)
 Loader.add_constructor("!deep", Loader.deep_constructor)
+Loader.add_constructor("!env", Loader.env_constructor)
+Loader.add_constructor("!env?", Loader.env_optional_constructor)
