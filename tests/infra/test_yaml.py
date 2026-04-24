@@ -1453,6 +1453,15 @@ value: !env ":default"
             load(StringIO(yaml_content))
         assert "Empty environment variable name" in str(exc_info.value)
 
+    def test_env_optional_tag_empty_var_name_raises(self):
+        """Test !env? :default raises error for empty variable name."""
+        yaml_content = """
+value: !env? ":default"
+"""
+        with pytest.raises(yaml.YAMLError) as exc_info:
+            load(StringIO(yaml_content))
+        assert "Empty environment variable name" in str(exc_info.value)
+
 
 class TestPathTag:
     """Test !path tag functionality for path resolution."""
