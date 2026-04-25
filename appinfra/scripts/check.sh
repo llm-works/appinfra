@@ -81,6 +81,7 @@ COVERAGE_TARGET="${COVERAGE_TARGET:-$DEFAULT_COVERAGE_TARGET}"
 
 # Docstring coverage threshold (0 to disable)
 DOCSTRING_THRESHOLD="${INFRA_DEV_DOCSTRING_THRESHOLD:-80}"
+MAX_INLINE_LINES=30
 
 # Check definitions: "Name|Make Target|Command|Fix Target"
 declare -a CHECKS=(
@@ -221,6 +222,34 @@ update_line() {
     } 200>"$DISPLAY_LOCK"
 }
 
+format_log_output() {
+    local logfile="$1" max_lines="$2"
+    local total_lines
+    total_lines=$(wc -l < "$logfile" 2>/dev/null || echo "0")
+    [ "$total_lines" -eq 0 ] && return
+
+    echo ""
+    local failed_lines
+    failed_lines=$(grep -E "^(FAILED|ERROR) " "$logfile" 2>/dev/null || true)
+    if [ -n "$failed_lines" ]; then
+        echo -e "${GRAY}Failed tests:${RESET}"
+        echo "$failed_lines"
+        echo ""
+        local error_lines
+        error_lines=$(grep -E "^E\s+" "$logfile" 2>/dev/null | head -10 || true)
+        [ -n "$error_lines" ] && echo -e "${GRAY}Errors:${RESET}" && echo "$error_lines"
+    else
+        echo -e "${GRAY}Output:${RESET}"
+        if [ "$total_lines" -le "$max_lines" ]; then
+            cat "$logfile"
+        else
+            local hidden=$((total_lines - max_lines))
+            echo -e "${GRAY}... ($hidden lines hidden)${RESET}"
+            tail -n "$max_lines" "$logfile"
+        fi
+    fi
+}
+
 display_failures() {
     [ -f "${STATUS_DIR}/failures" ] || return 0
 
@@ -229,24 +258,7 @@ display_failures() {
         [ -n "$extra" ] && echo -e "→ ${extra}"
         [ -n "$make_target" ] && echo -e "→ To investigate: ${YELLOW}make ${make_target}${RESET}"
         [ -n "$fix_target" ] && echo -e "→ To fix: ${YELLOW}make ${fix_target}${RESET}"
-        if [ "$FAIL_FAST" = true ] && [ -n "$logfile" ] && [ -f "$logfile" ]; then
-            echo ""
-            # Show FAILED/ERROR lines (pytest short test summary)
-            local failed_lines
-            failed_lines=$(grep -E "^(FAILED|ERROR) " "$logfile" 2>/dev/null || true)
-            if [ -n "$failed_lines" ]; then
-                echo -e "${GRAY}Failed tests:${RESET}"
-                echo "$failed_lines"
-                echo ""
-            fi
-            # Show error lines (pytest prefixes errors with "E ")
-            local error_lines
-            error_lines=$(grep -E "^E\s+" "$logfile" 2>/dev/null | head -5 || true)
-            if [ -n "$error_lines" ]; then
-                echo -e "${GRAY}Errors:${RESET}"
-                echo "$error_lines"
-            fi
-        fi
+        [ "$FAIL_FAST" = true ] && [ -n "$logfile" ] && [ -f "$logfile" ] && format_log_output "$logfile" "$MAX_INLINE_LINES"
         echo ""
     done < "${STATUS_DIR}/failures"
 }

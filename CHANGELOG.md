@@ -16,6 +16,10 @@ For API stability guarantees and deprecation policy, see
 - `RateLimiter.time_until_next()` — returns seconds until next slot is available, for event loops
   that need timeout values without consuming a slot (matches `Ticker.time_until_next_tick()`)
 
+### Changed
+- `make check` now shows error output inline for non-pytest failures (last 30 lines), in addition
+  to the existing pytest failure summary; fail-fast behavior is preserved
+
 ### Fixed
 - `after` field in log `extra` dict is now only treated as timing at top level; nested dicts with
   an `after` key are formatted normally (field name preserved, no time conversion)
