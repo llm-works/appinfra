@@ -17,8 +17,8 @@ For API stability guarantees and deprecation policy, see
   that need timeout values without consuming a slot (matches `Ticker.time_until_next_tick()`)
 
 ### Changed
-- `make check` now shows error output inline when a check fails, eliminating the need to run a
-  separate `make <target>` command to see what broke
+- `make check` now shows error output inline for non-pytest failures (last 30 lines), in addition
+  to the existing pytest failure summary
 
 ### Fixed
 - `after` field in log `extra` dict is now only treated as timing at top level; nested dicts with
