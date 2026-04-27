@@ -8,13 +8,15 @@ dot-notation path traversal.
 
 import builtins
 import datetime
-from typing import Any, Self
+from typing import Any, Self, TypeVar
 
 from . import time as timeutils
 from .dict import DictInterface
 
+V = TypeVar("V")
 
-class DotDict(dict, DictInterface):
+
+class DotDict(dict[str, V], DictInterface):
     """
     Dictionary subclass with attribute-style access and nested structure support.
 
@@ -45,7 +47,7 @@ class DotDict(dict, DictInterface):
         {"keys", "values", "items", "copy", "pop", "popitem", "setdefault", "update"}
     )
 
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
+    def __init__(self, *args: Any, **kwargs: V) -> None:
         """
         Initialize DotDict with initial key-value pairs.
 
@@ -96,7 +98,7 @@ class DotDict(dict, DictInterface):
                 return dict.__getitem__(self, name)
         return super().__getattribute__(name)
 
-    def __getattr__(self, key: str) -> Any:
+    def __getattr__(self, key: str) -> V:
         """
         Get value by attribute-style access (fallback for missing attributes).
 
@@ -113,7 +115,7 @@ class DotDict(dict, DictInterface):
             return dict.__getitem__(self, key)
         raise AttributeError(f"'{type(self).__name__}' has no attribute '{key}'")
 
-    def __setattr__(self, key: str, value: Any) -> None:
+    def __setattr__(self, key: str, value: V) -> None:
         """
         Set value by attribute-style access.
 
@@ -123,7 +125,7 @@ class DotDict(dict, DictInterface):
         """
         self._set_item(key, value)
 
-    def set(self, **kwargs: Any) -> Self:
+    def set(self, **kwargs: V) -> Self:
         """
         Set multiple key-value pairs, with automatic nested object creation.
 
@@ -140,6 +142,8 @@ class DotDict(dict, DictInterface):
     def _set_item(self, key: Any, val: Any) -> None:
         """
         Set a single key-value pair with automatic nested object creation.
+
+        Nested dicts are converted to DotDict, lists are processed recursively.
 
         Args:
             key: Key to set (will be converted to string if needed)
@@ -163,10 +167,10 @@ class DotDict(dict, DictInterface):
 
         # Handle nested dictionaries (but not DotDict instances)
         if isinstance(val, dict) and not isinstance(val, DotDict):
-            super().__setitem__(key, DotDict(**val))
+            super().__setitem__(key, DotDict(**val))  # type: ignore[assignment]
         # Handle lists with potential nested structures
         elif isinstance(val, list):
-            super().__setitem__(key, list(map(self._map_entry, val)))
+            super().__setitem__(key, list(map(self._map_entry, val)))  # type: ignore[assignment]
         # Handle simple values
         else:
             super().__setitem__(key, val)
@@ -237,7 +241,7 @@ class DotDict(dict, DictInterface):
                 result[key] = val
         return result
 
-    def __getitem__(self, key: str) -> Any:
+    def __getitem__(self, key: str) -> V | None:  # type: ignore[override]
         """
         Get value by key with dictionary-style access.
 
@@ -255,7 +259,7 @@ class DotDict(dict, DictInterface):
         except KeyError:
             return None
 
-    def __setitem__(self, key: str, val: Any) -> None:
+    def __setitem__(self, key: str, val: V) -> None:
         """
         Set value by key with dictionary-style access.
 
@@ -366,7 +370,7 @@ class DotDictPathNotFoundError(Exception):
         path: The path that was not found
     """
 
-    def __init__(self, obj: DotDict, path: str) -> None:
+    def __init__(self, obj: DotDict[Any], path: str) -> None:
         """
         Initialize the path not found error.
 

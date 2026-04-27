@@ -54,16 +54,30 @@ Dictionary subclass with attribute-style access and dot-notation paths.
 Since DotDict subclasses `dict`, `isinstance(dotdict, dict)` returns `True`.
 
 ```python
-class DotDict(dict):
+class DotDict(dict[str, V]):
     def __init__(self, *args, **kwargs): ...            # Accepts dict as positional arg or kwargs
 
     def get(self, path: str, default=None) -> Any: ...  # Dot-path access, returns None if not found
     def require(self, path: str) -> Any: ...            # Like get(), but raises if path missing
     def has(self, path: str) -> bool: ...               # Check if path exists
-    def set(self, **kwargs) -> DotDict: ...
+    def set(self, **kwargs) -> Self: ...
     def dict(self) -> dict: ...
     def to_dict(self) -> dict: ...                      # Recursive conversion to plain dicts
 ```
+
+**Type Parameter:**
+
+DotDict is generic over its value type. Use `DotDict[V]` for type-safe collections:
+
+```python
+def get_metrics() -> DotDict[float]:
+    return DotDict(latency=0.05, throughput=1000.0)
+
+metrics = get_metrics()
+x: float = metrics.latency  # Type checker knows this is float
+```
+
+Unparameterized `DotDict` is equivalent to `DotDict[Any]` for backward compatibility.
 
 **Usage:**
 

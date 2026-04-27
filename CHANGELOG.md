@@ -11,12 +11,16 @@ For API stability guarantees and deprecation policy, see
 ## [Unreleased]
 
 ### Added
+- `DotDict` is now generic — use `DotDict[V]` for type-safe homogeneous value collections (e.g.,
+  `DotDict[float]`); unparameterized `DotDict` remains `DotDict[Any]` for backward compatibility
 - `ReservedKeyError` exception — raised immediately when reserved LogRecord keys (e.g., `name`,
   `message`, `levelname`) are used in log `extra` dict, preventing silent overwrites
 - `RateLimiter.time_until_next()` — returns seconds until next slot is available, for event loops
   that need timeout values without consuming a slot (matches `Ticker.time_until_next_tick()`)
 
 ### Changed
+- `Config` internal attributes (`_enable_env_overrides`, `_config_path`, etc.) are now stored as
+  true object attributes rather than dict entries — they no longer appear in `keys()` or iteration
 - `make check` now shows error output inline for non-pytest failures (last 30 lines), in addition
   to the existing pytest failure summary; fail-fast behavior is preserved
 
