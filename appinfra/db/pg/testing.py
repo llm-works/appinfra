@@ -127,7 +127,7 @@ def pg_test_schema(worker_id: str) -> str:
     Generate a unique schema name for the current test worker.
 
     When running with pytest-xdist, each worker gets a unique schema.
-    The schema name includes the test suite prefix (from INFRA_PYTEST_SUITE env var)
+    The schema name includes the test suite prefix (from INFRA_CHECK_PYTEST_SUITE env var)
     to prevent collisions when multiple pytest processes run in parallel.
 
     Schema naming: {suite}_{worker_id}
@@ -144,7 +144,7 @@ def pg_test_schema(worker_id: str) -> str:
     """
     import os
 
-    suite = os.environ.get("INFRA_PYTEST_SUITE", "test")
+    suite = os.environ.get("INFRA_CHECK_PYTEST_SUITE") or "test"
     if worker_id == "master":
         return f"{suite}_master"
     return f"{suite}_{worker_id}"
