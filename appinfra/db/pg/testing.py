@@ -143,8 +143,15 @@ def pg_test_schema(worker_id: str) -> str:
         Schema name (e.g., "unit_gw0" or "test_master")
     """
     import os
+    import re
 
     suite = os.environ.get("INFRA_CHECK_PYTEST_SUITE") or "test"
+    if not re.match(r"^[a-z][a-z0-9_]{0,50}$", suite):
+        raise ValueError(
+            f"Invalid INFRA_CHECK_PYTEST_SUITE value: {suite!r}. "
+            "Must start with lowercase letter, contain only lowercase letters, "
+            "digits, and underscores, and be at most 51 characters."
+        )
     if worker_id == "master":
         return f"{suite}_master"
     return f"{suite}_{worker_id}"
