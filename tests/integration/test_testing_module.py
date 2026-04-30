@@ -32,8 +32,12 @@ class TestPgIsolatedFixture:
 
     def test_pg_isolated_has_schema(self, pg_isolated):
         """Test that pg_isolated has a schema configured."""
+        import re
+
         assert pg_isolated.schema is not None
-        assert pg_isolated.schema.startswith("test_")
+        # Schema format: {suite}_{worker} where suite is test/unit/integ/e2e/etc.
+        # and worker is master or gwN (suite must start with lowercase letter)
+        assert re.match(r"^[a-z][a-z0-9_]*_(master|gw\d+)$", pg_isolated.schema)
 
     def test_pg_isolated_can_execute_queries(self, pg_isolated):
         """Test that pg_isolated can execute queries."""

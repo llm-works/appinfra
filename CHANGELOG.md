@@ -36,6 +36,8 @@ For API stability guarantees and deprecation policy, see
   an `after` key are formatted normally (field name preserved, no time conversion)
 - `%` characters in nested dict values are no longer double-escaped; `{'costs': {'pct': '99%'}}`
   now correctly logs as `99%` instead of `99%%`
+- `pg_test_schema` fixture race condition when parallel test suites share schema names; each suite
+  now uses unique prefix via `INFRA_CHECK_PYTEST_SUITE` env var (unit_gw0, integ_gw0, e2e_gw0, etc.)
 
 ## [0.6.1] - 2026-04-14
 

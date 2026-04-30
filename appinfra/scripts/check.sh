@@ -149,29 +149,31 @@ if [ -n "$COVERAGE_MARKERS" ]; then
     COVERAGE_MARKER_ARG="-m \"${COVERAGE_MARKERS}\""
 fi
 
+# INFRA_CHECK_PYTEST_SUITE prevents schema collisions when test suites run in parallel.
+# Each suite gets unique schema names: unit_gw0, integ_gw0, e2e_gw0, etc.
 declare -a TEST_SUBCHECKS=(
-    "Unit tests|test.unit|${PYTHON} -m pytest tests/ -m unit --tb=short --no-header -q -rEfs ${PYTEST_PARALLEL}|"
-    "Integration tests|test.integration|${PYTHON} -m pytest tests/ -m integration --tb=short --no-header -q -rEfs ${PYTEST_PARALLEL}|"
-    "E2E tests|test.e2e|${PYTHON} -m pytest tests/ -m e2e --tb=short --no-header -q -rEfs ${PYTEST_PARALLEL}|"
-    "Security tests|test.security|${PYTHON} -m pytest tests/ -m security --tb=short --no-header -q -rEfs ${PYTEST_PARALLEL}|"
-    "Performance tests|test.perf|${PYTHON} -m pytest tests/ -m performance --tb=short --no-header -q -rEfs ${PYTEST_PARALLEL}|"
+    "Unit tests|test.unit|INFRA_CHECK_PYTEST_SUITE=unit ${PYTHON} -m pytest tests/ -m unit --tb=short --no-header -q -rEfs ${PYTEST_PARALLEL}|"
+    "Integration tests|test.integration|INFRA_CHECK_PYTEST_SUITE=integ ${PYTHON} -m pytest tests/ -m integration --tb=short --no-header -q -rEfs ${PYTEST_PARALLEL}|"
+    "E2E tests|test.e2e|INFRA_CHECK_PYTEST_SUITE=e2e ${PYTHON} -m pytest tests/ -m e2e --tb=short --no-header -q -rEfs ${PYTEST_PARALLEL}|"
+    "Security tests|test.security|INFRA_CHECK_PYTEST_SUITE=sec ${PYTHON} -m pytest tests/ -m security --tb=short --no-header -q -rEfs ${PYTEST_PARALLEL}|"
+    "Performance tests|test.perf|INFRA_CHECK_PYTEST_SUITE=perf ${PYTHON} -m pytest tests/ -m performance --tb=short --no-header -q -rEfs ${PYTEST_PARALLEL}|"
 )
 # Add coverage check only if threshold > 0 (awk is more portable than bc)
 if awk "BEGIN {exit !($COVERAGE_TARGET > 0)}" 2>/dev/null; then
-    TEST_SUBCHECKS+=("Code coverage|test.coverage|${PYTHON} -m pytest tests/ ${COVERAGE_MARKER_ARG} --cov=${PKG_NAME} --cov-report=term -q -rEfs ${PYTEST_PARALLEL}|${COVERAGE_TARGET}")
+    TEST_SUBCHECKS+=("Code coverage|test.coverage|INFRA_CHECK_PYTEST_SUITE=cov ${PYTHON} -m pytest tests/ ${COVERAGE_MARKER_ARG} --cov=${PKG_NAME} --cov-report=term -q -rEfs ${PYTEST_PARALLEL}|${COVERAGE_TARGET}")
 fi
 
 # Verbose versions for raw mode
 declare -a TEST_SUBCHECKS_RAW=(
-    "Unit tests|test.unit.v|${PYTHON} -m pytest tests/ -m unit -v --tb=short -rEfs ${PYTEST_PARALLEL}|"
-    "Integration tests|test.integration.v|${PYTHON} -m pytest tests/ -m integration -v --tb=short -rEfs ${PYTEST_PARALLEL}|"
-    "E2E tests|test.e2e.v|${PYTHON} -m pytest tests/ -m e2e -v --tb=short -rEfs ${PYTEST_PARALLEL}|"
-    "Security tests|test.security.v|${PYTHON} -m pytest tests/ -m security -v --tb=short -rEfs ${PYTEST_PARALLEL}|"
-    "Performance tests|test.perf.v|${PYTHON} -m pytest tests/ -m performance -v --tb=short -rEfs ${PYTEST_PARALLEL}|"
+    "Unit tests|test.unit.v|INFRA_CHECK_PYTEST_SUITE=unit ${PYTHON} -m pytest tests/ -m unit -v --tb=short -rEfs ${PYTEST_PARALLEL}|"
+    "Integration tests|test.integration.v|INFRA_CHECK_PYTEST_SUITE=integ ${PYTHON} -m pytest tests/ -m integration -v --tb=short -rEfs ${PYTEST_PARALLEL}|"
+    "E2E tests|test.e2e.v|INFRA_CHECK_PYTEST_SUITE=e2e ${PYTHON} -m pytest tests/ -m e2e -v --tb=short -rEfs ${PYTEST_PARALLEL}|"
+    "Security tests|test.security.v|INFRA_CHECK_PYTEST_SUITE=sec ${PYTHON} -m pytest tests/ -m security -v --tb=short -rEfs ${PYTEST_PARALLEL}|"
+    "Performance tests|test.perf.v|INFRA_CHECK_PYTEST_SUITE=perf ${PYTHON} -m pytest tests/ -m performance -v --tb=short -rEfs ${PYTEST_PARALLEL}|"
 )
 # Add coverage check only if threshold > 0 (awk is more portable than bc)
 if awk "BEGIN {exit !($COVERAGE_TARGET > 0)}" 2>/dev/null; then
-    TEST_SUBCHECKS_RAW+=("Code coverage|test.coverage|${PYTHON} -m pytest tests/ ${COVERAGE_MARKER_ARG} --cov=${PKG_NAME} --cov-report=term-missing -rEfs ${PYTEST_PARALLEL}|${COVERAGE_TARGET}")
+    TEST_SUBCHECKS_RAW+=("Code coverage|test.coverage|INFRA_CHECK_PYTEST_SUITE=cov ${PYTHON} -m pytest tests/ ${COVERAGE_MARKER_ARG} --cov=${PKG_NAME} --cov-report=term-missing -rEfs ${PYTEST_PARALLEL}|${COVERAGE_TARGET}")
 fi
 
 declare -A CHECK_LINES
