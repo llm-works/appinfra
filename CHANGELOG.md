@@ -10,6 +10,39 @@ For API stability guarantees and deprecation policy, see
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-05-07
+
+### Added
+- `!env` YAML tag for environment variable resolution at parse time — `!env VAR` (required, raises
+  if missing), `!env VAR:default` (fallback value), `!env? VAR` (optional, returns None if missing)
+- `DotDict` is now generic — use `DotDict[V]` for type-safe homogeneous value collections (e.g.,
+  `DotDict[float]`); unparameterized `DotDict` defaults to `DotDict[Any]` via PEP 696, so bare
+  `DotDict` works with strict mypy without requiring explicit `DotDict[Any]`
+- `ReservedKeyError` exception — raised immediately when reserved LogRecord keys (e.g., `name`,
+  `message`, `levelname`) are used in log `extra` dict, preventing silent overwrites
+- `RateLimiter.time_until_next()` — returns seconds until next slot is available, for event loops
+  that need timeout values without consuming a slot (matches `Ticker.time_until_next_tick()`)
+- `make reinstall` target — runs uninstall then install to clean orphaned files after removing
+  source files from a package
+
+### Changed
+- **Breaking:** `LifecycleCallbackDefinition` now has `after_lifespan: bool = True` — startup
+  callbacks run AFTER user lifespan enters by default, so user dependencies (database, message
+  queues) are initialized before "server started" logs; set `after_lifespan=False` for the old
+  behavior where callbacks run before lifespan
+- `Config` internal attributes (`_enable_env_overrides`, `_config_path`, etc.) are now stored as
+  true object attributes rather than dict entries — they no longer appear in `keys()` or iteration
+- `make check` now shows error output inline for non-pytest failures (last 30 lines), in addition
+  to the existing pytest failure summary; fail-fast behavior is preserved
+
+### Fixed
+- `after` field in log `extra` dict is now only treated as timing at top level; nested dicts with
+  an `after` key are formatted normally (field name preserved, no time conversion)
+- `%` characters in nested dict values are no longer double-escaped; `{'costs': {'pct': '99%'}}`
+  now correctly logs as `99%` instead of `99%%`
+- `pg_test_schema` fixture race condition when parallel test suites share schema names; each suite
+  now uses unique prefix via `INFRA_CHECK_PYTEST_SUITE` env var (unit_gw0, integ_gw0, e2e_gw0, etc.)
+
 ## [0.6.1] - 2026-04-14
 
 ### Added
@@ -551,7 +584,8 @@ as config. Affected: `ConfigValidator`, `PG.readonly`, `PG.migrate()`,
 ### Changed
 - Package renamed to `appinfra` (install and import both use `appinfra`)
 
-[Unreleased]: https://github.com/llm-works/appinfra/compare/v0.6.1...HEAD
+[Unreleased]: https://github.com/llm-works/appinfra/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/llm-works/appinfra/compare/v0.6.1...v0.7.0
 [0.6.1]: https://github.com/llm-works/appinfra/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/llm-works/appinfra/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/llm-works/appinfra/compare/v0.4.1...v0.5.0

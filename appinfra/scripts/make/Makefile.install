@@ -62,3 +62,8 @@ uninstall:: areyousure ## uninstalls $(INFRA_DEV_PKG_NAME) from all environments
 	done
 	@echo "* uninstall done"
 .PHONY: uninstall
+
+reinstall:: areyousure ## uninstall then install (cleans orphaned files)
+	@echo 'y' | $(MAKE) uninstall
+	@echo 'y' | $(MAKE) install
+.PHONY: reinstall

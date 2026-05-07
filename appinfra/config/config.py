@@ -165,6 +165,23 @@ class Config(DotDict):
         self._merge_strategy = merge_strategy
         self._load(fname)
 
+    def __setattr__(self, key: str, value: Any) -> None:
+        """
+        Set attribute, routing underscore-prefixed names to object attributes.
+
+        Config uses underscore-prefixed attributes for internal state (e.g.,
+        _enable_env_overrides, _config_path). These are stored as true object
+        attributes, not dict entries, keeping them separate from config data.
+
+        Args:
+            key: Attribute name to set
+            value: Value to set
+        """
+        if key.startswith("_"):
+            object.__setattr__(self, key, value)
+        else:
+            self._set_item(key, value)
+
     def _load(self, fname: str) -> None:
         """
         Load configuration from YAML file and resolve variable substitutions.

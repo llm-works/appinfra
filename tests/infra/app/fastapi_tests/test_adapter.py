@@ -682,7 +682,12 @@ class TestLifecycleCallbackExecution:
 
     @pytest.mark.asyncio
     async def test_lifespan_and_callbacks_chain_in_correct_order(self):
-        """Test that callbacks wrap inner lifespan in correct order."""
+        """Test that callbacks wrap inner lifespan in correct order.
+
+        Default behavior (after_lifespan=True): startup callbacks run AFTER
+        user lifespan enters, so user dependencies are ready before "server
+        started" type callbacks execute.
+        """
         from contextlib import asynccontextmanager
 
         from appinfra.app.fastapi.runtime.adapter import (
@@ -723,11 +728,68 @@ class TestLifecycleCallbackExecution:
 
             mock_app = MagicMock()
             async with lifespan(mock_app):
-                # Verify startup ran, then inner lifespan entered
-                assert events == ["startup", "inner_enter"]
+                # Inner lifespan enters first, then startup callback runs
+                assert events == ["inner_enter", "startup"]
 
-            # Verify full order: startup -> inner enter -> inner exit -> shutdown
-            assert events == ["startup", "inner_enter", "inner_exit", "shutdown"]
+            # Full order: inner enter -> startup -> inner exit -> shutdown
+            assert events == ["inner_enter", "startup", "inner_exit", "shutdown"]
+
+    @pytest.mark.asyncio
+    async def test_pre_lifespan_startup_callback(self):
+        """Test that after_lifespan=False runs callback BEFORE user lifespan."""
+        from contextlib import asynccontextmanager
+
+        from appinfra.app.fastapi.runtime.adapter import (
+            FastAPIAdapter,
+            LifecycleCallbackDefinition,
+            LifespanDefinition,
+        )
+
+        events = []
+
+        @asynccontextmanager
+        async def inner_lifespan(app):
+            events.append("inner_enter")
+            yield
+            events.append("inner_exit")
+
+        async def pre_startup(app):
+            events.append("pre_startup")
+
+        async def post_startup(app):
+            events.append("post_startup")
+
+        with (
+            patch("appinfra.app.fastapi.runtime.adapter.FASTAPI_AVAILABLE", True),
+            patch("appinfra.app.fastapi.runtime.adapter.FastAPI"),
+            patch("appinfra.app.fastapi.runtime.adapter.CORSMiddleware"),
+        ):
+            adapter = FastAPIAdapter(ApiConfig())
+            adapter.set_lifespan(LifespanDefinition(lifespan=inner_lifespan))
+            adapter.add_startup_callback(
+                LifecycleCallbackDefinition(
+                    callback=pre_startup, name="pre", after_lifespan=False
+                )
+            )
+            adapter.add_startup_callback(
+                LifecycleCallbackDefinition(
+                    callback=post_startup, name="post", after_lifespan=True
+                )
+            )
+
+            lifespan = adapter._wrap_lifespan_with_callbacks(inner_lifespan)
+
+            mock_app = MagicMock()
+            async with lifespan(mock_app):
+                # Pre runs before inner, post runs after inner enters
+                assert events == ["pre_startup", "inner_enter", "post_startup"]
+
+            assert events == [
+                "pre_startup",
+                "inner_enter",
+                "post_startup",
+                "inner_exit",
+            ]
 
     @pytest.mark.asyncio
     async def test_callback_middleware_runs_request_callbacks(self):

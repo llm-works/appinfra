@@ -137,6 +137,41 @@ class RateLimiter:
         with self._lock:
             return time.monotonic() >= self._last_t
 
+    def time_until_next(self, now: float | None = None) -> float:
+        """
+        Get seconds until next slot is available.
+
+        This method provides timing information for event loops that need to
+        multiplex multiple event sources. Use the return value as a timeout
+        for blocking operations like channel.recv() or select(). Thread-safe.
+
+        Unlike can_proceed() which returns a boolean, this returns the actual
+        time remaining, allowing callers to set precise timeouts.
+
+        Args:
+            now: Optional current time from time.monotonic(). If not provided,
+                 time.monotonic() will be called. Pass this to avoid multiple
+                 time.monotonic() calls when coordinating with other timers.
+                 **IMPORTANT**: Must be from time.monotonic(), not time.time().
+
+        Returns:
+            float: Seconds until next slot is available.
+                   Returns 0.0 if slot is available now.
+
+        Example:
+            while running:
+                timeout = limiter.time_until_next()
+                msg = channel.recv(timeout=timeout)
+                if msg:
+                    handle_message(msg)
+                if limiter.try_next():
+                    do_rate_limited_operation()
+        """
+        with self._lock:
+            if now is None:
+                now = time.monotonic()
+            return max(0.0, self._last_t - now)
+
 
 class Backoff:
     """

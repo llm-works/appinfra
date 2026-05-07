@@ -81,6 +81,7 @@ COVERAGE_TARGET="${COVERAGE_TARGET:-$DEFAULT_COVERAGE_TARGET}"
 
 # Docstring coverage threshold (0 to disable)
 DOCSTRING_THRESHOLD="${INFRA_DEV_DOCSTRING_THRESHOLD:-80}"
+MAX_INLINE_LINES=30
 
 # Check definitions: "Name|Make Target|Command|Fix Target"
 declare -a CHECKS=(
@@ -148,29 +149,31 @@ if [ -n "$COVERAGE_MARKERS" ]; then
     COVERAGE_MARKER_ARG="-m \"${COVERAGE_MARKERS}\""
 fi
 
+# INFRA_CHECK_PYTEST_SUITE prevents schema collisions when test suites run in parallel.
+# Each suite gets unique schema names: unit_gw0, integ_gw0, e2e_gw0, etc.
 declare -a TEST_SUBCHECKS=(
-    "Unit tests|test.unit|${PYTHON} -m pytest tests/ -m unit --tb=short --no-header -q -rEfs ${PYTEST_PARALLEL}|"
-    "Integration tests|test.integration|${PYTHON} -m pytest tests/ -m integration --tb=short --no-header -q -rEfs ${PYTEST_PARALLEL}|"
-    "E2E tests|test.e2e|${PYTHON} -m pytest tests/ -m e2e --tb=short --no-header -q -rEfs ${PYTEST_PARALLEL}|"
-    "Security tests|test.security|${PYTHON} -m pytest tests/ -m security --tb=short --no-header -q -rEfs ${PYTEST_PARALLEL}|"
-    "Performance tests|test.perf|${PYTHON} -m pytest tests/ -m performance --tb=short --no-header -q -rEfs ${PYTEST_PARALLEL}|"
+    "Unit tests|test.unit|INFRA_CHECK_PYTEST_SUITE=unit ${PYTHON} -m pytest tests/ -m unit --tb=short --no-header -q -rEfs ${PYTEST_PARALLEL}|"
+    "Integration tests|test.integration|INFRA_CHECK_PYTEST_SUITE=integ ${PYTHON} -m pytest tests/ -m integration --tb=short --no-header -q -rEfs ${PYTEST_PARALLEL}|"
+    "E2E tests|test.e2e|INFRA_CHECK_PYTEST_SUITE=e2e ${PYTHON} -m pytest tests/ -m e2e --tb=short --no-header -q -rEfs ${PYTEST_PARALLEL}|"
+    "Security tests|test.security|INFRA_CHECK_PYTEST_SUITE=sec ${PYTHON} -m pytest tests/ -m security --tb=short --no-header -q -rEfs ${PYTEST_PARALLEL}|"
+    "Performance tests|test.perf|INFRA_CHECK_PYTEST_SUITE=perf ${PYTHON} -m pytest tests/ -m performance --tb=short --no-header -q -rEfs ${PYTEST_PARALLEL}|"
 )
 # Add coverage check only if threshold > 0 (awk is more portable than bc)
 if awk "BEGIN {exit !($COVERAGE_TARGET > 0)}" 2>/dev/null; then
-    TEST_SUBCHECKS+=("Code coverage|test.coverage|${PYTHON} -m pytest tests/ ${COVERAGE_MARKER_ARG} --cov=${PKG_NAME} --cov-report=term -q -rEfs ${PYTEST_PARALLEL}|${COVERAGE_TARGET}")
+    TEST_SUBCHECKS+=("Code coverage|test.coverage|INFRA_CHECK_PYTEST_SUITE=cov ${PYTHON} -m pytest tests/ ${COVERAGE_MARKER_ARG} --cov=${PKG_NAME} --cov-report=term -q -rEfs ${PYTEST_PARALLEL}|${COVERAGE_TARGET}")
 fi
 
 # Verbose versions for raw mode
 declare -a TEST_SUBCHECKS_RAW=(
-    "Unit tests|test.unit.v|${PYTHON} -m pytest tests/ -m unit -v --tb=short -rEfs ${PYTEST_PARALLEL}|"
-    "Integration tests|test.integration.v|${PYTHON} -m pytest tests/ -m integration -v --tb=short -rEfs ${PYTEST_PARALLEL}|"
-    "E2E tests|test.e2e.v|${PYTHON} -m pytest tests/ -m e2e -v --tb=short -rEfs ${PYTEST_PARALLEL}|"
-    "Security tests|test.security.v|${PYTHON} -m pytest tests/ -m security -v --tb=short -rEfs ${PYTEST_PARALLEL}|"
-    "Performance tests|test.perf.v|${PYTHON} -m pytest tests/ -m performance -v --tb=short -rEfs ${PYTEST_PARALLEL}|"
+    "Unit tests|test.unit.v|INFRA_CHECK_PYTEST_SUITE=unit ${PYTHON} -m pytest tests/ -m unit -v --tb=short -rEfs ${PYTEST_PARALLEL}|"
+    "Integration tests|test.integration.v|INFRA_CHECK_PYTEST_SUITE=integ ${PYTHON} -m pytest tests/ -m integration -v --tb=short -rEfs ${PYTEST_PARALLEL}|"
+    "E2E tests|test.e2e.v|INFRA_CHECK_PYTEST_SUITE=e2e ${PYTHON} -m pytest tests/ -m e2e -v --tb=short -rEfs ${PYTEST_PARALLEL}|"
+    "Security tests|test.security.v|INFRA_CHECK_PYTEST_SUITE=sec ${PYTHON} -m pytest tests/ -m security -v --tb=short -rEfs ${PYTEST_PARALLEL}|"
+    "Performance tests|test.perf.v|INFRA_CHECK_PYTEST_SUITE=perf ${PYTHON} -m pytest tests/ -m performance -v --tb=short -rEfs ${PYTEST_PARALLEL}|"
 )
 # Add coverage check only if threshold > 0 (awk is more portable than bc)
 if awk "BEGIN {exit !($COVERAGE_TARGET > 0)}" 2>/dev/null; then
-    TEST_SUBCHECKS_RAW+=("Code coverage|test.coverage|${PYTHON} -m pytest tests/ ${COVERAGE_MARKER_ARG} --cov=${PKG_NAME} --cov-report=term-missing -rEfs ${PYTEST_PARALLEL}|${COVERAGE_TARGET}")
+    TEST_SUBCHECKS_RAW+=("Code coverage|test.coverage|INFRA_CHECK_PYTEST_SUITE=cov ${PYTHON} -m pytest tests/ ${COVERAGE_MARKER_ARG} --cov=${PKG_NAME} --cov-report=term-missing -rEfs ${PYTEST_PARALLEL}|${COVERAGE_TARGET}")
 fi
 
 declare -A CHECK_LINES
@@ -221,6 +224,34 @@ update_line() {
     } 200>"$DISPLAY_LOCK"
 }
 
+format_log_output() {
+    local logfile="$1" max_lines="$2"
+    local total_lines
+    total_lines=$(wc -l < "$logfile" 2>/dev/null || echo "0")
+    [ "$total_lines" -eq 0 ] && return
+
+    echo ""
+    local failed_lines
+    failed_lines=$(grep -E "^(FAILED|ERROR) " "$logfile" 2>/dev/null || true)
+    if [ -n "$failed_lines" ]; then
+        echo -e "${GRAY}Failed tests:${RESET}"
+        echo "$failed_lines"
+        echo ""
+        local error_lines
+        error_lines=$(grep -E "^E\s+" "$logfile" 2>/dev/null | head -10 || true)
+        [ -n "$error_lines" ] && echo -e "${GRAY}Errors:${RESET}" && echo "$error_lines"
+    else
+        echo -e "${GRAY}Output:${RESET}"
+        if [ "$total_lines" -le "$max_lines" ]; then
+            cat "$logfile"
+        else
+            local hidden=$((total_lines - max_lines))
+            echo -e "${GRAY}... ($hidden lines hidden)${RESET}"
+            tail -n "$max_lines" "$logfile"
+        fi
+    fi
+}
+
 display_failures() {
     [ -f "${STATUS_DIR}/failures" ] || return 0
 
@@ -229,24 +260,7 @@ display_failures() {
         [ -n "$extra" ] && echo -e "→ ${extra}"
         [ -n "$make_target" ] && echo -e "→ To investigate: ${YELLOW}make ${make_target}${RESET}"
         [ -n "$fix_target" ] && echo -e "→ To fix: ${YELLOW}make ${fix_target}${RESET}"
-        if [ "$FAIL_FAST" = true ] && [ -n "$logfile" ] && [ -f "$logfile" ]; then
-            echo ""
-            # Show FAILED/ERROR lines (pytest short test summary)
-            local failed_lines
-            failed_lines=$(grep -E "^(FAILED|ERROR) " "$logfile" 2>/dev/null || true)
-            if [ -n "$failed_lines" ]; then
-                echo -e "${GRAY}Failed tests:${RESET}"
-                echo "$failed_lines"
-                echo ""
-            fi
-            # Show error lines (pytest prefixes errors with "E ")
-            local error_lines
-            error_lines=$(grep -E "^E\s+" "$logfile" 2>/dev/null | head -5 || true)
-            if [ -n "$error_lines" ]; then
-                echo -e "${GRAY}Errors:${RESET}"
-                echo "$error_lines"
-            fi
-        fi
+        [ "$FAIL_FAST" = true ] && [ -n "$logfile" ] && [ -f "$logfile" ] && format_log_output "$logfile" "$MAX_INLINE_LINES"
         echo ""
     done < "${STATUS_DIR}/failures"
 }

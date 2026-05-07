@@ -1319,6 +1319,150 @@ database:
             assert len(secret_warnings) == 1
 
 
+# =============================================================================
+# Env Tag Tests
+# =============================================================================
+
+
+@pytest.mark.unit
+class TestEnvTag:
+    """Test !env and !env? tag functionality for environment variable resolution."""
+
+    def test_env_tag_resolves_set_variable(self, monkeypatch):
+        """Test !env resolves a set environment variable."""
+        monkeypatch.setenv("TEST_API_KEY", "secret123")
+        yaml_content = """
+api_key: !env TEST_API_KEY
+"""
+        data = load(StringIO(yaml_content))
+        assert data["api_key"] == "secret123"
+
+    def test_env_tag_raises_for_missing_variable(self, monkeypatch):
+        """Test !env raises error for missing environment variable."""
+        monkeypatch.delenv("NONEXISTENT_VAR_12345", raising=False)
+        yaml_content = """
+api_key: !env NONEXISTENT_VAR_12345
+"""
+        with pytest.raises(yaml.YAMLError) as exc_info:
+            load(StringIO(yaml_content))
+        assert "NONEXISTENT_VAR_12345" in str(exc_info.value)
+        assert "not set" in str(exc_info.value)
+
+    def test_env_tag_with_default_uses_default_when_missing(self, monkeypatch):
+        """Test !env VAR:default returns default when VAR is not set."""
+        monkeypatch.delenv("NONEXISTENT_TIMEOUT", raising=False)
+        yaml_content = """
+timeout: !env NONEXISTENT_TIMEOUT:30
+"""
+        data = load(StringIO(yaml_content))
+        assert data["timeout"] == "30"
+
+    def test_env_tag_with_default_uses_value_when_set(self, monkeypatch):
+        """Test !env VAR:default returns value when VAR is set."""
+        monkeypatch.setenv("MY_TIMEOUT", "60")
+        yaml_content = """
+timeout: !env MY_TIMEOUT:30
+"""
+        data = load(StringIO(yaml_content))
+        assert data["timeout"] == "60"
+
+    def test_env_tag_with_empty_default(self, monkeypatch):
+        """Test !env VAR: returns empty string as default."""
+        monkeypatch.delenv("NONEXISTENT_VAR", raising=False)
+        yaml_content = """
+optional_value: !env "NONEXISTENT_VAR:"
+"""
+        data = load(StringIO(yaml_content))
+        assert data["optional_value"] == ""
+
+    def test_env_tag_with_colon_in_default(self, monkeypatch):
+        """Test !env VAR:default:with:colons preserves colons in default."""
+        monkeypatch.delenv("NONEXISTENT_URL", raising=False)
+        yaml_content = """
+url: !env NONEXISTENT_URL:http://localhost:8080
+"""
+        data = load(StringIO(yaml_content))
+        assert data["url"] == "http://localhost:8080"
+
+    def test_env_optional_tag_returns_none_when_missing(self, monkeypatch):
+        """Test !env? returns None for missing environment variable."""
+        monkeypatch.delenv("NONEXISTENT_DEBUG_KEY", raising=False)
+        yaml_content = """
+debug_key: !env? NONEXISTENT_DEBUG_KEY
+"""
+        data = load(StringIO(yaml_content))
+        assert data["debug_key"] is None
+
+    def test_env_optional_tag_returns_value_when_set(self, monkeypatch):
+        """Test !env? returns value when environment variable is set."""
+        monkeypatch.setenv("DEBUG_KEY", "debug123")
+        yaml_content = """
+debug_key: !env? DEBUG_KEY
+"""
+        data = load(StringIO(yaml_content))
+        assert data["debug_key"] == "debug123"
+
+    def test_env_optional_tag_with_default_when_missing(self, monkeypatch):
+        """Test !env? VAR:default returns default when VAR is not set."""
+        monkeypatch.delenv("NONEXISTENT_LOG_LEVEL", raising=False)
+        yaml_content = """
+log_level: !env? NONEXISTENT_LOG_LEVEL:INFO
+"""
+        data = load(StringIO(yaml_content))
+        assert data["log_level"] == "INFO"
+
+    def test_env_tag_multiple_vars(self, monkeypatch):
+        """Test multiple !env tags in same document."""
+        monkeypatch.setenv("DB_HOST", "localhost")
+        monkeypatch.setenv("DB_PORT", "5432")
+        monkeypatch.delenv("DB_USER", raising=False)
+        monkeypatch.delenv("DB_PASSWORD", raising=False)
+        yaml_content = """
+database:
+  host: !env DB_HOST
+  port: !env DB_PORT
+  user: !env DB_USER:postgres
+  password: !env? DB_PASSWORD
+"""
+        data = load(StringIO(yaml_content))
+        assert data["database"]["host"] == "localhost"
+        assert data["database"]["port"] == "5432"
+        assert data["database"]["user"] == "postgres"
+        assert data["database"]["password"] is None
+
+    def test_env_tag_error_includes_location(self, monkeypatch):
+        """Test that !env error message includes file location."""
+        monkeypatch.delenv("MISSING_VAR_XYZ", raising=False)
+        yaml_content = """
+first: value
+second: !env MISSING_VAR_XYZ
+third: value
+"""
+        with pytest.raises(yaml.YAMLError) as exc_info:
+            load(StringIO(yaml_content))
+        error_msg = str(exc_info.value)
+        assert "MISSING_VAR_XYZ" in error_msg
+        assert "line" in error_msg.lower()
+
+    def test_env_tag_empty_var_name_raises(self):
+        """Test !env :default raises error for empty variable name."""
+        yaml_content = """
+value: !env ":default"
+"""
+        with pytest.raises(yaml.YAMLError) as exc_info:
+            load(StringIO(yaml_content))
+        assert "Empty environment variable name" in str(exc_info.value)
+
+    def test_env_optional_tag_empty_var_name_raises(self):
+        """Test !env? :default raises error for empty variable name."""
+        yaml_content = """
+value: !env? ":default"
+"""
+        with pytest.raises(yaml.YAMLError) as exc_info:
+            load(StringIO(yaml_content))
+        assert "Empty environment variable name" in str(exc_info.value)
+
+
 class TestPathTag:
     """Test !path tag functionality for path resolution."""
 

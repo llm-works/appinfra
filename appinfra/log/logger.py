@@ -15,6 +15,7 @@ from .callback import CallbackRegistry
 from .config import ChildLogConfig, LogConfig
 from .config_holder import LogConfigHolder
 from .constants import LogConstants
+from .errors import ReservedKeyError
 
 # Type alias for config parameter that can be either type
 ConfigLike = LogConfig | ChildLogConfig
@@ -70,8 +71,11 @@ class Logger(logging.Logger):
         self._config = config
         self._holder: LogConfigHolder | None = None  # Set by factory for hot-reload
         self._callbacks = callback_registry
-        self._extra = extra or {}
+        self._extra = extra.copy() if extra else {}  # Defensive copy, preserves type
         self._root_logger: Logger | None = None  # Set for derived "view" loggers
+
+        # Validate pre-populated extra keys at init time
+        self._validate_extra_keys(self._extra)
         self._suppress_format_errors = suppress_format_errors
         # Thread-safe storage for caller traces, keyed by thread ID
         self._pending_traces: dict[int, tuple[list[str], list[int]]] = {}
@@ -152,6 +156,19 @@ class Logger(logging.Logger):
         # Explicitly clear our own cache since we may not be in loggerDict
         self._cache.clear()  # type: ignore[attr-defined]
 
+    def _validate_extra_keys(self, extra: dict[str, Any] | None) -> None:
+        """Validate that extra dict doesn't contain reserved LogRecord keys.
+
+        Raises:
+            ReservedKeyError: If any reserved keys are present
+        """
+        if not extra:
+            return
+        reserved = LogConstants.RESERVED_EXTRA_KEYS
+        conflicts = set(extra.keys()) & reserved
+        if conflicts:
+            raise ReservedKeyError(conflicts)
+
     def _merge_extra(
         self, extra: dict[str, Any] | collections.OrderedDict | None
     ) -> dict[str, Any] | collections.OrderedDict:
@@ -197,6 +214,8 @@ class Logger(logging.Logger):
         sinfo: str | None = None,
     ) -> logging.LogRecord:
         """Create log record with extra field handling."""
+        # Validate per-call extra keys before merging
+        self._validate_extra_keys(extra)
         merged_extra = self._merge_extra(extra)
         record = self._original_makeRecord(
             name,
@@ -250,6 +269,9 @@ class Logger(logging.Logger):
 
         try:
             super()._log(level, msg, args, **kwargs)
+        except ReservedKeyError:
+            # Programming error - let it propagate for early detection
+            raise
         except (TypeError, ValueError) as e:
             # Format string errors (e.g., wrong number of args, type mismatch)
             if self._suppress_format_errors:

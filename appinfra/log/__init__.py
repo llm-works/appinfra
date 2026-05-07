@@ -60,6 +60,7 @@ from .errors import (
     InvalidLogLevelError,
     LogConfigError,
     LogError,
+    ReservedKeyError,
 )
 from .factory import LoggerFactory
 from .level_manager import LevelRule, LogLevelManager
@@ -323,6 +324,7 @@ __all__ = [
     "LogConfigError",
     "FormatterError",
     "CallbackError",
+    "ReservedKeyError",
     # LoggingBuilder classes
     "LoggingBuilder",
     "ConsoleLoggingBuilder",

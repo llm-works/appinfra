@@ -197,25 +197,30 @@ class ServerBuilder:
         self,
         callback: Callable[[FastAPI], Awaitable[None]],
         name: str | None = None,
+        after_lifespan: bool = True,
     ) -> ServerBuilder:
         """
         Register a startup callback.
 
-        The callback runs when the FastAPI app starts, before accepting requests.
-        Useful for initializing per-subprocess state.
+        By default, callbacks run AFTER the user lifespan enters, so user
+        dependencies (database, message queues) are initialized first.
 
         Args:
             callback: Async function with signature `async def callback(app: FastAPI) -> None`
             name: Optional name for debugging/logging
+            after_lifespan: If True (default), run after user lifespan enters.
+                If False, run before user lifespan (rare, for framework init).
 
         Example:
-            async def init_db(app: FastAPI) -> None:
-                app.state.db = await create_db_pool()
+            async def log_ready(app: FastAPI) -> None:
+                logger.info("Server ready")
 
-            builder.with_on_startup(init_db)
+            builder.with_on_startup(log_ready)  # runs after lifespan
         """
         self._startup_callbacks.append(
-            LifecycleCallbackDefinition(callback=callback, name=name)
+            LifecycleCallbackDefinition(
+                callback=callback, name=name, after_lifespan=after_lifespan
+            )
         )
         return self
 

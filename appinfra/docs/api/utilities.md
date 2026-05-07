@@ -54,16 +54,30 @@ Dictionary subclass with attribute-style access and dot-notation paths.
 Since DotDict subclasses `dict`, `isinstance(dotdict, dict)` returns `True`.
 
 ```python
-class DotDict(dict):
+class DotDict(dict[str, V]):
     def __init__(self, *args, **kwargs): ...            # Accepts dict as positional arg or kwargs
 
     def get(self, path: str, default=None) -> Any: ...  # Dot-path access, returns None if not found
     def require(self, path: str) -> Any: ...            # Like get(), but raises if path missing
     def has(self, path: str) -> bool: ...               # Check if path exists
-    def set(self, **kwargs) -> DotDict: ...
+    def set(self, **kwargs) -> Self: ...
     def dict(self) -> dict: ...
     def to_dict(self) -> dict: ...                      # Recursive conversion to plain dicts
 ```
+
+**Type Parameter:**
+
+DotDict is generic over its value type. Use `DotDict[V]` for type-safe collections:
+
+```python
+def get_metrics() -> DotDict[float]:
+    return DotDict(latency=0.05, throughput=1000.0)
+
+metrics = get_metrics()
+x: float = metrics.latency  # Type checker knows this is float
+```
+
+Unparameterized `DotDict` is equivalent to `DotDict[Any]` for backward compatibility.
 
 **Usage:**
 
@@ -202,6 +216,7 @@ class RateLimiter:
 
     def next(self, respect_max_ticks: bool = True) -> float: ...  # Blocking: wait and return delay
     def try_next(self) -> bool: ...                               # Non-blocking: return True if allowed
+    def time_until_next(self, now: float | None = None) -> float: ...  # Seconds until next slot
 ```
 
 By default, the first call waits one full interval before proceeding. Set `initial=True` for
@@ -234,6 +249,22 @@ while running:
     if limiter.try_next():
         do_rate_limited_operation()
     # If rate limited, skip this cycle and retry on next iteration
+```
+
+**Event Loop with Timeout (`time_until_next()`):**
+
+For event loops that need to multiplex rate limiting with other event sources:
+
+```python
+limiter = RateLimiter(lg, per_minute=60)
+
+while running:
+    timeout = limiter.time_until_next()  # Seconds until next slot
+    msg = channel.recv(timeout=timeout)  # Block until message or timeout
+    if msg:
+        handle_message(msg)
+    if limiter.try_next():
+        do_rate_limited_operation()
 ```
 
 **Bypass Mode:**

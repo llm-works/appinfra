@@ -72,23 +72,31 @@ class TestHelperFunctions:
 
     def test_get_cache_key_with_cacheable_value(self):
         """Test cache key generation for cacheable values."""
-        key = _get_cache_key("test", "col", "bold", "name", False)
-        assert key == ("test", "col", "bold", "name", False)
+        key = _get_cache_key("test", "col", "bold", "name", False, False)
+        assert key == ("test", "col", "bold", "name", False, False)
 
     def test_get_cache_key_with_int(self):
         """Test cache key generation for integers."""
-        key = _get_cache_key(123, "col", "bold", "name", True)
-        assert key == (123, "col", "bold", "name", True)
+        key = _get_cache_key(123, "col", "bold", "name", True, False)
+        assert key == (123, "col", "bold", "name", True, False)
 
     def test_get_cache_key_with_dict_returns_none(self):
         """Test cache key returns None for dict."""
-        key = _get_cache_key({"key": "value"}, "col", "bold", "name", False)
+        key = _get_cache_key({"key": "value"}, "col", "bold", "name", False, False)
         assert key is None
 
     def test_get_cache_key_with_list_returns_none(self):
         """Test cache key returns None for list."""
-        key = _get_cache_key([1, 2, 3], "col", "bold", "name", False)
+        key = _get_cache_key([1, 2, 3], "col", "bold", "name", False, False)
         assert key is None
+
+    def test_get_cache_key_includes_is_timing(self):
+        """Test cache key includes is_timing to differentiate timing vs normal fields."""
+        key_normal = _get_cache_key(1.5, "col", "bold", "after", True, False)
+        key_timing = _get_cache_key(1.5, "col", "bold", "after", True, True)
+        assert key_normal != key_timing
+        assert key_normal == (1.5, "col", "bold", "after", True, False)
+        assert key_timing == (1.5, "col", "bold", "after", True, True)
 
     def test_visual_len_plain_text(self):
         """Test visual length for plain text without ANSI codes."""
@@ -109,8 +117,9 @@ class TestHelperFunctions:
         assert "test[" in result
 
     def test_format_header_for_after_field(self):
-        """Test format header for 'after' field (no name)."""
-        result = _format_header("\033[34", "after")
+        """Test format header for 'after' timing field (no name shown)."""
+        # With is_timing=True, the field name is omitted
+        result = _format_header("\033[34", "after", is_timing=True)
         assert "\x1b[0m" in result  # actual escape sequence
         assert "[" in result
         assert "after[" not in result  # Should not include 'after' text
@@ -130,11 +139,14 @@ class TestHelperFunctions:
         formatter._format_fields_dict.assert_called_once()
 
     def test_format_value_with_after_field_and_float(self):
-        """Test format value for 'after' field with float (duration)."""
+        """Test format value for 'after' timing field with float (duration)."""
         formatter = Mock()
         formatter._config = Mock(micros=False)
+        # With is_timing=True, float values are formatted as time deltas
         with patch("appinfra.time.delta.delta_str", return_value="1m30s"):
-            result = _format_value(formatter, 90.5, "col", "bold", "after")
+            result = _format_value(
+                formatter, 90.5, "col", "bold", "after", is_timing=True
+            )
             assert "1m30s" in result
 
     def test_cache_result_caches_when_key_provided(self):
@@ -737,6 +749,20 @@ class TestMissingCoverage:
         # Should include the other field
         assert "other" in result or "value" in result
 
+    def test_format_fields_dict_nested_after_not_special(self, formatter_config):
+        """Test that 'after' in nested dicts is NOT treated specially."""
+        formatter = FieldFormatter(formatter_config)
+        # Top-level 'after' gets special timing formatting
+        # Nested 'after' should be treated as a normal field name
+        fields = {"nested": {"after": "some_value", "other": "data"}}
+
+        result = formatter._format_fields_dict(fields, "col", "bold")
+
+        # The nested dict should include "after" as a field name, not omit it
+        assert "after" in result
+        assert "some_value" in result
+        assert "other" in result
+
     def test_format_fields_dict_with_exception(self, formatter_config):
         """Test _format_fields_dict handles 'exception' field (line 264)."""
         formatter = FieldFormatter(formatter_config)
@@ -856,6 +882,32 @@ class TestMissingCoverage:
 
         # Should use micro rule width (different spacing)
         assert isinstance(result, str)
+
+    def test_format_extra_without_colors_nested_after(self):
+        """Test that 'after' in nested dicts is preserved in non-colored output."""
+        from appinfra.log.formatters import _format_extra_without_colors
+
+        record = logging.LogRecord(
+            name="test",
+            level=logging.INFO,
+            pathname="/test.py",
+            lineno=10,
+            msg="test",
+            args=(),
+            exc_info=None,
+        )
+        # Nested dict with 'after' key - should be preserved as field name
+        setattr(
+            record, "__infra__extra", {"nested": {"after": "cursor_id", "limit": 100}}
+        )
+
+        result = _format_extra_without_colors(record)
+
+        # The nested 'after' should appear as a field name, not be omitted
+        assert "after" in result
+        assert "cursor_id" in result
+        assert "limit" in result
+        assert "100" in result
 
     def test_format_exception_with_percent_placeholders_no_colors(self):
         """Test formatting exception with %-style placeholders doesn't crash.
@@ -983,3 +1035,56 @@ class TestMissingCoverage:
         # The extra field value should appear in output
         assert "user_id" in result
         assert "query" in result
+
+    def test_nested_dict_percent_not_double_escaped(self):
+        """Test that % in nested dict values is not double-escaped.
+
+        Regression test: Nested dict values containing % were being escaped
+        twice (once by nested format_field call, again by parent), resulting
+        in %% appearing in output instead of %.
+        """
+        config = LogConfig(location=0, micros=False, colors=True)
+        formatter = LogFormatter(config)
+
+        record = logging.LogRecord(
+            name="test.logger",
+            level=logging.INFO,
+            pathname="/test.py",
+            lineno=42,
+            msg="test message",
+            args=(),
+            exc_info=None,
+        )
+
+        # Nested dict with % in value
+        setattr(record, "__infra__extra", {"costs": {"remaining": "99%"}})
+
+        result = formatter.format(record)
+
+        # Should show 99%, not 99%%
+        assert "99%" in result
+        assert "99%%" not in result
+
+    def test_list_of_dicts_with_percent(self):
+        """Test that % in dicts inside lists is handled correctly."""
+        config = LogConfig(location=0, micros=False, colors=True)
+        formatter = LogFormatter(config)
+
+        record = logging.LogRecord(
+            name="test.logger",
+            level=logging.INFO,
+            pathname="/test.py",
+            lineno=42,
+            msg="test message",
+            args=(),
+            exc_info=None,
+        )
+
+        # List containing dict with % in value
+        setattr(record, "__infra__extra", {"items": [{"pct": "50%"}]})
+
+        result = formatter.format(record)
+
+        # Should show 50%, not 50%%
+        assert "50%" in result
+        assert "50%%" not in result

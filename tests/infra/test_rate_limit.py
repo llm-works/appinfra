@@ -412,6 +412,127 @@ class TestRateLimiterCanProceed:
 
 
 # =============================================================================
+# Test RateLimiter time_until_next() Method
+# =============================================================================
+
+
+@pytest.mark.unit
+class TestRateLimiterTimeUntilNext:
+    """Test RateLimiter time_until_next() method."""
+
+    def test_returns_positive_when_slot_not_available(self):
+        """Test time_until_next() returns positive value when rate limited."""
+        mock_logger = Mock()
+        limiter = RateLimiter(mock_logger, per_minute=60)  # 1 per second
+
+        # Initially, slot is not available (initial=False by default)
+        remaining = limiter.time_until_next()
+        assert remaining > 0
+        assert remaining <= 1.0  # Should be at most the interval
+
+    def test_returns_zero_when_slot_available(self):
+        """Test time_until_next() returns 0.0 when slot is available."""
+        mock_logger = Mock()
+        limiter = RateLimiter(mock_logger, per_minute=60, initial=True)
+
+        # With initial=True, slot is immediately available
+        assert limiter.time_until_next() == 0.0
+
+    def test_returns_zero_after_waiting(self):
+        """Test time_until_next() returns 0.0 after waiting for slot."""
+        mock_logger = Mock()
+        limiter = RateLimiter(mock_logger, per_minute=120)  # 0.5 second delay
+
+        # Wait for slot to become available
+        time.sleep(0.55)
+
+        assert limiter.time_until_next() == 0.0
+
+    def test_does_not_modify_state(self):
+        """Test time_until_next() does NOT modify last_t."""
+        mock_logger = Mock()
+        limiter = RateLimiter(mock_logger, per_minute=60)
+
+        original_last_t = limiter.last_t
+
+        # Call multiple times
+        for _ in range(5):
+            limiter.time_until_next()
+
+        # last_t should be unchanged
+        assert limiter.last_t == original_last_t
+
+    def test_accepts_now_parameter(self):
+        """Test time_until_next() accepts optional now parameter."""
+        mock_logger = Mock()
+        limiter = RateLimiter(mock_logger, per_minute=60, initial=True)
+
+        # Consume a slot
+        limiter.try_next()
+        next_slot = limiter.last_t
+
+        # Pass a specific time
+        fake_now = next_slot - 0.3  # 0.3 seconds before next slot
+        remaining = limiter.time_until_next(now=fake_now)
+        assert 0.25 < remaining < 0.35  # Should be ~0.3 seconds
+
+    def test_returns_zero_when_now_is_past_slot(self):
+        """Test time_until_next() returns 0.0 when now is past next slot."""
+        mock_logger = Mock()
+        limiter = RateLimiter(mock_logger, per_minute=60, initial=True)
+
+        # Consume a slot
+        limiter.try_next()
+        next_slot = limiter.last_t
+
+        # Pass a time past the next slot
+        fake_now = next_slot + 0.5
+        remaining = limiter.time_until_next(now=fake_now)
+        assert remaining == 0.0
+
+    def test_consistent_with_can_proceed(self):
+        """Test time_until_next() is consistent with can_proceed()."""
+        mock_logger = Mock()
+        limiter = RateLimiter(mock_logger, per_minute=120)
+
+        # When time_until_next() > 0, can_proceed() should be False
+        if limiter.time_until_next() > 0:
+            assert limiter.can_proceed() is False
+
+        # Wait for slot
+        time.sleep(0.55)
+
+        # When time_until_next() == 0, can_proceed() should be True
+        assert limiter.time_until_next() == 0.0
+        assert limiter.can_proceed() is True
+
+    def test_non_blocking_behavior(self):
+        """Test time_until_next() never blocks regardless of rate limit."""
+        mock_logger = Mock()
+        limiter = RateLimiter(mock_logger, per_minute=1)  # Very slow: 60 second delay
+
+        # Even with 60-second delay, should return immediately
+        start = time.monotonic()
+        remaining = limiter.time_until_next()
+        elapsed = time.monotonic() - start
+
+        assert remaining > 0  # Slot not available
+        assert elapsed < 0.01  # Should be near-instant
+
+    def test_decreases_over_time(self):
+        """Test time_until_next() value decreases as time passes."""
+        mock_logger = Mock()
+        limiter = RateLimiter(mock_logger, per_minute=60)
+
+        remaining1 = limiter.time_until_next()
+        time.sleep(0.2)
+        remaining2 = limiter.time_until_next()
+
+        assert remaining2 < remaining1
+        assert remaining1 - remaining2 >= 0.15  # Allow tolerance
+
+
+# =============================================================================
 # Test Rate Limiting Calculations
 # =============================================================================
 

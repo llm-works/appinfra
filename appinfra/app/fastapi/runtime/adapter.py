@@ -89,10 +89,16 @@ class ExceptionHandlerDefinition:
 
 @dataclass
 class LifecycleCallbackDefinition:
-    """Definition for startup/shutdown lifecycle callback."""
+    """Definition for startup/shutdown lifecycle callback.
+
+    For startup callbacks, `after_lifespan` controls execution order:
+    - True (default): runs AFTER user lifespan enters (dependencies ready)
+    - False: runs BEFORE user lifespan enters (rare, for framework init)
+    """
 
     callback: Callable[[FastAPI], Awaitable[None]]
     name: str | None = None  # Optional name for debugging
+    after_lifespan: bool = True  # For startup: run after user lifespan enters
 
 
 # Type alias for lifespan context manager
@@ -422,19 +428,30 @@ class FastAPIAdapter:
     def _wrap_lifespan_with_callbacks(
         self, inner: LifespanCallable | None
     ) -> LifespanCallable:
-        """Wrap a lifespan with startup/shutdown callbacks."""
-        startup_callbacks = self._startup_callbacks
+        """Wrap a lifespan with startup/shutdown callbacks.
+
+        Startup callbacks are partitioned by `after_lifespan`:
+        - after_lifespan=False: run BEFORE user lifespan enters
+        - after_lifespan=True: run AFTER user lifespan enters (default)
+
+        This ensures callbacks like "server started" log after user
+        dependencies (e.g., database, message queues) are initialized.
+        """
+        pre_startup = [c for c in self._startup_callbacks if not c.after_lifespan]
+        post_startup = [c for c in self._startup_callbacks if c.after_lifespan]
         shutdown_callbacks = self._shutdown_callbacks
         lg = self._subprocess_lg
 
         @asynccontextmanager
         async def lifespan(app: Any) -> AsyncIterator[None]:
-            await _run_startup_callbacks(startup_callbacks, app, lg)
+            await _run_startup_callbacks(pre_startup, app, lg)
             try:
                 if inner is not None:
                     async with inner(app):
+                        await _run_startup_callbacks(post_startup, app, lg)
                         yield
                 else:
+                    await _run_startup_callbacks(post_startup, app, lg)
                     yield
             finally:
                 await _run_shutdown_callbacks(shutdown_callbacks, app, lg)

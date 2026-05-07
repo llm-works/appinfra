@@ -37,32 +37,53 @@ def _visual_len(text: str) -> int:
 
 
 def _get_cache_key(
-    value: Any, col: str, bold: str, name: str, quote: bool
-) -> tuple[Any, str, str, str, bool] | None:
+    value: Any, col: str, bold: str, name: str, quote: bool, is_timing: bool
+) -> tuple[Any, str, str, str, bool, bool] | None:
     """Generate cache key for simple, cacheable values."""
     if isinstance(value, (str, int, float, bool)) and not isinstance(value, dict):
-        return (value, col, bold, name, quote)
+        return (value, col, bold, name, quote, is_timing)
     return None
 
 
-def _format_header(col: str, name: str) -> str:
-    """Format field header with color."""
-    if name == "after":
+def _format_header(col: str, name: str, is_timing: bool = False) -> str:
+    """Format field header with color.
+
+    Args:
+        col: Color escape sequence.
+        name: Field name.
+        is_timing: If True, this is the special top-level 'after' timing field,
+            so omit the field name (display just the timing value in brackets).
+    """
+    if is_timing:
         return ColorManager.RESET + col + "["
     return ColorManager.RESET + col + name + "["
 
 
-def _format_value(formatter: Any, value: Any, col: str, bold: str, name: str) -> str:
-    """Format value based on its type."""
+def _format_value(
+    formatter: Any, value: Any, col: str, bold: str, name: str, is_timing: bool = False
+) -> str:
+    """Format value based on its type.
+
+    Args:
+        formatter: The FieldFormatter instance.
+        value: The value to format.
+        col: Color escape sequence.
+        bold: Bold color escape sequence.
+        name: Field name.
+        is_timing: If True, this is the special top-level 'after' timing field,
+            so format float values as time deltas.
+    """
     if isinstance(value, list):
         if all(isinstance(v, (str, int, float)) for v in value):
             return bold + ",".join(map(str, value))
         return bold + ",".join(str(v) for v in value)
 
     if isinstance(value, dict):
-        return cast(str, formatter._format_fields_dict(value, col, bold))
+        return cast(
+            str, formatter._format_fields_dict(value, col, bold, top_level=False)
+        )
 
-    if name == "after" and isinstance(value, float):
+    if is_timing and isinstance(value, float):
         from .. import time as infratime
 
         return bold + infratime.delta.delta_str(value, precise=formatter._config.micros)
@@ -71,7 +92,7 @@ def _format_value(formatter: Any, value: Any, col: str, bold: str, name: str) ->
 
 
 def _cache_result(
-    formatter: Any, cache_key: tuple[Any, str, str, str, bool] | None, result: str
+    formatter: Any, cache_key: tuple[Any, str, str, str, bool, bool] | None, result: str
 ) -> None:
     """Cache result with LRU eviction when cache is full."""
     if cache_key is None:
@@ -100,6 +121,22 @@ def _escape_percent(s: str) -> str:
     return s.replace("%", "%%")
 
 
+def _format_value_without_colors(value: Any) -> str:
+    """Format a value without colors, recursively handling nested dicts.
+
+    For nested dicts, all keys (including 'after') are treated as normal field names.
+    """
+    if isinstance(value, dict):
+        # Recursively format nested dict - no special keys at nested level
+        parts = []
+        for k, v in value.items():
+            parts.append(f"{k}:{_format_value_without_colors(v)}")
+        return "{" + ",".join(parts) + "}"
+    if isinstance(value, list):
+        return ",".join(_format_value_without_colors(v) for v in value)
+    return str(value)
+
+
 def _format_extra_without_colors(record: logging.LogRecord) -> str:
     """Format extra fields without colors."""
     extra = getattr(record, "__infra__extra", None)
@@ -110,7 +147,7 @@ def _format_extra_without_colors(record: logging.LogRecord) -> str:
     if not isinstance(extra, collections.OrderedDict):
         keys = sorted(keys)
 
-    # Keys that get special handling
+    # Keys that get special handling at top level only
     special_keys = {"after", "exception", "exception_formatted"}
 
     extra_parts = []
@@ -118,7 +155,8 @@ def _format_extra_without_colors(record: logging.LogRecord) -> str:
         if key in special_keys:
             continue
         value = extra[key]
-        extra_parts.append(f"[{key}:{_escape_percent(str(value))}]")
+        formatted = _format_value_without_colors(value)
+        extra_parts.append(f"[{key}:{_escape_percent(formatted)}]")
 
     result = " " + " ".join(extra_parts) if extra_parts else ""
 
@@ -290,7 +328,13 @@ class FieldFormatter:
         return self._holder.config
 
     def format_field(
-        self, value: Any, col: str, bold: str, name: str = "", quote: bool = False
+        self,
+        value: Any,
+        col: str,
+        bold: str,
+        name: str = "",
+        quote: bool = False,
+        is_timing: bool = False,
     ) -> str:
         """
         Format a single field with color and brackets.
@@ -301,23 +345,26 @@ class FieldFormatter:
             bold: Bold color escape sequence
             name: Field name (empty for anonymous fields)
             quote: Whether to escape % characters for logging safety
+            is_timing: If True, this is the special 'after' timing field at
+                top level - omit field name and format float as time delta.
 
         Returns:
             Formatted field string with colors and brackets
         """
         # Check cache for simple, frequently repeated values
-        cache_key = _get_cache_key(value, col, bold, name, quote)
+        cache_key = _get_cache_key(value, col, bold, name, quote, is_timing)
         if cache_key and cache_key in self._format_cache:
             # Move to end to mark as recently used (LRU)
             self._format_cache.move_to_end(cache_key)
             return self._format_cache[cache_key]
 
         # Format the field
-        head = _format_header(col, name)
-        mid = _format_value(self, value, col, bold, name)
+        head = _format_header(col, name, is_timing=is_timing)
+        mid = _format_value(self, value, col, bold, name, is_timing=is_timing)
 
-        # Escape % characters to prevent logging format errors
-        if quote:
+        # Escape % characters to prevent logging format errors.
+        # Skip for dicts - nested format_field calls already escape their values.
+        if quote and not isinstance(value, dict):
             mid = mid.replace("%", "%%")
 
         tail = ColorManager.RESET + col + "]"
@@ -328,15 +375,25 @@ class FieldFormatter:
 
         return result
 
-    def _format_fields_dict(self, fields: dict[str, Any], col: str, bold: str) -> str:
-        """Format a dictionary of fields."""
-        # Keys to exclude from normal field formatting
-        special_keys = {"after", "exception", "exception_formatted"}
+    def _format_fields_dict(
+        self, fields: dict[str, Any], col: str, bold: str, top_level: bool = True
+    ) -> str:
+        """Format a dictionary of fields.
+
+        When top_level=True, 'after', 'exception', and 'exception_formatted'
+        get special handling. When False (nested dicts), all keys are normal.
+        """
+        # Keys that get special handling only at top level
+        special_keys = (
+            {"after", "exception", "exception_formatted"} if top_level else set()
+        )
 
         seq = []
-        if "after" in fields:
+        if top_level and "after" in fields:
             seq.append(
-                self.format_field(fields["after"], col, bold, "after", quote=True)
+                self.format_field(
+                    fields["after"], col, bold, "after", quote=True, is_timing=True
+                )
             )
 
         s = " ".join(
@@ -348,14 +405,19 @@ class FieldFormatter:
             ]
         )
 
-        # Handle exception - prefer pre-formatted (from queue mode), fall back to live
-        if "exception_formatted" in fields:
-            # Pre-formatted exception from MPQueueHandler (cross-process)
-            s += "\n" + _escape_percent(fields["exception_formatted"])
-        elif "exception" in fields:
-            # Live exception in same process
-            s += "\n" + _escape_percent(self._render_exception(fields["exception"]))
+        # Append exception (only at top level)
+        if top_level:
+            s = self._append_exception(s, fields)
+        return s
 
+    def _append_exception(self, s: str, fields: dict[str, Any]) -> str:
+        """Append exception to formatted string if present in fields."""
+        if "exception_formatted" in fields:
+            return s + "\n" + _escape_percent(fields["exception_formatted"])
+        if "exception" in fields:
+            return (
+                s + "\n" + _escape_percent(self._render_exception(fields["exception"]))
+            )
         return s
 
     def _render_exception(self, e: Exception) -> str:
