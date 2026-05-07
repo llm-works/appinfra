@@ -10,7 +10,11 @@ For API stability guarantees and deprecation policy, see
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-05-07
+
 ### Added
+- `!env` YAML tag for environment variable resolution at parse time — `!env VAR` (required, raises
+  if missing), `!env VAR:default` (fallback value), `!env? VAR` (optional, returns None if missing)
 - `DotDict` is now generic — use `DotDict[V]` for type-safe homogeneous value collections (e.g.,
   `DotDict[float]`); unparameterized `DotDict` defaults to `DotDict[Any]` via PEP 696, so bare
   `DotDict` works with strict mypy without requiring explicit `DotDict[Any]`
@@ -580,7 +584,8 @@ as config. Affected: `ConfigValidator`, `PG.readonly`, `PG.migrate()`,
 ### Changed
 - Package renamed to `appinfra` (install and import both use `appinfra`)
 
-[Unreleased]: https://github.com/llm-works/appinfra/compare/v0.6.1...HEAD
+[Unreleased]: https://github.com/llm-works/appinfra/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/llm-works/appinfra/compare/v0.6.1...v0.7.0
 [0.6.1]: https://github.com/llm-works/appinfra/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/llm-works/appinfra/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/llm-works/appinfra/compare/v0.4.1...v0.5.0
