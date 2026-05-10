@@ -118,7 +118,7 @@ class TestSchemaManagerListeners:
     """Test SchemaManager event listener management."""
 
     def test_setup_listeners_installs_events(self):
-        """Test setup_listeners installs connect and checkout listeners."""
+        """Test setup_listeners installs connect listener."""
         engine = Mock()
         logger = Mock()
         mgr = SchemaManager(engine, "test_schema", logger)
@@ -126,17 +126,13 @@ class TestSchemaManagerListeners:
         with patch("appinfra.db.pg.schema.event") as mock_event:
             mgr.setup_listeners()
 
-            # Verify both listeners were installed
+            # Verify connect listener was installed
             calls = mock_event.listens_for.call_args_list
-            assert len(calls) == 2
+            assert len(calls) == 1
 
             # Check 'connect' listener
             connect_call = [c for c in calls if c[0][1] == "connect"]
             assert len(connect_call) == 1
-
-            # Check 'checkout' listener
-            checkout_call = [c for c in calls if c[0][1] == "checkout"]
-            assert len(checkout_call) == 1
 
     def test_setup_listeners_is_idempotent(self):
         """Test calling setup_listeners twice only installs once."""
@@ -148,9 +144,9 @@ class TestSchemaManagerListeners:
             mgr.setup_listeners()
             mgr.setup_listeners()  # Second call should be no-op
 
-            # Should only have 2 calls (connect + checkout), not 4
+            # Should only have 1 call (connect), not 2
             calls = mock_event.listens_for.call_args_list
-            assert len(calls) == 2
+            assert len(calls) == 1
 
     def test_remove_listeners_removes_events(self):
         """Test remove_listeners removes installed listeners."""
@@ -162,16 +158,15 @@ class TestSchemaManagerListeners:
             # Setup first
             mgr.setup_listeners()
 
-            # Store the listeners
+            # Store the listener
             mgr._connect_listener = Mock()
-            mgr._checkout_listener = Mock()
 
             # Now remove
             mgr.remove_listeners()
 
-            # Verify remove was called for both
+            # Verify remove was called
             remove_calls = mock_event.remove.call_args_list
-            assert len(remove_calls) == 2
+            assert len(remove_calls) == 1
 
     def test_remove_listeners_without_setup_is_noop(self):
         """Test remove_listeners without setup is a no-op."""
@@ -209,39 +204,6 @@ class TestSchemaManagerListeners:
         mock_dbapi_conn.cursor.return_value = mock_cursor
 
         captured_callbacks["connect"](mock_dbapi_conn, None)
-
-        # Verify cursor was used to set search_path
-        mock_dbapi_conn.cursor.assert_called_once()
-        mock_cursor.execute.assert_called_once_with(
-            'SET search_path TO "test_schema", public'
-        )
-        mock_cursor.close.assert_called_once()
-
-    def test_checkout_listener_sets_search_path(self):
-        """Test the checkout event listener sets search_path correctly."""
-        engine = Mock()
-        logger = Mock()
-        mgr = SchemaManager(engine, "test_schema", logger)
-
-        # Capture the callbacks by mocking listens_for to return a passthrough decorator
-        captured_callbacks = {}
-
-        def mock_listens_for(target, event_name):
-            def decorator(fn):
-                captured_callbacks[event_name] = fn
-                return fn
-
-            return decorator
-
-        with patch("appinfra.db.pg.schema.event.listens_for", mock_listens_for):
-            mgr.setup_listeners()
-
-        # Now invoke the captured checkout callback with mock dbapi connection
-        mock_dbapi_conn = Mock()
-        mock_cursor = Mock()
-        mock_dbapi_conn.cursor.return_value = mock_cursor
-
-        captured_callbacks["checkout"](mock_dbapi_conn, None, None)
 
         # Verify cursor was used to set search_path
         mock_dbapi_conn.cursor.assert_called_once()

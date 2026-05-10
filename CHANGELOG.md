@@ -28,6 +28,11 @@ For API stability guarantees and deprecation policy, see
 - `with_config_file(from_etc_dir=True)` now automatically enables the `etc_dir` standard arg, so
   `--etc-dir` is available without explicit opt-in when using deferred config loading
 
+### Fixed
+- `SchemaManager` no longer executes redundant `SET search_path` on every connection checkout —
+  the `connect` listener already sets it when connections are created, eliminating an extra
+  network round-trip per query (significant for high-latency connections like VPN tunnels)
+
 ## [0.7.0] - 2026-05-07
 
 ### Added
