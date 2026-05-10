@@ -199,23 +199,75 @@ app = (
 
 ## Standard Arguments
 
-By default, AppBuilder adds these CLI arguments:
+Standard CLI arguments are **disabled by default** (except `-h/--help`). Opt-in explicitly:
 
-| Argument | Description |
-|----------|-------------|
-| `--etc-dir` | Configuration directory path |
-| `--log-level` | Log level (trace2, trace, debug, info, warning, error) |
-| `--log-json` | Output logs in JSON format |
-| `--log-location` | Show file location in logs (0, 1, 2) |
-| `--log-micros` | Use microsecond timestamps |
-| `--log-topic` | Log topic filter |
-| `--no-log-colors` | Disable colored log output |
-| `-q, --quiet` | Suppress output |
+```python
+# Enable all standard args
+AppBuilder("myapp").with_standard_args().build()
+
+# Enable specific args
+AppBuilder("myapp").with_standard_args(etc_dir=True, log_level=True, quiet=True).build()
+
+# Enable all logging args at once
+AppBuilder("myapp").with_standard_args(log=True).build()
+
+# Disable all (including help)
+AppBuilder("myapp").without_standard_args().build()
+```
+
+**Available standard args:**
+
+| Arg Name | CLI Flag | Description |
+|----------|----------|-------------|
+| `help` | `-h, --help` | Show help message (default: True) |
+| `config_file` | `-c, --config` | Config file path or name |
+| `etc_dir` | `--etc-dir` | Configuration directory path |
+| `log_level` | `-l, --log-level` | Log level (trace2, trace, debug, info, warning, error) |
+| `log_json` | `--log-json` | Output logs in JSON format |
+| `log_location` | `--log-location` | Show file location in logs (0, 1, 2) |
+| `log_micros` | `--log-micros` | Use microsecond timestamps |
+| `log_topic` | `--log-topic` | Log topic filter |
+| `log_colors` | `--no-log-colors` | Disable colored log output |
+| `quiet` | `-q, --quiet` | Suppress output |
+
+**Aliases:**
+- `log=True` enables all 7 log-related args (`log_level`, `log_location`, `log_micros`, `log_topic`,
+  `log_colors`, `log_json`, `quiet`)
+
+**Auto-enabled args:**
+- `with_config_file(from_etc_dir=True)` automatically enables `etc_dir`
 
 **Precedence:** CLI args override environment variables, which override YAML config values.
 See [Configuration Precedence](../guides/configuration-precedence.md) for the full precedence rules.
 
-Disable with `.without_standard_args()` or selectively with `.with_standard_args(log_micros=False)`.
+## Config File CLI Argument
+
+The `-c/--config` argument provides runtime config file selection:
+
+```bash
+# Direct path (absolute or ./ prefix)
+myapp -c /etc/myapp/prod.yaml
+myapp -c ./local-config.yaml
+
+# Filename within etc-dir (when with_config_file() is used)
+myapp -c custom.yaml                    # loads {etc_dir}/custom.yaml
+myapp --etc-dir /app/etc -c prod.yaml   # loads /app/etc/prod.yaml
+```
+
+Enable via `with_standard_args(config_file=True)`:
+
+```python
+# Standalone -c (direct path loading, no with_config_file needed)
+app = AppBuilder("myapp").with_standard_args(config_file=True).build()
+
+# With etc-dir (both --etc-dir and -c available)
+app = (
+    AppBuilder("myapp")
+    .with_config_file("default.yaml")      # auto-enables etc_dir
+    .with_standard_args(config_file=True)  # enables -c to override filename
+    .build()
+)
+```
 
 ## Main Tool (Single-Tool Apps)
 

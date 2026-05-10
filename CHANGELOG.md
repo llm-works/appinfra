@@ -10,6 +10,24 @@ For API stability guarantees and deprecation policy, see
 
 ## [Unreleased]
 
+### Added
+- `-c/--config` CLI argument for config file selection — works standalone (direct path) or with
+  `with_config_file()` (overrides filename within etc-dir); absolute paths and `./` prefixed paths
+  load directly, plain filenames resolve from etc-dir or cwd
+- `log` alias for `with_standard_args()` — `with_standard_args(log=True)` enables all 7 log-related
+  args at once (`log_level`, `log_location`, `log_micros`, `log_topic`, `log_colors`, `log_json`,
+  `quiet`)
+- `help` standard arg — controls whether `-h/--help` is added (default: True)
+- `config_file` standard arg — controls whether `-c/--config` is added (default: False)
+
+### Changed
+- **Breaking:** Standard CLI args are now disabled by default (except `help`). Apps must explicitly
+  opt-in via `with_standard_args()`. This makes minimal apps truly minimal (`-h` only). Use
+  `with_standard_args()` with no arguments to enable all, or selectively enable with
+  `with_standard_args(log=True, etc_dir=True)`.
+- `with_config_file(from_etc_dir=True)` now automatically enables the `etc_dir` standard arg, so
+  `--etc-dir` is available without explicit opt-in when using deferred config loading
+
 ## [0.7.0] - 2026-05-07
 
 ### Added
