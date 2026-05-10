@@ -84,7 +84,12 @@ class TestConfigFileWorkflow:
             # Create config with info level
             (etc_dir / "app.yaml").write_text("logging:\n  level: info\n")
 
-            app = AppBuilder("test-app").with_config_file("app.yaml").build()
+            app = (
+                AppBuilder("test-app")
+                .with_config_file("app.yaml")
+                .with_standard_args(log_level=True)
+                .build()
+            )
 
             # Pass --log-level debug to override YAML
             with patch.object(
@@ -194,8 +199,8 @@ class TestConfigFileWorkflow:
                 "custom_key: should_not_load\nlogging:\n  level: debug\n"
             )
 
-            # Don't use with_config_file
-            app = AppBuilder("test-app").build()
+            # Don't use with_config_file - manually enable etc_dir for this test
+            app = AppBuilder("test-app").with_standard_args(etc_dir=True).build()
 
             with patch.object(sys, "argv", ["test", "--etc-dir", str(etc_dir)]):
                 app.create_args()
@@ -784,7 +789,12 @@ class TestLogOutputCliOverrides:
                 "      colors: true\n"
             )
 
-            app = AppBuilder("test-app").with_config_file("app.yaml").build()
+            app = (
+                AppBuilder("test-app")
+                .with_config_file("app.yaml")
+                .with_standard_args(log_json=True)
+                .build()
+            )
 
             # Pass --log-json to override YAML format
             with patch.object(
@@ -829,7 +839,12 @@ class TestLogOutputCliOverrides:
                 "      colors: true\n"
             )
 
-            app = AppBuilder("test-app").with_config_file("app.yaml").build()
+            app = (
+                AppBuilder("test-app")
+                .with_config_file("app.yaml")
+                .with_standard_args(log_colors=True)
+                .build()
+            )
 
             # Pass --no-log-colors to override YAML colors
             with patch.object(
@@ -870,7 +885,12 @@ class TestLogOutputCliOverrides:
                 "      colors: true\n"
             )
 
-            app = AppBuilder("test-app").with_config_file("app.yaml").build()
+            app = (
+                AppBuilder("test-app")
+                .with_config_file("app.yaml")
+                .with_standard_args(log_json=True, log_colors=True)
+                .build()
+            )
 
             # Pass both flags
             with patch.object(
@@ -920,7 +940,12 @@ class TestLogOutputCliOverrides:
                 "      colors: true\n"
             )
 
-            app = AppBuilder("test-app").with_config_file("app.yaml").build()
+            app = (
+                AppBuilder("test-app")
+                .with_config_file("app.yaml")
+                .with_standard_args(log_json=True)
+                .build()
+            )
 
             # Pass --log-json to override both handlers
             with patch.object(
@@ -954,7 +979,12 @@ class TestLogOutputCliOverrides:
             # Create minimal config without handlers
             (etc_dir / "app.yaml").write_text("logging:\n  level: info\n")
 
-            app = AppBuilder("test-app").with_config_file("app.yaml").build()
+            app = (
+                AppBuilder("test-app")
+                .with_config_file("app.yaml")
+                .with_standard_args(log_json=True)
+                .build()
+            )
 
             # Pass --log-json - should apply to default handler
             with patch.object(
@@ -988,7 +1018,12 @@ class TestLogOutputCliOverrides:
             # Create minimal config without handlers
             (etc_dir / "app.yaml").write_text("logging:\n  level: info\n")
 
-            app = AppBuilder("test-app").with_config_file("app.yaml").build()
+            app = (
+                AppBuilder("test-app")
+                .with_config_file("app.yaml")
+                .with_standard_args(log_colors=True)
+                .build()
+            )
 
             # Pass --no-log-colors - should apply to default handler
             with patch.object(

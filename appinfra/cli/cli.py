@@ -50,7 +50,7 @@ def _build_app() -> App:
         AppBuilder("appinfra")
         .with_description("Infra framework utility commands")
         .without_standard_args()
-        .with_standard_args(etc_dir=True, log_level=True, quiet=True)
+        .with_standard_args(help=True, log_level=True, quiet=True)
         .version.with_semver(appinfra.__version__)
         .with_build_info()
         .done()

@@ -26,9 +26,11 @@ class CLIParser:
         self.parser: argparse.ArgumentParser | None = None
         self.subparsers: dict[str, argparse.ArgumentParser] = {}
 
-    def create_parser(self) -> argparse.ArgumentParser:
+    def create_parser(self, add_help: bool = True) -> argparse.ArgumentParser:
         """Create the main argument parser."""
-        self.parser = argparse.ArgumentParser(formatter_class=self.formatter_class)
+        self.parser = argparse.ArgumentParser(
+            formatter_class=self.formatter_class, add_help=add_help
+        )
         return self.parser
 
     def add_argument(self, *args: Any, **kwargs: Any) -> argparse.Action:
