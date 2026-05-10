@@ -33,6 +33,20 @@ from ..tracing.traceable import Traceable
 from .config import ConfigLoader
 from .lifecycle import LifecycleManager
 
+# Shared default for standard CLI args (minimal by default - only help enabled)
+DEFAULT_STANDARD_ARGS: dict[str, bool] = {
+    "help": True,
+    "config_file": False,
+    "etc_dir": False,
+    "log_level": False,
+    "log_location": False,
+    "log_micros": False,
+    "log_topic": False,
+    "log_colors": False,
+    "log_json": False,
+    "quiet": False,
+}
+
 
 class App(Traceable):
     """
@@ -63,18 +77,7 @@ class App(Traceable):
         self._parsed_args: argparse.Namespace | None = None
 
         # Standard args configuration (set by builder, minimal by default)
-        self._standard_args: dict[str, bool] = {
-            "help": True,
-            "config_file": False,
-            "etc_dir": False,
-            "log_level": False,
-            "log_location": False,
-            "log_micros": False,
-            "log_topic": False,
-            "log_colors": False,
-            "log_json": False,
-            "quiet": False,
-        }
+        self._standard_args: dict[str, bool] = DEFAULT_STANDARD_ARGS.copy()
 
         self._decorators: DecoratorAPI = DecoratorAPI(self)  # Decorator API support
         self._custom_args: list[tuple] = []  # Custom args (from builder)
@@ -562,12 +565,17 @@ class App(Traceable):
 
         for i, spec in enumerate(deferred_specs):
             # CLI --config overrides the first deferred config file
-            filename = cli_config_file if (i == 0 and cli_config_file) else spec.path
+            if i == 0 and cli_config_file:
+                filename = cli_config_file
+                optional = False  # CLI-provided files are always required
+            else:
+                filename = spec.path
+                optional = spec.optional
             config_path = Path(etc_dir) / filename
             result = self._load_single_deferred_config_to_local(
                 filename,
                 config_path,
-                spec.optional,
+                optional,
                 etc_dir,
                 local_config,
                 local_loaded_paths,

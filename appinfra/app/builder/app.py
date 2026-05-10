@@ -19,7 +19,7 @@ from typing import Any, Self
 from ...config import Config
 from ...dot_dict import DotDict
 from ...yaml import deep_merge
-from ..core.app import App
+from ..core.app import DEFAULT_STANDARD_ARGS, App
 from ..server.handlers import Middleware
 from ..tools.base import Tool, ToolConfig
 from ..tracing.traceable import Traceable
@@ -299,18 +299,7 @@ class AppBuilder:
     """
 
     # Default standard args configuration (minimal by default)
-    _DEFAULT_STANDARD_ARGS: dict[str, bool] = {
-        "help": True,
-        "config_file": False,
-        "etc_dir": False,
-        "log_level": False,
-        "log_location": False,
-        "log_micros": False,
-        "log_topic": False,
-        "quiet": False,
-        "log_colors": False,
-        "log_json": False,
-    }
+    _DEFAULT_STANDARD_ARGS: dict[str, bool] = DEFAULT_STANDARD_ARGS
 
     def __init__(self, name: str | None = None):
         """Initialize the application builder."""

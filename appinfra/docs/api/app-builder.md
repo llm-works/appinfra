@@ -267,6 +267,7 @@ app = (
     .with_standard_args(config_file=True)  # enables -c to override filename
     .build()
 )
+```
 
 ## Main Tool (Single-Tool Apps)
 
