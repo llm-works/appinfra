@@ -28,9 +28,8 @@ class TestPGFixtures:
         """Test that PostgreSQL connection is established."""
         assert pg_connection is not None
         # Test we can create a session
-        session = pg_connection.session()
-        assert session is not None
-        session.close()
+        with pg_connection.session() as session:
+            assert session is not None
 
     def test_pg_session_basic_query(self, pg_session):
         """Test that we can execute basic queries with pg_session."""

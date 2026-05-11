@@ -132,32 +132,30 @@ def _do_cleanup_stale_tables(pg_connection):
     """Execute the actual cleanup of stale debug tables."""
     import sqlalchemy
 
-    session = pg_connection.session()
     try:
-        result = session.execute(
-            sqlalchemy.text(
-                """
-                SELECT tablename FROM pg_tables
-                WHERE schemaname = 'public'
-                AND tablename ~ '_[0-9]{10}_'
-                """
+        with pg_connection.session() as session:
+            result = session.execute(
+                sqlalchemy.text(
+                    """
+                    SELECT tablename FROM pg_tables
+                    WHERE schemaname = 'public'
+                    AND tablename ~ '_[0-9]{10}_'
+                    """
+                )
             )
-        )
-        tables = [row[0] for row in result.fetchall()]
+            tables = [row[0] for row in result.fetchall()]
 
-        for table in tables:
-            session.execute(sqlalchemy.text(f'DROP TABLE IF EXISTS "{table}" CASCADE'))
+            for table in tables:
+                session.execute(
+                    sqlalchemy.text(f'DROP TABLE IF EXISTS "{table}" CASCADE')
+                )
 
-        if tables:
-            session.commit()
-            logging.info(
-                f"Cleaned up {len(tables)} stale debug tables from previous runs"
-            )
+            if tables:
+                logging.info(
+                    f"Cleaned up {len(tables)} stale debug tables from previous runs"
+                )
     except Exception as e:
-        session.rollback()
         logging.warning(f"Failed to clean up stale debug tables: {e}")
-    finally:
-        session.close()
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -278,16 +276,8 @@ def pg_session_ro(pg_connection_ro):
     Yields:
         SQLAlchemy session (readonly mode)
     """
-    session = pg_connection_ro.session()
-    try:
+    with pg_connection_ro.session() as session:
         yield session
-    finally:
-        # Rollback any pending transaction before closing
-        try:
-            session.rollback()
-        except Exception:
-            pass
-        session.close()
 
 
 # =============================================================================
@@ -309,15 +299,8 @@ def pg_session(pg_connection):
     Yields:
         SQLAlchemy session
     """
-    session = pg_connection.session()
-    try:
+    with pg_connection.session() as session:
         yield session
-        session.commit()
-    except Exception:
-        session.rollback()
-        raise
-    finally:
-        session.close()
 
 
 def _cleanup_debug_table(request, pg_session, table_name):

@@ -166,6 +166,14 @@ class TestSchemaIsolation:
                 value = result.scalar()
                 assert value == "test"
 
+            # Test read_session also uses schema search_path
+            with pg.read_session() as session:
+                result = session.execute(
+                    text("SELECT value FROM query_test_table WHERE id = 1")
+                )
+                value = result.scalar()
+                assert value == "test"
+
         finally:
             with pg_connection.engine.connect() as conn:
                 conn.execute(text(f'DROP SCHEMA IF EXISTS "{schema_name}" CASCADE'))

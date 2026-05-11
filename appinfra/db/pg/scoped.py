@@ -13,13 +13,12 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
+from sqlalchemy.orm import Session
 
 from ...errors import DatabaseError
 from .schema import validate_schema_name
 
 if TYPE_CHECKING:  # pragma: no cover
-    from sqlalchemy.orm import Session
-
     from ...log import Logger
     from .pg import PG
 
@@ -31,8 +30,8 @@ class ScopedPG:
     Provides session-level schema isolation without engine-level binding.
     Sessions have search_path set at creation, not via event listeners.
 
-    Unlike PG.session() which returns a raw session, ScopedPG.session()
-    is a context manager that handles commit/rollback/close automatically.
+    Like PG.session(), ScopedPG.session() is a context manager that handles
+    commit/rollback/close automatically.
 
     Example:
         >>> pg = PG(logger, config)  # Schema-agnostic
@@ -101,7 +100,7 @@ class ScopedPG:
             ...     result = session.execute(text("SELECT * FROM my_table"))
             ...     # Commits automatically on success
         """
-        session: Session = self._pg.session()
+        session: Session = self._pg._create_session()
         try:
             session.execute(
                 text(f'SET LOCAL search_path TO "{self._schema_name}", public')
@@ -114,6 +113,31 @@ class ScopedPG:
             raise
         finally:
             session.close()
+
+    @contextmanager
+    def read_session(self) -> Generator[Session, None, None]:
+        """
+        Get a read-only session with AUTOCOMMIT isolation (no transaction overhead).
+
+        Use for read-only queries where you don't need transaction semantics.
+        Avoids BEGIN/COMMIT round-trips for better performance.
+
+        Yields:
+            SQLAlchemy session configured for this schema
+
+        Example:
+            >>> with scoped.read_session() as session:
+            ...     result = session.execute(text("SELECT * FROM my_table"))
+        """
+        with self._pg.engine.connect().execution_options(
+            isolation_level="AUTOCOMMIT"
+        ) as conn:
+            conn.execute(text(f'SET search_path TO "{self._schema_name}", public'))
+            session: Session = Session(bind=conn, expire_on_commit=False)
+            try:
+                yield session
+            finally:
+                session.close()
 
     def ensure_schema(self) -> None:
         """

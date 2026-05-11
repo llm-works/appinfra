@@ -11,6 +11,8 @@ For API stability guarantees and deprecation policy, see
 ## [Unreleased]
 
 ### Added
+- `PG.read_session()` context manager for read-only queries with AUTOCOMMIT isolation — avoids
+  BEGIN/COMMIT round-trips for better performance on read-heavy workloads
 - `-c/--config` CLI argument for config file selection — works standalone (direct path) or with
   `with_config_file()` (overrides filename within etc-dir); absolute paths and `./` prefixed paths
   load directly, plain filenames resolve from etc-dir or cwd
@@ -21,6 +23,10 @@ For API stability guarantees and deprecation policy, see
 - `config_file` standard arg — controls whether `-c/--config` is added (default: False)
 
 ### Changed
+- **Breaking:** `PG.session()` is now a context manager that auto-commits on success, rolls back on
+  exception, and always closes. Code using `session = pg.session()` must change to
+  `with pg.session() as session:`. Use `pg._create_session()` if you need raw session access
+  (internal use only).
 - **Breaking:** Standard CLI args are now disabled by default (except `help`). Apps must explicitly
   opt-in via `with_standard_args()`. This makes minimal apps truly minimal (`-h` only). Use
   `with_standard_args()` with no arguments to enable all, or selectively enable with

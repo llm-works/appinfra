@@ -257,15 +257,8 @@ def pg_session_isolated(pg_isolated: PG) -> Generator[Any, None, None]:
     Yields:
         SQLAlchemy session
     """
-    session = pg_isolated.session()
-    try:
+    with pg_isolated.session() as session:
         yield session
-        session.commit()
-    except Exception:
-        session.rollback()
-        raise
-    finally:
-        session.close()
 
 
 @pytest.fixture

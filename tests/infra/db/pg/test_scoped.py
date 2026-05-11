@@ -68,7 +68,7 @@ class TestScopedPGSession:
         """Test session sets search_path on entry."""
         mock_session = MagicMock()
         mock_pg = MagicMock()
-        mock_pg.session.return_value = mock_session
+        mock_pg._create_session.return_value = mock_session
         mock_lg = MagicMock()
 
         scoped = ScopedPG(mock_lg, mock_pg, "my_schema")
@@ -85,7 +85,7 @@ class TestScopedPGSession:
         """Test session commits on successful exit."""
         mock_session = MagicMock()
         mock_pg = MagicMock()
-        mock_pg.session.return_value = mock_session
+        mock_pg._create_session.return_value = mock_session
         mock_lg = MagicMock()
 
         scoped = ScopedPG(mock_lg, mock_pg, "my_schema")
@@ -101,7 +101,7 @@ class TestScopedPGSession:
         """Test session rolls back on exception."""
         mock_session = MagicMock()
         mock_pg = MagicMock()
-        mock_pg.session.return_value = mock_session
+        mock_pg._create_session.return_value = mock_session
         mock_lg = MagicMock()
 
         scoped = ScopedPG(mock_lg, mock_pg, "my_schema")
@@ -118,7 +118,7 @@ class TestScopedPGSession:
         """Test session logs warning when rolling back."""
         mock_session = MagicMock()
         mock_pg = MagicMock()
-        mock_pg.session.return_value = mock_session
+        mock_pg._create_session.return_value = mock_session
         mock_lg = MagicMock()
 
         scoped = ScopedPG(mock_lg, mock_pg, "my_schema")
@@ -138,7 +138,7 @@ class TestScopedPGSession:
         mock_session = MagicMock()
         mock_session.commit.side_effect = RuntimeError("commit failed")
         mock_pg = MagicMock()
-        mock_pg.session.return_value = mock_session
+        mock_pg._create_session.return_value = mock_session
         mock_lg = MagicMock()
 
         scoped = ScopedPG(mock_lg, mock_pg, "my_schema")

@@ -6,12 +6,14 @@ using composition pattern for clean separation of concerns.
 """
 
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Generator
+from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any
 
 import sqlalchemy
 import sqlalchemy_utils
 from sqlalchemy import text
+from sqlalchemy.orm import Session
 
 if TYPE_CHECKING:  # pragma: no cover
     from .scoped import ScopedPG
@@ -332,32 +334,78 @@ class PG(Interface):
         # Run after-migrate hooks
         self._run_hooks(self._after_migrate_hooks, "after_migrate")
 
-    def session(self) -> Any:
+    def _create_session(self) -> Session:
         """
-        Create a new database session with automatic reconnection if enabled.
+        Create a raw database session with automatic reconnection if enabled.
+
+        This is an internal method - prefer session() for managed sessions.
 
         Returns:
-            Database session instance
+            Raw SQLAlchemy session instance
+        """
+        self._session_mgr.set_connection_health(self._reconnect_strategy.is_healthy())
+        session: Session = self._session_mgr.session()
+        return session
+
+    @contextmanager
+    def session(self) -> Generator[Session, None, None]:
+        """
+        Get a managed database session with automatic commit/rollback.
+
+        Commits on successful exit, rolls back on exception, always closes.
+
+        Yields:
+            SQLAlchemy session instance
 
         Raises:
             sqlalchemy.exc.SQLAlchemyError: If session creation fails
 
         Example:
             >>> pg = PG(logger, config)
-            >>> session = pg.session()
-            >>> try:
+            >>> with pg.session() as session:
             ...     result = session.execute(sqlalchemy.text("SELECT * FROM users"))
             ...     users = result.fetchall()
-            ...     session.commit()
-            ... except Exception:
-            ...     session.rollback()
-            ...     raise
-            ... finally:
-            ...     session.close()
+            ...     # Commits automatically on success
         """
-        # Update session manager's health status
-        self._session_mgr.set_connection_health(self._reconnect_strategy.is_healthy())
-        return self._session_mgr.session()
+        sa_session = self._create_session()
+        try:
+            yield sa_session
+            sa_session.commit()
+        except Exception:
+            sa_session.rollback()
+            raise
+        finally:
+            sa_session.close()
+
+    @contextmanager
+    def read_session(self) -> Generator[Session, None, None]:
+        """
+        Get a read-only session with AUTOCOMMIT isolation (no transaction overhead).
+
+        Use for read-only queries where you don't need transaction semantics.
+        Avoids BEGIN/COMMIT round-trips for better performance.
+
+        Yields:
+            SQLAlchemy session instance
+
+        Example:
+            >>> pg = PG(logger, config)
+            >>> with pg.read_session() as session:
+            ...     result = session.execute(sqlalchemy.text("SELECT * FROM users"))
+            ...     users = result.fetchall()
+        """
+        with self._engine.connect().execution_options(
+            isolation_level="AUTOCOMMIT"
+        ) as conn:
+            if self._schema_mgr:
+                conn.execute(
+                    text(f'SET search_path TO "{self._schema_mgr.schema}", public')
+                )
+            sa_session = Session(bind=conn, expire_on_commit=False)
+            try:
+                yield sa_session
+            finally:
+                sa_session.close()
 
     def health_check(self) -> dict[str, Any]:
         """

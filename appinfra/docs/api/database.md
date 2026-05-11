@@ -71,6 +71,20 @@ with pg.session() as session:
     print(result.fetchone())
 ```
 
+**Session Types:**
+
+```python
+# Write session (auto-commit on success, rollback on exception)
+with pg.session() as session:
+    session.execute(text("INSERT INTO users ..."))
+    # Commits automatically
+
+# Read session (AUTOCOMMIT isolation, no transaction overhead)
+with pg.read_session() as session:
+    result = session.execute(text("SELECT * FROM users"))
+    # No BEGIN/COMMIT round-trips
+```
+
 ## Manager
 
 Manages multiple database connections.
@@ -276,7 +290,7 @@ tenant_a.ensure_schema()  # CREATE SCHEMA IF NOT EXISTS tenant_a
 | Schema binding | Engine-level (all sessions) | Session-level (per scope) |
 | Multiple schemas | Requires multiple PG instances | Single PG, multiple scopes |
 | Schema must exist | Before first DB operation | At session time (lazy) |
-| Session API | `pg.session()` returns raw session | `scoped.session()` is context manager |
+| Session API | Same context manager API | Same context manager API |
 
 **When to use which:**
 - **Engine-level (`schema=`)**: Single schema per PG instance, schema known at startup
