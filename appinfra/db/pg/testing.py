@@ -317,8 +317,9 @@ def pg_migrate_factory(
 
         # In tests
         def test_something(pg_with_tables):
-            session = pg_with_tables.session()
-            # Tables from Base are available
+            with pg_with_tables.session() as session:
+                # Tables from Base are available
+                pass
     """
 
     @contextmanager

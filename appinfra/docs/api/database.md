@@ -48,12 +48,14 @@ Main PostgreSQL database interface.
 class PG:
     def __init__(
         self,
-        config_path: str,          # Path to YAML config file
-        db_name: str,              # Database config key
-        readonly: bool = False     # Default read-only mode
+        lg: Logger,                      # Logger instance
+        cfg: Any,                        # Database config (dict or object with url, etc.)
+        query_lg_level: Any | None = None,  # Log level for queries
+        schema: str | None = None        # Schema for isolation
     ): ...
 
-    def session(self, readonly: bool | None = None) -> Session: ...
+    def session(self) -> ContextManager[Session]: ...      # Auto-commit/rollback
+    def read_session(self) -> ContextManager[Session]: ... # AUTOCOMMIT isolation
     def engine(self) -> Engine: ...
 ```
 
@@ -61,10 +63,12 @@ class PG:
 
 ```python
 from appinfra.db import PG
-from appinfra.cfg import get_config_file_path
-import sqlalchemy
+from appinfra.config import Config
+from appinfra.log import LoggingBuilder
 
-pg = PG(get_config_file_path(), "production")
+lg = LoggingBuilder("myapp").build()
+cfg = Config("etc/config.yaml")
+pg = PG(lg, cfg.dbs.production)
 
 with pg.session() as session:
     result = session.execute(sqlalchemy.text("SELECT version()"))

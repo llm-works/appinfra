@@ -1,7 +1,6 @@
 from .interface import Interface
-from .pg import PG
+from .pg import PG, ScopedPG
 from .schema import SchemaManager, create_all_in_schema, validate_schema_name
-from .scoped import ScopedPG
 from .vector import Vector, create_vector_index, enable_pgvector
 
 __all__ = [
