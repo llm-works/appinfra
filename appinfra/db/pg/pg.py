@@ -272,6 +272,26 @@ class PG(Interface):
                 self._scoped_cache[schema_name] = ScopedPG(self._lg, self, schema_name)
             return self._scoped_cache[schema_name]
 
+    def dispose_scoped_cache(self) -> None:
+        """
+        Dispose all cached ScopedPG instances and clear the cache.
+
+        Use during shutdown or when all scoped schemas are no longer needed.
+        Each ScopedPG's internal connection pool is disposed.
+
+        Example:
+            >>> pg = PG(logger, config)
+            >>> scoped_a = pg.scoped("schema_a")
+            >>> scoped_b = pg.scoped("schema_b")
+            >>> # ... use scoped instances ...
+            >>> pg.dispose_scoped_cache()  # Releases all scoped pools
+        """
+        with self._scoped_cache_lock:
+            for scoped in self._scoped_cache.values():
+                scoped._pg._engine.dispose()
+            self._scoped_cache.clear()
+        self._lg.trace("disposed scoped cache")
+
     def connect(self) -> Any:
         """
         Establish a connection to the PostgreSQL database.
@@ -716,3 +736,20 @@ class ScopedPG:
     def cfg(self) -> Any:
         """Get the database configuration."""
         return self._pg.cfg
+
+    def dispose(self) -> None:
+        """
+        Dispose the internal connection pool and remove from parent cache.
+
+        Use when a schema is dropped or no longer needed to release resources.
+        After calling dispose(), this ScopedPG instance should not be used.
+
+        Example:
+            >>> scoped = pg.scoped("temp_schema")
+            >>> # ... use scoped ...
+            >>> scoped.dispose()  # Releases pool, removes from cache
+        """
+        self._pg._engine.dispose()
+        with self._parent_pg._scoped_cache_lock:
+            self._parent_pg._scoped_cache.pop(self._schema_name, None)
+        self._lg.trace("disposed scoped pg", extra={"schema": self._schema_name})
