@@ -93,10 +93,10 @@ class TestScopedPGSession:
             with scoped.session() as session:
                 assert session is mock_session
 
-            mock_inner_pg.session.assert_called_once()
+            mock_inner_pg.session.assert_called_once_with(autocommit=False)
 
-    def test_read_session_delegates_to_internal_pg(self):
-        """Test read_session() delegates to internal PG's read_session()."""
+    def test_session_autocommit_delegates_to_internal_pg(self):
+        """Test session(autocommit=True) delegates to internal PG."""
         mock_parent_pg = MagicMock()
         mock_parent_pg.cfg = {}
         mock_lg = MagicMock()
@@ -104,18 +104,18 @@ class TestScopedPGSession:
         with patch("appinfra.db.pg.pg.PG") as MockPG:
             mock_inner_pg = MagicMock()
             mock_session = MagicMock()
-            mock_inner_pg.read_session.return_value.__enter__ = Mock(
+            mock_inner_pg.session.return_value.__enter__ = Mock(
                 return_value=mock_session
             )
-            mock_inner_pg.read_session.return_value.__exit__ = Mock(return_value=False)
+            mock_inner_pg.session.return_value.__exit__ = Mock(return_value=False)
             MockPG.return_value = mock_inner_pg
 
             scoped = ScopedPG(mock_lg, mock_parent_pg, "my_schema")
 
-            with scoped.read_session() as session:
+            with scoped.session(autocommit=True) as session:
                 assert session is mock_session
 
-            mock_inner_pg.read_session.assert_called_once()
+            mock_inner_pg.session.assert_called_once_with(autocommit=True)
 
 
 @pytest.mark.unit
@@ -235,6 +235,8 @@ class TestPGScopedCaching:
 
     def test_scoped_caches_by_schema_name(self):
         """Test PG.scoped() returns cached instance for same schema."""
+        import threading
+
         from appinfra.db.pg import PG
 
         # Create a minimal PG-like object with cache
@@ -242,6 +244,7 @@ class TestPGScopedCaching:
         pg._lg = MagicMock()
         pg._cfg = {"url": "postgresql://localhost/test"}
         pg._scoped_cache = {}
+        pg._scoped_cache_lock = threading.Lock()
 
         with patch("appinfra.db.pg.pg.ScopedPG") as MockScopedPG:
             mock_scoped = MagicMock()
@@ -259,12 +262,15 @@ class TestPGScopedCaching:
 
     def test_scoped_creates_new_for_different_schemas(self):
         """Test PG.scoped() creates different instances for different schemas."""
+        import threading
+
         from appinfra.db.pg import PG
 
         pg = object.__new__(PG)
         pg._lg = MagicMock()
         pg._cfg = {"url": "postgresql://localhost/test"}
         pg._scoped_cache = {}
+        pg._scoped_cache_lock = threading.Lock()
 
         with patch("appinfra.db.pg.pg.ScopedPG") as MockScopedPG:
             mock_scoped_a = MagicMock()

@@ -11,9 +11,8 @@ For API stability guarantees and deprecation policy, see
 ## [Unreleased]
 
 ### Added
-- `PG.read_session()` context manager for read-only queries with AUTOCOMMIT isolation — avoids
-  BEGIN/COMMIT round-trips for better performance on read-heavy workloads
-- `ScopedPG.read_session()` context manager — same AUTOCOMMIT optimization for scoped schemas
+- `PG.session(autocommit=True)` mode for AUTOCOMMIT isolation — avoids BEGIN/COMMIT round-trips
+  for better performance on read-heavy workloads. Each statement commits immediately.
 - `-c/--config` CLI argument for config file selection — works standalone (direct path) or with
   `with_config_file()` (overrides filename within etc-dir); absolute paths and `./` prefixed paths
   load directly, plain filenames resolve from etc-dir or cwd
@@ -27,11 +26,12 @@ For API stability guarantees and deprecation policy, see
 - **Breaking:** `PG.session()` is now a context manager that auto-commits on success, rolls back on
   exception, and always closes. Code using `session = pg.session()` must change to
   `with pg.session() as session:`. Use `pg._create_session()` if you need raw session access
-  (internal use only).
+  (internal use only). New `autocommit=True` parameter enables AUTOCOMMIT isolation for read-heavy
+  workloads.
 - **Breaking:** `ScopedPG` now uses a dedicated connection pool per schema (was: shared pool with
   `SET LOCAL search_path` per transaction). This ensures consistent schema isolation for all
-  operations including AUTOCOMMIT reads. `ScopedPG` instances are cached by schema name on the
-  parent PG to avoid creating redundant pools.
+  operations. `ScopedPG` instances are cached by schema name on the parent PG to avoid creating
+  redundant pools. The `session(autocommit=True)` parameter is forwarded to the internal PG.
 - **Breaking:** Standard CLI args are now disabled by default (except `help`). Apps must explicitly
   opt-in via `with_standard_args()`. This makes minimal apps truly minimal (`-h` only). Use
   `with_standard_args()` with no arguments to enable all, or selectively enable with

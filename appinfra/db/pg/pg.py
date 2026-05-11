@@ -6,6 +6,7 @@ using composition pattern for clean separation of concerns.
 """
 
 import re
+import threading
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from typing import Any
@@ -81,8 +82,9 @@ class PG(Interface):
     _after_migrate_hooks: list[Callable[[Any], None]]
     # Schema isolation (optional)
     _schema_mgr: Any  # SchemaManager | None
-    # Scoped PG cache (schema_name -> ScopedPG)
+    # Scoped PG cache (schema_name -> ScopedPG, with lock for thread safety)
     _scoped_cache: dict[str, "ScopedPG"]
+    _scoped_cache_lock: threading.Lock
 
     # Extension name validation pattern (defense-in-depth)
     _EXTENSION_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_-]*$")
@@ -118,8 +120,9 @@ class PG(Interface):
         self._before_migrate_hooks = []
         self._after_migrate_hooks = []
 
-        # Initialize scoped PG cache
-        self._scoped_cache = {}
+        # Initialize scoped PG cache (with lock for thread safety)
+        self._scoped_cache: dict[str, ScopedPG] = {}
+        self._scoped_cache_lock = threading.Lock()
 
         # Validate and create engine
         ConfigValidator.validate_config(cfg)
@@ -239,6 +242,12 @@ class PG(Interface):
         at the connection level. ScopedPG instances are cached by schema name
         to avoid creating multiple pools for the same schema.
 
+        Note:
+            Repeated calls with the same schema_name return the cached instance.
+            If you drop and recreate a schema, the cached ScopedPG's pool may
+            have stale connections. In that case, dispose the parent PG and
+            create a new one.
+
         Args:
             schema_name: PostgreSQL schema name for the scope
 
@@ -258,9 +267,10 @@ class PG(Interface):
             >>> scope_a = pg.scoped("schema_a")
             >>> scope_b = pg.scoped("schema_b")
         """
-        if schema_name not in self._scoped_cache:
-            self._scoped_cache[schema_name] = ScopedPG(self._lg, self, schema_name)
-        return self._scoped_cache[schema_name]
+        with self._scoped_cache_lock:
+            if schema_name not in self._scoped_cache:
+                self._scoped_cache[schema_name] = ScopedPG(self._lg, self, schema_name)
+            return self._scoped_cache[schema_name]
 
     def connect(self) -> Any:
         """
@@ -350,11 +360,15 @@ class PG(Interface):
         return session
 
     @contextmanager
-    def session(self) -> Generator[Session, None, None]:
+    def session(self, autocommit: bool = False) -> Generator[Session, None, None]:
         """
-        Get a managed database session with automatic commit/rollback.
+        Get a managed database session.
 
-        Commits on successful exit, rolls back on exception, always closes.
+        Args:
+            autocommit: If True, use AUTOCOMMIT isolation (no transaction overhead).
+                        Each statement commits immediately. Use for read-heavy workloads.
+                        If False (default), wraps in a transaction with auto-commit on
+                        success and rollback on exception.
 
         Yields:
             SQLAlchemy session instance
@@ -364,48 +378,37 @@ class PG(Interface):
 
         Example:
             >>> pg = PG(logger, config)
+            >>> # Transactional session (default)
             >>> with pg.session() as session:
-            ...     result = session.execute(sqlalchemy.text("SELECT * FROM users"))
-            ...     users = result.fetchall()
+            ...     session.execute(text("INSERT INTO users ..."))
             ...     # Commits automatically on success
+            >>>
+            >>> # AUTOCOMMIT session (no transaction overhead)
+            >>> with pg.session(autocommit=True) as session:
+            ...     result = session.execute(text("SELECT * FROM users"))
+            ...     # No BEGIN/COMMIT round-trips
         """
-        sa_session = self._create_session()
-        try:
-            yield sa_session
-            sa_session.commit()
-        except Exception:
-            sa_session.rollback()
-            raise
-        finally:
-            sa_session.close()
-
-    @contextmanager
-    def read_session(self) -> Generator[Session, None, None]:
-        """
-        Get a read-only session with AUTOCOMMIT isolation (no transaction overhead).
-
-        Use for read-only queries where you don't need transaction semantics.
-        Avoids BEGIN/COMMIT round-trips for better performance.
-
-        Yields:
-            SQLAlchemy session instance
-
-        Example:
-            >>> pg = PG(logger, config)
-            >>> with pg.read_session() as session:
-            ...     result = session.execute(sqlalchemy.text("SELECT * FROM users"))
-            ...     users = result.fetchall()
-        """
-        with self._engine.connect().execution_options(
-            isolation_level="AUTOCOMMIT"
-        ) as conn:
-            if self._schema_mgr:
-                conn.execute(
-                    text(f'SET search_path TO "{self._schema_mgr.schema}", public')
-                )
-            sa_session = Session(bind=conn, expire_on_commit=False)
+        if autocommit:
+            with self._engine.connect().execution_options(
+                isolation_level="AUTOCOMMIT"
+            ) as conn:
+                if self._schema_mgr:
+                    conn.execute(
+                        text(f'SET search_path TO "{self._schema_mgr.schema}", public')
+                    )
+                sa_session = Session(bind=conn, expire_on_commit=False)
+                try:
+                    yield sa_session
+                finally:
+                    sa_session.close()
+        else:
+            sa_session = self._create_session()
             try:
                 yield sa_session
+                sa_session.commit()
+            except Exception:
+                sa_session.rollback()
+                raise
             finally:
                 sa_session.close()
 
@@ -572,8 +575,8 @@ class ScopedPG:
     PG wrapper scoped to a specific PostgreSQL schema.
 
     Uses a dedicated connection pool with schema enforced at connection level
-    via a connect event listener. All operations (session, read_session)
-    consistently use the configured schema.
+    via a connect event listener. All session operations consistently use
+    the configured schema.
 
     Example:
         >>> pg = PG(logger, config)  # Schema-agnostic
@@ -615,12 +618,13 @@ class ScopedPG:
         self._pg = PG(lg, parent_pg.cfg, schema=schema_name)
 
     @contextmanager
-    def session(self) -> Generator[Session, None, None]:
+    def session(self, autocommit: bool = False) -> Generator[Session, None, None]:
         """
         Get a managed session for this schema.
 
-        Commits on success, rolls back on exception, always closes.
-        Schema is enforced at connection level via the pool's connect listener.
+        Args:
+            autocommit: If True, use AUTOCOMMIT isolation (no transaction overhead).
+                        If False (default), wraps in a transaction.
 
         Yields:
             SQLAlchemy session configured for this schema
@@ -629,28 +633,46 @@ class ScopedPG:
             >>> with scoped.session() as session:
             ...     result = session.execute(text("SELECT * FROM my_table"))
             ...     # Commits automatically on success
+            >>>
+            >>> with scoped.session(autocommit=True) as session:
+            ...     result = session.execute(text("SELECT * FROM my_table"))
+            ...     # No transaction overhead
         """
-        with self._pg.session() as session:
+        with self._pg.session(autocommit=autocommit) as session:
             yield session
 
-    @contextmanager
-    def read_session(self) -> Generator[Session, None, None]:
+    def connect(self) -> Any:
         """
-        Get a read-only session with AUTOCOMMIT isolation (no transaction overhead).
+        Get a raw database connection for this schema.
 
-        Use for read-only queries where you don't need transaction semantics.
-        Avoids BEGIN/COMMIT round-trips for better performance.
+        Use for operations requiring direct connection access (COPY, psycopg2).
         Schema is enforced at connection level via the pool's connect listener.
 
-        Yields:
-            SQLAlchemy session configured for this schema
+        Returns:
+            Database connection object
 
         Example:
-            >>> with scoped.read_session() as session:
-            ...     result = session.execute(text("SELECT * FROM my_table"))
+            >>> with scoped.connect() as conn:
+            ...     # Direct connection access with schema set
         """
-        with self._pg.read_session() as session:
-            yield session
+        return self._pg.connect()
+
+    def migrate(self, base: Any) -> None:
+        """
+        Run database migrations for this schema.
+
+        Creates tables defined in the SQLAlchemy declarative base within this
+        schema. Call ensure_schema() first if the schema doesn't exist.
+
+        Args:
+            base: SQLAlchemy declarative base class
+
+        Example:
+            >>> scoped = pg.scoped("tenant_a")
+            >>> scoped.ensure_schema()
+            >>> scoped.migrate(Base)  # Creates tables in tenant_a schema
+        """
+        self._pg.migrate(base)
 
     def ensure_schema(self) -> None:
         """

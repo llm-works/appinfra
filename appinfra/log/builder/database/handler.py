@@ -136,10 +136,9 @@ class DatabaseHandler(logging.Handler):
             signal.alarm(int(self.handler_config.critical_flush_timeout))
 
             try:
-                # Immediate database write
+                # Immediate database write (session auto-commits on success)
                 with self.handler_config.db_interface.session() as session:
                     self._insert_single_record(session, row_data)
-                    session.commit()
 
             finally:
                 # Restore signal handler
@@ -180,11 +179,10 @@ class DatabaseHandler(logging.Handler):
             return
 
         try:
-            # Get database session
+            # Get database session (auto-commits on success)
             with self.handler_config.db_interface.session() as session:
                 # Insert batch data
                 self._insert_batch(session, self.batch)
-                session.commit()
 
         except Exception as e:
             # Log error but don't raise to avoid infinite recursion

@@ -60,9 +60,9 @@ class TestPGConnection:
                 assert result1.fetchone()[0] == 1
                 assert result2.fetchone()[0] == 2
 
-    def test_pg_read_session(self, pg_connection):
-        """Test read_session with AUTOCOMMIT isolation."""
-        with pg_connection.read_session() as session:
+    def test_pg_autocommit_session(self, pg_connection):
+        """Test session(autocommit=True) with AUTOCOMMIT isolation."""
+        with pg_connection.session(autocommit=True) as session:
             result = session.execute(text("SELECT 'read_test' as msg"))
             row = result.fetchone()
             assert row[0] == "read_test"

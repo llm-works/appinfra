@@ -54,8 +54,7 @@ class PG:
         schema: str | None = None        # Schema for isolation
     ): ...
 
-    def session(self) -> ContextManager[Session]: ...      # Auto-commit/rollback
-    def read_session(self) -> ContextManager[Session]: ... # AUTOCOMMIT isolation
+    def session(self, autocommit: bool = False) -> ContextManager[Session]: ...
     def engine(self) -> Engine: ...
 ```
 
@@ -78,13 +77,13 @@ with pg.session() as session:
 **Session Types:**
 
 ```python
-# Write session (auto-commit on success, rollback on exception)
+# Transactional session (default: auto-commit on success, rollback on exception)
 with pg.session() as session:
     session.execute(text("INSERT INTO users ..."))
     # Commits automatically
 
-# Read session (AUTOCOMMIT isolation, no transaction overhead)
-with pg.read_session() as session:
+# AUTOCOMMIT session (no transaction overhead, each statement commits immediately)
+with pg.session(autocommit=True) as session:
     result = session.execute(text("SELECT * FROM users"))
     # No BEGIN/COMMIT round-trips
 ```
@@ -291,8 +290,8 @@ tenant_a.ensure_schema()  # CREATE SCHEMA IF NOT EXISTS tenant_a
 
 | Feature | `PG(schema="x")` | `pg.scoped("x")` |
 |---------|------------------|------------------|
-| Schema binding | Engine-level (all sessions) | Session-level (per scope) |
-| Multiple schemas | Requires multiple PG instances | Single PG, multiple scopes |
+| Schema binding | Engine-level (all sessions) | Engine-level (dedicated pool per schema) |
+| Multiple schemas | Requires multiple PG instances | Single PG manages multiple internal pools |
 | Schema must exist | Before first DB operation | At session time (lazy) |
 | Session API | Same context manager API | Same context manager API |
 
@@ -419,37 +418,46 @@ image). Images that extend the official postgres image work correctly:
 Non-PostgreSQL databases or heavily modified images will fail to start because the framework passes
 PostgreSQL-specific CLI arguments to the container.
 
-## Read-Only Sessions
+## AUTOCOMMIT Sessions
+
+Use `autocommit=True` for read-heavy workloads to avoid transaction overhead:
 
 ```python
 from appinfra.db import PG
-from appinfra.cfg import get_config_file_path
+from appinfra.config import Config
+from appinfra.log import LoggingBuilder
 
-pg = PG(get_config_file_path(), "production")
+lg = LoggingBuilder("myapp").build()
+cfg = Config("etc/config.yaml")
+pg = PG(lg, cfg.dbs.production)
 
-# Open read-only session (no writes allowed)
-with pg.session(readonly=True) as session:
+# AUTOCOMMIT session - no BEGIN/COMMIT round-trips
+with pg.session(autocommit=True) as session:
     result = session.execute(sqlalchemy.text("SELECT * FROM users"))
     users = result.fetchall()
 ```
 
+Note: AUTOCOMMIT mode commits each statement immediately. Writes are allowed but
+not wrapped in a transaction, so there's no rollback capability.
+
 ## Transactions
+
+The `session()` context manager handles transactions automatically:
 
 ```python
 from appinfra.db import PG
-from appinfra.cfg import get_config_file_path
-import sqlalchemy
+from appinfra.config import Config
+from appinfra.log import LoggingBuilder
+from sqlalchemy import text
 
-pg = PG(get_config_file_path(), "production")
+lg = LoggingBuilder("myapp").build()
+cfg = Config("etc/config.yaml")
+pg = PG(lg, cfg.dbs.production)
 
 with pg.session() as session:
-    try:
-        session.execute(sqlalchemy.text("INSERT INTO logs (message) VALUES ('Started')"))
-        session.execute(sqlalchemy.text("UPDATE status SET value = 'active'"))
-        session.commit()
-    except Exception:
-        session.rollback()
-        raise
+    session.execute(text("INSERT INTO logs (message) VALUES ('Started')"))
+    session.execute(text("UPDATE status SET value = 'active'"))
+    # Commits automatically on success, rolls back on exception
 ```
 
 ## SQLAlchemy ORM

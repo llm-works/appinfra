@@ -1,7 +1,7 @@
 """
 E2E test for PostgreSQL session context managers.
 
-Tests the session() and read_session() context manager workflows.
+Tests the session() context manager workflow with transactional and autocommit modes.
 """
 
 import pytest
@@ -99,9 +99,9 @@ class TestPGSessionWorkflow:
         with self.pg.session() as session:
             session.execute(text(f"DROP TABLE {table_name}"))
 
-    def test_read_session_executes_queries(self):
-        """Test read_session() can execute read queries."""
-        table_name = "e2e_read_session_test"
+    def test_autocommit_session_executes_queries(self):
+        """Test session(autocommit=True) can execute queries."""
+        table_name = "e2e_autocommit_session_test"
 
         # Setup: create table with data
         with self.pg.session() as session:
@@ -113,8 +113,8 @@ class TestPGSessionWorkflow:
                 text(f"INSERT INTO {table_name} (id, value) VALUES (1, 'readable')")
             )
 
-        # Read using read_session
-        with self.pg.read_session() as session:
+        # Read using autocommit session
+        with self.pg.session(autocommit=True) as session:
             result = session.execute(
                 text(f"SELECT value FROM {table_name} WHERE id = 1")
             )

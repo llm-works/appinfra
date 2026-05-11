@@ -236,7 +236,7 @@ class PGTestHelperCore:
             List of debug table names
         """
         try:
-            with self.pg.read_session() as session:
+            with self.pg.session(autocommit=True) as session:
                 result = session.execute(
                     sqlalchemy.text(
                         """
@@ -266,7 +266,7 @@ class PGTestHelperCore:
             Dictionary with table info and contents, or None if table doesn't exist
         """
         try:
-            with self.pg.read_session() as session:
+            with self.pg.session(autocommit=True) as session:
                 if not _check_table_exists(session, table_name):
                     return None
 

@@ -138,9 +138,12 @@ class SQLite(Interface):
         base.metadata.create_all(self._engine)
         self._lg.debug("migrated schema")
 
-    def session(self) -> Session:
+    def session(self, autocommit: bool = False) -> Session:  # noqa: ARG002
         """
         Create a new database session.
+
+        Args:
+            autocommit: Ignored for SQLite (included for interface compatibility).
 
         Returns:
             Database session instance

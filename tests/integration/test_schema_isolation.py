@@ -166,8 +166,8 @@ class TestSchemaIsolation:
                 value = result.scalar()
                 assert value == "test"
 
-            # Test read_session also uses schema search_path
-            with pg.read_session() as session:
+            # Test autocommit session also uses schema search_path
+            with pg.session(autocommit=True) as session:
                 result = session.execute(
                     text("SELECT value FROM query_test_table WHERE id = 1")
                 )
