@@ -40,6 +40,8 @@ For API stability guarantees and deprecation policy, see
   `--etc-dir` is available without explicit opt-in when using deferred config loading
 
 ### Fixed
+- `SchemaManager` connect listener now commits after `SET search_path` — fixes search_path being
+  rolled back by SQLAlchemy's pool reset when a connection is returned without an explicit commit
 - `SchemaManager` no longer executes redundant `SET search_path` on every connection checkout —
   the `connect` listener already sets it when connections are created, eliminating an extra
   network round-trip per query (significant for high-latency connections like VPN tunnels)

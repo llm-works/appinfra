@@ -98,6 +98,10 @@ class SchemaManager:
             cursor = dbapi_conn.cursor()
             cursor.execute(set_path_sql)
             cursor.close()
+            # Commit to persist search_path at session level. Without this,
+            # the SET is part of an implicit transaction that gets rolled back
+            # when SQLAlchemy's pool resets the connection on return.
+            dbapi_conn.commit()
 
         self._connect_listener = _on_connect
         self._listeners_installed = True
