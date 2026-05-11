@@ -34,15 +34,13 @@ class TestPGConnection:
 
     def test_pg_session_creation(self, pg_connection):
         """Test that session() creates a working SQLAlchemy session."""
-        session = pg_connection.session()
-        assert session is not None
+        with pg_connection.session() as session:
+            assert session is not None
 
-        # Execute a simple query
-        result = session.execute(text("SELECT 'test' as msg"))
-        row = result.fetchone()
-        assert row[0] == "test"
-
-        session.close()
+            # Execute a simple query
+            result = session.execute(text("SELECT 'test' as msg"))
+            row = result.fetchone()
+            assert row[0] == "test"
 
     def test_pg_session_context_manager(self, pg_connection):
         """Test session as context manager for automatic cleanup."""
@@ -53,19 +51,21 @@ class TestPGConnection:
 
     def test_pg_multiple_sessions(self, pg_connection):
         """Test that multiple sessions can be created from same PG instance."""
-        session1 = pg_connection.session()
-        session2 = pg_connection.session()
+        with pg_connection.session() as session1:
+            with pg_connection.session() as session2:
+                # Both should work independently
+                result1 = session1.execute(text("SELECT 1"))
+                result2 = session2.execute(text("SELECT 2"))
 
-        try:
-            # Both should work independently
-            result1 = session1.execute(text("SELECT 1"))
-            result2 = session2.execute(text("SELECT 2"))
+                assert result1.fetchone()[0] == 1
+                assert result2.fetchone()[0] == 2
 
-            assert result1.fetchone()[0] == 1
-            assert result2.fetchone()[0] == 2
-        finally:
-            session1.close()
-            session2.close()
+    def test_pg_autocommit_session(self, pg_connection):
+        """Test session(autocommit=True) with AUTOCOMMIT isolation."""
+        with pg_connection.session(autocommit=True) as session:
+            result = session.execute(text("SELECT 'read_test' as msg"))
+            row = result.fetchone()
+            assert row[0] == "read_test"
 
 
 @pytest.mark.integration
@@ -359,9 +359,8 @@ class TestPGConfigValidation:
         assert pg is not None
 
         # Verify we can create a session
-        session = pg.session()
-        assert session is not None
-        session.close()
+        with pg.session() as session:
+            assert session is not None
 
     def test_pg_url_property_returns_database_url(self, pg_connection):
         """Test that url property returns the database URL."""

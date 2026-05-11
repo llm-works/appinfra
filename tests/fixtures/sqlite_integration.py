@@ -107,10 +107,8 @@ def sqlite_session(sqlite_connection):
     Create a database session for a single test.
 
     This fixture provides a fresh session for each test. The session
-    is automatically rolled back and closed after the test completes.
-
-    Unlike PostgreSQL fixtures, we always rollback SQLite sessions
-    to keep the in-memory database clean between tests.
+    is automatically committed on success, rolled back on exception,
+    and closed after the test completes.
 
     Args:
         sqlite_connection: SQLite connection fixture
@@ -118,12 +116,8 @@ def sqlite_session(sqlite_connection):
     Yields:
         SQLAlchemy session
     """
-    session = sqlite_connection.session()
-    try:
+    with sqlite_connection.session() as session:
         yield session
-    finally:
-        session.rollback()
-        session.close()
 
 
 @pytest.fixture

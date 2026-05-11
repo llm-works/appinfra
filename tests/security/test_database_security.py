@@ -70,7 +70,8 @@ def test_sql_injection_prevention(payload: str):
 
         # Simulate a query with user input
         # The key test: SQLAlchemy should parameterize this, preventing injection
-        session = pg.session()
+        # Use _create_session() for direct access in unit tests with mocking
+        session = pg._create_session()
 
         # Create a parameterized query (correct way)
         # This is how the code should handle user input
@@ -350,7 +351,8 @@ def test_legitimate_parameterized_queries_allowed():
         pg = PG(logger, mock_cfg)
 
         # Legitimate queries should work
-        session = pg.session()
+        # Use _create_session() for direct access in unit tests with mocking
+        session = pg._create_session()
 
         # These are valid usernames that should work fine
         legitimate_inputs = [

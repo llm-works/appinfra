@@ -68,11 +68,15 @@ class Interface(abc.ABC):
         pass  # pragma: no cover
 
     @abc.abstractmethod
-    def session(self) -> Any:
+    def session(self, autocommit: bool = False) -> Any:
         """
-        Create a database session.
+        Get a managed database session (context manager).
 
-        Returns:
-            Database session object
+        Args:
+            autocommit: If True, use AUTOCOMMIT isolation (no transaction).
+                        If False (default), wrap in transaction with auto-commit/rollback.
+
+        Yields:
+            Database session instance
         """
         pass  # pragma: no cover

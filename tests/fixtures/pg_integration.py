@@ -132,32 +132,30 @@ def _do_cleanup_stale_tables(pg_connection):
     """Execute the actual cleanup of stale debug tables."""
     import sqlalchemy
 
-    session = pg_connection.session()
     try:
-        result = session.execute(
-            sqlalchemy.text(
-                """
-                SELECT tablename FROM pg_tables
-                WHERE schemaname = 'public'
-                AND tablename ~ '_[0-9]{10}_'
-                """
+        with pg_connection.session() as session:
+            result = session.execute(
+                sqlalchemy.text(
+                    """
+                    SELECT tablename FROM pg_tables
+                    WHERE schemaname = 'public'
+                    AND tablename ~ '_[0-9]{10}_'
+                    """
+                )
             )
-        )
-        tables = [row[0] for row in result.fetchall()]
+            tables = [row[0] for row in result.fetchall()]
 
-        for table in tables:
-            session.execute(sqlalchemy.text(f'DROP TABLE IF EXISTS "{table}" CASCADE'))
+            for table in tables:
+                session.execute(
+                    sqlalchemy.text(f'DROP TABLE IF EXISTS "{table}" CASCADE')
+                )
 
-        if tables:
-            session.commit()
-            logging.info(
-                f"Cleaned up {len(tables)} stale debug tables from previous runs"
-            )
+            if tables:
+                logging.info(
+                    f"Cleaned up {len(tables)} stale debug tables from previous runs"
+                )
     except Exception as e:
-        session.rollback()
         logging.warning(f"Failed to clean up stale debug tables: {e}")
-    finally:
-        session.close()
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -265,28 +263,30 @@ def pg_connection_ro(pg_config_ro, pg_logger):
 
 
 @pytest.fixture
-def pg_session_ro(pg_connection_ro):
+def pg_session_ro(pg_connection_ro, request):
     """
     Create a read-only database session for a single test.
 
     This fixture provides a fresh readonly session for each test.
-    The session is automatically closed after the test completes.
+    The session is rolled back on test failure, committed on success,
+    and always closed after the test completes.
 
     Args:
         pg_connection_ro: Read-only PG connection fixture
+        request: pytest request fixture for test outcome detection
 
     Yields:
         SQLAlchemy session (readonly mode)
     """
-    session = pg_connection_ro.session()
+    session = pg_connection_ro._create_session()
     try:
         yield session
     finally:
-        # Rollback any pending transaction before closing
-        try:
+        failed = getattr(request.node, "rep_call", None)
+        if failed is not None and failed.failed:
             session.rollback()
-        except Exception:
-            pass
+        else:
+            session.commit()
         session.close()
 
 
@@ -296,27 +296,30 @@ def pg_session_ro(pg_connection_ro):
 
 
 @pytest.fixture
-def pg_session(pg_connection):
+def pg_session(pg_connection, request):
     """
     Create a database session for a single test.
 
     This fixture provides a fresh session for each test. The session
-    is automatically committed and closed after the test completes.
+    is rolled back on test failure, committed on success, and always
+    closed after the test completes.
 
     Args:
         pg_connection: PG connection fixture
+        request: pytest request fixture for test outcome detection
 
     Yields:
         SQLAlchemy session
     """
-    session = pg_connection.session()
+    session = pg_connection._create_session()
     try:
         yield session
-        session.commit()
-    except Exception:
-        session.rollback()
-        raise
     finally:
+        failed = getattr(request.node, "rep_call", None)
+        if failed is not None and failed.failed:
+            session.rollback()
+        else:
+            session.commit()
         session.close()
 
 

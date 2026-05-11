@@ -128,17 +128,23 @@ class TestSQLiteSession:
     """Test SQLite session method."""
 
     def test_session_returns_session(self, sqlite_db):
-        """Test session returns a session object."""
-        session = sqlite_db.session()
-        assert session is not None
-        session.close()
+        """Test session returns a session object via context manager."""
+        with sqlite_db.session() as session:
+            assert session is not None
 
     def test_session_can_execute(self, sqlite_db):
         """Test session can execute queries."""
-        session = sqlite_db.session()
-        result = session.execute(text("SELECT 1"))
-        assert result.fetchone()[0] == 1
-        session.close()
+        with sqlite_db.session() as session:
+            result = session.execute(text("SELECT 1"))
+            assert result.fetchone()[0] == 1
+
+    def test_session_autocommit_raises_not_implemented(self, sqlite_db):
+        """Test session(autocommit=True) raises NotImplementedError."""
+        with pytest.raises(
+            NotImplementedError, match="SQLite does not support AUTOCOMMIT"
+        ):
+            with sqlite_db.session(autocommit=True):
+                pass
 
 
 @pytest.mark.unit
