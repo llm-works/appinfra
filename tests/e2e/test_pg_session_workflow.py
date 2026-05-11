@@ -5,6 +5,7 @@ Tests the session() context manager workflow with transactional and autocommit m
 """
 
 import uuid
+from pathlib import Path
 
 import pytest
 from sqlalchemy import text
@@ -12,6 +13,9 @@ from sqlalchemy import text
 from appinfra.config import Config
 from appinfra.db.pg.pg import PG
 from appinfra.log import LoggingBuilder
+
+# Resolve config path relative to test file (works from any CWD)
+_CONFIG_PATH = Path(__file__).resolve().parent.parent.parent / "etc" / "infra.yaml"
 
 
 @pytest.mark.e2e
@@ -21,7 +25,7 @@ class TestPGSessionWorkflow:
     def setup_method(self):
         """Set up E2E test environment."""
         self.logger = LoggingBuilder("e2e_session").with_level("info").build()
-        self.cfg = Config("etc/infra.yaml")
+        self.cfg = Config(str(_CONFIG_PATH))
         self.pg = PG(self.logger, self.cfg.dbs.unittest)
 
     def teardown_method(self):
