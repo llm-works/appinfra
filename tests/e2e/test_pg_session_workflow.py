@@ -4,6 +4,8 @@ E2E test for PostgreSQL session context managers.
 Tests the session() context manager workflow with transactional and autocommit modes.
 """
 
+import uuid
+
 import pytest
 from sqlalchemy import text
 
@@ -43,7 +45,7 @@ class TestPGSessionWorkflow:
 
     def test_session_commits_on_success(self):
         """Test session() commits changes on successful exit."""
-        table_name = "e2e_session_commit_test"
+        table_name = f"e2e_session_commit_{uuid.uuid4().hex[:8]}"
 
         # Create table and insert data in one session
         with self.pg.session() as session:
@@ -68,7 +70,7 @@ class TestPGSessionWorkflow:
 
     def test_session_rollback_on_exception(self):
         """Test session() rolls back on exception."""
-        table_name = "e2e_session_rollback_test"
+        table_name = f"e2e_session_rollback_{uuid.uuid4().hex[:8]}"
 
         # Create table first
         with self.pg.session() as session:
@@ -101,7 +103,7 @@ class TestPGSessionWorkflow:
 
     def test_autocommit_session_executes_queries(self):
         """Test session(autocommit=True) can execute queries."""
-        table_name = "e2e_autocommit_session_test"
+        table_name = f"e2e_autocommit_{uuid.uuid4().hex[:8]}"
 
         # Setup: create table with data
         with self.pg.session() as session:

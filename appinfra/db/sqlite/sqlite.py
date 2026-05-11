@@ -141,16 +141,25 @@ class SQLite(Interface):
         self._lg.debug("migrated schema")
 
     @contextmanager
-    def session(self, autocommit: bool = False) -> Generator[Session, None, None]:  # noqa: ARG002
+    def session(self, autocommit: bool = False) -> Generator[Session, None, None]:
         """
         Get a managed database session (context manager).
 
         Args:
-            autocommit: Ignored for SQLite (included for interface compatibility).
+            autocommit: If True, raises NotImplementedError (SQLite doesn't support
+                        AUTOCOMMIT mode via this interface).
 
         Yields:
             Database session instance
+
+        Raises:
+            NotImplementedError: If autocommit=True
         """
+        if autocommit:
+            raise NotImplementedError(
+                "SQLite does not support AUTOCOMMIT mode via session(). "
+                "Use the default transactional mode instead."
+            )
         sa_session: Session = self._SessionCls()
         try:
             yield sa_session

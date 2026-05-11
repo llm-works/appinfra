@@ -283,3 +283,63 @@ class TestPGScopedCaching:
             assert scoped_a is mock_scoped_a
             assert scoped_b is mock_scoped_b
             assert MockScopedPG.call_count == 2
+
+    def test_dispose_scoped_cache_disposes_all(self):
+        """Test PG.dispose_scoped_cache() disposes all cached ScopedPG instances."""
+        import threading
+
+        from appinfra.db.pg import PG
+
+        pg = object.__new__(PG)
+        pg._lg = MagicMock()
+        pg._scoped_cache = {}
+        pg._scoped_cache_lock = threading.Lock()
+
+        # Create mock scoped instances with mock engines
+        mock_scoped_a = MagicMock()
+        mock_scoped_a._pg._engine = MagicMock()
+        mock_scoped_b = MagicMock()
+        mock_scoped_b._pg._engine = MagicMock()
+
+        pg._scoped_cache = {"schema_a": mock_scoped_a, "schema_b": mock_scoped_b}
+
+        pg.dispose_scoped_cache()
+
+        # Verify all engines were disposed
+        mock_scoped_a._pg._engine.dispose.assert_called_once()
+        mock_scoped_b._pg._engine.dispose.assert_called_once()
+        # Verify cache was cleared
+        assert pg._scoped_cache == {}
+        pg._lg.trace.assert_called_once()
+
+
+@pytest.mark.unit
+class TestScopedPGDispose:
+    """Test ScopedPG dispose method."""
+
+    def test_dispose_cleans_up_resources(self):
+        """Test ScopedPG.dispose() disposes engine and removes from cache."""
+        mock_parent_pg = MagicMock()
+        mock_parent_pg.cfg = {}
+        mock_parent_pg._scoped_cache = {}
+        mock_parent_pg._scoped_cache_lock = MagicMock()
+        mock_parent_pg._scoped_cache_lock.__enter__ = Mock(return_value=None)
+        mock_parent_pg._scoped_cache_lock.__exit__ = Mock(return_value=False)
+        mock_lg = MagicMock()
+
+        with patch("appinfra.db.pg.pg.PG") as MockPG:
+            mock_inner_pg = MagicMock()
+            mock_inner_pg._engine = MagicMock()
+            MockPG.return_value = mock_inner_pg
+
+            scoped = ScopedPG(mock_lg, mock_parent_pg, "test_schema")
+            # Add to cache
+            mock_parent_pg._scoped_cache["test_schema"] = scoped
+
+            scoped.dispose()
+
+            # Verify engine was disposed
+            mock_inner_pg._engine.dispose.assert_called_once()
+            # Verify removed from cache
+            assert "test_schema" not in mock_parent_pg._scoped_cache
+            mock_lg.trace.assert_called()

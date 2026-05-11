@@ -263,21 +263,31 @@ def pg_connection_ro(pg_config_ro, pg_logger):
 
 
 @pytest.fixture
-def pg_session_ro(pg_connection_ro):
+def pg_session_ro(pg_connection_ro, request):
     """
     Create a read-only database session for a single test.
 
     This fixture provides a fresh readonly session for each test.
-    The session is automatically closed after the test completes.
+    The session is rolled back on test failure, committed on success,
+    and always closed after the test completes.
 
     Args:
         pg_connection_ro: Read-only PG connection fixture
+        request: pytest request fixture for test outcome detection
 
     Yields:
         SQLAlchemy session (readonly mode)
     """
-    with pg_connection_ro.session() as session:
+    session = pg_connection_ro._create_session()
+    try:
         yield session
+    finally:
+        failed = getattr(request.node, "rep_call", None)
+        if failed is not None and failed.failed:
+            session.rollback()
+        else:
+            session.commit()
+        session.close()
 
 
 # =============================================================================
@@ -286,21 +296,31 @@ def pg_session_ro(pg_connection_ro):
 
 
 @pytest.fixture
-def pg_session(pg_connection):
+def pg_session(pg_connection, request):
     """
     Create a database session for a single test.
 
     This fixture provides a fresh session for each test. The session
-    is automatically committed and closed after the test completes.
+    is rolled back on test failure, committed on success, and always
+    closed after the test completes.
 
     Args:
         pg_connection: PG connection fixture
+        request: pytest request fixture for test outcome detection
 
     Yields:
         SQLAlchemy session
     """
-    with pg_connection.session() as session:
+    session = pg_connection._create_session()
+    try:
         yield session
+    finally:
+        failed = getattr(request.node, "rep_call", None)
+        if failed is not None and failed.failed:
+            session.rollback()
+        else:
+            session.commit()
+        session.close()
 
 
 def _cleanup_debug_table(request, pg_session, table_name):
