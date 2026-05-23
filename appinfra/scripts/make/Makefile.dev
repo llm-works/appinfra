@@ -25,7 +25,9 @@ INFRA_DEV_CHECK_SCRIPT ?= $(_MAKEFILE_DEV_DIR)../check.sh
 INFRA_DEV_INSTALL_EXTRAS ?=
 
 # Default extras for setup (all dev-related extras)
-INFRA_DEV_SETUP_EXTRAS ?= dev,ui,fastapi,validation,hotreload,docs
+# Includes `sql` and `service` so the fallback `pip install -e .[...]` path
+# matches what install_deps.py installs (every optional-dependency group).
+INFRA_DEV_SETUP_EXTRAS ?= dev,ui,fastapi,validation,hotreload,docs,sql,service
 
 # Default PYTHON_ENVS to PYTHON if not set (backward compatibility)
 PYTHON_ENVS ?= $(PYTHON)
@@ -61,8 +63,12 @@ setup:: ## sets up dev environment with all dependencies for all PYTHON_ENVS
 	@for pyenv in $(PYTHON_ENVS); do \
 		if [ -x "$$pyenv" ]; then \
 			echo "  → $$pyenv"; \
-			if command -v appinfra >/dev/null 2>&1 && [ -f "$$(appinfra scripts-path)/install_deps.py" ]; then \
-				$$pyenv "$$(appinfra scripts-path)/install_deps.py"; \
+			scripts_path=""; \
+			if command -v appinfra >/dev/null 2>&1; then \
+				scripts_path=$$(appinfra -q scripts-path 2>/dev/null); \
+			fi; \
+			if [ -n "$$scripts_path" ] && [ -f "$$scripts_path/install_deps.py" ]; then \
+				$$pyenv "$$scripts_path/install_deps.py"; \
 			else \
 				$$pyenv -m pip install -q -e ".[$(INFRA_DEV_SETUP_EXTRAS)]"; \
 			fi; \
