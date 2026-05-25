@@ -569,13 +569,12 @@ class TestPGExtensionValidation:
 
 
 @pytest.fixture
-def mocked_pg():
+def mocked_pg_factory():
     """
-    Build a PG with init dependencies patched out and managers stubbed.
+    Build PG instances with init dependencies patched out and managers stubbed.
 
-    Yields the configured PG and unwinds the four patches when the test ends.
-    Tests can override the cfg by calling the inner factory; the default cfg
-    covers the common case.
+    Yields a `build(cfg=...)` callable so tests that need a custom cfg can opt
+    in. The four init-time patches are unwound when the test ends.
     """
     with (
         patch("appinfra.db.pg.pg.LoggerFactory") as lf,
@@ -595,18 +594,21 @@ def mocked_pg():
             pg._schema_mgr = None
             return pg
 
-        # Default-built instance; tests needing a custom cfg call _build(cfg=...)
-        pg = _build()
-        pg.build = _build  # type: ignore[attr-defined]
-        yield pg
+        yield _build
+
+
+@pytest.fixture
+def mocked_pg(mocked_pg_factory):
+    """Default-cfg PG instance for tests that don't need a custom config."""
+    return mocked_pg_factory()
 
 
 @pytest.mark.unit
 class TestPGPropertiesAndDelegations:
     """Cover trivial property accessors and manager delegations."""
 
-    def test_cfg_property_returns_stored_config(self, mocked_pg):
-        pg = mocked_pg.build({"url": "postgresql://localhost/db", "extra": 1})
+    def test_cfg_property_returns_stored_config(self, mocked_pg_factory):
+        pg = mocked_pg_factory({"url": "postgresql://localhost/db", "extra": 1})
         assert pg.cfg is pg._cfg
 
     def test_url_property_stringifies_engine_url(self, mocked_pg):
@@ -684,7 +686,7 @@ class TestPGPropertiesAndDelegations:
 
 @pytest.mark.unit
 class TestDisposeROEngine:
-    """Cover the _dispose_ro_engine helper used by the pg_connection_ro fixture.
+    """Cover the dispose_ro_engine helper used by the pg_connection_ro fixture.
 
     The disposal block was originally added to prevent the SQLAlchemy engine from
     hanging when RO event listeners stay registered. These tests pin the
@@ -701,24 +703,24 @@ class TestDisposeROEngine:
         return pg
 
     def test_noop_when_no_engine_attr(self):
-        from tests.fixtures.pg_integration import _dispose_ro_engine
+        from tests.fixtures.pg_integration import dispose_ro_engine
 
         pg = Mock(spec=[])  # no _engine attribute at all
-        _dispose_ro_engine(pg)  # should not raise
+        dispose_ro_engine(pg)  # should not raise
 
     def test_noop_when_engine_is_none(self):
-        from tests.fixtures.pg_integration import _dispose_ro_engine
+        from tests.fixtures.pg_integration import dispose_ro_engine
 
         pg = Mock(spec=["_engine"])
         pg._engine = None
-        _dispose_ro_engine(pg)  # should not raise
+        dispose_ro_engine(pg)  # should not raise
 
     @patch("sqlalchemy.event")
     def test_removes_all_listeners_then_disposes(self, mock_event):
-        from tests.fixtures.pg_integration import _dispose_ro_engine
+        from tests.fixtures.pg_integration import dispose_ro_engine
 
         pg = self._make_pg()
-        _dispose_ro_engine(pg)
+        dispose_ro_engine(pg)
 
         mock_event.remove.assert_any_call(pg._engine, "begin", pg._readonly_listener)
         mock_event.remove.assert_any_call(
@@ -732,11 +734,11 @@ class TestDisposeROEngine:
 
     @patch("sqlalchemy.event")
     def test_skips_missing_listeners_but_still_disposes(self, mock_event):
-        from tests.fixtures.pg_integration import _dispose_ro_engine
+        from tests.fixtures.pg_integration import dispose_ro_engine
 
         # Only the readonly listener is present.
         pg = self._make_pg(with_listeners=("readonly",))
-        _dispose_ro_engine(pg)
+        dispose_ro_engine(pg)
 
         mock_event.remove.assert_called_once_with(
             pg._engine, "begin", pg._readonly_listener

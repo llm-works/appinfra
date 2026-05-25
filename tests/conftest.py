@@ -6,6 +6,7 @@ and shared fixtures for the infra test suite.
 """
 
 import shutil
+import sys
 import tempfile
 from collections.abc import Generator
 from pathlib import Path
@@ -48,11 +49,19 @@ def pytest_configure(config):
     # One-shot PG reachability probe. Stashed so pytest_collection_modifyitems
     # and the pg_available fixture read the same result.
     host, port = resolve_pgserver_endpoint()
+    available = probe(host, port)
     config.stash[PG_STATUS_KEY] = {
         "host": host,
         "port": port,
-        "available": probe(host, port),
+        "available": available,
     }
+    if not available:
+        # One-line notice so the developer can see which endpoint failed when
+        # PG-dependent tests start skipping with the sentinel reason.
+        print(
+            f"PG probe: {host}:{port} unreachable; PG-dependent tests will skip",
+            file=sys.stderr,
+        )
 
 
 # =============================================================================

@@ -13,6 +13,10 @@ import os
 import pytest
 import sqlalchemy
 
+# All tests in this module exercise PG-backed fixtures; skip the whole module
+# with the sentinel reason if PG is unreachable.
+pytestmark = pytest.mark.require_pg
+
 
 @pytest.mark.integration
 class TestPGFixtures:

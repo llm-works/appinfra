@@ -4,6 +4,10 @@ import time
 
 import pytest
 
+# Performance tests in this module run against a real PG instance; skip the
+# whole module with the sentinel reason if PG is unreachable.
+pytestmark = pytest.mark.require_pg
+
 
 @pytest.mark.performance
 @pytest.mark.integration  # Requires actual DB

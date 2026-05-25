@@ -21,6 +21,10 @@ from sqlalchemy.orm import declarative_base
 
 from appinfra.db.pg import PG
 
+# All tests in this module exercise a real PG instance; skip the whole module
+# with the sentinel reason if PG is unreachable.
+pytestmark = pytest.mark.require_pg
+
 
 @pytest.mark.integration
 class TestSchemaCreation:

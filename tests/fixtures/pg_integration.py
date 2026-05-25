@@ -25,6 +25,7 @@ Usage:
 
 import logging
 import os
+import sys
 import threading
 import time
 from pathlib import Path
@@ -138,7 +139,13 @@ def pg_connection(pg_config, pg_logger, pg_available):
         pg = PG(pg_logger, pg_config)
         conn = pg.connect()
         conn.close()
-    except Exception:
+    except Exception as e:
+        # Probe said port was open but real connect failed (auth/role/DB-name).
+        # Surface the cause so the developer doesn't see a bare "pg-unavailable".
+        print(
+            f"warning: PG probe passed but pg_connection setup failed ({e!r})",
+            file=sys.stderr,
+        )
         pytest.skip(PG_SKIP_REASON)
 
     yield pg
@@ -186,6 +193,11 @@ def pg_cleanup_stale_debug_tables(pg_available, worker_id, request):
     If PG is unreachable, no-op silently so non-PG tests can still run — only
     tests that directly request pg_connection/pg_session etc. will be skipped.
 
+    Note: pg_connection is *not* a declared parameter on purpose. Requesting it
+    declaratively would cause its pytest.skip(PG_SKIP_REASON) to propagate from
+    this autouse session fixture to every test in the run. Instead, we fetch it
+    lazily via request.getfixturevalue() and catch the skip exception locally.
+
     Args:
         pg_available: Session-level PG reachability probe
         worker_id: pytest-xdist worker ID ("master" when not using xdist)
@@ -198,7 +210,13 @@ def pg_cleanup_stale_debug_tables(pg_available, worker_id, request):
     if worker_id != "master":
         return
 
-    pg_connection = request.getfixturevalue("pg_connection")
+    # Probe said PG was reachable, but the actual connect inside pg_connection
+    # may still fail (auth/role/DB-name mismatch). Catch its pytest.skip here so
+    # the autouse session fixture does not cascade-skip every test in the run.
+    try:
+        pg_connection = request.getfixturevalue("pg_connection")
+    except pytest.skip.Exception:
+        return
     _do_cleanup_stale_tables(pg_connection)
 
 
@@ -265,16 +283,20 @@ def pg_connection_ro(pg_config_ro, pg_logger, pg_available):
         pg = PG(pg_logger, pg_config_ro)
         conn = pg.connect()
         conn.close()
-    except Exception:
+    except Exception as e:
+        print(
+            f"warning: PG probe passed but pg_connection_ro setup failed ({e!r})",
+            file=sys.stderr,
+        )
         pytest.skip(PG_SKIP_REASON)
 
     try:
         yield pg
     finally:
-        _dispose_ro_engine(pg)
+        dispose_ro_engine(pg)
 
 
-def _dispose_ro_engine(pg):
+def dispose_ro_engine(pg):
     """Remove RO-mode event listeners and dispose the engine to prevent hanging."""
     if not (hasattr(pg, "_engine") and pg._engine is not None):
         return

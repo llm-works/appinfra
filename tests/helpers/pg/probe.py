@@ -10,6 +10,7 @@ banner — no Python<->shell coupling is required.
 
 import os
 import socket
+import sys
 from pathlib import Path
 from typing import TypedDict
 
@@ -19,6 +20,12 @@ from appinfra.config import Config
 
 PG_SKIP_REASON = "pg-unavailable"
 REQUIRE_PG_MARKER = "require_pg"
+
+# Default endpoint used when neither etc/pg.yaml nor INFRA_PGSERVER_* env vars
+# are present. Matches the canonical port in etc/pg.yaml so a fresh checkout
+# probes the right place. Kept in one spot so the two values can't drift.
+DEFAULT_PG_HOST = "127.0.0.1"
+DEFAULT_PG_PORT = 7432
 
 
 class PgStatus(TypedDict):
@@ -32,8 +39,14 @@ class PgStatus(TypedDict):
 PG_STATUS_KEY: pytest.StashKey[PgStatus] = pytest.StashKey()
 
 
-def probe(host: str, port: int, timeout: float = 0.5) -> bool:
-    """TCP-only liveness probe — does not authenticate, just confirms port is open."""
+def probe(host: str, port: int, timeout: float = 2.0) -> bool:
+    """TCP-only liveness probe — does not authenticate, just confirms port is open.
+
+    Default timeout is generous on purpose: a reachable host accepts a TCP
+    connection in single-digit ms, so a higher ceiling costs nothing on the
+    happy path but protects against false negatives on loaded CI runners or
+    high-latency networks (VPNs).
+    """
     try:
         with socket.create_connection((host, port), timeout=timeout):
             return True
@@ -54,19 +67,35 @@ def resolve_pgserver_endpoint() -> tuple[str, int]:
         try:
             cfg = Config(str(pg_yaml))
             return str(cfg.get("pgserver.host")), int(cfg.get("pgserver.port"))
-        except Exception:
-            pass
+        except Exception as e:
+            # pg.yaml exists but couldn't be parsed (malformed YAML, missing
+            # pgserver.host/port keys, non-numeric port). Surface it so the
+            # silent fall-through to env defaults isn't a mystery.
+            print(
+                f"warning: failed to read {pg_yaml} for PG probe ({e!r}); "
+                "falling back to INFRA_PGSERVER_HOST/PORT or defaults",
+                file=sys.stderr,
+            )
 
-    host = os.environ.get("INFRA_PGSERVER_HOST", "127.0.0.1")
-    port = int(os.environ.get("INFRA_PGSERVER_PORT", "7432"))
+    host = os.environ.get("INFRA_PGSERVER_HOST", DEFAULT_PG_HOST)
+    try:
+        port = int(os.environ.get("INFRA_PGSERVER_PORT", str(DEFAULT_PG_PORT)))
+    except ValueError:
+        port = DEFAULT_PG_PORT
     return host, port
 
 
 def _find_upwards(relpath: str) -> Path | None:
-    """Walk up from this file looking for `relpath` (e.g. 'etc/pg.yaml')."""
+    """Walk up from this file looking for `relpath` (e.g. 'etc/pg.yaml').
+
+    The walk stops at the project root (the directory containing pyproject.toml)
+    so a nested-workspace layout cannot resolve to an unrelated ancestor's file.
+    """
     here = Path(__file__).resolve()
     for parent in (here, *here.parents):
         candidate = parent / relpath
         if candidate.exists():
             return candidate
+        if (parent / "pyproject.toml").exists():
+            return None
     return None
