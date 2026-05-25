@@ -25,6 +25,10 @@ def pg_test_logger(pg_logger):
 # Now import the testing fixtures
 pytest_plugins = ["appinfra.db.pg.testing"]
 
+# All classes here exercise PG-backed fixtures from appinfra.db.pg.testing;
+# skip the whole module with the sentinel reason if PG is unreachable.
+pytestmark = pytest.mark.require_pg
+
 
 @pytest.mark.integration
 class TestPgIsolatedFixture:

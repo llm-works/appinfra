@@ -14,6 +14,7 @@ from appinfra.log import LoggingBuilder
 
 
 @pytest.mark.e2e
+@pytest.mark.require_pg
 class TestPGReadOnlyWorkflow:
     """E2E tests for PostgreSQL readonly mode complete workflow."""
 

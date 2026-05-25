@@ -12,6 +12,14 @@ from pathlib import Path
 
 import pytest
 
+from tests._pg_probe import (
+    PG_SKIP_REASON,
+    PG_STATUS_KEY,
+    REQUIRE_PG_MARKER,
+    probe,
+    resolve_pgserver_endpoint,
+)
+
 # =============================================================================
 # Plugin Registration
 # =============================================================================
@@ -30,25 +38,35 @@ pytest_plugins = [
 # =============================================================================
 
 
+_MARKERS = [
+    ("unit", "Unit tests (fast, isolated, no external dependencies)"),
+    ("integration", "Integration tests (may use DB, network, filesystem)"),
+    ("performance", "Performance/benchmark tests"),
+    ("security", "Security-focused tests (injection, validation, etc.)"),
+    ("e2e", "End-to-end tests (full system integration)"),
+    ("slow", "Tests that take >1 second to run"),
+    ("asyncio", "Mark test as an async test (requires async runner)"),
+    (
+        REQUIRE_PG_MARKER,
+        "Test requires a running PostgreSQL server "
+        "(skipped with a single banner if unavailable)",
+    ),
+]
+
+
 def pytest_configure(config):
-    """Register custom markers."""
-    config.addinivalue_line(
-        "markers", "unit: Unit tests (fast, isolated, no external dependencies)"
-    )
-    config.addinivalue_line(
-        "markers", "integration: Integration tests (may use DB, network, filesystem)"
-    )
-    config.addinivalue_line("markers", "performance: Performance/benchmark tests")
-    config.addinivalue_line(
-        "markers", "security: Security-focused tests (injection, validation, etc.)"
-    )
-    config.addinivalue_line(
-        "markers", "e2e: End-to-end tests (full system integration)"
-    )
-    config.addinivalue_line("markers", "slow: Tests that take >1 second to run")
-    config.addinivalue_line(
-        "markers", "asyncio: Mark test as an async test (requires async runner)"
-    )
+    """Register custom markers and probe PG availability once per session."""
+    for name, desc in _MARKERS:
+        config.addinivalue_line("markers", f"{name}: {desc}")
+
+    # One-shot PG reachability probe. Stashed so pytest_collection_modifyitems,
+    # the pg_available fixture, and pytest_terminal_summary all read the same result.
+    host, port = resolve_pgserver_endpoint()
+    config.stash[PG_STATUS_KEY] = {
+        "host": host,
+        "port": port,
+        "available": probe(host, port),
+    }
 
 
 # =============================================================================
@@ -134,10 +152,59 @@ def pytest_collection_modifyitems(config, items):
         ):
             item.add_marker(pytest.mark.unit)
 
+    # Skip @pytest.mark.require_pg tests with the uniform sentinel reason when
+    # PG is unreachable. The terminal-summary banner consolidates them.
+    status = config.stash.get(PG_STATUS_KEY, None)
+    if status and not status["available"]:
+        skip_marker = pytest.mark.skip(reason=PG_SKIP_REASON)
+        for item in items:
+            if any(m.name == REQUIRE_PG_MARKER for m in item.iter_markers()):
+                item.add_marker(skip_marker)
+
 
 # =============================================================================
 # Output Control Hooks
 # =============================================================================
+
+
+def _partition_pg_skips(skipped):
+    """Split skip reports into (kept, sentinel_count). report.longrepr is a
+    (file, lineno, reason) tuple for skips."""
+    kept = []
+    sentinel_count = 0
+    for report in skipped:
+        reason = ""
+        if isinstance(report.longrepr, tuple) and len(report.longrepr) == 3:
+            reason = report.longrepr[2] or ""
+        if PG_SKIP_REASON in reason:
+            sentinel_count += 1
+        else:
+            kept.append(report)
+    return kept, sentinel_count
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_terminal_summary(terminalreporter, exitstatus, config):
+    """Collapse PG-unavailable skips into one banner. Registered tryfirst so we
+    filter terminalreporter.stats before pytest's built-in summary plugin runs."""
+    skipped = terminalreporter.stats.get("skipped", [])
+    if not skipped:
+        return
+    kept, sentinel_count = _partition_pg_skips(skipped)
+    if sentinel_count == 0:
+        return
+    terminalreporter.stats["skipped"] = kept
+    status = config.stash.get(PG_STATUS_KEY, None)
+    location = (
+        f"{status['host']}:{status['port']}" if status else "configured host:port"
+    )
+    terminalreporter.write_sep(
+        "-",
+        f"PG unavailable at {location} — {sentinel_count} tests skipped. "
+        f"Run `make pg.server.up` to enable them.",
+        yellow=True,
+        bold=True,
+    )
 
 
 def pytest_report_teststatus(report, config):
