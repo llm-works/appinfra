@@ -25,6 +25,7 @@ Usage:
 
 import logging
 import os
+import sys
 import threading
 import time
 from pathlib import Path
@@ -40,6 +41,7 @@ from appinfra.config import Config
 from appinfra.db.pg.pg import PG
 from appinfra.log.config import LogConfig
 from appinfra.log.factory import LoggerFactory
+from tests.helpers.pg.probe import PG_SKIP_REASON, PG_STATUS_KEY
 
 # =============================================================================
 # Configuration and Connection Fixtures
@@ -98,7 +100,17 @@ def pg_logger():
 
 
 @pytest.fixture(scope="session")
-def pg_connection(pg_config, pg_logger):
+def pg_available(request) -> bool:
+    """
+    Return the session-level PG reachability flag stashed by conftest's
+    pytest_configure hook. (One probe per session, shared by all consumers.)
+    """
+    status = request.config.stash.get(PG_STATUS_KEY, None)
+    return bool(status and status["available"])
+
+
+@pytest.fixture(scope="session")
+def pg_connection(pg_config, pg_logger, pg_available):
     """
     Create a PostgreSQL connection for the test session.
 
@@ -108,24 +120,35 @@ def pg_connection(pg_config, pg_logger):
     Args:
         pg_config: Database configuration fixture
         pg_logger: Logger fixture
+        pg_available: Session-level PG reachability probe
 
     Yields:
         PG instance with active connection
 
     Raises:
-        pytest.skip: If database connection fails
+        pytest.skip: With the uniform sentinel reason if PG is unreachable,
+            so terminal_summary can collapse all DB-skipped tests into one banner.
     """
+    if not pg_available:
+        pytest.skip(PG_SKIP_REASON)
+
+    # Narrow try/except to connection setup only: an exception here means the
+    # DB isn't usable → skip. Letting `yield` run inside this except block
+    # would silently convert genuine test failures into skips.
     try:
         pg = PG(pg_logger, pg_config)
-
-        # Test connection
         conn = pg.connect()
         conn.close()
-
-        yield pg
-
     except Exception as e:
-        pytest.skip(f"Cannot connect to test database: {e}")
+        # Probe said port was open but real connect failed (auth/role/DB-name).
+        # Surface the cause so the developer doesn't see a bare "pg-unavailable".
+        print(
+            f"warning: PG probe passed but pg_connection setup failed ({e!r})",
+            file=sys.stderr,
+        )
+        pytest.skip(PG_SKIP_REASON)
+
+    yield pg
 
 
 def _do_cleanup_stale_tables(pg_connection):
@@ -159,7 +182,7 @@ def _do_cleanup_stale_tables(pg_connection):
 
 
 @pytest.fixture(scope="session", autouse=True)
-def pg_cleanup_stale_debug_tables(pg_connection, worker_id):
+def pg_cleanup_stale_debug_tables(pg_available, worker_id, request):
     """
     Clean up all debug tables from previous test runs at session start.
 
@@ -167,15 +190,33 @@ def pg_cleanup_stale_debug_tables(pg_connection, worker_id):
     (worker_id="master") to avoid race conditions where one worker might
     drop tables that another worker just created.
 
+    If PG is unreachable, no-op silently so non-PG tests can still run — only
+    tests that directly request pg_connection/pg_session etc. will be skipped.
+
+    Note: pg_connection is *not* a declared parameter on purpose. Requesting it
+    declaratively would cause its pytest.skip(PG_SKIP_REASON) to propagate from
+    this autouse session fixture to every test in the run. Instead, we fetch it
+    lazily via request.getfixturevalue() and catch the skip exception locally.
+
     Args:
-        pg_connection: PG connection fixture
+        pg_available: Session-level PG reachability probe
         worker_id: pytest-xdist worker ID ("master" when not using xdist)
+        request: pytest request object (used to lazily fetch pg_connection)
     """
+    if not pg_available:
+        return
     # Only run cleanup on master to avoid race conditions with xdist workers
     # Each xdist worker gets its own "session", but they share the same database
     if worker_id != "master":
         return
 
+    # Probe said PG was reachable, but the actual connect inside pg_connection
+    # may still fail (auth/role/DB-name mismatch). Catch its pytest.skip here so
+    # the autouse session fixture does not cascade-skip every test in the run.
+    try:
+        pg_connection = request.getfixturevalue("pg_connection")
+    except pytest.skip.Exception:
+        return
     _do_cleanup_stale_tables(pg_connection)
 
 
@@ -214,7 +255,7 @@ def pg_config_ro():
 
 
 @pytest.fixture
-def pg_connection_ro(pg_config_ro, pg_logger):
+def pg_connection_ro(pg_config_ro, pg_logger, pg_available):
     """
     Create a read-only PostgreSQL connection for the test session.
 
@@ -224,42 +265,52 @@ def pg_connection_ro(pg_config_ro, pg_logger):
     Args:
         pg_config_ro: Read-only database configuration fixture
         pg_logger: Logger fixture
+        pg_available: Session-level PG reachability probe
 
     Yields:
         PG instance with readonly connection
 
     Raises:
-        pytest.skip: If database connection fails
+        pytest.skip: With the uniform sentinel reason if PG is unreachable.
     """
+    if not pg_available:
+        pytest.skip(PG_SKIP_REASON)
+
+    # Narrow try/except to connection setup only: an exception here means the
+    # readonly DB isn't usable → skip. Letting `yield` run inside this except
+    # block would silently convert genuine test failures into skips.
     try:
         pg = PG(pg_logger, pg_config_ro)
-
-        # Test connection
         conn = pg.connect()
         conn.close()
-
-        yield pg
-
-        # Explicit cleanup - remove event listeners before disposing engine
-        if hasattr(pg, "_engine") and pg._engine is not None:
-            import sqlalchemy
-
-            # Remove all event listeners to prevent hanging
-            if hasattr(pg, "_readonly_listener"):
-                sqlalchemy.event.remove(pg._engine, "begin", pg._readonly_listener)
-            if hasattr(pg, "_after_execute_listener"):
-                sqlalchemy.event.remove(
-                    pg._engine, "after_execute", pg._after_execute_listener
-                )
-            if hasattr(pg, "_before_cursor_listener"):
-                sqlalchemy.event.remove(
-                    pg._engine, "before_cursor_execute", pg._before_cursor_listener
-                )
-
-            pg._engine.dispose()
-
     except Exception as e:
-        pytest.skip(f"Cannot connect to readonly test database: {e}")
+        print(
+            f"warning: PG probe passed but pg_connection_ro setup failed ({e!r})",
+            file=sys.stderr,
+        )
+        pytest.skip(PG_SKIP_REASON)
+
+    try:
+        yield pg
+    finally:
+        dispose_ro_engine(pg)
+
+
+def dispose_ro_engine(pg):
+    """Remove RO-mode event listeners and dispose the engine to prevent hanging."""
+    if not (hasattr(pg, "_engine") and pg._engine is not None):
+        return
+    import sqlalchemy
+
+    if hasattr(pg, "_readonly_listener"):
+        sqlalchemy.event.remove(pg._engine, "begin", pg._readonly_listener)
+    if hasattr(pg, "_after_execute_listener"):
+        sqlalchemy.event.remove(pg._engine, "after_execute", pg._after_execute_listener)
+    if hasattr(pg, "_before_cursor_listener"):
+        sqlalchemy.event.remove(
+            pg._engine, "before_cursor_execute", pg._before_cursor_listener
+        )
+    pg._engine.dispose()
 
 
 @pytest.fixture

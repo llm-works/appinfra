@@ -317,6 +317,11 @@ record_warning() {
 record_skips() {
     local name="$1" logfile="$2"
     [ -d "$STATUS_DIR" ] || return 0
+    # Parses pytest's `SKIPPED [count] location: reason` short-summary lines.
+    # This format is only emitted when pytest is invoked with `-r` containing
+    # `s` (e.g. `-rEfs`) — all test subchecks in TEST_SUBCHECKS use `-rEfs`.
+    # If that flag is ever dropped, this banner silently empties.
+    #
     # mapfile + for-loop, NOT `grep | while`: a pipeline runs the loop body in a
     # grandchild subshell that can outlive a SIGKILL on this bg job and keep
     # writing to STATUS_DIR after main has rm -rf'd it.

@@ -214,6 +214,7 @@ def _extract_section_data(
     section_path: str,
     location: str,
     resolve_variables: bool = True,
+    env_overrides: dict[str, str] | None = None,
 ) -> Any:
     """
     Extract a specific section from data using dot-notation path.
@@ -226,6 +227,9 @@ def _extract_section_data(
         section_path: Dot-separated path (e.g., "server.http")
         location: Human-readable location for error messages (file path or context)
         resolve_variables: If True, resolve ${var} references before extraction
+        env_overrides: Optional explicit name→value map that takes precedence
+            over the source file's context during ${var} substitution. Used by
+            Config to propagate INFRA_* overrides into include-time substitution.
 
     Returns:
         Data at the specified section path
@@ -239,7 +243,9 @@ def _extract_section_data(
     # Resolve variables within the full file context BEFORE extraction
     # This allows ${sibling.key} references to resolve before the section is extracted
     if resolve_variables and isinstance(data, dict):
-        data = _resolve_variables_in_data(data, data, pass_through_undefined=True)
+        data = _resolve_variables_in_data(
+            data, data, pass_through_undefined=True, env_overrides=env_overrides
+        )
 
     current = data
     parts = section_path.split(".")
@@ -311,38 +317,77 @@ def _resolve_variables_in_data(
     data: Any,
     context: dict[str, Any],
     pass_through_undefined: bool = True,
+    env_overrides: dict[str, str] | None = None,
 ) -> Any:
     """
     Resolve ${var} patterns in data using context dict.
 
+    Lookup order for each ${var}:
+      1. `env_overrides[var_name]` if provided. This is the explicit channel
+         Config uses to inject its INFRA_* env-override values so include-time
+         substitution stays aligned with Config's post-load env overrides.
+         Standalone `yaml.load()` callers pass None → no env behavior, raw
+         YAML values win.
+      2. `env_overrides[canonical]` where `canonical` lowercases `var_name`
+         and replaces `.`/`-` with `_`. Lets a single env var (e.g.
+         `INFRA_DB_CONNECTION_POOL_SIZE`) match either dotted or mixed-form
+         YAML references (`${db.connection.pool.size}` or
+         `${db.connection_pool.size}`).
+      3. Context dict (the YAML file's own data).
+      4. Pass-through (keep `${var}` literal) or KeyError, per
+         `pass_through_undefined`.
+
     Resolution is scoped to the context (typically the full included file).
-    Undefined variables are passed through for Config._resolve() to handle.
     Single-pass resolution (no recursive expansion) to prevent infinite loops.
     """
     if isinstance(data, dict):
         return {
-            k: _resolve_variables_in_data(v, context, pass_through_undefined)
+            k: _resolve_variables_in_data(
+                v, context, pass_through_undefined, env_overrides
+            )
             for k, v in data.items()
         }
     elif isinstance(data, list):
         return [
-            _resolve_variables_in_data(item, context, pass_through_undefined)
+            _resolve_variables_in_data(
+                item, context, pass_through_undefined, env_overrides
+            )
             for item in data
         ]
     elif isinstance(data, str):
-
-        def substitute(match: re.Match[str]) -> str:
-            var_name = match.group(1)
-            value = _get_value_by_path(context, var_name)
-            if value is _NOT_FOUND:
-                if pass_through_undefined:
-                    return match.group(0)  # Keep original ${var}
-                raise KeyError(f"Variable '{var_name}' not found")
-            return str(value)
-
-        # Same pattern as Config._resolve() for consistency
-        return re.sub(r"\$\{([a-zA-Z0-9_.]+)\}", substitute, data)
+        return _substitute_vars_in_string(
+            data, context, pass_through_undefined, env_overrides
+        )
     return data
+
+
+def _substitute_vars_in_string(
+    data: str,
+    context: dict[str, Any],
+    pass_through_undefined: bool,
+    env_overrides: dict[str, str] | None,
+) -> str:
+    """Resolve `${var}` references inside a single string. See
+    `_resolve_variables_in_data` for the lookup order.
+    """
+
+    def substitute(match: re.Match[str]) -> str:
+        var_name = match.group(1)
+        if env_overrides is not None:
+            if var_name in env_overrides:
+                return env_overrides[var_name]
+            canonical = var_name.replace(".", "_").replace("-", "_").lower()
+            if canonical in env_overrides:
+                return env_overrides[canonical]
+        value = _get_value_by_path(context, var_name)
+        if value is _NOT_FOUND:
+            if pass_through_undefined:
+                return match.group(0)  # Keep original ${var}
+            raise KeyError(f"Variable '{var_name}' not found")
+        return str(value)
+
+    # Same pattern as Config._resolve() for consistency
+    return re.sub(r"\$\{([a-zA-Z0-9_.]+)\}", substitute, data)
 
 
 def _create_document_error_context(

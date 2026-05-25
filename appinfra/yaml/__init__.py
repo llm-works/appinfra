@@ -83,11 +83,14 @@ def _apply_section_filter(
     section_path: str,
     include_path: Path,
     track_sources: bool,
+    env_overrides: dict[str, str] | None = None,
 ) -> tuple[Any, dict[str, Path | None]]:
     """Extract section from data and filter source map if applicable."""
     if not section_path or data is None:
         return data, source_map
-    data = _extract_section_data(data, section_path, str(include_path))
+    data = _extract_section_data(
+        data, section_path, str(include_path), env_overrides=env_overrides
+    )
     if track_sources:
         source_map = _filter_source_map_for_section(source_map, section_path)
     return data, source_map
@@ -125,6 +128,7 @@ def _load_document_include(
     track_sources: bool,
     project_root: Path | None,
     max_include_depth: int,
+    env_overrides: dict[str, str] | None = None,
     line: int | None = None,
     optional: bool = False,
 ) -> tuple[Any, dict[str, Path | None]]:
@@ -151,9 +155,10 @@ def _load_document_include(
         track_sources,
         project_root,
         max_include_depth,
+        env_overrides,
     )
     return _apply_section_filter(
-        data, source_map, section_path, include_path, track_sources
+        data, source_map, section_path, include_path, track_sources, env_overrides
     )
 
 
@@ -164,6 +169,7 @@ def _load_include_file(
     track_sources: bool,
     project_root: Path | None,
     max_include_depth: int,
+    env_overrides: dict[str, str] | None = None,
 ) -> tuple[Any, dict[str, Path | None]]:
     """
     Load an included YAML file.
@@ -175,6 +181,9 @@ def _load_include_file(
         track_sources: If True, track source files
         project_root: Optional project root for security validation
         max_include_depth: Maximum allowed include depth
+        env_overrides: Optional explicit name→value map forwarded to the
+            recursive load() call so include-time substitution stays aware
+            of the caller's env overrides.
 
     Returns:
         Tuple of (data, source_map)
@@ -188,6 +197,7 @@ def _load_include_file(
             track_sources=track_sources,
             project_root=project_root,
             max_include_depth=max_include_depth,
+            env_overrides=env_overrides,
             _include_chain=new_chain,
         )
 
@@ -213,6 +223,7 @@ def _merge_document_includes(
     track_sources: bool,
     project_root: Path | None,
     max_include_depth: int,
+    env_overrides: dict[str, str] | None = None,
 ) -> tuple[dict[str, Any] | None, dict[str, Path | None]]:
     """Load and merge all document-level includes."""
     merged_data: dict[str, Any] | None = None
@@ -227,6 +238,7 @@ def _merge_document_includes(
             track_sources,
             project_root,
             max_include_depth,
+            env_overrides=env_overrides,
             line=line_num,
             optional=is_optional,
         )
@@ -251,6 +263,7 @@ def _parse_yaml_content(
     track_sources: bool,
     project_root: Path | None,
     max_include_depth: int,
+    env_overrides: dict[str, str] | None = None,
 ) -> tuple[Any, dict[str, Path | None]]:
     """
     Parse YAML content using the Loader.
@@ -263,6 +276,8 @@ def _parse_yaml_content(
         track_sources: If True, track source files
         project_root: Optional project root for security validation
         max_include_depth: Maximum allowed include depth
+        env_overrides: Optional explicit name→value map for include-time
+            ${var} substitution (forwarded to Loader).
 
     Returns:
         Tuple of (data, source_map)
@@ -275,6 +290,7 @@ def _parse_yaml_content(
         track_sources=track_sources,
         project_root=project_root.resolve() if project_root else None,
         max_include_depth=max_include_depth,
+        env_overrides=env_overrides,
     )
     try:
         data = loader.get_single_data()
@@ -335,6 +351,7 @@ def load(
     track_sources: bool = False,
     project_root: Path | None = None,
     max_include_depth: int = 10,
+    env_overrides: dict[str, str] | None = None,
     _include_chain: set[Path] | None = None,
 ) -> Any | tuple[Any, dict[str, Path | None]]:
     """
@@ -351,6 +368,10 @@ def load(
         track_sources: If True, return (data, source_map) tuple
         project_root: Restrict includes to this directory
         max_include_depth: Max nested include depth (default: 10)
+        env_overrides: Optional explicit name→value map applied during
+            include-time `${var}` substitution. Callers that want env-aware
+            substitution (e.g. Config) pass an explicit map; standalone callers
+            leave this None and get raw YAML values only.
     """
     include_chain = _init_include_chain(current_file, _include_chain)
     content = stream.read() if hasattr(stream, "read") else str(stream)
@@ -365,6 +386,7 @@ def load(
         track_sources,
         project_root,
         max_include_depth,
+        env_overrides,
     )
     main_data, main_source_map = _parse_yaml_content(
         remaining_content,
@@ -374,6 +396,7 @@ def load(
         track_sources,
         project_root,
         max_include_depth,
+        env_overrides,
     )
     final_data, final_source_map = _merge_data_and_sources(
         merged_data, main_data, merged_source_map, main_source_map
