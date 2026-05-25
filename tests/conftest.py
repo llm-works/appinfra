@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from tests._pg_probe import (
+from tests.helpers.pg.probe import (
     PG_SKIP_REASON,
     PG_STATUS_KEY,
     REQUIRE_PG_MARKER,
@@ -38,29 +38,15 @@ pytest_plugins = [
 # =============================================================================
 
 
-_MARKERS = [
-    ("unit", "Unit tests (fast, isolated, no external dependencies)"),
-    ("integration", "Integration tests (may use DB, network, filesystem)"),
-    ("performance", "Performance/benchmark tests"),
-    ("security", "Security-focused tests (injection, validation, etc.)"),
-    ("e2e", "End-to-end tests (full system integration)"),
-    ("slow", "Tests that take >1 second to run"),
-    ("asyncio", "Mark test as an async test (requires async runner)"),
-    (
-        REQUIRE_PG_MARKER,
-        "Test requires a running PostgreSQL server "
-        "(skipped with a single banner if unavailable)",
-    ),
-]
-
-
 def pytest_configure(config):
-    """Register custom markers and probe PG availability once per session."""
-    for name, desc in _MARKERS:
-        config.addinivalue_line("markers", f"{name}: {desc}")
+    """Probe PG availability once per session.
 
-    # One-shot PG reachability probe. Stashed so pytest_collection_modifyitems,
-    # the pg_available fixture, and pytest_terminal_summary all read the same result.
+    Custom markers are registered declaratively in pyproject.toml under
+    [tool.pytest.ini_options].markers. The `asyncio` marker is registered
+    by the pytest-asyncio plugin itself.
+    """
+    # One-shot PG reachability probe. Stashed so pytest_collection_modifyitems
+    # and the pg_available fixture read the same result.
     host, port = resolve_pgserver_endpoint()
     config.stash[PG_STATUS_KEY] = {
         "host": host,

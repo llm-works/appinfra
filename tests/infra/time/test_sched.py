@@ -338,7 +338,8 @@ class TestSchedSetup:
         assert sched.next_t is not None
         assert sched.next_t > time.time()
 
-    def test_setup_daily_advances_when_time_passed(self, mock_logger):
+    @patch.object(Sched, "_log_setup")
+    def test_setup_daily_advances_when_time_passed(self, _log_setup, mock_logger):
         """Cover _setup_daily branch where the scheduled time has already passed today."""
         sched = Sched(mock_logger, Period.DAILY, "08:00")
         # Force "now" to be after 08:00 so the +1 day branch fires.
@@ -347,8 +348,16 @@ class TestSchedSetup:
         assert sched.next_t > now.timestamp()
         assert sched.next_t >= (now + datetime.timedelta(hours=8)).timestamp()
 
-    def test_setup_weekly_advances_when_same_weekday_time_passed(self, mock_logger):
-        """Cover _setup_weekly branch: same target weekday but time has already passed."""
+    @patch.object(Sched, "_log_setup")
+    def test_setup_weekly_advances_when_same_weekday_time_passed(
+        self, _log_setup, mock_logger
+    ):
+        """Cover _setup_weekly: when today is the target weekday, schedule next week.
+
+        Hits the `days_ahead <= 0` branch (sched.py:359), not the later same-day
+        check at sched.py:368 — that line is effectively unreachable because the
+        +7 above always pushes target_time a full week out.
+        """
         # Monday = 0. Use a Monday afternoon, schedule for Monday at 08:00.
         sched = Sched(mock_logger, Period.WEEKLY, "08:00", weekday=0)
         monday_afternoon = datetime.datetime(2026, 5, 25, 14, 0, 0)  # Monday
@@ -358,7 +367,8 @@ class TestSchedSetup:
         delta = sched.next_t - monday_afternoon.timestamp()
         assert delta > 6 * SECONDS_PER_DAY  # at least 6 full days ahead
 
-    def test_setup_minutely_advances_when_time_passed(self, mock_logger):
+    @patch.object(Sched, "_log_setup")
+    def test_setup_minutely_advances_when_time_passed(self, _log_setup, mock_logger):
         """Cover _setup_minutely branch where current second is past the target second."""
         sched = Sched(mock_logger, Period.MINUTELY, "5")
         # Pick a "now" whose second component is > 5 to trigger the +1 minute branch.

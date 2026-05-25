@@ -568,158 +568,177 @@ class TestPGExtensionValidation:
         pg._engine.connect.assert_not_called()
 
 
-def _make_mocked_pg(mock_logger_factory, cfg=None):
-    """Construct a PG with init dependencies patched out and managers stubbed."""
-    mock_logger = Mock()
-    mock_logger_factory.derive.return_value = mock_logger
-    pg = PG(mock_logger, cfg or {"url": "postgresql://localhost/testdb"})
-    pg._engine = Mock()
-    pg._connection_mgr = Mock()
-    pg._session_mgr = Mock()
-    pg._reconnect_strategy = Mock()
-    pg._schema_mgr = None
-    return pg
+@pytest.fixture
+def mocked_pg():
+    """
+    Build a PG with init dependencies patched out and managers stubbed.
+
+    Yields the configured PG and unwinds the four patches when the test ends.
+    Tests can override the cfg by calling the inner factory; the default cfg
+    covers the common case.
+    """
+    with (
+        patch("appinfra.db.pg.pg.LoggerFactory") as lf,
+        patch.object(PG, "_create_managers"),
+        patch.object(PG, "_initialize_subsystems"),
+        patch.object(PG, "_create_engine_and_session"),
+    ):
+
+        def _build(cfg=None):
+            mock_logger = Mock()
+            lf.derive.return_value = mock_logger
+            pg = PG(mock_logger, cfg or {"url": "postgresql://localhost/testdb"})
+            pg._engine = Mock()
+            pg._connection_mgr = Mock()
+            pg._session_mgr = Mock()
+            pg._reconnect_strategy = Mock()
+            pg._schema_mgr = None
+            return pg
+
+        # Default-built instance; tests needing a custom cfg call _build(cfg=...)
+        pg = _build()
+        pg.build = _build  # type: ignore[attr-defined]
+        yield pg
 
 
 @pytest.mark.unit
 class TestPGPropertiesAndDelegations:
     """Cover trivial property accessors and manager delegations."""
 
-    @patch("appinfra.db.pg.pg.LoggerFactory")
-    @patch.object(PG, "_create_managers")
-    @patch.object(PG, "_initialize_subsystems")
-    @patch.object(PG, "_create_engine_and_session")
-    def test_cfg_property_returns_stored_config(self, _e, _s, _m, lf):
-        pg = _make_mocked_pg(lf, {"url": "postgresql://localhost/db", "extra": 1})
+    def test_cfg_property_returns_stored_config(self, mocked_pg):
+        pg = mocked_pg.build({"url": "postgresql://localhost/db", "extra": 1})
         assert pg.cfg is pg._cfg
 
-    @patch("appinfra.db.pg.pg.LoggerFactory")
-    @patch.object(PG, "_create_managers")
-    @patch.object(PG, "_initialize_subsystems")
-    @patch.object(PG, "_create_engine_and_session")
-    def test_url_property_stringifies_engine_url(self, _e, _s, _m, lf):
-        pg = _make_mocked_pg(lf)
-        pg._engine.url = "postgresql://localhost/db"
-        assert pg.url == "postgresql://localhost/db"
+    def test_url_property_stringifies_engine_url(self, mocked_pg):
+        # Use a non-string object whose str() is well-defined, so we actually
+        # verify the property calls str() on engine.url rather than passing it
+        # through identity-style.
+        url_obj = Mock()
+        url_obj.__str__ = Mock(return_value="postgresql://localhost/db")
+        mocked_pg._engine.url = url_obj
+        assert mocked_pg.url == "postgresql://localhost/db"
+        url_obj.__str__.assert_called_once()
 
-    @patch("appinfra.db.pg.pg.LoggerFactory")
-    @patch.object(PG, "_create_managers")
-    @patch.object(PG, "_initialize_subsystems")
-    @patch.object(PG, "_create_engine_and_session")
-    def test_engine_property_returns_underlying_engine(self, _e, _s, _m, lf):
-        pg = _make_mocked_pg(lf)
-        assert pg.engine is pg._engine
+    def test_engine_property_returns_underlying_engine(self, mocked_pg):
+        assert mocked_pg.engine is mocked_pg._engine
 
-    @patch("appinfra.db.pg.pg.LoggerFactory")
-    @patch.object(PG, "_create_managers")
-    @patch.object(PG, "_initialize_subsystems")
-    @patch.object(PG, "_create_engine_and_session")
-    def test_schema_property_none_without_schema_mgr(self, _e, _s, _m, lf):
-        pg = _make_mocked_pg(lf)
-        assert pg.schema is None
+    def test_schema_property_none_without_schema_mgr(self, mocked_pg):
+        assert mocked_pg.schema is None
 
-    @patch("appinfra.db.pg.pg.LoggerFactory")
-    @patch.object(PG, "_create_managers")
-    @patch.object(PG, "_initialize_subsystems")
-    @patch.object(PG, "_create_engine_and_session")
-    def test_schema_property_returns_schema_when_mgr_present(self, _e, _s, _m, lf):
-        pg = _make_mocked_pg(lf)
-        pg._schema_mgr = Mock(schema="my_schema")
-        assert pg.schema == "my_schema"
+    def test_schema_property_returns_schema_when_mgr_present(self, mocked_pg):
+        mocked_pg._schema_mgr = Mock(schema="my_schema")
+        assert mocked_pg.schema == "my_schema"
 
-    @patch("appinfra.db.pg.pg.LoggerFactory")
-    @patch.object(PG, "_create_managers")
-    @patch.object(PG, "_initialize_subsystems")
-    @patch.object(PG, "_create_engine_and_session")
-    def test_create_schema_invokes_mgr(self, _e, _s, _m, lf):
-        pg = _make_mocked_pg(lf)
-        pg._schema_mgr = Mock()
-        pg.create_schema()
-        pg._schema_mgr.create_schema.assert_called_once()
+    def test_create_schema_invokes_mgr(self, mocked_pg):
+        mocked_pg._schema_mgr = Mock()
+        mocked_pg.create_schema()
+        mocked_pg._schema_mgr.create_schema.assert_called_once()
 
-    @patch("appinfra.db.pg.pg.LoggerFactory")
-    @patch.object(PG, "_create_managers")
-    @patch.object(PG, "_initialize_subsystems")
-    @patch.object(PG, "_create_engine_and_session")
-    def test_create_schema_noop_without_mgr(self, _e, _s, _m, lf):
-        pg = _make_mocked_pg(lf)
-        pg.create_schema()  # Should not raise
+    def test_create_schema_noop_without_mgr(self, mocked_pg):
+        mocked_pg.create_schema()  # Should not raise
 
-    @patch("appinfra.db.pg.pg.LoggerFactory")
-    @patch.object(PG, "_create_managers")
-    @patch.object(PG, "_initialize_subsystems")
-    @patch.object(PG, "_create_engine_and_session")
-    def test_connect_delegates_to_connection_mgr(self, _e, _s, _m, lf):
-        pg = _make_mocked_pg(lf)
+    def test_connect_delegates_to_connection_mgr(self, mocked_pg):
         sentinel = Mock()
-        pg._connection_mgr.connect.return_value = sentinel
-        assert pg.connect() is sentinel
-        pg._connection_mgr.connect.assert_called_once()
+        mocked_pg._connection_mgr.connect.return_value = sentinel
+        assert mocked_pg.connect() is sentinel
+        mocked_pg._connection_mgr.connect.assert_called_once()
 
-    @patch("appinfra.db.pg.pg.LoggerFactory")
-    @patch.object(PG, "_create_managers")
-    @patch.object(PG, "_initialize_subsystems")
-    @patch.object(PG, "_create_engine_and_session")
-    def test_create_session_syncs_health_then_returns_session(self, _e, _s, _m, lf):
-        pg = _make_mocked_pg(lf)
-        pg._reconnect_strategy.is_healthy.return_value = True
+    def test_create_session_syncs_health_then_returns_session(self, mocked_pg):
+        mocked_pg._reconnect_strategy.is_healthy.return_value = True
         sentinel = Mock()
-        pg._session_mgr.session.return_value = sentinel
-        assert pg._create_session() is sentinel
-        pg._session_mgr.set_connection_health.assert_called_once_with(True)
+        mocked_pg._session_mgr.session.return_value = sentinel
+        assert mocked_pg._create_session() is sentinel
+        mocked_pg._session_mgr.set_connection_health.assert_called_once_with(True)
 
-    @patch("appinfra.db.pg.pg.LoggerFactory")
-    @patch.object(PG, "_create_managers")
-    @patch.object(PG, "_initialize_subsystems")
-    @patch.object(PG, "_create_engine_and_session")
-    def test_health_check_delegates(self, _e, _s, _m, lf):
-        pg = _make_mocked_pg(lf)
-        pg._connection_mgr.health_check.return_value = {"ok": True}
-        assert pg.health_check() == {"ok": True}
+    def test_health_check_delegates(self, mocked_pg):
+        mocked_pg._connection_mgr.health_check.return_value = {"ok": True}
+        assert mocked_pg.health_check() == {"ok": True}
 
-    @patch("appinfra.db.pg.pg.LoggerFactory")
-    @patch.object(PG, "_create_managers")
-    @patch.object(PG, "_initialize_subsystems")
-    @patch.object(PG, "_create_engine_and_session")
-    def test_get_pool_status_delegates(self, _e, _s, _m, lf):
-        pg = _make_mocked_pg(lf)
-        pg._connection_mgr.get_pool_status.return_value = {"size": 5}
-        assert pg.get_pool_status() == {"size": 5}
+    def test_get_pool_status_delegates(self, mocked_pg):
+        mocked_pg._connection_mgr.get_pool_status.return_value = {"size": 5}
+        assert mocked_pg.get_pool_status() == {"size": 5}
 
-    @patch("appinfra.db.pg.pg.LoggerFactory")
-    @patch.object(PG, "_create_managers")
-    @patch.object(PG, "_initialize_subsystems")
-    @patch.object(PG, "_create_engine_and_session")
-    def test_reconnect_syncs_health_and_returns_result(self, _e, _s, _m, lf):
-        pg = _make_mocked_pg(lf)
-        pg._reconnect_strategy.reconnect.return_value = True
-        pg._reconnect_strategy.is_healthy.return_value = True
-        assert pg.reconnect(max_retries=3, initial_delay=0.1) is True
-        pg._reconnect_strategy.reconnect.assert_called_once_with(3, 0.1)
-        pg._session_mgr.set_connection_health.assert_called_once_with(True)
+    def test_reconnect_syncs_health_and_returns_result(self, mocked_pg):
+        mocked_pg._reconnect_strategy.reconnect.return_value = True
+        mocked_pg._reconnect_strategy.is_healthy.return_value = True
+        assert mocked_pg.reconnect(max_retries=3, initial_delay=0.1) is True
+        mocked_pg._reconnect_strategy.reconnect.assert_called_once_with(3, 0.1)
+        mocked_pg._session_mgr.set_connection_health.assert_called_once_with(True)
 
-    @patch("appinfra.db.pg.pg.LoggerFactory")
-    @patch.object(PG, "_create_managers")
-    @patch.object(PG, "_initialize_subsystems")
-    @patch.object(PG, "_create_engine_and_session")
-    def test_setup_query_logging_wires_callbacks_when_level_set(self, _e, _s, _m, lf):
-        pg = _make_mocked_pg(lf)
-        pg._query_logger = Mock()
-        pg._lg_extra = {"k": "v"}
-        pg._setup_query_logging(query_lg_level="DEBUG")
-        pg._query_logger.setup_callbacks.assert_called_once_with({"k": "v"})
+    def test_setup_query_logging_wires_callbacks_when_level_set(self, mocked_pg):
+        mocked_pg._query_logger = Mock()
+        mocked_pg._lg_extra = {"k": "v"}
+        mocked_pg._setup_query_logging(query_lg_level="DEBUG")
+        mocked_pg._query_logger.setup_callbacks.assert_called_once_with({"k": "v"})
 
-    @patch("appinfra.db.pg.pg.LoggerFactory")
-    @patch.object(PG, "_create_managers")
-    @patch.object(PG, "_initialize_subsystems")
-    @patch.object(PG, "_create_engine_and_session")
     @patch("appinfra.db.pg.schema.SchemaManager")
     def test_initialize_schema_isolation_builds_schema_mgr(
-        self, mock_schema_mgr_cls, _e, _s, _m, lf
+        self, mock_schema_mgr_cls, mocked_pg
     ):
-        pg = _make_mocked_pg(lf)
         cfg = SimpleNamespace(isolation_schema=None, schema="my_schema")
-        pg._initialize_schema_isolation(schema=None, cfg=cfg)
+        mocked_pg._initialize_schema_isolation(schema=None, cfg=cfg)
         mock_schema_mgr_cls.assert_called_once()
-        assert pg._schema_mgr is mock_schema_mgr_cls.return_value
-        pg._schema_mgr.setup_listeners.assert_called_once()
+        assert mocked_pg._schema_mgr is mock_schema_mgr_cls.return_value
+        mocked_pg._schema_mgr.setup_listeners.assert_called_once()
+
+
+@pytest.mark.unit
+class TestDisposeROEngine:
+    """Cover the _dispose_ro_engine helper used by the pg_connection_ro fixture.
+
+    The disposal block was originally added to prevent the SQLAlchemy engine from
+    hanging when RO event listeners stay registered. These tests pin the
+    remove/dispose call sequence so future refactors can't silently drop it.
+    """
+
+    def _make_pg(
+        self, *, with_listeners=("readonly", "after_execute", "before_cursor")
+    ):
+        pg = Mock(spec=["_engine"])
+        pg._engine = Mock()
+        for name in with_listeners:
+            setattr(pg, f"_{name}_listener", Mock())
+        return pg
+
+    def test_noop_when_no_engine_attr(self):
+        from tests.fixtures.pg_integration import _dispose_ro_engine
+
+        pg = Mock(spec=[])  # no _engine attribute at all
+        _dispose_ro_engine(pg)  # should not raise
+
+    def test_noop_when_engine_is_none(self):
+        from tests.fixtures.pg_integration import _dispose_ro_engine
+
+        pg = Mock(spec=["_engine"])
+        pg._engine = None
+        _dispose_ro_engine(pg)  # should not raise
+
+    @patch("sqlalchemy.event")
+    def test_removes_all_listeners_then_disposes(self, mock_event):
+        from tests.fixtures.pg_integration import _dispose_ro_engine
+
+        pg = self._make_pg()
+        _dispose_ro_engine(pg)
+
+        mock_event.remove.assert_any_call(pg._engine, "begin", pg._readonly_listener)
+        mock_event.remove.assert_any_call(
+            pg._engine, "after_execute", pg._after_execute_listener
+        )
+        mock_event.remove.assert_any_call(
+            pg._engine, "before_cursor_execute", pg._before_cursor_listener
+        )
+        assert mock_event.remove.call_count == 3
+        pg._engine.dispose.assert_called_once()
+
+    @patch("sqlalchemy.event")
+    def test_skips_missing_listeners_but_still_disposes(self, mock_event):
+        from tests.fixtures.pg_integration import _dispose_ro_engine
+
+        # Only the readonly listener is present.
+        pg = self._make_pg(with_listeners=("readonly",))
+        _dispose_ro_engine(pg)
+
+        mock_event.remove.assert_called_once_with(
+            pg._engine, "begin", pg._readonly_listener
+        )
+        pg._engine.dispose.assert_called_once()

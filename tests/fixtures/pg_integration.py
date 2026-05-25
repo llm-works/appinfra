@@ -40,7 +40,7 @@ from appinfra.config import Config
 from appinfra.db.pg.pg import PG
 from appinfra.log.config import LogConfig
 from appinfra.log.factory import LoggerFactory
-from tests._pg_probe import PG_SKIP_REASON, PG_STATUS_KEY
+from tests.helpers.pg.probe import PG_SKIP_REASON, PG_STATUS_KEY
 
 # =============================================================================
 # Configuration and Connection Fixtures
@@ -130,17 +130,18 @@ def pg_connection(pg_config, pg_logger, pg_available):
     """
     if not pg_available:
         pytest.skip(PG_SKIP_REASON)
+
+    # Narrow try/except to connection setup only: an exception here means the
+    # DB isn't usable → skip. Letting `yield` run inside this except block
+    # would silently convert genuine test failures into skips.
     try:
         pg = PG(pg_logger, pg_config)
-
-        # Test connection
         conn = pg.connect()
         conn.close()
-
-        yield pg
-
     except Exception:
         pytest.skip(PG_SKIP_REASON)
+
+    yield pg
 
 
 def _do_cleanup_stale_tables(pg_connection):
@@ -256,15 +257,21 @@ def pg_connection_ro(pg_config_ro, pg_logger, pg_available):
     """
     if not pg_available:
         pytest.skip(PG_SKIP_REASON)
+
+    # Narrow try/except to connection setup only: an exception here means the
+    # readonly DB isn't usable → skip. Letting `yield` run inside this except
+    # block would silently convert genuine test failures into skips.
     try:
         pg = PG(pg_logger, pg_config_ro)
-        # Test connection
         conn = pg.connect()
         conn.close()
-        yield pg
-        _dispose_ro_engine(pg)
     except Exception:
         pytest.skip(PG_SKIP_REASON)
+
+    try:
+        yield pg
+    finally:
+        _dispose_ro_engine(pg)
 
 
 def _dispose_ro_engine(pg):

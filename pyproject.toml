@@ -159,7 +159,14 @@ filterwarnings = [
     "ignore:'crypt' is deprecated:DeprecationWarning:passlib",
 ]
 markers = [
+    "unit: Unit tests (fast, isolated, no external dependencies)",
+    "integration: Integration tests (may use DB, network, filesystem)",
+    "performance: Performance/benchmark tests",
+    "security: Security-focused tests (injection, validation, etc.)",
+    "e2e: End-to-end tests (full system integration)",
+    "slow: Tests that take >1 second to run",
     "property: property-based tests using Hypothesis",
+    "require_pg: Test requires a running PostgreSQL server (skipped with a single banner if unavailable)",
 ]
 
 [tool.coverage.run]
