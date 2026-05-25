@@ -31,6 +31,14 @@ if [ ! -f "$DEFAULT_PATH" ]; then
     exit 1
 fi
 
+# Bootstrap-safe: if PyYAML isn't installed yet (e.g. fresh venv before `make setup`),
+# emit an empty path so Make can finish parsing and run setup. Docs-specific targets
+# will fail until deps are installed, but setup itself completes.
+if ! python3 -c "import yaml" 2>/dev/null; then
+    echo ""
+    exit 0
+fi
+
 # Check if 'docs' section exists and extract it
 python3 -c "
 import yaml
