@@ -1561,15 +1561,15 @@ class TestEnvOverrideSubstitution:
         config = Config(str(config_file))
         assert config.dbs.unittest.url == "postgresql://127.0.0.1:7432/db"
 
-    def test_env_overrides_disabled_leaks_into_include_substitution(
+    def test_env_overrides_disabled_does_not_reach_include_substitution(
         self, tmp_path, clean_env
     ):
-        """Documented coupling: when `!include` triggers substitution, env
-        overrides apply *even if* Config(enable_env_overrides=False), because
-        the YAML loader has no knowledge of Config's flag. The INFRA_ prefix
-        is shared between the loader and Config defaults — see the Note in
-        Config.__init__'s docstring. This test pins that behavior so any
-        future change is intentional rather than accidental.
+        """`enable_env_overrides=False` cleanly suppresses env at BOTH the
+        leaf-key override pass and the include-time `${var}` substitution.
+
+        Config achieves this by not passing an `env_overrides` dict to
+        yaml.load() — the YAML loader is pure local-context substitution
+        unless the caller explicitly opts in.
         """
         included = tmp_path / "pg.yaml"
         included.write_text(
@@ -1585,7 +1585,5 @@ class TestEnvOverrideSubstitution:
         )
         os.environ["INFRA_PGSERVER_HOST"] = "postgres"
         config = Config(str(main), enable_env_overrides=False)
-        # Leaf-key override is suppressed (Config flag respected).
         assert config.pgserver.host == "127.0.0.1"
-        # But the include-time substitution already applied the env var.
-        assert config.dbs.unittest.url == "postgres://postgres/db"
+        assert config.dbs.unittest.url == "postgres://127.0.0.1/db"

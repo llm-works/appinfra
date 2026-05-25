@@ -101,6 +101,7 @@ class Loader(yaml.SafeLoader):
         track_sources: bool = False,
         project_root: Path | None = None,
         max_include_depth: int = 10,
+        env_overrides: dict[str, str] | None = None,
     ) -> None:
         """
         Initialize the loader with include support.
@@ -113,6 +114,10 @@ class Loader(yaml.SafeLoader):
             track_sources: If True, track source file for each value (for path resolution)
             project_root: Optional project root path to restrict includes (prevents path traversal)
             max_include_depth: Maximum allowed depth for nested includes (default: 10)
+            env_overrides: Optional explicit name→value map applied during
+                include-time `${var}` substitution. Used by Config to inject
+                its INFRA_* overrides so URL strings pick up env values.
+                Standalone callers leave this None.
         """
         super().__init__(stream)
         self.current_file = current_file
@@ -121,6 +126,7 @@ class Loader(yaml.SafeLoader):
         self.track_sources = track_sources
         self.project_root = project_root.resolve() if project_root else None
         self.max_include_depth = max_include_depth
+        self.env_overrides = env_overrides
         self.source_map: dict[str, Path | None] = {}
         self._path_stack: list = []  # Stack to track current config path during construction
         self._pending_include_maps: dict[
@@ -430,6 +436,7 @@ class Loader(yaml.SafeLoader):
                 track_sources=self.track_sources,
                 project_root=ctx.project_root,
                 max_include_depth=ctx.max_include_depth,
+                env_overrides=self.env_overrides,
             )
             try:
                 included_data = included_loader.get_single_data()
@@ -458,7 +465,12 @@ class Loader(yaml.SafeLoader):
         Raises:
             yaml.YAMLError: If section path is invalid or not found
         """
-        return _extract_section_data(data, section_path, ctx.format_location())
+        return _extract_section_data(
+            data,
+            section_path,
+            ctx.format_location(),
+            env_overrides=self.env_overrides,
+        )
 
     def _create_error_context(self, node: Any) -> ErrorContext:
         """Create an ErrorContext from the current loader state and node position."""

@@ -503,41 +503,43 @@ class TestConfigSectionIncludeWorkflow:
     def test_section_include_resolves_sibling_variables(self):
         """Test that !include with section resolves ${sibling.key} variables.
 
-        This is the main use case from the ticket: when including a section from
-        a file, variables referencing other sections in that file should resolve.
+        Section names use a generic `dbserver`/`dbs` rather than `pgserver` so
+        the test stays independent of `INFRA_PGSERVER_*` env vars that CI sets
+        — Config now (correctly) propagates env overrides into include-time
+        ${var} substitution.
 
         Example:
-            # pg.yaml
-            pgserver:
+            # db.yaml
+            dbserver:
               port: 7632
-              user: postgres
+              user: appuser
             dbs:
               main:
-                url: "postgresql://${pgserver.user}:@127.0.0.1:${pgserver.port}/learn"
+                url: "postgresql://${dbserver.user}:@127.0.0.1:${dbserver.port}/learn"
 
             # app.yaml
             learn:
-              db: !include './pg.yaml#dbs.main'
+              db: !include './db.yaml#dbs.main'
 
-        Expected: db.url = "postgresql://postgres:@127.0.0.1:7632/learn"
+        Expected: db.url = "postgresql://appuser:@127.0.0.1:7632/learn"
         """
         with tempfile.TemporaryDirectory() as tmpdir:
             etc_dir = Path(tmpdir) / "etc"
             etc_dir.mkdir()
 
-            # Create pg.yaml with sibling sections
-            (etc_dir / "pg.yaml").write_text(
-                "pgserver:\n"
+            # Create db.yaml with sibling sections
+            (etc_dir / "db.yaml").write_text(
+                "dbserver:\n"
                 "  port: 7632\n"
-                "  user: postgres\n"
+                "  user: appuser\n"
                 "dbs:\n"
                 "  main:\n"
-                '    url: "postgresql://${pgserver.user}:@127.0.0.1:${pgserver.port}/learn"\n'
+                '    url: "postgresql://${dbserver.user}:@127.0.0.1:${dbserver.port}/learn"\n'
             )
 
             # Create main config that includes a section
             (etc_dir / "app.yaml").write_text(
-                "learn:\n  db: !include './pg.yaml#dbs.main'\nlogging:\n  level: info\n"
+                "learn:\n  db: !include './db.yaml#dbs.main'\nlogging:\n  level: info\n"
             )
 
             app = AppBuilder("test-app").with_config_file("app.yaml").build()
@@ -549,7 +551,7 @@ class TestConfigSectionIncludeWorkflow:
 
             # Verify sibling variables were resolved
             assert (
-                app.config.learn.db.url == "postgresql://postgres:@127.0.0.1:7632/learn"
+                app.config.learn.db.url == "postgresql://appuser:@127.0.0.1:7632/learn"
             )
 
     def test_section_include_with_nested_structure(self):

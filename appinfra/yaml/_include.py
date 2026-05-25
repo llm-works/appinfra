@@ -11,7 +11,6 @@ All functions in this module are internal implementation details (prefixed with 
 and should not be imported directly by external code.
 """
 
-import os
 import re
 from pathlib import Path
 from typing import Any
@@ -20,13 +19,6 @@ import yaml  # type: ignore[import-untyped]
 
 from ._utils import _file_exists
 from .types import DOCUMENT_INCLUDE_PATTERN, ErrorContext
-
-# Env-var prefix used by Config.__init__'s default (env_prefix="INFRA_").
-# `_resolve_variables_in_data` checks env vars with this prefix first so that
-# include-time `${var}` substitution stays consistent with Config's post-load
-# env overrides — otherwise URL strings get baked in with raw YAML values
-# before env overrides can apply. See appinfra/config/config.py.
-_ENV_PREFIX = "INFRA_"
 
 
 def _preprocess_document_includes(
@@ -222,6 +214,7 @@ def _extract_section_data(
     section_path: str,
     location: str,
     resolve_variables: bool = True,
+    env_overrides: dict[str, str] | None = None,
 ) -> Any:
     """
     Extract a specific section from data using dot-notation path.
@@ -234,6 +227,9 @@ def _extract_section_data(
         section_path: Dot-separated path (e.g., "server.http")
         location: Human-readable location for error messages (file path or context)
         resolve_variables: If True, resolve ${var} references before extraction
+        env_overrides: Optional explicit name→value map that takes precedence
+            over the source file's context during ${var} substitution. Used by
+            Config to propagate INFRA_* overrides into include-time substitution.
 
     Returns:
         Data at the specified section path
@@ -247,7 +243,9 @@ def _extract_section_data(
     # Resolve variables within the full file context BEFORE extraction
     # This allows ${sibling.key} references to resolve before the section is extracted
     if resolve_variables and isinstance(data, dict):
-        data = _resolve_variables_in_data(data, data, pass_through_undefined=True)
+        data = _resolve_variables_in_data(
+            data, data, pass_through_undefined=True, env_overrides=env_overrides
+        )
 
     current = data
     parts = section_path.split(".")
@@ -319,16 +317,17 @@ def _resolve_variables_in_data(
     data: Any,
     context: dict[str, Any],
     pass_through_undefined: bool = True,
+    env_overrides: dict[str, str] | None = None,
 ) -> Any:
     """
     Resolve ${var} patterns in data using context dict.
 
     Lookup order for each ${var}:
-      1. INFRA_<UPPER_PATH> environment variable (hyphens/dots → underscores).
-         Matches Config's env-override convention so include-time substitution
-         stays consistent with Config's post-load env overrides — without this,
-         URL strings like "postgres://${pgserver.host}/..." get baked in with
-         the raw YAML value before env overrides can apply.
+      1. `env_overrides[var_name]` if provided. This is the explicit channel
+         Config uses to inject its INFRA_* env-override values so include-time
+         substitution stays aligned with Config's post-load env overrides.
+         Standalone `yaml.load()` callers pass None → no env behavior, raw
+         YAML values win.
       2. Context dict (the YAML file's own data).
       3. Pass-through (keep `${var}` literal) or KeyError, per
          `pass_through_undefined`.
@@ -338,24 +337,24 @@ def _resolve_variables_in_data(
     """
     if isinstance(data, dict):
         return {
-            k: _resolve_variables_in_data(v, context, pass_through_undefined)
+            k: _resolve_variables_in_data(
+                v, context, pass_through_undefined, env_overrides
+            )
             for k, v in data.items()
         }
     elif isinstance(data, list):
         return [
-            _resolve_variables_in_data(item, context, pass_through_undefined)
+            _resolve_variables_in_data(
+                item, context, pass_through_undefined, env_overrides
+            )
             for item in data
         ]
     elif isinstance(data, str):
 
         def substitute(match: re.Match[str]) -> str:
             var_name = match.group(1)
-            # Env override first — keeps include-time substitution aligned with
-            # Config's post-load env overrides (see Config._apply_env_overrides).
-            env_key = _ENV_PREFIX + var_name.replace(".", "_").replace("-", "_").upper()
-            env_value = os.environ.get(env_key)
-            if env_value is not None:
-                return env_value
+            if env_overrides is not None and var_name in env_overrides:
+                return env_overrides[var_name]
             value = _get_value_by_path(context, var_name)
             if value is _NOT_FOUND:
                 if pass_through_undefined:
