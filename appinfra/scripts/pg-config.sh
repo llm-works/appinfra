@@ -25,14 +25,6 @@ if [ ! -f "$FULL_PATH" ]; then
     exit 0
 fi
 
-# Bootstrap-safe: if PyYAML isn't installed yet (e.g. fresh venv before `make setup`),
-# emit empty defaults so Make can finish parsing and run setup. The real values will
-# resolve on the next invocation once dependencies are installed.
-if ! python3 -c "import yaml" 2>/dev/null; then
-    echo "PG_DOCKER_IMAGE:=|PG_VERSION:=|PG_PORT:=|PG_IMAGE:=|PG_REPLICA_ENABLED:=false|PG_PORT_R:=|PG_COMMAND:=postgres"
-    exit 0
-fi
-
 python3 -c "
 import yaml
 
