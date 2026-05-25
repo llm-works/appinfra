@@ -1491,3 +1491,101 @@ app:
         assert config.app.server.config.port == 8080
         assert config.app.server.config.host == "remotehost"
         assert config.app.server.config.timeout == 30
+
+
+@pytest.mark.unit
+class TestEnvOverrideSubstitution:
+    """Env overrides must reach `${var}` references inside strings.
+
+    Regression: the YAML loader's include-time substitution pre-rendered
+    `${pgserver.host}` with raw YAML values *before* Config applied env
+    overrides, so URLs like `postgres://${pgserver.host}/db` kept the
+    pre-override value even when `INFRA_PGSERVER_HOST` was set.
+    appinfra.yaml._include now checks INFRA_* env vars first.
+    """
+
+    def test_env_override_substitutes_into_url(self, tmp_path, clean_env):
+        """${var} in a URL string picks up the env-overridden value."""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text(
+            "pgserver:\n"
+            "  host: 127.0.0.1\n"
+            "  port: 7432\n"
+            "  user: postgres\n"
+            "  pass: ''\n"
+            "dbs:\n"
+            "  unittest:\n"
+            '    url: "postgresql://${pgserver.user}:${pgserver.pass}'
+            '@${pgserver.host}:${pgserver.port}/infra_test"\n'
+        )
+        os.environ["INFRA_PGSERVER_HOST"] = "postgres"
+        os.environ["INFRA_PGSERVER_PORT"] = "5432"
+        config = Config(str(config_file))
+        assert config.pgserver.host == "postgres"
+        assert config.pgserver.port == 5432
+        assert (
+            config.dbs.unittest.url == "postgresql://postgres:@postgres:5432/infra_test"
+        )
+
+    def test_env_override_substitutes_across_include(self, tmp_path, clean_env):
+        """${var} resolved at !include time also picks up env overrides."""
+        included = tmp_path / "pg.yaml"
+        included.write_text(
+            "pgserver:\n"
+            "  host: 127.0.0.1\n"
+            "  port: 7432\n"
+            "dbs:\n"
+            "  unittest:\n"
+            '    url: "postgresql://${pgserver.host}:${pgserver.port}/db"\n'
+        )
+        main = tmp_path / "infra.yaml"
+        main.write_text(
+            "pgserver: !include pg.yaml#pgserver\ndbs: !include pg.yaml#dbs\n"
+        )
+        os.environ["INFRA_PGSERVER_HOST"] = "postgres"
+        os.environ["INFRA_PGSERVER_PORT"] = "5432"
+        config = Config(str(main))
+        assert config.dbs.unittest.url == "postgresql://postgres:5432/db"
+
+    def test_no_env_override_uses_yaml_values(self, tmp_path, clean_env):
+        """Without env overrides set, substitution uses YAML values as before."""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text(
+            "pgserver:\n"
+            "  host: 127.0.0.1\n"
+            "  port: 7432\n"
+            "dbs:\n"
+            "  unittest:\n"
+            '    url: "postgresql://${pgserver.host}:${pgserver.port}/db"\n'
+        )
+        config = Config(str(config_file))
+        assert config.dbs.unittest.url == "postgresql://127.0.0.1:7432/db"
+
+    def test_env_overrides_disabled_leaks_into_include_substitution(
+        self, tmp_path, clean_env
+    ):
+        """Documented coupling: when `!include` triggers substitution, env
+        overrides apply *even if* Config(enable_env_overrides=False), because
+        the YAML loader has no knowledge of Config's flag. The INFRA_ prefix
+        is shared between the loader and Config defaults — see the Note in
+        Config.__init__'s docstring. This test pins that behavior so any
+        future change is intentional rather than accidental.
+        """
+        included = tmp_path / "pg.yaml"
+        included.write_text(
+            "pgserver:\n"
+            "  host: 127.0.0.1\n"
+            "dbs:\n"
+            "  unittest:\n"
+            '    url: "postgres://${pgserver.host}/db"\n'
+        )
+        main = tmp_path / "main.yaml"
+        main.write_text(
+            "pgserver: !include pg.yaml#pgserver\ndbs: !include pg.yaml#dbs\n"
+        )
+        os.environ["INFRA_PGSERVER_HOST"] = "postgres"
+        config = Config(str(main), enable_env_overrides=False)
+        # Leaf-key override is suppressed (Config flag respected).
+        assert config.pgserver.host == "127.0.0.1"
+        # But the include-time substitution already applied the env var.
+        assert config.dbs.unittest.url == "postgres://postgres/db"

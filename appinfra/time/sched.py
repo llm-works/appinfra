@@ -354,9 +354,11 @@ class Sched:
     def _setup_weekly(self, now: datetime.datetime) -> None:
         """Set up weekly scheduling."""
         assert self._weekday is not None  # Validated in __init__ for WEEKLY period
-        # Calculate days until target weekday
+        # Calculate days until target weekday. days_ahead == 0 means today *is*
+        # the target weekday — keep it 0 so the same-day time-check below can
+        # decide whether to fire today or push to next week.
         days_ahead = self._weekday - now.weekday()
-        if days_ahead <= 0:  # Target day is this week or next week
+        if days_ahead < 0:  # Target day was earlier this week → go to next week
             days_ahead += 7
 
         target_date = now + datetime.timedelta(days=days_ahead)

@@ -13,6 +13,7 @@ import socket
 import sys
 from pathlib import Path
 from typing import TypedDict
+from urllib.parse import urlparse
 
 import pytest
 
@@ -58,21 +59,33 @@ def resolve_pgserver_endpoint() -> tuple[str, int]:
     """
     Resolve the PG host:port the test suite will try to connect to.
 
-    Order: etc/pg.yaml `pgserver` section (with INFRA_PGSERVER_HOST/PORT env
-    overrides applied by appinfra.config.Config) → env vars only with stdlib
-    fallback if pg.yaml is missing.
+    Parses `dbs.unittest.url` from etc/infra.yaml so the probe targets the
+    exact endpoint the tests will use. This avoids divergence between
+    "probe sees pgserver.host=postgres" and "tests connect to a URL that
+    still has 127.0.0.1 baked in" if the Config substitution pipeline ever
+    drifts again.
+
+    Order:
+      1. etc/infra.yaml → parse `dbs.unittest.url` (env overrides applied by
+         appinfra.config.Config + appinfra.yaml's env-aware substitution).
+      2. INFRA_PGSERVER_HOST / INFRA_PGSERVER_PORT env vars.
+      3. Hardcoded defaults (DEFAULT_PG_HOST / DEFAULT_PG_PORT).
     """
-    pg_yaml = _find_upwards("etc/pg.yaml")
-    if pg_yaml is not None:
+    infra_yaml = _find_upwards("etc/infra.yaml")
+    if infra_yaml is not None:
         try:
-            cfg = Config(str(pg_yaml))
-            return str(cfg.get("pgserver.host")), int(cfg.get("pgserver.port"))
+            cfg = Config(str(infra_yaml))
+            url = cfg.get("dbs.unittest.url")
+            if url:
+                parsed = urlparse(str(url))
+                if parsed.hostname and parsed.port:
+                    return parsed.hostname, parsed.port
         except Exception as e:
-            # pg.yaml exists but couldn't be parsed (malformed YAML, missing
-            # pgserver.host/port keys, non-numeric port). Surface it so the
-            # silent fall-through to env defaults isn't a mystery.
+            # infra.yaml exists but couldn't be parsed (malformed YAML, missing
+            # dbs.unittest.url, unparseable URL). Surface it so the silent
+            # fall-through to env defaults isn't a mystery.
             print(
-                f"warning: failed to read {pg_yaml} for PG probe ({e!r}); "
+                f"warning: failed to read {infra_yaml} for PG probe ({e!r}); "
                 "falling back to INFRA_PGSERVER_HOST/PORT or defaults",
                 file=sys.stderr,
             )

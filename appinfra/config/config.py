@@ -158,6 +158,14 @@ class Config(DotDict):
         Note:
             Path resolution is handled explicitly via the !path YAML tag. Use !path for paths
             that should be resolved relative to the config file or for tilde (~) expansion.
+
+        Note on env_prefix:
+            The `INFRA_` prefix is also hardcoded in appinfra.yaml._include
+            (`_ENV_PREFIX`) so include-time `${var}` substitution stays
+            consistent with this class's post-load env overrides. Changing
+            `env_prefix` here will leak: leaf-key overrides take the new
+            prefix, but `${var}` substitution in URL strings keeps using
+            INFRA_. Most users should leave this at the default.
         """
         super().__init__()  # Initialize DotDict first
         self._enable_env_overrides = enable_env_overrides

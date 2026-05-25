@@ -11,6 +11,7 @@ All functions in this module are internal implementation details (prefixed with 
 and should not be imported directly by external code.
 """
 
+import os
 import re
 from pathlib import Path
 from typing import Any
@@ -19,6 +20,13 @@ import yaml  # type: ignore[import-untyped]
 
 from ._utils import _file_exists
 from .types import DOCUMENT_INCLUDE_PATTERN, ErrorContext
+
+# Env-var prefix used by Config.__init__'s default (env_prefix="INFRA_").
+# `_resolve_variables_in_data` checks env vars with this prefix first so that
+# include-time `${var}` substitution stays consistent with Config's post-load
+# env overrides — otherwise URL strings get baked in with raw YAML values
+# before env overrides can apply. See appinfra/config/config.py.
+_ENV_PREFIX = "INFRA_"
 
 
 def _preprocess_document_includes(
@@ -315,8 +323,17 @@ def _resolve_variables_in_data(
     """
     Resolve ${var} patterns in data using context dict.
 
+    Lookup order for each ${var}:
+      1. INFRA_<UPPER_PATH> environment variable (hyphens/dots → underscores).
+         Matches Config's env-override convention so include-time substitution
+         stays consistent with Config's post-load env overrides — without this,
+         URL strings like "postgres://${pgserver.host}/..." get baked in with
+         the raw YAML value before env overrides can apply.
+      2. Context dict (the YAML file's own data).
+      3. Pass-through (keep `${var}` literal) or KeyError, per
+         `pass_through_undefined`.
+
     Resolution is scoped to the context (typically the full included file).
-    Undefined variables are passed through for Config._resolve() to handle.
     Single-pass resolution (no recursive expansion) to prevent infinite loops.
     """
     if isinstance(data, dict):
@@ -333,6 +350,12 @@ def _resolve_variables_in_data(
 
         def substitute(match: re.Match[str]) -> str:
             var_name = match.group(1)
+            # Env override first — keeps include-time substitution aligned with
+            # Config's post-load env overrides (see Config._apply_env_overrides).
+            env_key = _ENV_PREFIX + var_name.replace(".", "_").replace("-", "_").upper()
+            env_value = os.environ.get(env_key)
+            if env_value is not None:
+                return env_value
             value = _get_value_by_path(context, var_name)
             if value is _NOT_FOUND:
                 if pass_through_undefined:

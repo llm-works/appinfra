@@ -345,27 +345,37 @@ class TestSchedSetup:
         # Force "now" to be after 08:00 so the +1 day branch fires.
         now = datetime.datetime(2026, 5, 25, 23, 59, 0)
         sched._setup_daily(now)
-        assert sched.next_t > now.timestamp()
-        assert sched.next_t >= (now + datetime.timedelta(hours=8)).timestamp()
+        expected = datetime.datetime(2026, 5, 26, 8, 0, 0)
+        assert sched.next_t == expected.timestamp()
 
     @patch.object(Sched, "_log_setup")
     def test_setup_weekly_advances_when_same_weekday_time_passed(
         self, _log_setup, mock_logger
     ):
-        """Cover _setup_weekly: when today is the target weekday, schedule next week.
-
-        Hits the `days_ahead <= 0` branch (sched.py:359), not the later same-day
-        check at sched.py:368 — that line is effectively unreachable because the
-        +7 above always pushes target_time a full week out.
-        """
-        # Monday = 0. Use a Monday afternoon, schedule for Monday at 08:00.
+        """Same target weekday, time already passed → fire next week."""
+        # Monday = 0. Now is Monday afternoon, schedule Monday at 08:00.
         sched = Sched(mock_logger, Period.WEEKLY, "08:00", weekday=0)
-        monday_afternoon = datetime.datetime(2026, 5, 25, 14, 0, 0)  # Monday
+        monday_afternoon = datetime.datetime(2026, 5, 25, 14, 0, 0)
         assert monday_afternoon.weekday() == 0
         sched._setup_weekly(monday_afternoon)
-        # Should be scheduled for next Monday (7 days out)
-        delta = sched.next_t - monday_afternoon.timestamp()
-        assert delta > 6 * SECONDS_PER_DAY  # at least 6 full days ahead
+        expected = datetime.datetime(2026, 6, 1, 8, 0, 0)  # next Monday 08:00
+        assert sched.next_t == expected.timestamp()
+
+    @patch.object(Sched, "_log_setup")
+    def test_setup_weekly_fires_today_when_same_weekday_time_not_passed(
+        self, _log_setup, mock_logger
+    ):
+        """Same target weekday, time still ahead → fire today (regression).
+
+        Before sched.py:359 was changed from `<= 0` to `< 0`, today's 08:00
+        on the target weekday was incorrectly skipped to next week.
+        """
+        sched = Sched(mock_logger, Period.WEEKLY, "08:00", weekday=0)
+        monday_morning = datetime.datetime(2026, 5, 25, 6, 0, 0)
+        assert monday_morning.weekday() == 0
+        sched._setup_weekly(monday_morning)
+        expected = datetime.datetime(2026, 5, 25, 8, 0, 0)  # same Monday 08:00
+        assert sched.next_t == expected.timestamp()
 
     @patch.object(Sched, "_log_setup")
     def test_setup_minutely_advances_when_time_passed(self, _log_setup, mock_logger):
@@ -374,7 +384,8 @@ class TestSchedSetup:
         # Pick a "now" whose second component is > 5 to trigger the +1 minute branch.
         now = datetime.datetime(2026, 5, 25, 12, 0, 30)
         sched._setup_minutely(now)
-        assert sched.next_t > now.timestamp()
+        expected = datetime.datetime(2026, 5, 25, 12, 1, 5)
+        assert sched.next_t == expected.timestamp()
 
     def test_log_scheduler_status_emits_debug(self, mock_logger):
         """Cover _log_scheduler_status (debug log emission)."""
