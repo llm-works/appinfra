@@ -167,46 +167,6 @@ def pytest_collection_modifyitems(config, items):
 # =============================================================================
 
 
-def _partition_pg_skips(skipped):
-    """Split skip reports into (kept, sentinel_count). report.longrepr is a
-    (file, lineno, reason) tuple for skips."""
-    kept = []
-    sentinel_count = 0
-    for report in skipped:
-        reason = ""
-        if isinstance(report.longrepr, tuple) and len(report.longrepr) == 3:
-            reason = report.longrepr[2] or ""
-        if PG_SKIP_REASON in reason:
-            sentinel_count += 1
-        else:
-            kept.append(report)
-    return kept, sentinel_count
-
-
-@pytest.hookimpl(tryfirst=True)
-def pytest_terminal_summary(terminalreporter, exitstatus, config):
-    """Collapse PG-unavailable skips into one banner. Registered tryfirst so we
-    filter terminalreporter.stats before pytest's built-in summary plugin runs."""
-    skipped = terminalreporter.stats.get("skipped", [])
-    if not skipped:
-        return
-    kept, sentinel_count = _partition_pg_skips(skipped)
-    if sentinel_count == 0:
-        return
-    terminalreporter.stats["skipped"] = kept
-    status = config.stash.get(PG_STATUS_KEY, None)
-    location = (
-        f"{status['host']}:{status['port']}" if status else "configured host:port"
-    )
-    terminalreporter.write_sep(
-        "-",
-        f"PG unavailable at {location} — {sentinel_count} tests skipped. "
-        f"Run `make pg.server.up` to enable them.",
-        yellow=True,
-        bold=True,
-    )
-
-
 def pytest_report_teststatus(report, config):
     """
     Suppress dots and progress output for cleaner test runs.

@@ -338,6 +338,41 @@ class TestSchedSetup:
         assert sched.next_t is not None
         assert sched.next_t > time.time()
 
+    def test_setup_daily_advances_when_time_passed(self, mock_logger):
+        """Cover _setup_daily branch where the scheduled time has already passed today."""
+        sched = Sched(mock_logger, Period.DAILY, "08:00")
+        # Force "now" to be after 08:00 so the +1 day branch fires.
+        now = datetime.datetime(2026, 5, 25, 23, 59, 0)
+        sched._setup_daily(now)
+        assert sched.next_t > now.timestamp()
+        assert sched.next_t >= (now + datetime.timedelta(hours=8)).timestamp()
+
+    def test_setup_weekly_advances_when_same_weekday_time_passed(self, mock_logger):
+        """Cover _setup_weekly branch: same target weekday but time has already passed."""
+        # Monday = 0. Use a Monday afternoon, schedule for Monday at 08:00.
+        sched = Sched(mock_logger, Period.WEEKLY, "08:00", weekday=0)
+        monday_afternoon = datetime.datetime(2026, 5, 25, 14, 0, 0)  # Monday
+        assert monday_afternoon.weekday() == 0
+        sched._setup_weekly(monday_afternoon)
+        # Should be scheduled for next Monday (7 days out)
+        delta = sched.next_t - monday_afternoon.timestamp()
+        assert delta > 6 * SECONDS_PER_DAY  # at least 6 full days ahead
+
+    def test_setup_minutely_advances_when_time_passed(self, mock_logger):
+        """Cover _setup_minutely branch where current second is past the target second."""
+        sched = Sched(mock_logger, Period.MINUTELY, "5")
+        # Pick a "now" whose second component is > 5 to trigger the +1 minute branch.
+        now = datetime.datetime(2026, 5, 25, 12, 0, 30)
+        sched._setup_minutely(now)
+        assert sched.next_t > now.timestamp()
+
+    def test_log_scheduler_status_emits_debug(self, mock_logger):
+        """Cover _log_scheduler_status (debug log emission)."""
+        sched = Sched(mock_logger, Period.DAILY, "09:00")
+        sched._next_t = time.time() + 3600
+        sched._log_scheduler_status(delay=3600.0)
+        sched.lg.debug.assert_called_once()
+
 
 # =============================================================================
 # Test Sched Sync

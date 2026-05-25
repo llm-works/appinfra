@@ -38,6 +38,8 @@ For API stability guarantees and deprecation policy, see
   `with_standard_args(log=True, etc_dir=True)`.
 - `with_config_file(from_etc_dir=True)` now automatically enables the `etc_dir` standard arg, so
   `--etc-dir` is available without explicit opt-in when using deferred config loading
+- PG-dependent tests now skip via a single `@pytest.mark.require_pg` marker with reason
+  `pg-unavailable`, so `make check` shows one aggregated banner instead of per-test skip noise
 
 ### Fixed
 - `SchemaManager` connect listener now commits after `SET search_path` — fixes search_path being
