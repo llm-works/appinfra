@@ -45,6 +45,12 @@ For API stability guarantees and deprecation policy, see
 - `SchemaManager` no longer executes redundant `SET search_path` on every connection checkout —
   the `connect` listener already sets it when connections are created, eliminating an extra
   network round-trip per query (significant for high-latency connections like VPN tunnels)
+- `make check` no longer spams `STATUS_DIR/skips: No such file or directory` under fail-fast —
+  `record_skips` rewritten from `grep | while` (loop ran in a grandchild subshell that outlived
+  `kill -KILL` on its bg job) to `mapfile` + `for`, with a `wait` in cleanup before `rm -rf`
+- `make setup` is now stable — `appinfra scripts-path` was emitting a "build info" log line on
+  stdout, mangling `$(…)` so the install_deps.py path test failed; setup now uses
+  `appinfra -q scripts-path` and adds `sql,service` to `INFRA_DEV_SETUP_EXTRAS` as a fallback
 
 ## [0.7.0] - 2026-05-07
 

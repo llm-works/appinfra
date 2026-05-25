@@ -188,6 +188,9 @@ cleanup() {
         jobs -p | xargs -r kill -TERM 2>/dev/null || true
         sleep 0.1
         jobs -p | xargs -r kill -KILL 2>/dev/null || true
+        # Reap direct children before removing STATUS_DIR so killed bg subshells
+        # can't still be in the middle of writing to it.
+        wait 2>/dev/null || true
         rm -rf "$STATUS_DIR" "$DISPLAY_LOCK" 2>/dev/null || true
     fi
 }
@@ -313,26 +316,25 @@ record_warning() {
 
 record_skips() {
     local name="$1" logfile="$2"
-    # Parse pytest -rs output for skip reasons
-    # Format: "SKIPPED [N] path:line: reason" or "SKIPPED [N] path: reason" (no line number)
-    # Using portable grep+sed instead of grep -oP (not available on macOS BSD grep)
-    grep -E "^SKIPPED \[" "$logfile" 2>/dev/null | while read -r line; do
-        # Extract count: "SKIPPED [6] ..." -> "6"
-        # SC2155: Declare and assign separately to preserve exit status
-        local count reason
+    [ -d "$STATUS_DIR" ] || return 0
+    # mapfile + for-loop, NOT `grep | while`: a pipeline runs the loop body in a
+    # grandchild subshell that can outlive a SIGKILL on this bg job and keep
+    # writing to STATUS_DIR after main has rm -rf'd it.
+    local lines=()
+    mapfile -t lines < <(grep -E "^SKIPPED \[" "$logfile" 2>/dev/null) || true
+    local line count reason
+    for line in "${lines[@]}"; do
         count=$(echo "$line" | sed -E 's/^SKIPPED \[([0-9]+)\].*/\1/')
-        # Extract reason: everything after "path:line: " or "path: " (line number optional)
         reason=$(echo "$line" | sed -E 's/^SKIPPED \[[0-9]+\] [^:]+:([0-9]+:)? //')
         # Skip reasons prefixed with [expected] (from @pytest.mark.expected_skip)
         if [[ "$reason" == "[expected] "* ]]; then
             continue
         fi
-        # Use tab delimiter to avoid issues with | in skip reasons
-        # Use if block instead of && chain to avoid pipefail issues
         if [ -n "$count" ] && [ -n "$reason" ]; then
+            [ -d "$STATUS_DIR" ] || return 0
             printf '%s\t%s\n' "$count" "$reason" >> "${STATUS_DIR}/skips"
         fi
-    done || true  # Guard against pipefail when loop has no matching lines
+    done
 }
 
 display_skip_summary() {
