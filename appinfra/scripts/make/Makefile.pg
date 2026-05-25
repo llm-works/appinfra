@@ -50,7 +50,12 @@ endef
 # Extract all PG config values in one call (sets PG_DOCKER_IMAGE, PG_VERSION, PG_PORT, PG_IMAGE, PG_REPLICA_ENABLED, PG_PORT_R, PG_COMMAND)
 # pg-config.sh outputs pipe-separated values; $(subst) converts pipes to newlines for $(eval)
 # Args: config_file, config_key, etc_dir, default_config_file
+# Gated on PyYAML availability so `make setup` can run from a fresh venv (see Makefile.config).
+# When skipped, PG_* variables are left undefined — recipes that need them will fail at
+# recipe time, but parse-time (and `make setup`) completes.
+ifdef _INFRA_PYYAML_OK
 $(eval $(subst |,$(_pg_newline),$(shell $(pg_local)/../pg-config.sh "$(INFRA_PG_CONFIG_FILE)" $(INFRA_PG_CONFIG_KEY) $(ETC_DIR) $(INFRA_DEFAULT_CONFIG_FILE))))
+endif
 
 # Validate replica config and hide replication targets from help when disabled
 ifeq ($(PG_REPLICA_ENABLED),true)
