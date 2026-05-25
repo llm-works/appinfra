@@ -51,6 +51,8 @@ For API stability guarantees and deprecation policy, see
 - `make setup` is now stable — `appinfra scripts-path` was emitting a "build info" log line on
   stdout, mangling `$(…)` so the install_deps.py path test failed; setup now uses
   `appinfra -q scripts-path` and adds `sql,service` to `INFRA_DEV_SETUP_EXTRAS` as a fallback
+- `make setup` can now bootstrap when PyYAML is missing — `pg-config.sh` and `docs-config.sh`
+  (invoked at Make parse time) now probe for `yaml` and fall back to empty defaults on miss
 
 ## [0.7.0] - 2026-05-07
 
