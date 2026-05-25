@@ -14,6 +14,7 @@ Public API:
     SecretLiteralWarning: Warning for literal secrets
 """
 
+from dataclasses import dataclass, replace
 from io import StringIO
 from pathlib import Path
 from typing import Any, Literal, overload
@@ -34,6 +35,26 @@ from .types import (
     ResetValue,
     SecretLiteralWarning,
 )
+
+
+@dataclass(frozen=True, slots=True)
+class _LoadSession:
+    """Immutable bag of per-load() parameters.
+
+    Threaded through every internal helper so signatures don't have to repeat
+    the 7-field bag. Recursion (when entering an included file) builds a fresh
+    session via ``dataclasses.replace`` with the new ``current_file`` and
+    extended ``include_chain``; everything else carries over verbatim.
+    """
+
+    current_file: Path | None
+    include_chain: set[Path]
+    merge_strategy: str
+    track_sources: bool
+    project_root: Path | None
+    max_include_depth: int
+    env_overrides: dict[str, str] | None
+
 
 # Public API exports
 __all__ = [
@@ -78,42 +99,40 @@ def deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]
 
 
 def _apply_section_filter(
+    s: _LoadSession,
     data: Any,
     source_map: dict[str, Path | None],
     section_path: str,
     include_path: Path,
-    track_sources: bool,
-    env_overrides: dict[str, str] | None = None,
 ) -> tuple[Any, dict[str, Path | None]]:
     """Extract section from data and filter source map if applicable."""
     if not section_path or data is None:
         return data, source_map
     data = _extract_section_data(
-        data, section_path, str(include_path), env_overrides=env_overrides
+        data, section_path, str(include_path), env_overrides=s.env_overrides
     )
-    if track_sources:
+    if s.track_sources:
         source_map = _filter_source_map_for_section(source_map, section_path)
     return data, source_map
 
 
 def _resolve_and_validate_include(
+    s: _LoadSession,
     include_path_str: str,
-    current_file: Path | None,
-    include_chain: set[Path],
-    project_root: Path | None,
-    max_include_depth: int,
     line: int | None,
     optional: bool,
 ) -> Path | None:
     """Resolve and validate include path. Returns None if optional and missing."""
-    ctx = _create_document_error_context(current_file, line)
-    resolved_root = project_root.resolve() if project_root else None
-    include_path = _resolve_include_path_standalone(include_path_str, current_file, ctx)
+    ctx = _create_document_error_context(s.current_file, line)
+    resolved_root = s.project_root.resolve() if s.project_root else None
+    include_path = _resolve_include_path_standalone(
+        include_path_str, s.current_file, ctx
+    )
     file_exists = _validate_include_standalone(
         include_path,
-        include_chain,
+        s.include_chain,
         resolved_root,
-        max_include_depth,
+        s.max_include_depth,
         ctx,
         optional=optional,
     )
@@ -121,14 +140,8 @@ def _resolve_and_validate_include(
 
 
 def _load_document_include(
+    s: _LoadSession,
     include_spec: str,
-    current_file: Path | None,
-    include_chain: set[Path],
-    merge_strategy: str,
-    track_sources: bool,
-    project_root: Path | None,
-    max_include_depth: int,
-    env_overrides: dict[str, str] | None = None,
     line: int | None = None,
     optional: bool = False,
 ) -> tuple[Any, dict[str, Path | None]]:
@@ -136,72 +149,29 @@ def _load_document_include(
     include_path_str, section_path = (
         include_spec.split("#", 1) if "#" in include_spec else (include_spec, "")
     )
-    include_path = _resolve_and_validate_include(
-        include_path_str,
-        current_file,
-        include_chain,
-        project_root,
-        max_include_depth,
-        line,
-        optional,
-    )
+    include_path = _resolve_and_validate_include(s, include_path_str, line, optional)
     if include_path is None:
         return None, {}
 
-    data, source_map = _load_include_file(
-        include_path,
-        include_chain,
-        merge_strategy,
-        track_sources,
-        project_root,
-        max_include_depth,
-        env_overrides,
-    )
-    return _apply_section_filter(
-        data, source_map, section_path, include_path, track_sources, env_overrides
-    )
+    data, source_map = _load_include_file(s, include_path)
+    return _apply_section_filter(s, data, source_map, section_path, include_path)
 
 
 def _load_include_file(
-    include_path: Path,
-    include_chain: set[Path],
-    merge_strategy: str,
-    track_sources: bool,
-    project_root: Path | None,
-    max_include_depth: int,
-    env_overrides: dict[str, str] | None = None,
+    s: _LoadSession, include_path: Path
 ) -> tuple[Any, dict[str, Path | None]]:
     """
-    Load an included YAML file.
-
-    Args:
-        include_path: Resolved path to the included file
-        include_chain: Current include chain for circular detection
-        merge_strategy: Strategy for merging includes
-        track_sources: If True, track source files
-        project_root: Optional project root for security validation
-        max_include_depth: Maximum allowed include depth
-        env_overrides: Optional explicit name→value map forwarded to the
-            recursive load() call so include-time substitution stays aware
-            of the caller's env overrides.
-
-    Returns:
-        Tuple of (data, source_map)
+    Load an included YAML file by recursing into the loader with a fresh
+    session pointing at the included file (and the chain extended to include
+    it, for circular-include detection).
     """
-    new_chain = include_chain | {include_path}
+    inner = replace(
+        s, current_file=include_path, include_chain=s.include_chain | {include_path}
+    )
     with open(include_path) as f:
-        result = load(
-            f,
-            current_file=include_path,
-            merge_strategy=merge_strategy,
-            track_sources=track_sources,
-            project_root=project_root,
-            max_include_depth=max_include_depth,
-            env_overrides=env_overrides,
-            _include_chain=new_chain,
-        )
+        result = _load_with_session(inner, f)
 
-    if track_sources:
+    if s.track_sources:
         return result  # type: ignore[return-value]
     return result, {}
 
@@ -216,14 +186,8 @@ def _validate_include_data(include_data: Any, include_spec: str, line_num: int) 
 
 
 def _merge_document_includes(
+    s: _LoadSession,
     doc_include_paths: list[tuple[str, int, bool]],
-    current_file: Path | None,
-    include_chain: set[Path],
-    merge_strategy: str,
-    track_sources: bool,
-    project_root: Path | None,
-    max_include_depth: int,
-    env_overrides: dict[str, str] | None = None,
 ) -> tuple[dict[str, Any] | None, dict[str, Path | None]]:
     """Load and merge all document-level includes."""
     merged_data: dict[str, Any] | None = None
@@ -231,16 +195,7 @@ def _merge_document_includes(
 
     for include_spec, line_num, is_optional in doc_include_paths:
         include_data, source_map = _load_document_include(
-            include_spec,
-            current_file,
-            include_chain,
-            merge_strategy,
-            track_sources,
-            project_root,
-            max_include_depth,
-            env_overrides=env_overrides,
-            line=line_num,
-            optional=is_optional,
+            s, include_spec, line=line_num, optional=is_optional
         )
         if include_data is None:
             continue
@@ -249,52 +204,33 @@ def _merge_document_includes(
         merged_data = (
             deep_merge(merged_data, include_data) if merged_data else include_data
         )
-        if track_sources:
+        if s.track_sources:
             merged_source_map.update(source_map)
 
     return merged_data, merged_source_map
 
 
 def _parse_yaml_content(
-    content: str,
-    current_file: Path | None,
-    include_chain: set[Path],
-    merge_strategy: str,
-    track_sources: bool,
-    project_root: Path | None,
-    max_include_depth: int,
-    env_overrides: dict[str, str] | None = None,
+    s: _LoadSession, content: str
 ) -> tuple[Any, dict[str, Path | None]]:
-    """
-    Parse YAML content using the Loader.
+    """Parse YAML content using the Loader.
 
-    Args:
-        content: YAML content string to parse
-        current_file: Path to current file for relative path resolution
-        include_chain: Current include chain for circular detection
-        merge_strategy: Strategy for merging includes
-        track_sources: If True, track source files
-        project_root: Optional project root for security validation
-        max_include_depth: Maximum allowed include depth
-        env_overrides: Optional explicit name→value map for include-time
-            ${var} substitution (forwarded to Loader).
-
-    Returns:
-        Tuple of (data, source_map)
+    Loader is constructed with kwargs from the session — Loader keeps its
+    explicit-kwarg constructor for callers that build it directly.
     """
     loader = Loader(
         StringIO(content),
-        current_file=current_file,
-        include_chain=include_chain,
-        merge_strategy=merge_strategy,
-        track_sources=track_sources,
-        project_root=project_root.resolve() if project_root else None,
-        max_include_depth=max_include_depth,
-        env_overrides=env_overrides,
+        current_file=s.current_file,
+        include_chain=s.include_chain,
+        merge_strategy=s.merge_strategy,
+        track_sources=s.track_sources,
+        project_root=s.project_root.resolve() if s.project_root else None,
+        max_include_depth=s.max_include_depth,
+        env_overrides=s.env_overrides,
     )
     try:
         data = loader.get_single_data()
-        source_map = loader.source_map if track_sources else {}
+        source_map = loader.source_map if s.track_sources else {}
         return data, source_map
     finally:
         loader.dispose()
@@ -373,36 +309,35 @@ def load(
             substitution (e.g. Config) pass an explicit map; standalone callers
             leave this None and get raw YAML values only.
     """
-    include_chain = _init_include_chain(current_file, _include_chain)
+    s = _LoadSession(
+        current_file=current_file,
+        include_chain=_init_include_chain(current_file, _include_chain),
+        merge_strategy=merge_strategy,
+        track_sources=track_sources,
+        project_root=project_root,
+        max_include_depth=max_include_depth,
+        env_overrides=env_overrides,
+    )
+    return _load_with_session(s, stream)
+
+
+def _load_with_session(
+    s: _LoadSession, stream: Any
+) -> Any | tuple[Any, dict[str, Path | None]]:
+    """Session-aware body of load(). Re-entered by _load_include_file with a
+    derived session when recursing into an included file.
+    """
     content = stream.read() if hasattr(stream, "read") else str(stream)
     content = preprocess_deep_tags(content)
     remaining_content, doc_include_paths = _preprocess_document_includes(content)
 
-    merged_data, merged_source_map = _merge_document_includes(
-        doc_include_paths,
-        current_file,
-        include_chain,
-        merge_strategy,
-        track_sources,
-        project_root,
-        max_include_depth,
-        env_overrides,
-    )
-    main_data, main_source_map = _parse_yaml_content(
-        remaining_content,
-        current_file,
-        include_chain,
-        merge_strategy,
-        track_sources,
-        project_root,
-        max_include_depth,
-        env_overrides,
-    )
+    merged_data, merged_source_map = _merge_document_includes(s, doc_include_paths)
+    main_data, main_source_map = _parse_yaml_content(s, remaining_content)
     final_data, final_source_map = _merge_data_and_sources(
         merged_data, main_data, merged_source_map, main_source_map
     )
 
-    return (final_data, final_source_map) if track_sources else final_data
+    return (final_data, final_source_map) if s.track_sources else final_data
 
 
 @overload
