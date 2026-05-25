@@ -1561,6 +1561,33 @@ class TestEnvOverrideSubstitution:
         config = Config(str(config_file))
         assert config.dbs.unittest.url == "postgresql://127.0.0.1:7432/db"
 
+    def test_env_override_multi_underscore_resolves_via_canonical_alias(
+        self, tmp_path, clean_env
+    ):
+        """A multi-segment env var (`INFRA_DB_CONNECTION_POOL_SIZE`) reaches a
+        `${db.connection_pool.size}` reference inside an included section.
+
+        Without the canonical alias, `_collect_env_overrides_for_yaml` only
+        emits `db.connection.pool.size` (every `_` becomes `.`); the
+        include-time substitute then misses the override and renders the
+        included string with the raw YAML value (10), so the env override
+        cannot land at all — `Config._resolve` already sees a baked literal.
+        """
+        included = tmp_path / "db.yaml"
+        included.write_text(
+            "db:\n"
+            "  connection_pool:\n"
+            "    size: 10\n"
+            "  summary:\n"
+            '    size_str: "size=${db.connection_pool.size}"\n'
+        )
+        main = tmp_path / "main.yaml"
+        main.write_text("db: !include db.yaml#db\n")
+        os.environ["INFRA_DB_CONNECTION_POOL_SIZE"] = "42"
+        config = Config(str(main))
+        assert config.db.connection_pool.size == 42
+        assert config.db.summary.size_str == "size=42"
+
     def test_env_overrides_disabled_does_not_reach_include_substitution(
         self, tmp_path, clean_env
     ):

@@ -327,14 +327,27 @@ class Config(DotDict):
         Build the name→value map passed to yaml.load() so include-time
         `${var}` substitution uses env-overridden values.
 
-        Keys are dotted paths matching what would appear inside `${...}` in YAML
-        (e.g. `pgserver.host`). Values are the raw env strings — typed
-        conversion happens later in `_apply_env_overrides` on the parsed dict.
+        For each `INFRA_*` env var, two aliases are inserted:
+
+        - Dotted form: every underscore in the env name becomes `.`
+          (e.g. `INFRA_PGSERVER_HOST` → `pgserver.host`). Matches simple
+          `${pgserver.host}` references.
+
+        - Canonical form: env name lowercased with the prefix stripped,
+          underscores preserved (e.g. `INFRA_DB_CONNECTION_POOL_SIZE` →
+          `db_connection_pool_size`). The include-time substitute normalizes
+          its lookup key the same way (`.`/`-` → `_`), so multi-word YAML
+          references like `${db.connection_pool.size}` resolve unambiguously.
+
+        Values are the raw env strings — typed conversion happens later in
+        `_apply_env_overrides` on the parsed dict.
         """
         overrides: dict[str, str] = {}
         for env_key, env_value in self._collect_env_vars().items():
             dotted = ".".join(self._env_key_to_path(env_key))
             overrides[dotted] = env_value
+            canonical = env_key[len(self._env_prefix) :].lower()
+            overrides[canonical] = env_value
         return overrides
 
     def _collect_env_vars(self) -> dict[str, str]:

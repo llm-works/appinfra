@@ -78,8 +78,10 @@ def resolve_pgserver_endpoint() -> tuple[str, int]:
             url = cfg.get("dbs.unittest.url")
             if url:
                 parsed = urlparse(str(url))
-                if parsed.hostname and parsed.port:
-                    return parsed.hostname, parsed.port
+                if parsed.hostname:
+                    return parsed.hostname, (
+                        parsed.port if parsed.port is not None else DEFAULT_PG_PORT
+                    )
         except Exception as e:
             # infra.yaml exists but couldn't be parsed (malformed YAML, missing
             # dbs.unittest.url, unparseable URL). Surface it so the silent

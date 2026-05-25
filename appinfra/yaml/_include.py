@@ -328,8 +328,13 @@ def _resolve_variables_in_data(
          substitution stays aligned with Config's post-load env overrides.
          Standalone `yaml.load()` callers pass None → no env behavior, raw
          YAML values win.
-      2. Context dict (the YAML file's own data).
-      3. Pass-through (keep `${var}` literal) or KeyError, per
+      2. `env_overrides[canonical]` where `canonical` lowercases `var_name`
+         and replaces `.`/`-` with `_`. Lets a single env var (e.g.
+         `INFRA_DB_CONNECTION_POOL_SIZE`) match either dotted or mixed-form
+         YAML references (`${db.connection.pool.size}` or
+         `${db.connection_pool.size}`).
+      3. Context dict (the YAML file's own data).
+      4. Pass-through (keep `${var}` literal) or KeyError, per
          `pass_through_undefined`.
 
     Resolution is scoped to the context (typically the full included file).
@@ -350,21 +355,39 @@ def _resolve_variables_in_data(
             for item in data
         ]
     elif isinstance(data, str):
-
-        def substitute(match: re.Match[str]) -> str:
-            var_name = match.group(1)
-            if env_overrides is not None and var_name in env_overrides:
-                return env_overrides[var_name]
-            value = _get_value_by_path(context, var_name)
-            if value is _NOT_FOUND:
-                if pass_through_undefined:
-                    return match.group(0)  # Keep original ${var}
-                raise KeyError(f"Variable '{var_name}' not found")
-            return str(value)
-
-        # Same pattern as Config._resolve() for consistency
-        return re.sub(r"\$\{([a-zA-Z0-9_.]+)\}", substitute, data)
+        return _substitute_vars_in_string(
+            data, context, pass_through_undefined, env_overrides
+        )
     return data
+
+
+def _substitute_vars_in_string(
+    data: str,
+    context: dict[str, Any],
+    pass_through_undefined: bool,
+    env_overrides: dict[str, str] | None,
+) -> str:
+    """Resolve `${var}` references inside a single string. See
+    `_resolve_variables_in_data` for the lookup order.
+    """
+
+    def substitute(match: re.Match[str]) -> str:
+        var_name = match.group(1)
+        if env_overrides is not None:
+            if var_name in env_overrides:
+                return env_overrides[var_name]
+            canonical = var_name.replace(".", "_").replace("-", "_").lower()
+            if canonical in env_overrides:
+                return env_overrides[canonical]
+        value = _get_value_by_path(context, var_name)
+        if value is _NOT_FOUND:
+            if pass_through_undefined:
+                return match.group(0)  # Keep original ${var}
+            raise KeyError(f"Variable '{var_name}' not found")
+        return str(value)
+
+    # Same pattern as Config._resolve() for consistency
+    return re.sub(r"\$\{([a-zA-Z0-9_.]+)\}", substitute, data)
 
 
 def _create_document_error_context(
