@@ -12,8 +12,11 @@ CICD_INCLUDED := true
 # Configuration
 INFRA_CICD_PYTHON_VERSION ?= 3.12
 
-# Use real path (not symlink) to ensure Docker context resolves correctly
-CICD_DIR := $(local)/appinfra/scripts/cicd
+# Use real path (not symlink) to ensure Docker context resolves correctly.
+# Resolved from this Makefile's own location so downstream consumers don't
+# need to define a $(local) variable in their top-level Makefile.
+cicd_local := $(dir $(realpath $(lastword $(MAKEFILE_LIST))))
+CICD_DIR := $(cicd_local)../cicd
 
 ##@ CI/CD (Docker Compose)
 

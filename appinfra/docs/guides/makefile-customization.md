@@ -96,7 +96,7 @@ Hide specific targets from `make help` and block their execution:
 
 ```makefile
 # Hide specific targets
-INFRA_DISABLE_TARGETS := release pg.clean cicd.erase
+INFRA_DISABLE_TARGETS := pg.clean cicd.erase
 
 # Hide all targets with a prefix
 INFRA_DISABLE_GROUPS := pg. cicd.
@@ -386,7 +386,12 @@ These targets can be extended by defining them again in your Makefile:
 - `docs.deploy::` - Add deployment steps
 
 **Database:**
-- `pg.clean::` - Add database cleanup
+- `pg.clean::` - Add steps to "drop databases (with confirmation)". Runs `areyousure`
+  upfront; chaining destructive ops in here re-prompts.
+- `pg.clean.internal::` - The no-confirmation extension hook. Use this when
+  composing into a higher-level target (e.g. `clean::`, `clean.full::`) so the
+  user is prompted once, not once per layer. Mirrors `pg.server.clean.internal::`
+  and `cicd.erase.internal::`.
 
 ### Non-Extensible Targets (Single-Colon)
 
@@ -488,7 +493,7 @@ Here's a complete example of an app extending the framework:
 infra := $(shell appinfra scripts-path)
 INFRA_DEV_PKG_NAME := myapp
 INFRA_DEV_CQ_STRICT := true
-INFRA_DISABLE_TARGETS := release  # Hide release target
+INFRA_DISABLE_TARGETS := pg.clean  # Hide a destructive target
 
 # Include framework Makefiles (selectively)
 include $(infra)/make/Makefile.config
