@@ -64,6 +64,9 @@ For API stability guarantees and deprecation policy, see
 - `make install` now builds a wheel (`pip wheel . --no-deps -w dist/`) and copies it into each
   `$VENV/share/$INFRA_DEV_PKG_NAME/wheels/` alongside the install. Consumers (container builds,
   ops handoff) read from the stable per-venv path instead of the dev checkout
+- `pg.clean.internal` validates each database name against `^[A-Za-z_][A-Za-z0-9_]*$` and skips
+  unsafe entries; valid names are passed as quoted identifiers to `DROP DATABASE`. Closes a
+  small SQL-interpolation sharp edge in the existing loop body
 
 ### Fixed
 - `SchemaManager` connect listener now commits after `SET search_path` — fixes search_path being

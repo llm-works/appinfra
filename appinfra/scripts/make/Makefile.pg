@@ -192,10 +192,14 @@ ifeq ($(INFRA_PG_DATABASES),)
 else
 	@echo "* cleaning pg databases..."
 	@for db in $(INFRA_PG_DATABASES); do \
+		if ! echo "$${db}" | grep -Eq '^[A-Za-z_][A-Za-z0-9_]*$$'; then \
+			echo "  * skipping unsafe database name: $${db}"; \
+			continue; \
+		fi; \
 		exists=`$(PSQL) -XtAc "SELECT 1 FROM pg_database WHERE datname='$${db}'"`; \
 		if [ "$${exists}" = "1" ]; then \
 			echo "  * dropping db $${db}..."; \
-			$(PSQL) -c "DROP DATABASE $${db} WITH (FORCE)" 2>/dev/null; \
+			$(PSQL) -c "DROP DATABASE \"$${db}\" WITH (FORCE)" 2>/dev/null; \
 		else \
 			echo "  * database $${db} not found"; \
 		fi; \

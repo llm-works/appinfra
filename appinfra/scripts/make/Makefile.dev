@@ -1,6 +1,6 @@
 # Makefile.dev - Development and Code Quality Targets
 #
-# Provides: setup, install, fmt, lint, type, cq, check targets
+# Provides: setup, fmt, lint, type, cq, check targets
 # Requires: PYTHON (from Makefile.env), areyousure (from Makefile.utils)
 #
 # Configuration variables (set in Makefile before include, or in Makefile.local):
