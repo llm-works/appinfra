@@ -335,7 +335,7 @@ These environment variables control framework behavior (not config value overrid
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `INFRA_DEFAULT_CONFIG_FILE` | `infra.yaml` | Default config filename used by `with_config_file()` and `get_config_file_path()` |
-| `INFRA_NO_CONFIRM` | unset | When set to `1`, bypasses the `areyousure` confirmation prompt used by destructive Make targets (e.g., `pg.server.down`, `pg.server.clean`, `cicd.erase`, `install`). Intended for CI and other non-interactive contexts. |
+| `INFRA_NO_CONFIRM` | unset | When set to `1`, bypasses the `areyousure` confirmation prompt used by destructive Make targets (e.g., `pg.server.down`, `pg.server.clean`, `cicd.erase`, `uninstall`). Intended for CI and other non-interactive contexts. |
 
 **Note:** Because this env var starts with `INFRA_`, it can interfere with config keys named
 `default`. If your config has a `default` key, the env var will be interpreted as

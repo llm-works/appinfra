@@ -93,7 +93,18 @@ echo ""
 # Containers (runtime via INFRA_CONTAINER_CMD; defaults to docker)
 echo -e "${BOLD}CONTAINERS${RESET}"
 echo -e "${GRAY}----------${RESET}"
-${INFRA_CONTAINER_CMD:-docker} ps -a --filter "name=${PG_CONTAINER_NAME}" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" 2>/dev/null || echo "No PostgreSQL containers found"
+container_runtime="${INFRA_CONTAINER_CMD:-docker}"
+container_output=$(${container_runtime} ps -a --filter "name=${PG_CONTAINER_NAME}" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" 2>&1)
+container_exit=$?
+if [ $container_exit -ne 0 ]; then
+    echo -e "${RED}Error from '${container_runtime}' (exit $container_exit):${RESET}"
+    echo "$container_output"
+elif [ "$(echo "$container_output" | wc -l)" -le 1 ]; then
+    # Output is only the header row (or empty) — no matching containers
+    echo "No PostgreSQL containers found"
+else
+    echo "$container_output"
+fi
 echo ""
 
 # System configuration

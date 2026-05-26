@@ -57,6 +57,13 @@ if ! ${INFRA_CONTAINER_CMD} info >/dev/null 2>&1; then
     exit 1
 fi
 
+# Check if the compose CLI is available
+if ! ${INFRA_COMPOSE_CMD} version >/dev/null 2>&1; then
+    echo -e "${RED}Error: '${INFRA_COMPOSE_CMD}' is not available${NC}"
+    echo "       Override via INFRA_CONTAINER_CMD / INFRA_COMPOSE_CMD env vars"
+    exit 1
+fi
+
 # Navigate to cicd directory
 cd "$CICD_DIR"
 
@@ -81,10 +88,11 @@ fi
 # LOG_FILE="$LOG_DIR/${TIMESTAMP}-docker-test.log"
 # mkdir -p "$LOG_DIR"
 
-# Run compose
-${INFRA_COMPOSE_CMD} -f docker-compose.yml -f "$COMPOSE_OVERRIDE" run --rm app bash -c "$COMMAND"
-
-EXIT_CODE=$?
+# Run compose. Capture exit code via `|| EXIT_CODE=$?` so `set -e` does not
+# abort before we reach the cleanup block below (LHS of `||` is exempt from
+# `set -e`). Without this, a failing test command skips `down -v`.
+EXIT_CODE=0
+${INFRA_COMPOSE_CMD} -f docker-compose.yml -f "$COMPOSE_OVERRIDE" run --rm app bash -c "$COMMAND" || EXIT_CODE=$?
 
 # Append postgres service logs (disabled - uncomment if needed)
 # echo "" >> "$LOG_FILE"
