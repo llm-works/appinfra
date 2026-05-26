@@ -38,6 +38,9 @@ For API stability guarantees and deprecation policy, see
 - `INFRA_NO_CONFIRM=1` env var — bypasses the `areyousure` confirmation prompt for destructive
   Make targets (`pg.server.down`, `pg.server.clean`, `cicd.erase`, `install`, ...). For CI and
   non-interactive scripts.
+- CI: `check-no-db` job verifies that `make check` passes on a clean runner with no postgres,
+  docker, or podman — the path a fresh contributor takes on first clone. Catches regressions
+  where tests forget to skip on PG-unavailable, or imports require runtime services.
 
 ### Removed
 - `make release` and `make release.check` — targeted a non-existent `master` branch and
