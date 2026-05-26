@@ -109,28 +109,22 @@ class App(Traceable):
         return getattr(self, "_loaded_config_paths", [])
 
     @property
-    def etc_dir(self) -> str:
-        """Resolved etc directory path the framework uses for config lookup.
+    def etc_dir(self) -> str | None:
+        """Resolved etc directory the framework chose for config lookup.
 
-        Runs the four-tier fallback in `resolve_etc_dir` (explicit `--etc-dir` →
-        `./etc` → walk-up to project root → bundled package `etc/`) on first
-        access. Deferred config loading already populates this; reading the
-        property before config load triggers the resolution lazily.
+        Set by the framework when a config file is loaded — either the parent
+        of an absolute `with_config_file()` path, or the etc directory used to
+        resolve deferred configs after `--etc-dir` is parsed. Returns None
+        before any config has been resolved.
+
+        For on-demand resolution independent of the App lifecycle, call
+        `appinfra.config.resolve_etc_dir()` directly.
 
         Returns:
-            Resolved etc directory as an absolute path string.
-
-        Raises:
-            FileNotFoundError: If no etc directory can be found in the chain.
+            Resolved etc directory as an absolute path string, or None if no
+            config has been resolved yet.
         """
-        if not hasattr(self, "_etc_dir"):
-            from ...config import resolve_etc_dir
-
-            custom = None
-            if self._parsed_args is not None:
-                custom = getattr(self._parsed_args, "etc_dir", None)
-            self._etc_dir = str(resolve_etc_dir(custom))
-        return self._etc_dir
+        return getattr(self, "_etc_dir", None)
 
     def set_main_tool(self, name: str) -> None:
         """

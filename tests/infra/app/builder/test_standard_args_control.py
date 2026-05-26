@@ -401,6 +401,13 @@ class TestWithStandardArgMethod:
         with pytest.raises(ValueError, match="'log' is an alias"):
             builder.with_standard_arg("log", default="warning")
 
+    def test_help_rejected(self):
+        # 'help' is consumed via add_help, not the standard-arg kwargs path,
+        # so overrides would be silently dropped. Reject instead.
+        builder = AppBuilder("test")
+        with pytest.raises(ValueError, match="'help' is consumed by argparse"):
+            builder.with_standard_arg("help", help="custom")
+
     def test_dest_override_rejected(self):
         builder = AppBuilder("test")
         with pytest.raises(ValueError, match="Cannot override 'dest'"):
@@ -495,3 +502,48 @@ class TestStandardArgOverrideIntegration:
         action = self._action_for(app, "config")
         assert action.default == "prod.yaml"
         assert action.help == "prod config"
+
+    def test_multi_kwarg_override_all_applied(self):
+        """Overriding default + metavar + help in one call applies all three."""
+        app = (
+            AppBuilder("test")
+            .with_standard_args(etc_dir=True)
+            .with_standard_arg(
+                "etc_dir", default="/srv/etc", metavar="PATH", help="srv etc"
+            )
+            .build()
+        )
+        app.create_args()
+
+        action = self._action_for(app, "etc_dir")
+        assert action.default == "/srv/etc"
+        assert action.metavar == "PATH"
+        assert action.help == "srv etc"
+
+    def test_log_topic_override(self):
+        """log_topic's dest is log_topics; override must still find the action by dest."""
+        app = (
+            AppBuilder("test")
+            .with_standard_args(log_topic=True)
+            .with_standard_arg("log_topic", help="custom topic help")
+            .build()
+        )
+        app.create_args()
+
+        action = self._action_for(app, "log_topics")
+        assert action.help == "custom topic help"
+
+    def test_quiet_override(self):
+        """quiet is a store_true flag — overriding help works without disturbing the action."""
+        app = (
+            AppBuilder("test")
+            .with_standard_args(quiet=True)
+            .with_standard_arg("quiet", help="silence the build")
+            .build()
+        )
+        app.create_args()
+
+        action = self._action_for(app, "quiet")
+        assert action.help == "silence the build"
+        # store_true machinery preserved
+        assert action.const is True

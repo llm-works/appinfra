@@ -1468,72 +1468,33 @@ class TestAppEtcDirProperty:
 
         assert app.etc_dir == "/cached/etc"
 
-    def test_lazy_resolves_when_unset(self, tmp_path):
-        """Without prior config load, the property resolves via resolve_etc_dir."""
-        custom = tmp_path / "custom_etc"
-        custom.mkdir()
+    def test_returns_none_when_unset(self):
+        """Before any config is resolved, the property returns None."""
         app = App()
-        # Simulate parsed args carrying --etc-dir
-        app._parsed_args = argparse.Namespace(etc_dir=str(custom))
+        assert app._parsed_args is None
+        assert app.etc_dir is None
 
-        result = app.etc_dir
-
-        assert result == str(custom.resolve())
-        # Subsequent reads come from cache
-        assert app.etc_dir is result  # same string object, cached
-
-    def test_lazy_resolves_when_no_parsed_args(self, monkeypatch, tmp_path):
-        """Property works even before parse_args() runs (uses fallback chain)."""
-        cwd_etc = tmp_path / "etc"
-        cwd_etc.mkdir()
-        monkeypatch.chdir(tmp_path)
-
+    def test_returns_none_even_when_parsed_args_present(self):
+        """Property does not auto-resolve from _parsed_args; framework must set _etc_dir."""
         app = App()
-        assert app._parsed_args is None  # not yet parsed
+        app._parsed_args = argparse.Namespace(etc_dir="/some/path")
+        # No config loaded yet -> framework hasn't set _etc_dir
+        assert app.etc_dir is None
 
-        # Should hit priority-2 in resolve_etc_dir (./etc in cwd)
-        result = app.etc_dir
-
-        assert Path(result).resolve() == cwd_etc.resolve()
-
-    def test_caches_after_first_access(self, tmp_path):
-        """Property is memoised on self._etc_dir."""
-        custom = tmp_path / "etc"
-        custom.mkdir()
+    def test_reflects_framework_set_value(self):
+        """Property returns whatever the framework wrote to _etc_dir."""
         app = App()
-        app._parsed_args = argparse.Namespace(etc_dir=str(custom))
+        app._etc_dir = "/cached/etc"  # type: ignore[attr-defined]
 
-        first = app.etc_dir
-        # Mutate the parsed args after first access — should not affect cached value
-        app._parsed_args.etc_dir = "/totally/different"
-        second = app.etc_dir
+        # Mutating _parsed_args after the framework sets _etc_dir must not affect the value.
+        app._parsed_args = argparse.Namespace(etc_dir="/totally/different")
 
-        assert first == second
-
-    def test_raises_when_nothing_resolves(self, monkeypatch, tmp_path):
-        """If no etc dir exists anywhere and custom path is missing, raises."""
-        # Move to an empty tmp dir with no ./etc, no ancestor with etc/infra.yaml
-        empty = tmp_path / "empty"
-        empty.mkdir()
-        monkeypatch.chdir(empty)
-
-        app = App()
-        app._parsed_args = argparse.Namespace(etc_dir="/definitely/not/there")
-
-        with pytest.raises(FileNotFoundError):
-            _ = app.etc_dir
+        assert app.etc_dir == "/cached/etc"
 
 
 @pytest.mark.unit
 class TestResolveEtcDirReExport:
     """Verify resolve_etc_dir is reachable from the public import paths."""
-
-    def test_appinfra_config_namespace(self):
-        # Verifies the back-compat re-export from app.core.config still works
-        from appinfra.app.core.config import resolve_etc_dir as r2
-        from appinfra.config import resolve_etc_dir as r1
-
-        assert r1 is r2
 
     def test_appinfra_root_namespace(self):
         from appinfra import resolve_etc_dir as r1

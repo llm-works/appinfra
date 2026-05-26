@@ -309,9 +309,10 @@ if config:
     db_host = config.database.host
 ```
 
-Inside an `App`, prefer `app.etc_dir` — it returns the same value as
-`resolve_etc_dir(args.etc_dir)` but caches the result and reuses what config
-loading already computed.
+Inside an `App`, read `app.etc_dir` to see which etc directory the framework
+chose during config loading. The property returns `None` until a config has
+been resolved — it does not lazy-compute. For on-demand resolution outside the
+App lifecycle (e.g. CLI tools), call `resolve_etc_dir()` directly.
 
 ## Constants
 

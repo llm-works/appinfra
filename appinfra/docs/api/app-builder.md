@@ -242,8 +242,8 @@ AppBuilder("myapp").without_standard_args().build()
 
 Use `with_standard_arg(name, **argparse_kwargs)` to override any argparse parameter
 (`default`, `help`, `metavar`, `type`, `choices`, `required`, `nargs`, `action`) of a standard
-arg without subclassing `App`. Overrides merge on top of framework defaults — only the keys you
-pass are changed.
+arg without subclassing `App`. Overrides merge on top of framework defaults — only the passed
+keys are changed.
 
 ```python
 # Quieter default log level for a background service
@@ -253,18 +253,26 @@ AppBuilder("myapp") \
     .build()
 ```
 
-> For the specific case of "I want a non-None etc dir string", prefer
-> `app.etc_dir` over setting `default="./etc"`. The property returns the
-> framework's resolved path (custom CLI override → `./etc` → walk-up to
-> project root → bundled package etc/) and reuses what config loading
-> already computed. Setting `default="./etc"` short-circuits the fallback
-> chain (the path is validated strictly and errors if `./etc` is missing).
+> To get a resolved etc directory after config loads, read `app.etc_dir` (set
+> by the framework during config resolution) or call
+> `appinfra.config.resolve_etc_dir()` directly. Setting `default="./etc"` here
+> short-circuits the framework's four-tier fallback chain — the path is
+> validated strictly and errors if `./etc` is missing.
 
 Restrictions:
 - `name` must be a valid standard arg; the `log` alias is rejected (target a specific log arg).
-- `dest` cannot be overridden — the framework reads parsed args by their canonical attribute name
-  (e.g. `args.etc_dir`).
+- `help` is rejected — toggle it via `with_standard_args(help=...)`; its kwargs flow through
+  argparse's `add_help`, not the standard-arg kwargs path.
+- `dest` cannot be overridden — the framework reads parsed args by a fixed attribute name set
+  internally, which may differ from `name` (e.g. `log_topic` is read as `args.log_topics`).
 - The override is silently ignored if the arg is not opted in via `with_standard_args(<name>=True)`.
+
+> Overriding shape-changing kwargs (`action`, `nargs`, `required`) is allowed but the consumer
+> takes on the responsibility of keeping framework assumptions intact. For example, flipping
+> `--no-log-colors` from `store_false` to `store_true` inverts the flag's user-visible meaning;
+> setting `required=True` on `--etc-dir` defeats the four-tier fallback because argparse will
+> reject runs without the flag. Prefer overriding `default`, `help`, `metavar`, `type`, and
+> `choices` unless the shape-change is deliberate.
 
 **Precedence:** CLI args override environment variables, which override YAML config values.
 See [Configuration Precedence](../guides/configuration-precedence.md) for the full precedence rules.

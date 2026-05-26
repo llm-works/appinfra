@@ -8,7 +8,7 @@ import argparse
 from pathlib import Path
 from typing import Any
 
-from ...config import Config, get_etc_dir, resolve_etc_dir  # noqa: F401 (re-export)
+from ...config import Config, get_etc_dir
 from ...dot_dict import DotDict
 
 # Logging level constant for quiet mode (suppresses all logging)
