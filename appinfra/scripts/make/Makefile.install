@@ -45,7 +45,9 @@ install:: areyousure ## installs $(INFRA_DEV_PKG_NAME) to all environments; emit
 			else \
 				$$pyenv -m pip install -q "$$wheel" || exit 1; \
 			fi; \
-			venv_share="$$($$pyenv -c 'import sys; print(sys.prefix)')/share/$(INFRA_DEV_PKG_NAME)/wheels"; \
+			prefix="$$($$pyenv -c 'import sys; print(sys.prefix)')" || exit 1; \
+			[ -n "$$prefix" ] || { echo "    ERROR: $$pyenv reported empty sys.prefix"; exit 1; }; \
+			venv_share="$$prefix/share/$(INFRA_DEV_PKG_NAME)/wheels"; \
 			mkdir -p "$$venv_share" || exit 1; \
 			wheel_name="$$(basename "$$wheel")"; \
 			cp "$$wheel" "$$venv_share/$$wheel_name" || exit 1; \
@@ -70,7 +72,9 @@ install.e:: areyousure ## installs $(INFRA_DEV_PKG_NAME) (editable) to all envir
 			else \
 				$$pyenv -m pip install -q -e .; \
 			fi; \
-			rm -rf "$$($$pyenv -c 'import sys; print(sys.prefix)')/share/$(INFRA_DEV_PKG_NAME)/wheels"; \
+			prefix="$$($$pyenv -c 'import sys; print(sys.prefix)')" || exit 1; \
+			[ -n "$$prefix" ] || { echo "    ERROR: $$pyenv reported empty sys.prefix"; exit 1; }; \
+			rm -rf "$$prefix/share/$(INFRA_DEV_PKG_NAME)/wheels"; \
 		else \
 			echo "  → $$pyenv (skipped, not found)"; \
 		fi; \
@@ -84,7 +88,9 @@ uninstall:: areyousure ## uninstalls $(INFRA_DEV_PKG_NAME) from all environments
 		if [ -x "$$pyenv" ]; then \
 			echo "  → $$pyenv"; \
 			$$pyenv -m pip uninstall -q -y $(INFRA_DEV_PKG_NAME) 2>/dev/null || true; \
-			rm -rf "$$($$pyenv -c 'import sys; print(sys.prefix)')/share/$(INFRA_DEV_PKG_NAME)/wheels"; \
+			prefix="$$($$pyenv -c 'import sys; print(sys.prefix)')" || exit 1; \
+			[ -n "$$prefix" ] || { echo "    ERROR: $$pyenv reported empty sys.prefix"; exit 1; }; \
+			rm -rf "$$prefix/share/$(INFRA_DEV_PKG_NAME)/wheels"; \
 		else \
 			echo "  → $$pyenv (skipped, not found)"; \
 		fi; \
