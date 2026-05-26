@@ -3,7 +3,7 @@
 services:
   postgres-primary:
     container_name: ${NAME:?}-primary
-    image: ${IMAGE:-postgres:${VERSION}}
+    image: ${IMAGE:?}
     # Replication requires: wal_level, max_wal_senders, max_replication_slots, hot_standby, hba_file
     # User's postgres_conf params are appended (can override these defaults)
     command:
@@ -37,7 +37,7 @@ services:
 
   postgres-standby:
     container_name: ${NAME:?}-standby
-    image: ${IMAGE:-postgres:${VERSION}}
+    image: ${IMAGE:?}
     restart: always
     volumes:
       - "$PWD:$PWD"

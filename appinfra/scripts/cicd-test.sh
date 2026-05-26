@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
-# Convenience script for running tests in Docker
+# Convenience script for running tests in a container runtime
 # Matches CI environment exactly - great for debugging CI failures locally
+#
+# Container runtime is selected via env vars (defaults to docker):
+#   INFRA_CONTAINER_CMD  - container CLI (docker | podman | ...)
+#   INFRA_COMPOSE_CMD    - compose CLI (docker compose | podman compose | ...)
 
 set -euo pipefail
 
@@ -8,6 +12,10 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 CICD_DIR="$SCRIPT_DIR/cicd"
+
+# Container runtime (override via env vars)
+INFRA_CONTAINER_CMD="${INFRA_CONTAINER_CMD:-docker}"
+INFRA_COMPOSE_CMD="${INFRA_COMPOSE_CMD:-docker compose}"
 
 # Default values
 PYTHON_VERSION="${1:-3.12}"
@@ -42,10 +50,10 @@ if [[ ! "$PYTHON_VERSION" =~ ^3\.(11|12|13)$ ]]; then
     usage
 fi
 
-# Check if Docker is running
-if ! docker info >/dev/null 2>&1; then
-    echo -e "${RED}Error: Docker is not running${NC}"
-    echo "       Please start Docker and try again"
+# Check if the container runtime is available
+if ! ${INFRA_CONTAINER_CMD} info >/dev/null 2>&1; then
+    echo -e "${RED}Error: '${INFRA_CONTAINER_CMD}' is not available or not running${NC}"
+    echo "       Override via INFRA_CONTAINER_CMD / INFRA_COMPOSE_CMD env vars"
     exit 1
 fi
 
@@ -73,8 +81,8 @@ fi
 # LOG_FILE="$LOG_DIR/${TIMESTAMP}-docker-test.log"
 # mkdir -p "$LOG_DIR"
 
-# Run docker compose
-docker compose -f docker-compose.yml -f "$COMPOSE_OVERRIDE" run --rm app bash -c "$COMMAND"
+# Run compose
+${INFRA_COMPOSE_CMD} -f docker-compose.yml -f "$COMPOSE_OVERRIDE" run --rm app bash -c "$COMMAND"
 
 EXIT_CODE=$?
 
@@ -89,8 +97,8 @@ EXIT_CODE=$?
 
 # Cleanup
 echo ""
-echo -e "${GREEN}Cleaning up Docker resources...${NC}"
-docker compose down -v >/dev/null 2>&1
+echo -e "${GREEN}Cleaning up container resources...${NC}"
+${INFRA_COMPOSE_CMD} down -v >/dev/null 2>&1
 
 if [ $EXIT_CODE -eq 0 ]; then
     echo -e "${GREEN}✓ Tests passed!${NC}"

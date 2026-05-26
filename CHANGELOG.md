@@ -31,6 +31,10 @@ For API stability guarantees and deprecation policy, see
   databases. Lets downstream projects compose database cleanup into their own higher-level
   targets without re-prompting. Mirrors the existing `cicd.erase.internal` /
   `pg.server.clean.internal` pattern.
+- `INFRA_CONTAINER_CMD` / `INFRA_COMPOSE_CMD` configuration — parameterizes the container runtime
+  used by `pg.*` / `cicd.*` Makefile targets and the helper shell scripts. Defaults to `docker` /
+  `docker compose`; set to `podman` / `podman compose` in `Makefile.local` to run the local-dev
+  container layer under Podman.
 
 ### Removed
 - `make release` and `make release.check` — targeted a non-existent `master` branch and

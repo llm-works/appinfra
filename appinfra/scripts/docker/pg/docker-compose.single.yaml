@@ -3,7 +3,7 @@
 services:
   postgres:
     container_name: ${NAME:?}
-    image: ${IMAGE:-postgres:${VERSION}}
+    image: ${IMAGE:?}
     command: ${COMMAND:-postgres}
     restart: always
     volumes:
