@@ -3,6 +3,11 @@
 # Provides install, install.e (editable), and uninstall targets.
 # Separate from Makefile.dev so projects can use dev tools without package install.
 #
+# `install` builds a wheel once, installs it into every $(PYTHON_ENVS) entry, and
+# drops a copy of the wheel into $$VENV/share/$(INFRA_DEV_PKG_NAME)/wheels/ for each
+# venv. Consumers (e.g. container builds) can pull from that stable per-venv
+# location instead of hardcoding the dev checkout path.
+#
 # Required variables:
 #   INFRA_DEV_PKG_NAME  - Package name to install/uninstall
 #   PYTHON_ENVS         - Python environments to install to
@@ -12,18 +17,34 @@
 
 ##@ Package Installation
 
-install:: areyousure ## installs $(INFRA_DEV_PKG_NAME) to all environments in PYTHON_ENVS
+install:: areyousure ## installs $(INFRA_DEV_PKG_NAME) to all environments; emits wheel to dist/ and $$VENV/share/$(INFRA_DEV_PKG_NAME)/wheels/
 	@echo "* cleaning build artifacts..."
 	@rm -rf *.egg-info .dist .build dist build
+	@echo "* building wheel..."
+	@builder=""; \
+	for pyenv in $(PYTHON_ENVS); do \
+		if [ -x "$$pyenv" ]; then builder="$$pyenv"; break; fi; \
+	done; \
+	if [ -z "$$builder" ]; then \
+		echo "  ERROR: no valid python found in PYTHON_ENVS"; exit 1; \
+	fi; \
+	$$builder -m pip wheel . --no-deps -q -w dist/ && \
+	echo "  built $$(ls dist/*.whl)"
 	@echo "* installing $(INFRA_DEV_PKG_NAME) to all environments..."
-	@for pyenv in $(PYTHON_ENVS); do \
+	@wheel="$$(ls dist/*.whl | head -1)"; \
+	for pyenv in $(PYTHON_ENVS); do \
 		if [ -x "$$pyenv" ]; then \
 			echo "  → $$pyenv"; \
 			if [ -n "$(INFRA_DEV_INSTALL_EXTRAS)" ]; then \
-				$$pyenv -m pip install -q ".[$(INFRA_DEV_INSTALL_EXTRAS)]"; \
+				$$pyenv -m pip install -q "$${wheel}[$(INFRA_DEV_INSTALL_EXTRAS)]"; \
 			else \
-				$$pyenv -m pip install -q .; \
+				$$pyenv -m pip install -q "$$wheel"; \
 			fi; \
+			venv_share="$$(dirname "$$(dirname "$$pyenv")")/share/$(INFRA_DEV_PKG_NAME)/wheels"; \
+			mkdir -p "$$venv_share"; \
+			rm -f "$$venv_share"/*.whl; \
+			cp "$$wheel" "$$venv_share/"; \
+			echo "    wheel → $$venv_share/$$(basename $$wheel)"; \
 		else \
 			echo "  → $$pyenv (skipped, not found)"; \
 		fi; \
@@ -43,6 +64,8 @@ install.e:: areyousure ## installs $(INFRA_DEV_PKG_NAME) (editable) to all envir
 			else \
 				$$pyenv -m pip install -q -e .; \
 			fi; \
+			venv_share="$$(dirname "$$(dirname "$$pyenv")")/share/$(INFRA_DEV_PKG_NAME)/wheels"; \
+			rm -rf "$$venv_share"; \
 		else \
 			echo "  → $$pyenv (skipped, not found)"; \
 		fi; \
@@ -56,6 +79,8 @@ uninstall:: areyousure ## uninstalls $(INFRA_DEV_PKG_NAME) from all environments
 		if [ -x "$$pyenv" ]; then \
 			echo "  → $$pyenv"; \
 			$$pyenv -m pip uninstall -q -y $(INFRA_DEV_PKG_NAME) 2>/dev/null || true; \
+			venv_share="$$(dirname "$$(dirname "$$pyenv")")/share/$(INFRA_DEV_PKG_NAME)/wheels"; \
+			rm -rf "$$venv_share"; \
 		else \
 			echo "  → $$pyenv (skipped, not found)"; \
 		fi; \
