@@ -175,6 +175,11 @@ jobs:
   # rootless podman + podman-compose. Tests the same code paths a podman-only
   # contributor would hit (Makefile.local override, INFRA_CONTAINER_CMD /
   # INFRA_COMPOSE_CMD propagation, image pre-resolution, container lifecycle).
+  #
+  # Smoke test, not full parity: single Python version (3.12), single-instance
+  # pg only. Replication mode is not exercised here — the matrix `test` job
+  # covers cross-version Python; cross-runtime parity for replication is a
+  # follow-up if podman-specific replication issues land.
   podman:
     name: Podman
     runs-on: ubuntu-latest
