@@ -397,6 +397,10 @@ These targets can be extended by defining them again in your Makefile:
   once (at the top level), not once per layer. Mirrors `pg.server.clean.internal::`
   and `cicd.erase.internal::`.
 
+> **Non-interactive use:** Set `INFRA_NO_CONFIRM=1` to bypass all `areyousure` prompts
+> (intended for CI and scripts). See
+> [Framework Environment Variables](environment-variables.md#framework-environment-variables).
+
 ### Non-Extensible Targets (Single-Colon)
 
 These targets should be used as-is, not extended:

@@ -35,19 +35,24 @@
 # Flag to indicate Postgres Makefile is loaded
 PG_INCLUDED := true
 
+# Container runtime (defensive defaults; Makefile.config sets these centrally
+# when included, but the ?= keeps this file usable in minimal include sets).
+INFRA_CONTAINER_CMD ?= docker
+INFRA_COMPOSE_CMD   ?= docker compose
+
 # Path to this Makefile's directory
 pg_local := $(dir $(realpath $(lastword $(MAKEFILE_LIST))))
 
 # Derived values (from YAML config) - single extraction for performance
-PG_DOCKER_YAML_SINGLE := $(pg_local)/../docker/pg/docker-compose.single.yaml
-PG_DOCKER_YAML_REPL := $(pg_local)/../docker/pg/docker-compose.repl.yaml
+PG_COMPOSE_YAML_SINGLE := $(pg_local)/../docker/pg/docker-compose.single.yaml
+PG_COMPOSE_YAML_REPL := $(pg_local)/../docker/pg/docker-compose.repl.yaml
 
 # Newline for $(subst) - must be exactly two newlines between define/endef
 define _pg_newline
 
 
 endef
-# Extract all PG config values in one call (sets PG_DOCKER_IMAGE, PG_VERSION, PG_PORT, PG_IMAGE, PG_REPLICA_ENABLED, PG_PORT_R, PG_COMMAND)
+# Extract all PG config values in one call (sets PG_CONTAINER_NAME, PG_VERSION, PG_PORT, PG_IMAGE, PG_REPLICA_ENABLED, PG_PORT_R, PG_COMMAND)
 # pg-config.sh outputs pipe-separated values; $(subst) converts pipes to newlines for $(eval)
 # Args: config_file, config_key, etc_dir, default_config_file
 # Gated on PyYAML availability so `make setup` can run from a fresh venv (see Makefile.config).
@@ -75,10 +80,19 @@ ifeq ($(PG_REPLICA_ENABLED),true)
 PSQL_STANDBY := PAGER='less -S' psql -h $(PG_HOST) -p $(PG_PORT_R) -U $(PG_USER)
 endif
 
-# Docker compose commands
-PG_DOCKER_CMD_SINGLE := VERSION=$(PG_VERSION) NAME=$(PG_DOCKER_IMAGE) PORT=$(PG_PORT) IMAGE=$(PG_IMAGE) COMMAND='$(PG_COMMAND)' docker compose -p $(PG_DOCKER_IMAGE) -f $(PG_DOCKER_YAML_SINGLE)
+# Resolved image: use explicit pgserver.image when set, else docker.io/postgres:<version>.
+# Pre-resolved here (rather than via ${IMAGE:-...} in the compose YAML) because
+# podman-compose does not recursively expand nested shell-style defaults. The default
+# is fully qualified (docker.io/...) because podman does not assume docker.io for
+# unqualified image names — docker accepts the qualified form transparently.
+# When neither image nor version is configured, leaves IMAGE empty so the YAML's
+# ${IMAGE:?} produces a clean "IMAGE: required variable not set" error.
+PG_RESOLVED_IMAGE := $(if $(PG_IMAGE),$(PG_IMAGE),$(if $(PG_VERSION),docker.io/postgres:$(PG_VERSION)))
+
+# Compose commands (runtime selected by INFRA_COMPOSE_CMD / INFRA_CONTAINER_CMD)
+PG_COMPOSE_CMD_SINGLE := NAME=$(PG_CONTAINER_NAME) PORT=$(PG_PORT) IMAGE=$(PG_RESOLVED_IMAGE) COMMAND='$(PG_COMMAND)' $(INFRA_COMPOSE_CMD) -p $(PG_CONTAINER_NAME) -f $(PG_COMPOSE_YAML_SINGLE)
 ifeq ($(PG_REPLICA_ENABLED),true)
-PG_DOCKER_CMD_REPL := VERSION=$(PG_VERSION) NAME=$(PG_DOCKER_IMAGE) PORT=$(PG_PORT) PORT_R=$(PG_PORT_R) IMAGE=$(PG_IMAGE) COMMAND='$(PG_COMMAND)' docker compose -p $(PG_DOCKER_IMAGE) -f $(PG_DOCKER_YAML_REPL)
+PG_COMPOSE_CMD_REPL := NAME=$(PG_CONTAINER_NAME) PORT=$(PG_PORT) PORT_R=$(PG_PORT_R) IMAGE=$(PG_RESOLVED_IMAGE) COMMAND='$(PG_COMMAND)' $(INFRA_COMPOSE_CMD) -p $(PG_CONTAINER_NAME) -f $(PG_COMPOSE_YAML_REPL)
 endif
 
 ##@ Postgres
@@ -87,54 +101,93 @@ endif
 # Single Instance Mode (default)
 # =============================================================================
 
-pg.server.up: ## starts postgres server (single instance)
+pg.server.up: ## starts postgres server (single instance, waits for readiness)
 ifeq ($(PG_REPLICA_ENABLED),true)
 	@# Stop replication mode if running (port conflict)
-	@if docker ps --format '{{.Names}}' | grep -q "$(PG_DOCKER_IMAGE)-primary"; then \
+	@if $(INFRA_CONTAINER_CMD) ps --format '{{.Names}}' | grep -q "$(PG_CONTAINER_NAME)-primary"; then \
 		echo "Stopping replication mode..."; \
-		$(PG_DOCKER_CMD_REPL) down; \
+		$(PG_COMPOSE_CMD_REPL) down; \
 		echo "Starting single instance..."; \
 	fi
 endif
-	@$(PG_DOCKER_CMD_SINGLE) up -d
+	@$(PG_COMPOSE_CMD_SINGLE) up -d
+	@$(MAKE) --no-print-directory pg.server.wait.up
 .PHONY: pg.server.up
 
-pg.server.down: areyousure ## stops postgres server (auto-detects mode)
+pg.server.down: areyousure ## stops postgres server (auto-detects mode, verifies removal)
 ifeq ($(PG_REPLICA_ENABLED),true)
-	@if docker ps --format '{{.Names}}' | grep -q "$(PG_DOCKER_IMAGE)-primary"; then \
-		$(PG_DOCKER_CMD_REPL) down; \
+	@if $(INFRA_CONTAINER_CMD) ps --format '{{.Names}}' | grep -q "$(PG_CONTAINER_NAME)-primary"; then \
+		$(PG_COMPOSE_CMD_REPL) down || true; \
 	else \
-		$(PG_DOCKER_CMD_SINGLE) down; \
+		$(PG_COMPOSE_CMD_SINGLE) down || true; \
 	fi
 else
-	@$(PG_DOCKER_CMD_SINGLE) down
+	@$(PG_COMPOSE_CMD_SINGLE) down || true
 endif
+	@$(MAKE) --no-print-directory pg.server.wait.down
 .PHONY: pg.server.down
 
-pg.server.reboot: areyousure ## restarts postgres server (auto-detects mode)
+pg.server.wait.up: ## waits for postgres to accept connections (30s timeout, auto-detects mode)
+	@target="$(PG_CONTAINER_NAME)"; \
+	if $(INFRA_CONTAINER_CMD) ps --format '{{.Names}}' | grep -q "^$(PG_CONTAINER_NAME)-primary$$"; then \
+		target="$(PG_CONTAINER_NAME)-primary"; \
+	fi; \
+	echo "Waiting for $$target to accept connections..."; \
+	for i in $$(seq 1 30); do \
+		if $(INFRA_CONTAINER_CMD) exec $$target pg_isready -U postgres -q 2>/dev/null; then \
+			echo "Server is UP ($$target on port $(PG_PORT))"; \
+			exit 0; \
+		fi; \
+		if [ $$((i % 5)) -eq 0 ]; then \
+			echo "  still waiting ($${i}s elapsed)"; \
+		fi; \
+		sleep 1; \
+	done; \
+	echo "ERROR: $$target did not become ready within 30s" >&2; \
+	exit 1
+.PHONY: pg.server.wait.up
+
+pg.server.wait.down: ## waits for postgres containers to be fully removed (30s timeout)
+	@echo "Waiting for $(PG_CONTAINER_NAME) container(s) to be removed..."
+	@for i in $$(seq 1 30); do \
+		if ! $(INFRA_CONTAINER_CMD) ps -a --format '{{.Names}}' | grep -qE "^$(PG_CONTAINER_NAME)(-primary|-standby)?$$"; then \
+			echo "Server is DOWN"; \
+			exit 0; \
+		fi; \
+		if [ $$((i % 5)) -eq 0 ]; then \
+			echo "  still waiting ($${i}s elapsed)"; \
+		fi; \
+		sleep 1; \
+	done; \
+	echo "ERROR: container(s) for $(PG_CONTAINER_NAME) still present after teardown" >&2; \
+	exit 1
+.PHONY: pg.server.wait.down
+
+pg.server.reboot: areyousure ## restarts postgres server (auto-detects mode, waits for readiness)
 ifeq ($(PG_REPLICA_ENABLED),true)
-	@if docker ps --format '{{.Names}}' | grep -q "$(PG_DOCKER_IMAGE)-primary"; then \
-		$(PG_DOCKER_CMD_REPL) down; \
-		$(PG_DOCKER_CMD_REPL) up -d; \
+	@if $(INFRA_CONTAINER_CMD) ps --format '{{.Names}}' | grep -q "$(PG_CONTAINER_NAME)-primary"; then \
+		$(PG_COMPOSE_CMD_REPL) down; \
+		$(PG_COMPOSE_CMD_REPL) up -d; \
 	else \
-		$(PG_DOCKER_CMD_SINGLE) down; \
-		$(PG_DOCKER_CMD_SINGLE) up -d; \
+		$(PG_COMPOSE_CMD_SINGLE) down; \
+		$(PG_COMPOSE_CMD_SINGLE) up -d; \
 	fi
 else
-	@$(PG_DOCKER_CMD_SINGLE) down
-	@$(PG_DOCKER_CMD_SINGLE) up -d
+	@$(PG_COMPOSE_CMD_SINGLE) down
+	@$(PG_COMPOSE_CMD_SINGLE) up -d
 endif
+	@$(MAKE) --no-print-directory pg.server.wait.up
 .PHONY: pg.server.reboot
 
 pg.server.logs: ## tails postgres server logs (auto-detects mode)
 ifeq ($(PG_REPLICA_ENABLED),true)
-	@if docker ps --format '{{.Names}}' | grep -q "$(PG_DOCKER_IMAGE)-primary"; then \
-		$(PG_DOCKER_CMD_REPL) logs -f; \
+	@if $(INFRA_CONTAINER_CMD) ps --format '{{.Names}}' | grep -q "$(PG_CONTAINER_NAME)-primary"; then \
+		$(PG_COMPOSE_CMD_REPL) logs -f; \
 	else \
-		$(PG_DOCKER_CMD_SINGLE) logs -f; \
+		$(PG_COMPOSE_CMD_SINGLE) logs -f; \
 	fi
 else
-	@$(PG_DOCKER_CMD_SINGLE) logs -f
+	@$(PG_COMPOSE_CMD_SINGLE) logs -f
 endif
 .PHONY: pg.server.logs
 
@@ -144,14 +197,16 @@ pg.server.clean: areyousure ## removes all postgres containers, volumes, images,
 
 pg.server.clean.internal:: # Internal: cleanup without confirmation (used by clean.full)
 	@echo "Stopping all PostgreSQL containers..."
-	@docker ps -a --filter "name=$(PG_DOCKER_IMAGE)" --format "{{.Names}}" | xargs -r docker stop 2>/dev/null || true
-	@docker ps -a --filter "name=$(PG_DOCKER_IMAGE)" --format "{{.Names}}" | xargs -r docker rm 2>/dev/null || true
+	@$(INFRA_CONTAINER_CMD) ps -a --filter "name=$(PG_CONTAINER_NAME)" --format "{{.Names}}" | xargs -r $(INFRA_CONTAINER_CMD) stop 2>/dev/null || true
+	@$(INFRA_CONTAINER_CMD) ps -a --filter "name=$(PG_CONTAINER_NAME)" --format "{{.Names}}" | xargs -r $(INFRA_CONTAINER_CMD) rm 2>/dev/null || true
 	@echo "Removing PostgreSQL volumes..."
-	@docker volume ls --filter "name=infra-pg" --format "{{.Name}}" | xargs -r docker volume rm 2>/dev/null || true
+	@$(INFRA_CONTAINER_CMD) volume ls --filter "name=infra-pg" --format "{{.Name}}" | xargs -r $(INFRA_CONTAINER_CMD) volume rm 2>/dev/null || true
 	@echo "Removing PostgreSQL networks..."
-	@docker network ls --filter "name=$(PG_DOCKER_IMAGE)" --format "{{.Name}}" | xargs -r docker network rm 2>/dev/null || true
+	@$(INFRA_CONTAINER_CMD) network ls --filter "name=$(PG_CONTAINER_NAME)" --format "{{.Name}}" | xargs -r $(INFRA_CONTAINER_CMD) network rm 2>/dev/null || true
 	@echo "Removing PostgreSQL images (force)..."
-	@docker images --filter "reference=postgres:$(PG_VERSION)" --format "{{.ID}}" | xargs -r docker rmi -f 2>/dev/null || true
+	@if [ -n "$(PG_RESOLVED_IMAGE)" ]; then \
+		$(INFRA_CONTAINER_CMD) images --filter "reference=$(PG_RESOLVED_IMAGE)" --format "{{.ID}}" | xargs -r $(INFRA_CONTAINER_CMD) rmi -f 2>/dev/null || true; \
+	fi
 	@echo "PostgreSQL cleanup complete (containers, volumes, networks, and images removed)"
 .PHONY: pg.server.clean.internal
 
@@ -160,16 +215,17 @@ pg.server.clean.internal:: # Internal: cleanup without confirmation (used by cle
 # =============================================================================
 
 ifeq ($(PG_REPLICA_ENABLED),true)
-pg.server.up.repl: ## starts postgres replication (primary + standby)
+pg.server.up.repl: ## starts postgres replication (primary + standby, waits for readiness)
 	@# Stop single instance if running (port conflict)
-	@if docker ps --format '{{.Names}}' | grep -q "^$(PG_DOCKER_IMAGE)$$"; then \
+	@if $(INFRA_CONTAINER_CMD) ps --format '{{.Names}}' | grep -q "^$(PG_CONTAINER_NAME)$$"; then \
 		echo "Stopping single instance..."; \
-		$(PG_DOCKER_CMD_SINGLE) down; \
+		$(PG_COMPOSE_CMD_SINGLE) down; \
 		echo "Starting PostgreSQL replication mode..."; \
 		echo "  Primary:  port $(PG_PORT)"; \
 		echo "  Standby:  port $(PG_PORT_R) (read-only replica)"; \
 	fi
-	@$(PG_DOCKER_CMD_REPL) up -d
+	@$(PG_COMPOSE_CMD_REPL) up -d
+	@$(MAKE) --no-print-directory pg.server.wait.up
 .PHONY: pg.server.up.repl
 endif
 
@@ -179,11 +235,11 @@ endif
 # =============================================================================
 
 pg.info: ## comprehensive server and database information
-	@$(pg_local)/../pg-info.sh "$(PG_DOCKER_IMAGE)" "$(PG_VERSION)" "$(PG_HOST)" "$(PG_PORT)" "$(PG_PORT_R)" "$(PG_USER)" "$(PG_REPLICA_ENABLED)"
+	@$(pg_local)/../pg-info.sh "$(PG_CONTAINER_NAME)" "$(PG_VERSION)" "$(PG_HOST)" "$(PG_PORT)" "$(PG_PORT_R)" "$(PG_USER)" "$(PG_REPLICA_ENABLED)"
 .PHONY: pg.info
 
 pg.info.short: ## short status summary
-	@$(pg_local)/../pg-info.sh --short "$(PG_DOCKER_IMAGE)" "$(PG_VERSION)" "$(PG_HOST)" "$(PG_PORT)" "$(PG_PORT_R)" "$(PG_USER)" "$(PG_REPLICA_ENABLED)"
+	@$(pg_local)/../pg-info.sh --short "$(PG_CONTAINER_NAME)" "$(PG_VERSION)" "$(PG_HOST)" "$(PG_PORT)" "$(PG_PORT_R)" "$(PG_USER)" "$(PG_REPLICA_ENABLED)"
 .PHONY: pg.info.short
 
 pg.clean.internal:: ## drops all configured databases (no confirmation; for downstream chaining)
@@ -213,14 +269,14 @@ pg.clean:: areyousure ## cleans all databases (with confirmation)
 .PHONY: pg.clean
 
 pg: ## connects to postgres db (primary)
-	@$(pg_local)/../pg-info.sh --short "$(PG_DOCKER_IMAGE)" "$(PG_VERSION)" "$(PG_HOST)" "$(PG_PORT)" "$(PG_PORT_R)" "$(PG_USER)" "$(PG_REPLICA_ENABLED)"
+	@$(pg_local)/../pg-info.sh --short "$(PG_CONTAINER_NAME)" "$(PG_VERSION)" "$(PG_HOST)" "$(PG_PORT)" "$(PG_PORT_R)" "$(PG_USER)" "$(PG_REPLICA_ENABLED)"
 	@echo ""
 	$(PSQL)
 .PHONY: pg
 
 ifeq ($(PG_REPLICA_ENABLED),true)
 pg.standby: ## connects to standby postgres db (replication mode only)
-	@$(pg_local)/../pg-info.sh --short "$(PG_DOCKER_IMAGE)" "$(PG_VERSION)" "$(PG_HOST)" "$(PG_PORT)" "$(PG_PORT_R)" "$(PG_USER)" "$(PG_REPLICA_ENABLED)"
+	@$(pg_local)/../pg-info.sh --short "$(PG_CONTAINER_NAME)" "$(PG_VERSION)" "$(PG_HOST)" "$(PG_PORT)" "$(PG_PORT_R)" "$(PG_USER)" "$(PG_REPLICA_ENABLED)"
 	@echo ""
 	@echo "Connecting to standby server (read-only)..."
 	$(PSQL_STANDBY)
