@@ -27,6 +27,18 @@ For API stability guarantees and deprecation policy, see
   `quiet`)
 - `help` standard arg — controls whether `-h/--help` is added (default: True)
 - `config_file` standard arg — controls whether `-c/--config` is added (default: False)
+- `pg.clean.internal` Makefile target — no-confirmation entry point for dropping all configured
+  databases. Lets downstream projects compose database cleanup into their own higher-level
+  targets without re-prompting. Mirrors the existing `cicd.erase.internal` /
+  `pg.server.clean.internal` pattern.
+
+### Removed
+- `make release` and `make release.check` — targeted a non-existent `master` branch and
+  bypassed the documented release flow (release PR to develop, `--no-ff` merge to main,
+  semver tag, CHANGELOG promotion). Use the documented protocol instead.
+- `pg.do_clean` Makefile target — unfinished extension stub (typo'd `$(pg_databases)`,
+  hardcoded `proxy` database, kept `areyousure` despite being intended as a no-confirm
+  variant). Replaced by `pg.clean.internal`.
 
 ### Changed
 - **Breaking:** `PG.session()` is now a context manager that auto-commits on success, rolls back on
@@ -52,6 +64,9 @@ For API stability guarantees and deprecation policy, see
 - `make install` now builds a wheel (`pip wheel . --no-deps -w dist/`) and copies it into each
   `$VENV/share/$INFRA_DEV_PKG_NAME/wheels/` alongside the install. Consumers (container builds,
   ops handoff) read from the stable per-venv path instead of the dev checkout
+- `pg.clean.internal` validates each database name against `^[A-Za-z_][A-Za-z0-9_]*$` and skips
+  unsafe entries; valid names are passed as quoted identifiers to `DROP DATABASE`. Closes a
+  small SQL-interpolation sharp edge in the existing loop body
 
 ### Fixed
 - `SchemaManager` connect listener now commits after `SET search_path` — fixes search_path being
@@ -68,6 +83,12 @@ For API stability guarantees and deprecation policy, see
 - `make setup` can now bootstrap when PyYAML is missing — `Makefile.config` probes for `yaml`
   once and exposes `_INFRA_PYYAML_OK`; `Makefile.pg` and `Makefile.docs` gate their parse-time
   `$(shell ...)` calls on it so setup completes from a fresh venv
+- `make env` now prints `INFRA_DOCS_CONFIG_FILE` / `INFRA_PG_CONFIG_FILE` values; previously
+  referenced the undefined names `INFRA_DOCS_CONFIG` / `INFRA_PG_CONFIG`, so the output was empty
+- `Makefile.cicd` now self-resolves its include path via `cicd_local := $(dir $(realpath ...))`
+  (the same pattern `Makefile.pg` already uses); previously depended on the caller defining a
+  `$(local)` variable, silently breaking downstream consumers that included `Makefile.cicd`
+  standalone
 
 ## [0.7.0] - 2026-05-07
 
