@@ -108,6 +108,30 @@ class App(Traceable):
         """
         return getattr(self, "_loaded_config_paths", [])
 
+    @property
+    def etc_dir(self) -> str:
+        """Resolved etc directory path the framework uses for config lookup.
+
+        Runs the four-tier fallback in `resolve_etc_dir` (explicit `--etc-dir` →
+        `./etc` → walk-up to project root → bundled package `etc/`) on first
+        access. Deferred config loading already populates this; reading the
+        property before config load triggers the resolution lazily.
+
+        Returns:
+            Resolved etc directory as an absolute path string.
+
+        Raises:
+            FileNotFoundError: If no etc directory can be found in the chain.
+        """
+        if not hasattr(self, "_etc_dir"):
+            from ...config import resolve_etc_dir
+
+            custom = None
+            if self._parsed_args is not None:
+                custom = getattr(self._parsed_args, "etc_dir", None)
+            self._etc_dir = str(resolve_etc_dir(custom))
+        return self._etc_dir
+
     def set_main_tool(self, name: str) -> None:
         """
         Set the main tool that runs when no subcommand is specified.
@@ -546,7 +570,7 @@ class App(Traceable):
 
         Uses local accumulators to avoid leaving partial state if a required file fails.
         """
-        from .config import resolve_etc_dir
+        from ...config import resolve_etc_dir
 
         deferred_specs = self._get_deferred_config_specs()
         if not deferred_specs:

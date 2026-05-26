@@ -287,7 +287,8 @@ pip install appinfra[validation]
 ```python
 from appinfra.config import (
     get_project_root,      # Find project root (contains etc/)
-    get_etc_dir,           # Get etc directory path
+    get_etc_dir,           # Get etc directory path (project root only)
+    resolve_etc_dir,       # Resolve etc dir with four-tier fallback
     get_config_file_path,  # Get path to config file
     get_default_config,    # Lazy-load default config
 )
@@ -298,11 +299,19 @@ etc = get_etc_dir()                 # /path/to/project/etc
 config_path = get_config_file_path()  # /path/to/project/etc/infra.yaml
 config_path = get_config_file_path("app.yaml")  # /path/to/project/etc/app.yaml
 
+# Resolve etc dir the way the framework does (custom path → ./etc → project root → package etc)
+etc = resolve_etc_dir()             # auto-detect
+etc = resolve_etc_dir("/srv/etc")   # explicit, validated strictly
+
 # Lazy-load default config (for scripts/examples)
 config = get_default_config()
 if config:
     db_host = config.database.host
 ```
+
+Inside an `App`, prefer `app.etc_dir` — it returns the same value as
+`resolve_etc_dir(args.etc_dir)` but caches the result and reuses what config
+loading already computed.
 
 ## Constants
 

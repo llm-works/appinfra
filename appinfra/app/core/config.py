@@ -8,7 +8,7 @@ import argparse
 from pathlib import Path
 from typing import Any
 
-from ...config import Config, get_etc_dir
+from ...config import Config, get_etc_dir, resolve_etc_dir  # noqa: F401 (re-export)
 from ...dot_dict import DotDict
 
 # Logging level constant for quiet mode (suppresses all logging)
@@ -134,81 +134,6 @@ class ConfigLoader:
     def default() -> DotDict:
         """Create default configuration with logging section."""
         return DotDict(logging=DotDict(level="info", location=0, micros=False))
-
-
-def _validate_custom_etc_path(custom_path: str) -> Path:
-    """Validate and return custom etc directory path."""
-    path = Path(custom_path).resolve()
-    if not path.exists():
-        raise FileNotFoundError(
-            f"Specified etc directory does not exist: {custom_path}"
-        )
-    if not path.is_dir():
-        raise FileNotFoundError(f"Specified etc path is not a directory: {custom_path}")
-    return path
-
-
-def _get_package_etc_dir() -> Path | None:
-    """Try to get etc directory relative to infra package."""
-    infra_package_dir = Path(__file__).parent.parent  # infra/app/core -> infra
-    package_etc = infra_package_dir.parent / "etc"  # infra -> project root -> etc
-    if package_etc.exists() and package_etc.is_dir():
-        return package_etc
-    return None
-
-
-def resolve_etc_dir(custom_path: str | None = None) -> Path:
-    """
-    Resolve the etc directory with intelligent fallback.
-
-    Resolution order:
-    1. If custom_path provided, use it (from --etc-dir)
-    2. Try ./etc/ in current working directory
-    3. Try project root etc/ (walk up to find etc/infra.yaml)
-    4. Fall back to infra package etc/ directory
-
-    Args:
-        custom_path: Custom etc directory path from --etc-dir argument
-
-    Returns:
-        Path to etc directory
-
-    Raises:
-        FileNotFoundError: If no etc directory can be found
-
-    Example:
-        # With custom path
-        etc_dir = resolve_etc_dir("/path/to/custom/etc")
-
-        # Auto-detection
-        etc_dir = resolve_etc_dir()  # Uses fallback chain
-    """
-    # Priority 1: Custom path from --etc-dir
-    if custom_path:
-        return _validate_custom_etc_path(custom_path)
-
-    # Priority 2: Current working directory ./etc/
-    cwd_etc = Path.cwd() / "etc"
-    if cwd_etc.exists() and cwd_etc.is_dir():
-        return cwd_etc
-
-    # Priority 3: Project root etc/ (walk up to find etc/infra.yaml)
-    try:
-        return get_etc_dir()  # Uses existing get_project_root() logic
-    except FileNotFoundError:
-        pass
-
-    # Priority 4: Infra package etc/ directory
-    package_etc = _get_package_etc_dir()
-    if package_etc:
-        return package_etc
-
-    raise FileNotFoundError(
-        "Could not find etc directory. Tried:\n"
-        f"  1. Current directory: {cwd_etc}\n"
-        f"  2. Project root (via etc/infra.yaml marker)\n"
-        f"  3. Infra package directory"
-    )
 
 
 def create_config(

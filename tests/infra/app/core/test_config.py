@@ -18,8 +18,8 @@ from appinfra.app.core.config import (
     LOG_LEVEL_QUIET,
     ConfigLoader,
     create_config,
-    resolve_etc_dir,
 )
+from appinfra.config import resolve_etc_dir
 from appinfra.dot_dict import DotDict
 
 # =============================================================================
@@ -474,7 +474,7 @@ class TestResolveEtcDir:
     def test_project_root_etc_via_get_etc_dir(self):
         """Test Priority 3: Project root etc/ via get_etc_dir()."""
         # This tests that resolve_etc_dir() calls get_etc_dir() when CWD etc/ doesn't exist
-        with patch("appinfra.app.core.config.get_etc_dir") as mock_get_etc_dir:
+        with patch("appinfra.config.config.get_etc_dir") as mock_get_etc_dir:
             mock_project_etc = Path("/mock/project/etc")
             mock_get_etc_dir.return_value = mock_project_etc
 
@@ -502,7 +502,7 @@ class TestResolveEtcDir:
                 os.chdir(tmpdir)
 
                 # Mock get_etc_dir to raise FileNotFoundError (no project root)
-                with patch("appinfra.app.core.config.get_etc_dir") as mock_get_etc_dir:
+                with patch("appinfra.config.config.get_etc_dir") as mock_get_etc_dir:
                     mock_get_etc_dir.side_effect = FileNotFoundError("No project root")
 
                     # The function should fall back to package etc/
@@ -529,19 +529,23 @@ class TestResolveEtcDir:
                 os.chdir(tmpdir)
 
                 # Mock get_etc_dir to raise FileNotFoundError
-                with patch("appinfra.app.core.config.get_etc_dir") as mock_get_etc_dir:
+                with patch("appinfra.config.config.get_etc_dir") as mock_get_etc_dir:
                     mock_get_etc_dir.side_effect = FileNotFoundError("No project root")
 
                     # Mock the package etc/ to not exist
-                    with patch("appinfra.app.core.config.Path") as mock_path_cls:
+                    with patch("appinfra.config.config.Path") as mock_path_cls:
                         # Make the package etc path not exist
                         mock_package_etc = MagicMock()
                         mock_package_etc.exists.return_value = False
 
-                        # Mock Path(__file__).parent.parent navigation
+                        # Mock Path(__file__).parent.parent / "etc" navigation
+                        # (the function now lives in appinfra/config/config.py,
+                        # so one fewer .parent than in the prior location)
                         mock_config_file = MagicMock()
-                        mock_config_file.parent.parent.parent = MagicMock()
-                        mock_config_file.parent.parent.parent.__truediv__.return_value = mock_package_etc
+                        mock_config_file.parent.parent = MagicMock()
+                        mock_config_file.parent.parent.__truediv__.return_value = (
+                            mock_package_etc
+                        )
 
                         mock_path_cls.return_value = mock_config_file
                         mock_path_cls.cwd.return_value = Path(tmpdir)

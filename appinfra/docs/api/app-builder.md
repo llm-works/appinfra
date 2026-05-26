@@ -246,20 +246,19 @@ arg without subclassing `App`. Overrides merge on top of framework defaults — 
 pass are changed.
 
 ```python
-# Make --etc-dir default to "./etc" so args.etc_dir is always a string
-app = (
-    AppBuilder("myapp")
-    .with_standard_args(etc_dir=True)
-    .with_standard_arg("etc_dir", default="./etc", help="config dir (default: ./etc)")
-    .build()
-)
-
 # Quieter default log level for a background service
 AppBuilder("myapp") \
     .with_standard_args(log_level=True) \
     .with_standard_arg("log_level", default="warning") \
     .build()
 ```
+
+> For the specific case of "I want a non-None etc dir string", prefer
+> `app.etc_dir` over setting `default="./etc"`. The property returns the
+> framework's resolved path (custom CLI override → `./etc` → walk-up to
+> project root → bundled package etc/) and reuses what config loading
+> already computed. Setting `default="./etc"` short-circuits the fallback
+> chain (the path is validated strictly and errors if `./etc` is missing).
 
 Restrictions:
 - `name` must be a valid standard arg; the `log` alias is rejected (target a specific log arg).
