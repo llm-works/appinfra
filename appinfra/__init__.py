@@ -16,6 +16,7 @@ from .config import (
     get_default_config,
     get_etc_dir,
     get_project_root,
+    resolve_etc_dir,
 )
 from .deprecation import deprecated
 from .dict import DictInterface
@@ -71,6 +72,7 @@ __all__ = [
     # Config utilities
     "get_project_root",
     "get_etc_dir",
+    "resolve_etc_dir",
     "get_config_file_path",
     "get_default_config",
     "PROJECT_ROOT",

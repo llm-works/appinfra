@@ -123,7 +123,7 @@ class TestEtcPathTool:
 
         # Mock resolve_etc_dir to raise FileNotFoundError
         with patch(
-            "appinfra.app.core.config.resolve_etc_dir",
+            "appinfra.config.resolve_etc_dir",
             side_effect=FileNotFoundError("No etc found"),
         ):
             result = tool.run(local=True)

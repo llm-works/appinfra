@@ -78,6 +78,8 @@ class App(Traceable):
 
         # Standard args configuration (set by builder, minimal by default)
         self._standard_args: dict[str, bool] = DEFAULT_STANDARD_ARGS.copy()
+        # Per-arg argparse kwarg overrides (set by builder via with_standard_arg)
+        self._standard_arg_overrides: dict[str, dict[str, Any]] = {}
 
         self._decorators: DecoratorAPI = DecoratorAPI(self)  # Decorator API support
         self._custom_args: list[tuple] = []  # Custom args (from builder)
@@ -105,6 +107,24 @@ class App(Traceable):
             or iterate over this list to set up watchers for all config files.
         """
         return getattr(self, "_loaded_config_paths", [])
+
+    @property
+    def etc_dir(self) -> str | None:
+        """Resolved etc directory the framework chose for config lookup.
+
+        Set by the framework when a config file is loaded — either the parent
+        of an absolute `with_config_file()` path, or the etc directory used to
+        resolve deferred configs after `--etc-dir` is parsed. Returns None
+        before any config has been resolved.
+
+        For on-demand resolution independent of the App lifecycle, call
+        `appinfra.config.resolve_etc_dir()` directly.
+
+        Returns:
+            Resolved etc directory as an absolute path string, or None if no
+            config has been resolved yet.
+        """
+        return getattr(self, "_etc_dir", None)
 
     def set_main_tool(self, name: str) -> None:
         """
@@ -172,25 +192,36 @@ class App(Traceable):
 
         self.add_log_default_args()
 
+    def _resolve_arg_kwargs(self, name: str, **defaults: Any) -> dict[str, Any]:
+        """Merge consumer overrides on top of framework defaults for a standard arg."""
+        overrides = self._standard_arg_overrides.get(name, {})
+        return {**defaults, **overrides}
+
     def add_config_file_arg(self) -> None:
         """Add config file command-line argument."""
         self.parser.add_argument(
             "-c",
             "--config",
-            type=str,
-            default=None,
-            metavar="FILE",
-            help="configuration file name (default: infra.yaml or INFRA_DEFAULT_CONFIG_FILE)",
+            **self._resolve_arg_kwargs(
+                "config_file",
+                type=str,
+                default=None,
+                metavar="FILE",
+                help="configuration file name (default: infra.yaml or INFRA_DEFAULT_CONFIG_FILE)",
+            ),
         )
 
     def add_etc_dir_arg(self) -> None:
         """Add etc directory command-line argument."""
         self.parser.add_argument(
             "--etc-dir",
-            type=str,
-            default=None,
-            metavar="DIR",
-            help="configuration directory (default: auto-detect ./etc/, project etc/, or package etc/)",
+            **self._resolve_arg_kwargs(
+                "etc_dir",
+                type=str,
+                default=None,
+                metavar="DIR",
+                help="configuration directory (default: auto-detect ./etc/, project etc/, or package etc/)",
+            ),
         )
 
     def add_argument(self, *args: Any, **kwargs: Any) -> None:
@@ -214,7 +245,9 @@ class App(Traceable):
     def _add_log_argument(self, flag_key: str, *args: Any, **kwargs: Any) -> None:
         """Add a logging argument if enabled in standard args."""
         if self._standard_args.get(flag_key, True):
-            self.parser.add_argument(*args, **kwargs)
+            self.parser.add_argument(
+                *args, **self._resolve_arg_kwargs(flag_key, **kwargs)
+            )
 
     def add_log_default_args(self) -> None:
         """Add logging-related command-line arguments."""
@@ -531,7 +564,7 @@ class App(Traceable):
 
         Uses local accumulators to avoid leaving partial state if a required file fails.
         """
-        from .config import resolve_etc_dir
+        from ...config import resolve_etc_dir
 
         deferred_specs = self._get_deferred_config_specs()
         if not deferred_specs:

@@ -1455,3 +1455,55 @@ class TestCreateConfigWatcherMethod:
         watcher = app.create_config_watcher()
 
         assert watcher._lg is mock_logger
+
+
+@pytest.mark.unit
+class TestAppEtcDirProperty:
+    """Test App.etc_dir property exposes the resolved etc directory."""
+
+    def test_returns_cached_value_set_by_config_load(self):
+        """If config loading already populated _etc_dir, the property reuses it."""
+        app = App()
+        app._etc_dir = "/cached/etc"  # type: ignore[attr-defined]
+
+        assert app.etc_dir == "/cached/etc"
+
+    def test_returns_none_when_unset(self):
+        """Before any config is resolved, the property returns None."""
+        app = App()
+        assert app._parsed_args is None
+        assert app.etc_dir is None
+
+    def test_returns_none_even_when_parsed_args_present(self):
+        """Property does not auto-resolve from _parsed_args; framework must set _etc_dir."""
+        app = App()
+        app._parsed_args = argparse.Namespace(etc_dir="/some/path")
+        # No config loaded yet -> framework hasn't set _etc_dir
+        assert app.etc_dir is None
+
+    def test_reflects_framework_set_value(self):
+        """Property returns whatever the framework wrote to _etc_dir."""
+        app = App()
+        app._etc_dir = "/cached/etc"  # type: ignore[attr-defined]
+
+        # Mutating _parsed_args after the framework sets _etc_dir must not affect the value.
+        app._parsed_args = argparse.Namespace(etc_dir="/totally/different")
+
+        assert app.etc_dir == "/cached/etc"
+
+
+@pytest.mark.unit
+class TestResolveEtcDirReExport:
+    """Verify resolve_etc_dir is reachable from the public import paths."""
+
+    def test_appinfra_root_namespace(self):
+        from appinfra import resolve_etc_dir as r1
+        from appinfra.config import resolve_etc_dir as r2
+
+        assert r1 is r2
+
+    def test_appinfra_app_namespace(self):
+        from appinfra.app import resolve_etc_dir as r1
+        from appinfra.config import resolve_etc_dir as r2
+
+        assert r1 is r2
