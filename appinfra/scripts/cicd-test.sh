@@ -103,10 +103,12 @@ ${INFRA_COMPOSE_CMD} -f docker-compose.yml -f "$COMPOSE_OVERRIDE" run --rm app b
 # echo ""
 # echo -e "${GREEN}Logs saved to:${NC} ${YELLOW}$LOG_FILE${NC}"
 
-# Cleanup
+# Cleanup. `|| true` so a cleanup failure (e.g. network/runtime issue at
+# teardown) does not mask EXIT_CODE under `set -e` by aborting before we
+# print the result and exit with EXIT_CODE below.
 echo ""
 echo -e "${GREEN}Cleaning up container resources...${NC}"
-${INFRA_COMPOSE_CMD} down -v >/dev/null 2>&1
+${INFRA_COMPOSE_CMD} down -v >/dev/null 2>&1 || true
 
 if [ $EXIT_CODE -eq 0 ]; then
     echo -e "${GREEN}✓ Tests passed!${NC}"

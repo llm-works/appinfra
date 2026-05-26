@@ -99,6 +99,7 @@ container_exit=$?
 if [ $container_exit -ne 0 ]; then
     echo -e "${RED}Error from '${container_runtime}' (exit $container_exit):${RESET}"
     echo "$container_output"
+    exit $container_exit
 elif [ "$(echo "$container_output" | wc -l)" -le 1 ]; then
     # Output is only the header row (or empty) — no matching containers
     echo "No PostgreSQL containers found"
