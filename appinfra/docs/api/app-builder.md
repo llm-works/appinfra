@@ -18,6 +18,7 @@ class AppBuilder:
 - `with_main_cls(cls)` - Use custom App subclass
 - `with_main_tool(tool)` - Set main tool (runs when no subcommand specified)
 - `with_standard_args(**kwargs)` - Enable/disable standard CLI args
+- `with_standard_arg(name, **kwargs)` - Override argparse kwargs of a standard arg
 - `without_standard_args()` - Disable all standard args
 - `build()` - Build and return the App instance
 
@@ -236,6 +237,35 @@ AppBuilder("myapp").without_standard_args().build()
 
 **Auto-enabled args:**
 - `with_config_file(from_etc_dir=True)` automatically enables `etc_dir`
+
+**Overriding framework defaults:**
+
+Use `with_standard_arg(name, **argparse_kwargs)` to override any argparse parameter
+(`default`, `help`, `metavar`, `type`, `choices`, `required`, `nargs`, `action`) of a standard
+arg without subclassing `App`. Overrides merge on top of framework defaults — only the keys you
+pass are changed.
+
+```python
+# Make --etc-dir default to "./etc" so args.etc_dir is always a string
+app = (
+    AppBuilder("myapp")
+    .with_standard_args(etc_dir=True)
+    .with_standard_arg("etc_dir", default="./etc", help="config dir (default: ./etc)")
+    .build()
+)
+
+# Quieter default log level for a background service
+AppBuilder("myapp") \
+    .with_standard_args(log_level=True) \
+    .with_standard_arg("log_level", default="warning") \
+    .build()
+```
+
+Restrictions:
+- `name` must be a valid standard arg; the `log` alias is rejected (target a specific log arg).
+- `dest` cannot be overridden — the framework reads parsed args by their canonical attribute name
+  (e.g. `args.etc_dir`).
+- The override is silently ignored if the arg is not opted in via `with_standard_args(<name>=True)`.
 
 **Precedence:** CLI args override environment variables, which override YAML config values.
 See [Configuration Precedence](../guides/configuration-precedence.md) for the full precedence rules.

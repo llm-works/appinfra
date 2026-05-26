@@ -78,6 +78,8 @@ class App(Traceable):
 
         # Standard args configuration (set by builder, minimal by default)
         self._standard_args: dict[str, bool] = DEFAULT_STANDARD_ARGS.copy()
+        # Per-arg argparse kwarg overrides (set by builder via with_standard_arg)
+        self._standard_arg_overrides: dict[str, dict[str, Any]] = {}
 
         self._decorators: DecoratorAPI = DecoratorAPI(self)  # Decorator API support
         self._custom_args: list[tuple] = []  # Custom args (from builder)
@@ -172,25 +174,36 @@ class App(Traceable):
 
         self.add_log_default_args()
 
+    def _resolve_arg_kwargs(self, name: str, **defaults: Any) -> dict[str, Any]:
+        """Merge consumer overrides on top of framework defaults for a standard arg."""
+        overrides = self._standard_arg_overrides.get(name, {})
+        return {**defaults, **overrides}
+
     def add_config_file_arg(self) -> None:
         """Add config file command-line argument."""
         self.parser.add_argument(
             "-c",
             "--config",
-            type=str,
-            default=None,
-            metavar="FILE",
-            help="configuration file name (default: infra.yaml or INFRA_DEFAULT_CONFIG_FILE)",
+            **self._resolve_arg_kwargs(
+                "config_file",
+                type=str,
+                default=None,
+                metavar="FILE",
+                help="configuration file name (default: infra.yaml or INFRA_DEFAULT_CONFIG_FILE)",
+            ),
         )
 
     def add_etc_dir_arg(self) -> None:
         """Add etc directory command-line argument."""
         self.parser.add_argument(
             "--etc-dir",
-            type=str,
-            default=None,
-            metavar="DIR",
-            help="configuration directory (default: auto-detect ./etc/, project etc/, or package etc/)",
+            **self._resolve_arg_kwargs(
+                "etc_dir",
+                type=str,
+                default=None,
+                metavar="DIR",
+                help="configuration directory (default: auto-detect ./etc/, project etc/, or package etc/)",
+            ),
         )
 
     def add_argument(self, *args: Any, **kwargs: Any) -> None:
@@ -214,7 +227,9 @@ class App(Traceable):
     def _add_log_argument(self, flag_key: str, *args: Any, **kwargs: Any) -> None:
         """Add a logging argument if enabled in standard args."""
         if self._standard_args.get(flag_key, True):
-            self.parser.add_argument(*args, **kwargs)
+            self.parser.add_argument(
+                *args, **self._resolve_arg_kwargs(flag_key, **kwargs)
+            )
 
     def add_log_default_args(self) -> None:
         """Add logging-related command-line arguments."""

@@ -11,6 +11,9 @@ For API stability guarantees and deprecation policy, see
 ## [Unreleased]
 
 ### Added
+- `AppBuilder.with_standard_arg(name, **argparse_kwargs)` overrides any argparse kwarg
+  (`default`, `help`, `metavar`, ...) of a standard CLI arg without subclassing `App`. Example:
+  `.with_standard_args(etc_dir=True).with_standard_arg("etc_dir", default="./etc")`.
 - `PG.session(autocommit=True)` mode for AUTOCOMMIT isolation — avoids BEGIN/COMMIT round-trips
   for better performance on read-heavy workloads. Each statement commits immediately.
 - `-c/--config` CLI argument for config file selection — works standalone (direct path) or with

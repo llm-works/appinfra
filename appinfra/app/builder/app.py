@@ -198,6 +198,10 @@ def _initialize_foundation(app: App, builder: AppBuilder) -> None:
     if hasattr(builder, "_config_file"):
         app._config_file = builder._config_file  # type: ignore[attr-defined]
     app._standard_args = builder._standard_args.copy()
+    app._standard_arg_overrides = {
+        name: dict(overrides)
+        for name, overrides in builder._standard_arg_overrides.items()
+    }
     _set_app_metadata(app, builder._name, builder._description, builder._version)
 
 
@@ -319,6 +323,7 @@ class AppBuilder:
         self._version: str | None = None
         self._main_cls: type | None = None
         self._standard_args: dict[str, bool] = self._DEFAULT_STANDARD_ARGS.copy()
+        self._standard_arg_overrides: dict[str, dict[str, Any]] = {}
         self._main_tool: str | None = None
         # Version tracking
         self._version_tracker: Any | None = None
@@ -580,6 +585,57 @@ class AppBuilder:
                     )
                 self._standard_args[name] = enabled
 
+        return self
+
+    def with_standard_arg(self, name: str, **overrides: Any) -> Self:
+        """
+        Override argparse kwargs for a single standard CLI argument.
+
+        Use this to customize the default value, help text, or any other argparse
+        parameter (``metavar``, ``type``, ``choices``, ``required``, ``nargs``,
+        ``action``, ...) of a standard arg without subclassing ``App``. Overrides
+        are merged on top of the framework's defaults at parser-build time, so
+        only the keys you pass are changed.
+
+        Args:
+            name: Name of the standard arg to override (e.g. ``"etc_dir"``,
+                  ``"log_level"``). Must be one of the valid standard arg names.
+                  The ``"log"`` alias is rejected here — target a specific log
+                  arg (``log_level``, ``log_location``, ...) instead.
+            **overrides: argparse kwargs to merge. ``dest`` is rejected because
+                         the framework reads parsed args by their canonical
+                         attribute name (e.g. ``args.etc_dir``).
+
+        Returns:
+            AppBuilder: Self for method chaining.
+
+        Raises:
+            ValueError: If ``name`` is not a valid standard arg, is the ``"log"``
+                        alias, or ``overrides`` contains ``"dest"``.
+
+        Note:
+            This method does NOT enable the arg — opt in with
+            ``with_standard_args(<name>=True)`` first (or rely on the framework
+            default). Overrides for a disabled arg are stored but never applied.
+
+        Example:
+            AppBuilder("myapp") \\
+                .with_standard_args(etc_dir=True) \\
+                .with_standard_arg("etc_dir", default="./etc", help="config dir") \\
+                .build()
+        """
+        self._validate_standard_arg_name(name)
+        if name == "log":
+            raise ValueError(
+                "'log' is an alias for multiple log args; use a specific name "
+                "(log_level, log_location, log_micros, log_topic, log_colors, log_json)"
+            )
+        if "dest" in overrides:
+            raise ValueError(
+                f"Cannot override 'dest' for standard arg '{name}': "
+                f"the framework reads parsed args by their canonical attribute name"
+            )
+        self._standard_arg_overrides.setdefault(name, {}).update(overrides)
         return self
 
     def without_standard_args(self) -> Self:

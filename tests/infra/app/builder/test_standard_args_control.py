@@ -359,3 +359,139 @@ class TestEdgeCases:
 
         # Final state should be all enabled (last call)
         assert all(builder._standard_args.values())
+
+
+@pytest.mark.unit
+class TestWithStandardArgMethod:
+    """Test AppBuilder.with_standard_arg() per-arg override behavior."""
+
+    def test_stores_overrides_under_arg_name(self):
+        builder = AppBuilder("test").with_standard_arg(
+            "etc_dir", default="./etc", help="config dir"
+        )
+
+        assert builder._standard_arg_overrides == {
+            "etc_dir": {"default": "./etc", "help": "config dir"}
+        }
+
+    def test_multiple_calls_merge_keys(self):
+        builder = AppBuilder("test")
+        builder.with_standard_arg("etc_dir", default="./etc")
+        builder.with_standard_arg("etc_dir", help="new help")
+
+        assert builder._standard_arg_overrides["etc_dir"] == {
+            "default": "./etc",
+            "help": "new help",
+        }
+
+    def test_later_call_overwrites_same_key(self):
+        builder = AppBuilder("test")
+        builder.with_standard_arg("etc_dir", default="./etc")
+        builder.with_standard_arg("etc_dir", default="/srv/etc")
+
+        assert builder._standard_arg_overrides["etc_dir"]["default"] == "/srv/etc"
+
+    def test_invalid_name_rejected(self):
+        builder = AppBuilder("test")
+        with pytest.raises(ValueError, match="Invalid standard argument name"):
+            builder.with_standard_arg("not_a_real_arg", default="x")
+
+    def test_log_alias_rejected(self):
+        builder = AppBuilder("test")
+        with pytest.raises(ValueError, match="'log' is an alias"):
+            builder.with_standard_arg("log", default="warning")
+
+    def test_dest_override_rejected(self):
+        builder = AppBuilder("test")
+        with pytest.raises(ValueError, match="Cannot override 'dest'"):
+            builder.with_standard_arg("etc_dir", dest="my_etc_dir")
+
+    def test_method_chains(self):
+        builder = AppBuilder("test")
+        result = builder.with_standard_arg("etc_dir", default="./etc")
+        assert result is builder
+
+
+@pytest.mark.integration
+class TestStandardArgOverrideIntegration:
+    """Verify with_standard_arg overrides reach the parser."""
+
+    @staticmethod
+    def _action_for(app, dest: str):
+        return next(a for a in app.parser.parser._actions if a.dest == dest)
+
+    def test_default_override_reaches_parser(self):
+        app = (
+            AppBuilder("test")
+            .with_standard_args(etc_dir=True)
+            .with_standard_arg("etc_dir", default="./etc")
+            .build()
+        )
+        app.create_args()
+
+        action = self._action_for(app, "etc_dir")
+        assert action.default == "./etc"
+
+    def test_help_override_reaches_parser(self):
+        app = (
+            AppBuilder("test")
+            .with_standard_args(etc_dir=True)
+            .with_standard_arg("etc_dir", help="custom etc help")
+            .build()
+        )
+        app.create_args()
+
+        action = self._action_for(app, "etc_dir")
+        assert action.help == "custom etc help"
+
+    def test_override_for_disabled_arg_is_silently_ignored(self):
+        app = (
+            AppBuilder("test")
+            .without_standard_args()
+            .with_standard_arg("etc_dir", default="./etc")
+            .build()
+        )
+        app.create_args()
+
+        parser_dests = {a.dest for a in app.parser.parser._actions}
+        assert "etc_dir" not in parser_dests
+
+    def test_override_only_changes_specified_keys(self):
+        """Framework defaults survive for kwargs not in the override."""
+        app = (
+            AppBuilder("test")
+            .with_standard_args(etc_dir=True)
+            .with_standard_arg("etc_dir", default="./etc")
+            .build()
+        )
+        app.create_args()
+
+        action = self._action_for(app, "etc_dir")
+        assert action.default == "./etc"
+        # metavar and type came from the framework
+        assert action.metavar == "DIR"
+        assert action.type is str
+
+    def test_log_level_override(self):
+        app = (
+            AppBuilder("test")
+            .with_standard_args(log_level=True)
+            .with_standard_arg("log_level", default="warning")
+            .build()
+        )
+        app.create_args()
+
+        assert self._action_for(app, "log_level").default == "warning"
+
+    def test_config_file_override(self):
+        app = (
+            AppBuilder("test")
+            .with_standard_args(config_file=True)
+            .with_standard_arg("config_file", default="prod.yaml", help="prod config")
+            .build()
+        )
+        app.create_args()
+
+        action = self._action_for(app, "config")
+        assert action.default == "prod.yaml"
+        assert action.help == "prod config"
