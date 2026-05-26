@@ -186,7 +186,7 @@ pg.info.short: ## short status summary
 	@$(pg_local)/../pg-info.sh --short "$(PG_DOCKER_IMAGE)" "$(PG_VERSION)" "$(PG_HOST)" "$(PG_PORT)" "$(PG_PORT_R)" "$(PG_USER)" "$(PG_REPLICA_ENABLED)"
 .PHONY: pg.info.short
 
-pg.clean.internal:: ## drops all configured databases (no confirmation; for chaining from clean::/clean.full)
+pg.clean.internal:: ## drops all configured databases (no confirmation; for downstream chaining)
 ifeq ($(INFRA_PG_DATABASES),)
 	@echo "no databases configured"
 else
@@ -204,7 +204,8 @@ else
 endif
 .PHONY: pg.clean.internal
 
-pg.clean:: areyousure pg.clean.internal ## cleans all databases (with confirmation)
+pg.clean:: areyousure ## cleans all databases (with confirmation)
+	@$(MAKE) pg.clean.internal
 .PHONY: pg.clean
 
 pg: ## connects to postgres db (primary)

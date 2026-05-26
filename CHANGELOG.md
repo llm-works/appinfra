@@ -27,9 +27,10 @@ For API stability guarantees and deprecation policy, see
   `quiet`)
 - `help` standard arg — controls whether `-h/--help` is added (default: True)
 - `config_file` standard arg — controls whether `-c/--config` is added (default: False)
-- `pg.clean.internal` Makefile target — no-confirmation extension hook for chaining database
-  cleanup into higher-level targets (`clean::`, `clean.full::`) without re-prompting. Mirrors
-  the existing `cicd.erase.internal` / `pg.server.clean.internal` pattern.
+- `pg.clean.internal` Makefile target — no-confirmation entry point for dropping all configured
+  databases. Lets downstream projects compose database cleanup into their own higher-level
+  targets without re-prompting. Mirrors the existing `cicd.erase.internal` /
+  `pg.server.clean.internal` pattern.
 
 ### Removed
 - `make release` and `make release.check` — targeted a non-existent `master` branch and
