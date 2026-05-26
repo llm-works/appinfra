@@ -1,5 +1,10 @@
 # PostgreSQL Single Instance Mode
 # Configure postgres via pgserver.postgres_conf
+#
+# Makefile-orchestrated: NAME / IMAGE / PORT / COMMAND are required env vars,
+# set by Makefile.pg from the pgserver config (image is pre-resolved there
+# because podman-compose does not expand nested ${IMAGE:-postgres:${VERSION}}
+# defaults). Not intended for direct `docker compose -f ...` invocation.
 services:
   postgres:
     container_name: ${NAME:?}

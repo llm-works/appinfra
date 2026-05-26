@@ -35,6 +35,9 @@ For API stability guarantees and deprecation policy, see
   used by `pg.*` / `cicd.*` Makefile targets and the helper shell scripts. Defaults to `docker` /
   `docker compose`; set to `podman` / `podman compose` in `Makefile.local` to run the local-dev
   container layer under Podman.
+- `INFRA_NO_CONFIRM=1` env var — bypasses the `areyousure` confirmation prompt for destructive
+  Make targets (`pg.server.down`, `pg.server.clean`, `cicd.erase`, `install`, ...). For CI and
+  non-interactive scripts.
 
 ### Removed
 - `make release` and `make release.check` — targeted a non-existent `master` branch and
@@ -71,6 +74,10 @@ For API stability guarantees and deprecation policy, see
 - `pg.clean.internal` validates each database name against `^[A-Za-z_][A-Za-z0-9_]*$` and skips
   unsafe entries; valid names are passed as quoted identifiers to `DROP DATABASE`. Closes a
   small SQL-interpolation sharp edge in the existing loop body
+- `pg.server.up` and `pg.server.down` now block on readiness/teardown (up to 30s) before
+  returning, instead of returning immediately after `compose up -d` / `down`. Eliminates flaky
+  "not ready" failures in chained targets. Downstream callers with their own readiness loop
+  will see harmless double-waits.
 
 ### Fixed
 - `SchemaManager` connect listener now commits after `SET search_path` — fixes search_path being

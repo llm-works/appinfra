@@ -12,6 +12,11 @@ CICD_INCLUDED := true
 # Configuration
 INFRA_CICD_PYTHON_VERSION ?= 3.12
 
+# Container runtime (defensive defaults; Makefile.config sets these centrally
+# when included, but the ?= keeps this file standalone-includable).
+INFRA_CONTAINER_CMD ?= docker
+INFRA_COMPOSE_CMD   ?= docker compose
+
 # Use real path (not symlink) to ensure Docker context resolves correctly.
 # Resolved from this Makefile's own location so downstream consumers don't
 # need to define a $(local) variable in their top-level Makefile.

@@ -35,6 +35,11 @@
 # Flag to indicate Postgres Makefile is loaded
 PG_INCLUDED := true
 
+# Container runtime (defensive defaults; Makefile.config sets these centrally
+# when included, but the ?= keeps this file usable in minimal include sets).
+INFRA_CONTAINER_CMD ?= docker
+INFRA_COMPOSE_CMD   ?= docker compose
+
 # Path to this Makefile's directory
 pg_local := $(dir $(realpath $(lastword $(MAKEFILE_LIST))))
 
@@ -80,7 +85,9 @@ endif
 # podman-compose does not recursively expand nested shell-style defaults. The default
 # is fully qualified (docker.io/...) because podman does not assume docker.io for
 # unqualified image names — docker accepts the qualified form transparently.
-PG_RESOLVED_IMAGE := $(if $(PG_IMAGE),$(PG_IMAGE),docker.io/postgres:$(PG_VERSION))
+# When neither image nor version is configured, leaves IMAGE empty so the YAML's
+# ${IMAGE:?} produces a clean "IMAGE: required variable not set" error.
+PG_RESOLVED_IMAGE := $(if $(PG_IMAGE),$(PG_IMAGE),$(if $(PG_VERSION),docker.io/postgres:$(PG_VERSION)))
 
 # Compose commands (runtime selected by INFRA_COMPOSE_CMD / INFRA_CONTAINER_CMD)
 PG_COMPOSE_CMD_SINGLE := NAME=$(PG_CONTAINER_NAME) PORT=$(PG_PORT) IMAGE=$(PG_RESOLVED_IMAGE) COMMAND='$(PG_COMMAND)' $(INFRA_COMPOSE_CMD) -p $(PG_CONTAINER_NAME) -f $(PG_COMPOSE_YAML_SINGLE)
