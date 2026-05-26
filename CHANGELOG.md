@@ -40,6 +40,9 @@ For API stability guarantees and deprecation policy, see
   `--etc-dir` is available without explicit opt-in when using deferred config loading
 - PG-dependent tests now skip via a single `@pytest.mark.require_pg` marker with reason
   `pg-unavailable`, so `make check` shows one aggregated banner instead of per-test skip noise
+- Internal refactor of `appinfra/yaml/__init__.py`: 7 per-load parameters consolidated behind a
+  `_LoadContext` dataclass so private helpers no longer re-thread the bag (worst signature went
+  from 10 to 4 params). Public `load()` / `load_file()` signatures unchanged
 
 ### Fixed
 - `SchemaManager` connect listener now commits after `SET search_path` — fixes search_path being
