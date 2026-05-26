@@ -1493,6 +1493,91 @@ class TestAppEtcDirProperty:
 
 
 @pytest.mark.unit
+class TestEtcDirResolutionOnOptIn:
+    """Verify _resolve_etc_dir_if_opted_in populates _etc_dir from --etc-dir or
+    the fallback chain when the standard arg is enabled — even without any
+    registered config files."""
+
+    def test_explicit_etc_dir_resolves_and_sets(self, tmp_path):
+        custom = tmp_path / "myetc"
+        custom.mkdir()
+
+        app = App()
+        app._standard_args = {"etc_dir": True}
+        app._parsed_args = argparse.Namespace(etc_dir=str(custom))
+
+        app._resolve_etc_dir_if_opted_in()
+
+        assert app.etc_dir == str(custom.resolve())
+
+    def test_explicit_bad_etc_dir_raises(self):
+        app = App()
+        app._standard_args = {"etc_dir": True}
+        app._parsed_args = argparse.Namespace(etc_dir="/definitely/not/there")
+
+        with pytest.raises(FileNotFoundError):
+            app._resolve_etc_dir_if_opted_in()
+
+    def test_fallback_resolves_when_flag_omitted(self, monkeypatch, tmp_path):
+        cwd_etc = tmp_path / "etc"
+        cwd_etc.mkdir()
+        monkeypatch.chdir(tmp_path)
+
+        app = App()
+        app._standard_args = {"etc_dir": True}
+        app._parsed_args = argparse.Namespace(etc_dir=None)
+
+        app._resolve_etc_dir_if_opted_in()
+
+        assert Path(app.etc_dir).resolve() == cwd_etc.resolve()
+
+    def test_fallback_miss_is_tolerant(self, monkeypatch, tmp_path):
+        """When the user didn't pass --etc-dir and no fallback exists, leave
+        _etc_dir unset (app.etc_dir returns None) — don't raise."""
+        empty = tmp_path / "empty"
+        empty.mkdir()
+        monkeypatch.chdir(empty)
+
+        app = App()
+        app._standard_args = {"etc_dir": True}
+        app._parsed_args = argparse.Namespace(etc_dir=None)
+
+        # Force the project-root and package-etc fallbacks to also fail.
+        from appinfra.config import config as _config_mod
+
+        monkeypatch.setattr(
+            _config_mod,
+            "get_etc_dir",
+            lambda: (_ for _ in ()).throw(FileNotFoundError("no project root")),
+        )
+        monkeypatch.setattr(_config_mod, "_get_package_etc_dir", lambda: None)
+
+        app._resolve_etc_dir_if_opted_in()  # must not raise
+
+        assert app.etc_dir is None
+
+    def test_not_opted_in_is_noop(self, tmp_path):
+        app = App()
+        app._standard_args = {"etc_dir": False}
+        app._parsed_args = argparse.Namespace(etc_dir=str(tmp_path))
+
+        app._resolve_etc_dir_if_opted_in()
+
+        assert app.etc_dir is None
+
+    def test_already_set_is_not_overwritten(self):
+        """If config loading already set _etc_dir, don't clobber it."""
+        app = App()
+        app._standard_args = {"etc_dir": True}
+        app._etc_dir = "/loaded/by/config/file"  # type: ignore[attr-defined]
+        app._parsed_args = argparse.Namespace(etc_dir="/from/cli")
+
+        app._resolve_etc_dir_if_opted_in()
+
+        assert app.etc_dir == "/loaded/by/config/file"
+
+
+@pytest.mark.unit
 class TestResolveEtcDirReExport:
     """Verify resolve_etc_dir is reachable from the public import paths."""
 

@@ -14,7 +14,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from ...config import Config
+from ...config import Config, resolve_etc_dir
 from ...dot_dict import DotDict
 
 if TYPE_CHECKING:
@@ -110,19 +110,27 @@ class App(Traceable):
 
     @property
     def etc_dir(self) -> str | None:
-        """Resolved etc directory the framework chose for config lookup.
+        """Resolved etc directory for this run.
 
-        Set by the framework when a config file is loaded — either the parent
-        of an absolute `with_config_file()` path, or the etc directory used to
-        resolve deferred configs after `--etc-dir` is parsed. Returns None
-        before any config has been resolved.
+        Available no later than the start of ``Tool.setup()``; sometimes set
+        earlier (at build time for absolute ``with_config_file()`` paths).
+        Resolution rules:
 
-        For on-demand resolution independent of the App lifecycle, call
-        `appinfra.config.resolve_etc_dir()` directly.
+        - If ``with_config_file("/abs/path.yaml")`` was used, the parent of the
+          absolute path wins.
+        - Else if any config file was loaded (deferred or via ``-c``), the etc
+          directory used during loading is stored.
+        - Else if the ``etc_dir`` standard arg is opted in (via
+          ``with_standard_args(etc_dir=True)``): ``resolve_etc_dir(args.etc_dir)``
+          runs post-parse. Explicit ``--etc-dir <path>`` is validated strictly
+          (raises ``FileNotFoundError`` on a bad path); a missing flag falls
+          back through ``./etc`` → project root → bundled ``appinfra/etc/``,
+          and is tolerant (leaves ``etc_dir`` as ``None`` only if every
+          fallback — including the bundled package etc — is absent).
+        - Else: ``None`` — the consumer didn't opt into etc_dir.
 
-        Returns:
-            Resolved etc directory as an absolute path string, or None if no
-            config has been resolved yet.
+        For on-demand resolution outside the App lifecycle, call
+        ``appinfra.config.resolve_etc_dir()`` directly.
         """
         return getattr(self, "_etc_dir", None)
 
@@ -427,6 +435,12 @@ class App(Traceable):
         # Load and merge configuration
         auto_load_result = self._load_and_merge_config()
 
+        # Resolve etc_dir from --etc-dir / fallback chain when opted in but
+        # no config-file branch already set it. Lives here (not inside
+        # _load_and_merge_config) so the "independent of config loading"
+        # property is structural, not incidental.
+        self._resolve_etc_dir_if_opted_in()
+
         # Initialize lifecycle with final merged config and parsed args
         self.lifecycle.initialize(self.config, args=self._parsed_args)
 
@@ -471,6 +485,26 @@ class App(Traceable):
         )
 
         return load_result
+
+    def _resolve_etc_dir_if_opted_in(self) -> None:
+        """Populate self._etc_dir when the standard arg is enabled but no
+        config-file branch has set it.
+
+        Strict for explicit --etc-dir <path> (raises FileNotFoundError on a bad
+        path); tolerant when the user didn't pass the flag (leaves _etc_dir
+        unset if the fallback chain finds nothing, so app.etc_dir reads as None).
+        """
+        if hasattr(self, "_etc_dir"):
+            return
+        if not self._standard_args.get("etc_dir", False):
+            return
+
+        custom = getattr(self._parsed_args, "etc_dir", None)
+        try:
+            self._etc_dir = str(resolve_etc_dir(custom))
+        except FileNotFoundError:
+            if custom is not None:
+                raise
 
     def _is_direct_path(self, path: str) -> bool:
         """Check if path should be loaded directly (absolute or explicit relative)."""
@@ -564,8 +598,6 @@ class App(Traceable):
 
         Uses local accumulators to avoid leaving partial state if a required file fails.
         """
-        from ...config import resolve_etc_dir
-
         deferred_specs = self._get_deferred_config_specs()
         if not deferred_specs:
             return None

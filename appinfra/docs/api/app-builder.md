@@ -253,11 +253,12 @@ AppBuilder("myapp") \
     .build()
 ```
 
-> To get a resolved etc directory after config loads, read `app.etc_dir` (set
-> by the framework during config resolution) or call
-> `appinfra.config.resolve_etc_dir()` directly. Setting `default="./etc"` here
-> short-circuits the framework's four-tier fallback chain — the path is
-> validated strictly and errors if `./etc` is missing.
+> The framework already resolves the etc directory when `etc_dir` is opted in
+> via `with_standard_args(etc_dir=True)` — read `app.etc_dir` from inside
+> `Tool.configure()`. There is no need to override the default to `"./etc"` to
+> "get a non-None string"; doing so would short-circuit the four-tier fallback
+> chain (the path is then validated strictly and errors if `./etc` is missing).
+> See [config docs](config.md#reading-appetc_dir) for the full resolution table.
 
 Restrictions:
 - `name` must be a valid standard arg; the `log` alias is rejected (target a specific log arg).
