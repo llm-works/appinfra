@@ -626,8 +626,8 @@ class AppBuilder:
 
         Example:
             AppBuilder("myapp") \\
-                .with_standard_args(etc_dir=True) \\
-                .with_standard_arg("etc_dir", default="./etc", help="config dir") \\
+                .with_standard_args(log_level=True) \\
+                .with_standard_arg("log_level", default="DEBUG", help="logging level") \\
                 .build()
         """
         self._validate_standard_arg_name(name)

@@ -312,8 +312,9 @@ if config:
 ### Reading `app.etc_dir`
 
 `App.etc_dir` returns the framework's resolved etc directory for the current
-run. It is populated during `app.setup()` after argument parsing — before any
-`Tool.setup()` runs — so tools can read it directly:
+run. It is available no later than the start of `Tool.setup()` — sometimes set
+earlier (at build time for absolute `with_config_file()` paths) — so tools can
+read it directly:
 
 ```python
 class MyTool(Tool):
@@ -327,14 +328,16 @@ class MyTool(Tool):
 Resolution rules:
 
 - **`with_config_file("/abs/x.yaml")`** — `app.etc_dir` is the parent of the absolute
-  path (set at build time).
+  path.
 - **Deferred configs or `-c <path>`** — `app.etc_dir` is the etc directory used to
   load that file.
 - **`with_standard_args(etc_dir=True)` only** (no config file registered):
   - `--etc-dir /foo` valid → `app.etc_dir` is `/foo` (resolved).
   - `--etc-dir /bad` missing → raises `FileNotFoundError` at setup (fail-fast).
-  - flag omitted, `./etc` exists → `app.etc_dir` is the resolved `./etc`.
-  - flag omitted, no fallback hits → `app.etc_dir` is `None`.
+  - flag omitted → falls back through `./etc` → project root → bundled
+    `appinfra/etc/`. In practice `app.etc_dir` almost always resolves to *some*
+    path; `None` only if every fallback (including the bundled package etc) is
+    absent.
 - **`etc_dir` not opted in** — `app.etc_dir` is always `None`.
 
 For on-demand resolution outside the App lifecycle (e.g. standalone CLI tools),

@@ -24,7 +24,9 @@ Key points:
 - `with_standard_args(etc_dir=True)` is the single opt-in; no `with_config_file()`.
 - Read `self.app.etc_dir` inside `Tool.configure()` — populated by the framework.
 - Explicit bad `--etc-dir /missing` raises `FileNotFoundError` at setup (fail-fast).
-- Missing flag with no resolvable fallback yields `app.etc_dir is None`.
+- Missing flag falls back through `./etc` → project root → bundled `appinfra/etc/`,
+  so `app.etc_dir` almost always resolves to *something* — the realistic failure
+  is the wrong dir lacking your YAML, caught at `open()` time.
 """
 
 from __future__ import annotations
@@ -54,18 +56,27 @@ class GreetTool(Tool):
 
     def configure(self) -> None:
         """Load YAML from the framework-resolved etc directory."""
-        if self.app.etc_dir is None:
-            # Only reachable if the user didn't pass --etc-dir AND no fallback
-            # (./etc, project root, package etc) was found. Bail explicitly
-            # rather than silently using a wrong default.
+        # app.etc_dir is populated by the framework. The narrow `is None` check
+        # is mostly a type guard — the fallback chain ends at the bundled
+        # appinfra/etc/, so None only occurs in degenerate environments.
+        # The realistic failure is the YAML missing from the resolved dir,
+        # handled by the try/except below.
+        etc_dir = self.app.etc_dir
+        if etc_dir is None:
             raise RuntimeError(
-                "no etc directory available; pass --etc-dir or run from a "
-                "directory containing ./etc/etc_dir_only_greeter.yaml"
+                "app.etc_dir is None; pass --etc-dir or ensure ./etc/ exists"
             )
 
-        config_path = pathlib.Path(self.app.etc_dir) / "etc_dir_only_greeter.yaml"
-        with open(config_path) as f:
-            settings = yaml.safe_load(f)
+        config_path = pathlib.Path(etc_dir) / "etc_dir_only_greeter.yaml"
+        try:
+            with open(config_path) as f:
+                settings = yaml.safe_load(f)
+        except FileNotFoundError as e:
+            raise RuntimeError(
+                f"etc_dir_only_greeter.yaml not found in {etc_dir}; "
+                "pass --etc-dir <dir-containing-the-yaml> or place the file "
+                "in ./etc/ next to the cwd"
+            ) from e
 
         self._greeting = settings["greeting"]
         self._recipient = settings["recipient"]

@@ -14,7 +14,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from ...config import Config
+from ...config import Config, resolve_etc_dir
 from ...dot_dict import DotDict
 
 if TYPE_CHECKING:
@@ -112,19 +112,21 @@ class App(Traceable):
     def etc_dir(self) -> str | None:
         """Resolved etc directory for this run.
 
-        Populated during ``app.setup()`` after argument parsing, available
-        before any ``Tool.setup()`` runs. Resolution rules:
+        Available no later than the start of ``Tool.setup()``; sometimes set
+        earlier (at build time for absolute ``with_config_file()`` paths).
+        Resolution rules:
 
         - If ``with_config_file("/abs/path.yaml")`` was used, the parent of the
-          absolute path wins (set at build time).
+          absolute path wins.
         - Else if any config file was loaded (deferred or via ``-c``), the etc
           directory used during loading is stored.
         - Else if the ``etc_dir`` standard arg is opted in (via
           ``with_standard_args(etc_dir=True)``): ``resolve_etc_dir(args.etc_dir)``
           runs post-parse. Explicit ``--etc-dir <path>`` is validated strictly
           (raises ``FileNotFoundError`` on a bad path); a missing flag falls
-          back through ``./etc`` → project root → package etc, and is tolerant
-          (returns ``None`` if nothing is found).
+          back through ``./etc`` → project root → bundled ``appinfra/etc/``,
+          and is tolerant (leaves ``etc_dir`` as ``None`` only if every
+          fallback — including the bundled package etc — is absent).
         - Else: ``None`` — the consumer didn't opt into etc_dir.
 
         For on-demand resolution outside the App lifecycle, call
@@ -433,6 +435,12 @@ class App(Traceable):
         # Load and merge configuration
         auto_load_result = self._load_and_merge_config()
 
+        # Resolve etc_dir from --etc-dir / fallback chain when opted in but
+        # no config-file branch already set it. Lives here (not inside
+        # _load_and_merge_config) so the "independent of config loading"
+        # property is structural, not incidental.
+        self._resolve_etc_dir_if_opted_in()
+
         # Initialize lifecycle with final merged config and parsed args
         self.lifecycle.initialize(self.config, args=self._parsed_args)
 
@@ -469,11 +477,6 @@ class App(Traceable):
             # No deferred configs but -c provided: load from cwd
             load_result = self._load_direct_config(cli_config)
 
-        # If etc_dir was opted into but no config-loader branch fired, resolve
-        # the etc directory anyway so app.etc_dir is populated for tools that
-        # manage their own YAML.
-        self._resolve_etc_dir_if_opted_in()
-
         # Apply command-line args to config, preserving loaded YAML sections
         # CLI args override anything loaded from etc directory
         assert self._parsed_args is not None  # Set in setup() before this method
@@ -495,7 +498,6 @@ class App(Traceable):
             return
         if not self._standard_args.get("etc_dir", False):
             return
-        from ...config import resolve_etc_dir
 
         custom = getattr(self._parsed_args, "etc_dir", None)
         try:
@@ -596,8 +598,6 @@ class App(Traceable):
 
         Uses local accumulators to avoid leaving partial state if a required file fails.
         """
-        from ...config import resolve_etc_dir
-
         deferred_specs = self._get_deferred_config_specs()
         if not deferred_specs:
             return None

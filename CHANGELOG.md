@@ -15,7 +15,7 @@ For API stability guarantees and deprecation policy, see
   (`default`, `help`, `metavar`, ...) of a standard CLI arg without subclassing `App`. Example:
   `.with_standard_args(log_level=True).with_standard_arg("log_level", default="DEBUG")`.
 - `App.etc_dir` property exposes the framework-resolved etc directory for the current run.
-  Populated whenever `etc_dir` is opted in via `with_standard_args(etc_dir=True)`, even without
+  Populated when `etc_dir` is opted in via `with_standard_args(etc_dir=True)`, even without
   `with_config_file()`. See `examples/04_configuration/etc_dir_only_example.py`.
 - `PG.session(autocommit=True)` mode for AUTOCOMMIT isolation — avoids BEGIN/COMMIT round-trips
   for better performance on read-heavy workloads. Each statement commits immediately.
