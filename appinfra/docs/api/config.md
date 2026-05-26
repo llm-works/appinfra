@@ -309,10 +309,41 @@ if config:
     db_host = config.database.host
 ```
 
-Inside an `App`, read `app.etc_dir` to see which etc directory the framework
-chose during config loading. The property returns `None` until a config has
-been resolved — it does not lazy-compute. For on-demand resolution outside the
-App lifecycle (e.g. CLI tools), call `resolve_etc_dir()` directly.
+### Reading `app.etc_dir`
+
+`App.etc_dir` returns the framework's resolved etc directory for the current
+run. It is populated during `app.setup()` after argument parsing — before any
+`Tool.setup()` runs — so tools can read it directly:
+
+```python
+class MyTool(Tool):
+    def configure(self) -> None:
+        # Inside Tool.configure(), self.app.etc_dir is the resolved path
+        # (or None if etc_dir was not opted into).
+        with open(Path(self.app.etc_dir) / "mytool.yaml") as f:
+            self._settings = yaml.safe_load(f)
+```
+
+Resolution rules:
+
+- **`with_config_file("/abs/x.yaml")`** — `app.etc_dir` is the parent of the absolute
+  path (set at build time).
+- **Deferred configs or `-c <path>`** — `app.etc_dir` is the etc directory used to
+  load that file.
+- **`with_standard_args(etc_dir=True)` only** (no config file registered):
+  - `--etc-dir /foo` valid → `app.etc_dir` is `/foo` (resolved).
+  - `--etc-dir /bad` missing → raises `FileNotFoundError` at setup (fail-fast).
+  - flag omitted, `./etc` exists → `app.etc_dir` is the resolved `./etc`.
+  - flag omitted, no fallback hits → `app.etc_dir` is `None`.
+- **`etc_dir` not opted in** — `app.etc_dir` is always `None`.
+
+For on-demand resolution outside the App lifecycle (e.g. standalone CLI tools),
+call `resolve_etc_dir()` directly.
+
+See
+[`examples/04_configuration/etc_dir_only_example.py`](../../examples/04_configuration/etc_dir_only_example.py)
+for a runnable app that loads its own YAML files from `app.etc_dir` without
+using `with_config_file()`.
 
 ## Constants
 

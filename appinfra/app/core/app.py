@@ -110,19 +110,25 @@ class App(Traceable):
 
     @property
     def etc_dir(self) -> str | None:
-        """Resolved etc directory the framework chose for config lookup.
+        """Resolved etc directory for this run.
 
-        Set by the framework when a config file is loaded — either the parent
-        of an absolute `with_config_file()` path, or the etc directory used to
-        resolve deferred configs after `--etc-dir` is parsed. Returns None
-        before any config has been resolved.
+        Populated during ``app.setup()`` after argument parsing, available
+        before any ``Tool.setup()`` runs. Resolution rules:
 
-        For on-demand resolution independent of the App lifecycle, call
-        `appinfra.config.resolve_etc_dir()` directly.
+        - If ``with_config_file("/abs/path.yaml")`` was used, the parent of the
+          absolute path wins (set at build time).
+        - Else if any config file was loaded (deferred or via ``-c``), the etc
+          directory used during loading is stored.
+        - Else if the ``etc_dir`` standard arg is opted in (via
+          ``with_standard_args(etc_dir=True)``): ``resolve_etc_dir(args.etc_dir)``
+          runs post-parse. Explicit ``--etc-dir <path>`` is validated strictly
+          (raises ``FileNotFoundError`` on a bad path); a missing flag falls
+          back through ``./etc`` → project root → package etc, and is tolerant
+          (returns ``None`` if nothing is found).
+        - Else: ``None`` — the consumer didn't opt into etc_dir.
 
-        Returns:
-            Resolved etc directory as an absolute path string, or None if no
-            config has been resolved yet.
+        For on-demand resolution outside the App lifecycle, call
+        ``appinfra.config.resolve_etc_dir()`` directly.
         """
         return getattr(self, "_etc_dir", None)
 
@@ -463,6 +469,11 @@ class App(Traceable):
             # No deferred configs but -c provided: load from cwd
             load_result = self._load_direct_config(cli_config)
 
+        # If etc_dir was opted into but no config-loader branch fired, resolve
+        # the etc directory anyway so app.etc_dir is populated for tools that
+        # manage their own YAML.
+        self._resolve_etc_dir_if_opted_in()
+
         # Apply command-line args to config, preserving loaded YAML sections
         # CLI args override anything loaded from etc directory
         assert self._parsed_args is not None  # Set in setup() before this method
@@ -471,6 +482,27 @@ class App(Traceable):
         )
 
         return load_result
+
+    def _resolve_etc_dir_if_opted_in(self) -> None:
+        """Populate self._etc_dir when the standard arg is enabled but no
+        config-file branch has set it.
+
+        Strict for explicit --etc-dir <path> (raises FileNotFoundError on a bad
+        path); tolerant when the user didn't pass the flag (leaves _etc_dir
+        unset if the fallback chain finds nothing, so app.etc_dir reads as None).
+        """
+        if hasattr(self, "_etc_dir"):
+            return
+        if not self._standard_args.get("etc_dir", False):
+            return
+        from ...config import resolve_etc_dir
+
+        custom = getattr(self._parsed_args, "etc_dir", None)
+        try:
+            self._etc_dir = str(resolve_etc_dir(custom))
+        except FileNotFoundError:
+            if custom is not None:
+                raise
 
     def _is_direct_path(self, path: str) -> bool:
         """Check if path should be loaded directly (absolute or explicit relative)."""
