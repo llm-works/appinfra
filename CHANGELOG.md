@@ -71,9 +71,10 @@ For API stability guarantees and deprecation policy, see
 - Internal refactor of `appinfra/yaml/__init__.py`: 7 per-load parameters consolidated behind a
   `_LoadContext` dataclass so private helpers no longer re-thread the bag (worst signature went
   from 10 to 4 params). Public `load()` / `load_file()` signatures unchanged
-- `make install` now builds a wheel (`pip wheel . --no-deps -w dist/`) and copies it into each
-  `$VENV/share/$INFRA_DEV_PKG_NAME/wheels/` alongside the install. Consumers (container builds,
-  ops handoff) read from the stable per-venv path instead of the dev checkout
+- `make install` now builds a wheel (`pip wheel . --no-deps -w dist/`) and publishes it to each
+  `$VENV/share/$INFRA_DEV_PKG_NAME/wheels/` with mode derived from `$VENV/share/` (refuses to
+  install when `$VENV/share/` does not exist). Consumers (container builds, ops handoff) read
+  from the stable per-venv path instead of the dev checkout
 - `pg.clean.internal` validates each database name against `^[A-Za-z_][A-Za-z0-9_]*$` and skips
   unsafe entries; valid names are passed as quoted identifiers to `DROP DATABASE`. Closes a
   small SQL-interpolation sharp edge in the existing loop body
