@@ -11,12 +11,15 @@
 # wheels overwrite in dist/; for C-extension packages dist/ accumulates one
 # wheel per tag.
 #
-# Permissions: <sys.prefix>/share/ must already exist. The publish step mirrors
-# its mode (stripped to file bits via & 0666) onto the published wheel and onto
-# any directories created beneath it, so the site policy on share/ propagates
-# to wheels/ without depending on the caller's umask. If share/ does not exist
-# the install is refused — this Makefile will not synthesize share/ under
-# arbitrary prefixes (e.g. /usr/lib/pythonX.Y/share).
+# Permissions: <sys.prefix>/share/ must already exist. The publish step reads
+# share/'s mode bits (low 12 — perm + setuid/setgid/sticky) and uses them
+# verbatim for created subdirectories ($pkg/ and wheels/); the published wheel
+# file uses the same bits masked to & 0666 (regular files never inherit
+# suid/sgid/sticky here). This makes the site policy on share/ propagate to
+# wheels/ deterministically, independent of the caller's umask. If share/ does
+# not exist the install is refused — this Makefile will not synthesize share/
+# under arbitrary prefixes (e.g. /usr/share when $pyenv resolves to a system
+# interpreter).
 #
 # Required variables:
 #   INFRA_DEV_PKG_NAME  - Package name to install/uninstall
@@ -49,11 +52,12 @@ install:: areyousure ## installs $(INFRA_DEV_PKG_NAME) to all environments; emit
 				echo "    refusing to install; this Makefile will not create share/ under an arbitrary prefix."; \
 				echo "    create it manually with the desired permissions, e.g.:"; \
 				echo "      mkdir -p '$$prefix/share' && chmod 0755 '$$prefix/share'"; \
+				echo "    note: share/'s mode becomes the policy for all published wheels."; \
 				echo "    then re-run 'make install'."; \
 				exit 1; \
 			fi; \
-			share_mode="$$($$pyenv -c 'import os, sys; print("%o" % (os.stat(sys.argv[1]).st_mode & 0o777))' "$$prefix/share")" || exit 1; \
-			file_mode="$$($$pyenv -c 'import sys; print("%o" % (int(sys.argv[1], 8) & 0o666))' "$$share_mode")" || exit 1; \
+			dir_mode="$$($$pyenv -c 'import os, sys; print("%o" % (os.stat(sys.argv[1]).st_mode & 0o7777))' "$$prefix/share")" || exit 1; \
+			file_mode="$$(printf '%o' $$((0$$dir_mode & 0666)))"; \
 			echo "    building wheel..."; \
 			$$pyenv -m pip wheel . --no-deps -q -w dist/ || exit 1; \
 			wheel="$$(ls -t dist/*.whl 2>/dev/null | head -1)"; \
@@ -65,7 +69,8 @@ install:: areyousure ## installs $(INFRA_DEV_PKG_NAME) to all environments; emit
 				$$pyenv -m pip install -q "$$wheel" || exit 1; \
 			fi; \
 			venv_share="$$prefix/share/$(INFRA_DEV_PKG_NAME)/wheels"; \
-			install -d -m "$$share_mode" "$$venv_share" || exit 1; \
+			install -d -m "$$dir_mode" "$$prefix/share/$(INFRA_DEV_PKG_NAME)" || exit 1; \
+			install -d -m "$$dir_mode" "$$venv_share" || exit 1; \
 			wheel_name="$$(basename "$$wheel")"; \
 			install -m "$$file_mode" "$$wheel" "$$venv_share/$$wheel_name" || exit 1; \
 			find "$$venv_share" -maxdepth 1 -name '*.whl' ! -name "$$wheel_name" -delete; \
