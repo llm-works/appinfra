@@ -330,9 +330,16 @@ jobs:
       - name: Pre-create $prefix/share at mode 2775 (setgid)
         run: |
           prefix="$(python -c 'import sys; print(sys.prefix)')"
-          mkdir -p "$prefix/share"
+          # setup-python's toolcache dir is root-owned. Take ownership so the
+          # subsequent chmod 2775 actually retains the setgid bit — Linux
+          # silently strips S_ISGID via chmod() when the caller doesn't own
+          # the file's group (chmod(2)).
+          sudo mkdir -p "$prefix/share"
+          sudo chown "$(id -u):$(id -g)" "$prefix/share"
           chmod 2775 "$prefix/share"
-          echo "share/ at $prefix/share mode $(stat -c %a "$prefix/share")"
+          mode=$(stat -c %a "$prefix/share")
+          echo "share/ at $prefix/share mode $mode"
+          [ "$mode" = "2775" ] || { echo "ERROR: pre-create chmod 2775 did not stick (got $mode)"; exit 1; }
 
       - name: Run make install
         run: INFRA_NO_CONFIRM=1 make install
