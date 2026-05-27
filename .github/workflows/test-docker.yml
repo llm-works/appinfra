@@ -22,6 +22,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -61,6 +63,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Set up Docker layer caching
         uses: actions/cache@v4
@@ -125,6 +129,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Set up Docker layer caching
         uses: actions/cache@v4
@@ -193,6 +199,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -258,6 +266,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Set up Python
         uses: actions/setup-python@v5
