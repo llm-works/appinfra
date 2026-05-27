@@ -100,7 +100,7 @@ jobs:
   test-summary:
     name: Test
     runs-on: ubuntu-latest
-    needs: [test, podman, check-no-db]
+    needs: [test, podman, check-no-db, install]
     if: always()
     steps:
       - name: Check test results
@@ -115,6 +115,10 @@ jobs:
           fi
           if [[ "${{ needs.check-no-db.result }}" != "success" ]]; then
             echo "No-DB fresh-install check failed"
+            exit 1
+          fi
+          if [[ "${{ needs.install.result }}" != "success" ]]; then
+            echo "Install verification failed"
             exit 1
           fi
           echo "All tests passed"
@@ -292,13 +296,13 @@ jobs:
       - name: Run make check (no postgres, no docker, no podman)
         run: make check
 
-  # Install check: verify `make install` publishes the wheel to
-  # $prefix/share/$pkg/wheels/ with the mode derived from $prefix/share/,
-  # and that it refuses on a fresh venv where $prefix/share/ is missing.
-  # Guards Makefile.install against regressions in the wheel-publish path,
-  # which is otherwise untested in CI.
-  check-install:
-    name: Check (make install)
+  # Install verification: run `make install` against a clean ubuntu runner and
+  # confirm the wheel is published to $prefix/share/$pkg/wheels/ with the mode
+  # derived from $prefix/share/, and that the install refuses on a fresh venv
+  # where $prefix/share/ is missing. Guards Makefile.install against regressions
+  # in the wheel-publish path, which is otherwise untested in CI.
+  install:
+    name: Install
     runs-on: ubuntu-latest
     needs: lint
     timeout-minutes: 10
@@ -323,11 +327,11 @@ jobs:
           python -m pip install --upgrade pip
           make setup
 
-      - name: Pre-create $prefix/share at mode 0755
+      - name: Pre-create $prefix/share at mode 2775 (setgid)
         run: |
           prefix="$(python -c 'import sys; print(sys.prefix)')"
           mkdir -p "$prefix/share"
-          chmod 0755 "$prefix/share"
+          chmod 2775 "$prefix/share"
           echo "share/ at $prefix/share mode $(stat -c %a "$prefix/share")"
 
       - name: Run make install
@@ -346,9 +350,9 @@ jobs:
           wheels_mode=$(stat -c %a "$wheels_dir")
           wheel_mode=$(stat -c %a "$wheel")
           echo "modes: $pkg/=$pkg_mode wheels/=$wheels_mode wheel=$wheel_mode"
-          [ "$pkg_mode"    = "755" ] || { echo "ERROR: $pkg/ mode $pkg_mode != 755"; exit 1; }
-          [ "$wheels_mode" = "755" ] || { echo "ERROR: wheels/ mode $wheels_mode != 755"; exit 1; }
-          [ "$wheel_mode"  = "644" ] || { echo "ERROR: wheel mode $wheel_mode != 644"; exit 1; }
+          [ "$pkg_mode"    = "2775" ] || { echo "ERROR: $pkg/ mode $pkg_mode != 2775 (setgid lost)"; exit 1; }
+          [ "$wheels_mode" = "2775" ] || { echo "ERROR: wheels/ mode $wheels_mode != 2775 (setgid lost)"; exit 1; }
+          [ "$wheel_mode"  = "664"  ] || { echo "ERROR: wheel mode $wheel_mode != 664"; exit 1; }
           echo "OK: wheel at $wheel"
 
       - name: Verify make install refuses when $prefix/share/ is missing
