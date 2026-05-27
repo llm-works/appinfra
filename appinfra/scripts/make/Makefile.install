@@ -11,6 +11,13 @@
 # wheels overwrite in dist/; for C-extension packages dist/ accumulates one
 # wheel per tag.
 #
+# Permissions: <sys.prefix>/share/ must already exist. The publish step mirrors
+# its mode (stripped to file bits via & 0666) onto the published wheel and onto
+# any directories created beneath it, so the site policy on share/ propagates
+# to wheels/ without depending on the caller's umask. If share/ does not exist
+# the install is refused — this Makefile will not synthesize share/ under
+# arbitrary prefixes (e.g. /usr/lib/pythonX.Y/share).
+#
 # Required variables:
 #   INFRA_DEV_PKG_NAME  - Package name to install/uninstall
 #   PYTHON_ENVS         - Python environments to install to
@@ -35,6 +42,18 @@ install:: areyousure ## installs $(INFRA_DEV_PKG_NAME) to all environments; emit
 	@for pyenv in $(PYTHON_ENVS); do \
 		if [ -x "$$pyenv" ]; then \
 			echo "  → $$pyenv"; \
+			prefix="$$($$pyenv -c 'import sys; print(sys.prefix)')" || exit 1; \
+			[ -n "$$prefix" ] || { echo "    ERROR: $$pyenv reported empty sys.prefix"; exit 1; }; \
+			if [ ! -d "$$prefix/share" ]; then \
+				echo "    ERROR: $$prefix/share does not exist"; \
+				echo "    refusing to install; this Makefile will not create share/ under an arbitrary prefix."; \
+				echo "    create it manually with the desired permissions, e.g.:"; \
+				echo "      mkdir -p '$$prefix/share' && chmod 0755 '$$prefix/share'"; \
+				echo "    then re-run 'make install'."; \
+				exit 1; \
+			fi; \
+			share_mode="$$($$pyenv -c 'import os, sys; print("%o" % (os.stat(sys.argv[1]).st_mode & 0o777))' "$$prefix/share")" || exit 1; \
+			file_mode="$$($$pyenv -c 'import sys; print("%o" % (int(sys.argv[1], 8) & 0o666))' "$$share_mode")" || exit 1; \
 			echo "    building wheel..."; \
 			$$pyenv -m pip wheel . --no-deps -q -w dist/ || exit 1; \
 			wheel="$$(ls -t dist/*.whl 2>/dev/null | head -1)"; \
@@ -45,14 +64,12 @@ install:: areyousure ## installs $(INFRA_DEV_PKG_NAME) to all environments; emit
 			else \
 				$$pyenv -m pip install -q "$$wheel" || exit 1; \
 			fi; \
-			prefix="$$($$pyenv -c 'import sys; print(sys.prefix)')" || exit 1; \
-			[ -n "$$prefix" ] || { echo "    ERROR: $$pyenv reported empty sys.prefix"; exit 1; }; \
 			venv_share="$$prefix/share/$(INFRA_DEV_PKG_NAME)/wheels"; \
-			mkdir -p "$$venv_share" || exit 1; \
+			install -d -m "$$share_mode" "$$venv_share" || exit 1; \
 			wheel_name="$$(basename "$$wheel")"; \
-			cp "$$wheel" "$$venv_share/$$wheel_name" || exit 1; \
+			install -m "$$file_mode" "$$wheel" "$$venv_share/$$wheel_name" || exit 1; \
 			find "$$venv_share" -maxdepth 1 -name '*.whl' ! -name "$$wheel_name" -delete; \
-			echo "    wheel → $$venv_share/$$wheel_name"; \
+			echo "    wheel → $$venv_share/$$wheel_name (mode 0$$file_mode)"; \
 		else \
 			echo "  → $$pyenv (skipped, not found)"; \
 		fi; \
