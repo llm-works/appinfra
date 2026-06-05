@@ -10,6 +10,8 @@ For API stability guarantees and deprecation policy, see
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-06-04
+
 ### Added
 - `AppBuilder.with_standard_arg(name, **argparse_kwargs)` overrides any argparse kwarg
   (`default`, `help`, `metavar`, ...) of a standard CLI arg without subclassing `App`. Example:
@@ -680,7 +682,8 @@ as config. Affected: `ConfigValidator`, `PG.readonly`, `PG.migrate()`,
 ### Changed
 - Package renamed to `appinfra` (install and import both use `appinfra`)
 
-[Unreleased]: https://github.com/llm-works/appinfra/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/llm-works/appinfra/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/llm-works/appinfra/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/llm-works/appinfra/compare/v0.6.1...v0.7.0
 [0.6.1]: https://github.com/llm-works/appinfra/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/llm-works/appinfra/compare/v0.5.0...v0.6.0
