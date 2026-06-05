@@ -338,6 +338,62 @@ class TestSchedSetup:
         assert sched.next_t is not None
         assert sched.next_t > time.time()
 
+    @patch.object(Sched, "_log_setup")
+    def test_setup_daily_advances_when_time_passed(self, _log_setup, mock_logger):
+        """Cover _setup_daily branch where the scheduled time has already passed today."""
+        sched = Sched(mock_logger, Period.DAILY, "08:00")
+        # Force "now" to be after 08:00 so the +1 day branch fires.
+        now = datetime.datetime(2026, 5, 25, 23, 59, 0)
+        sched._setup_daily(now)
+        expected = datetime.datetime(2026, 5, 26, 8, 0, 0)
+        assert sched.next_t == expected.timestamp()
+
+    @patch.object(Sched, "_log_setup")
+    def test_setup_weekly_advances_when_same_weekday_time_passed(
+        self, _log_setup, mock_logger
+    ):
+        """Same target weekday, time already passed → fire next week."""
+        # Monday = 0. Now is Monday afternoon, schedule Monday at 08:00.
+        sched = Sched(mock_logger, Period.WEEKLY, "08:00", weekday=0)
+        monday_afternoon = datetime.datetime(2026, 5, 25, 14, 0, 0)
+        assert monday_afternoon.weekday() == 0
+        sched._setup_weekly(monday_afternoon)
+        expected = datetime.datetime(2026, 6, 1, 8, 0, 0)  # next Monday 08:00
+        assert sched.next_t == expected.timestamp()
+
+    @patch.object(Sched, "_log_setup")
+    def test_setup_weekly_fires_today_when_same_weekday_time_not_passed(
+        self, _log_setup, mock_logger
+    ):
+        """Same target weekday, time still ahead → fire today (regression).
+
+        Before sched.py:359 was changed from `<= 0` to `< 0`, today's 08:00
+        on the target weekday was incorrectly skipped to next week.
+        """
+        sched = Sched(mock_logger, Period.WEEKLY, "08:00", weekday=0)
+        monday_morning = datetime.datetime(2026, 5, 25, 6, 0, 0)
+        assert monday_morning.weekday() == 0
+        sched._setup_weekly(monday_morning)
+        expected = datetime.datetime(2026, 5, 25, 8, 0, 0)  # same Monday 08:00
+        assert sched.next_t == expected.timestamp()
+
+    @patch.object(Sched, "_log_setup")
+    def test_setup_minutely_advances_when_time_passed(self, _log_setup, mock_logger):
+        """Cover _setup_minutely branch where current second is past the target second."""
+        sched = Sched(mock_logger, Period.MINUTELY, "5")
+        # Pick a "now" whose second component is > 5 to trigger the +1 minute branch.
+        now = datetime.datetime(2026, 5, 25, 12, 0, 30)
+        sched._setup_minutely(now)
+        expected = datetime.datetime(2026, 5, 25, 12, 1, 5)
+        assert sched.next_t == expected.timestamp()
+
+    def test_log_scheduler_status_emits_debug(self, mock_logger):
+        """Cover _log_scheduler_status (debug log emission)."""
+        sched = Sched(mock_logger, Period.DAILY, "09:00")
+        sched._next_t = time.time() + 3600
+        sched._log_scheduler_status(delay=3600.0)
+        sched.lg.debug.assert_called_once()
+
 
 # =============================================================================
 # Test Sched Sync

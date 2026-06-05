@@ -12,8 +12,16 @@ CICD_INCLUDED := true
 # Configuration
 INFRA_CICD_PYTHON_VERSION ?= 3.12
 
-# Use real path (not symlink) to ensure Docker context resolves correctly
-CICD_DIR := $(local)/appinfra/scripts/cicd
+# Container runtime (defensive defaults; Makefile.config sets these centrally
+# when included, but the ?= keeps this file standalone-includable).
+INFRA_CONTAINER_CMD ?= docker
+INFRA_COMPOSE_CMD   ?= docker compose
+
+# Use real path (not symlink) to ensure Docker context resolves correctly.
+# Resolved from this Makefile's own location so downstream consumers don't
+# need to define a $(local) variable in their top-level Makefile.
+cicd_local := $(dir $(realpath $(lastword $(MAKEFILE_LIST))))
+CICD_DIR := $(cicd_local)../cicd
 
 ##@ CI/CD (Docker Compose)
 
@@ -29,13 +37,13 @@ cicd.test:: ## Run full CI: lint (native) + tests on all Python versions (Docker
 	@$(MAKE) cq.strict
 	@echo ""
 	@echo "=== Running tests on Python 3.11 (Docker) ==="
-	@cd $(CICD_DIR) && docker compose -f docker-compose.yml -f docker-compose.override.py3.11.yml run --build --rm cicd-test make test.all
+	@cd $(CICD_DIR) && $(INFRA_COMPOSE_CMD) -f docker-compose.yml -f docker-compose.override.py3.11.yml run --build --rm cicd-test make test.all
 	@echo ""
 	@echo "=== Running tests on Python 3.12 (Docker) ==="
-	@cd $(CICD_DIR) && docker compose -f docker-compose.yml -f docker-compose.override.py3.12.yml run --build --rm cicd-test make test.all
+	@cd $(CICD_DIR) && $(INFRA_COMPOSE_CMD) -f docker-compose.yml -f docker-compose.override.py3.12.yml run --build --rm cicd-test make test.all
 	@echo ""
 	@echo "=== Running tests on Python 3.13 (Docker) ==="
-	@cd $(CICD_DIR) && docker compose -f docker-compose.yml -f docker-compose.override.py3.13.yml run --build --rm cicd-test make test.all
+	@cd $(CICD_DIR) && $(INFRA_COMPOSE_CMD) -f docker-compose.yml -f docker-compose.override.py3.13.yml run --build --rm cicd-test make test.all
 .PHONY: cicd.test
 
 cicd.test.quick:: ## Quick CI: lint (native) + tests on Python 3.12 only (Docker)
@@ -46,37 +54,37 @@ cicd.test.quick:: ## Quick CI: lint (native) + tests on Python 3.12 only (Docker
 	@$(MAKE) cq.strict
 	@echo ""
 	@echo "=== Running tests on Python 3.12 (Docker) ==="
-	@cd $(CICD_DIR) && docker compose -f docker-compose.yml -f docker-compose.override.py3.12.yml run --build --rm cicd-test make test.all
+	@cd $(CICD_DIR) && $(INFRA_COMPOSE_CMD) -f docker-compose.yml -f docker-compose.override.py3.12.yml run --build --rm cicd-test make test.all
 .PHONY: cicd.test.quick
 
 cicd.test.docker:: ## Run all checks inside Docker (Python 3.12, for debugging)
-	@cd $(CICD_DIR) && docker compose -f docker-compose.yml -f docker-compose.override.py3.12.yml run --build --rm cicd-test make check.summary
+	@cd $(CICD_DIR) && $(INFRA_COMPOSE_CMD) -f docker-compose.yml -f docker-compose.override.py3.12.yml run --build --rm cicd-test make check.summary
 .PHONY: cicd.test.docker
 
 cicd.test.py311:: ## Run tests on Python 3.11 only (Docker, no lint)
-	@cd $(CICD_DIR) && docker compose -f docker-compose.yml -f docker-compose.override.py3.11.yml run --build --rm cicd-test make test.all
+	@cd $(CICD_DIR) && $(INFRA_COMPOSE_CMD) -f docker-compose.yml -f docker-compose.override.py3.11.yml run --build --rm cicd-test make test.all
 .PHONY: cicd.test.py311
 
 cicd.test.py312:: ## Run tests on Python 3.12 only (Docker, no lint)
-	@cd $(CICD_DIR) && docker compose -f docker-compose.yml -f docker-compose.override.py3.12.yml run --build --rm cicd-test make test.all
+	@cd $(CICD_DIR) && $(INFRA_COMPOSE_CMD) -f docker-compose.yml -f docker-compose.override.py3.12.yml run --build --rm cicd-test make test.all
 .PHONY: cicd.test.py312
 
 cicd.test.py313:: ## Run tests on Python 3.13 only (Docker, no lint)
-	@cd $(CICD_DIR) && docker compose -f docker-compose.yml -f docker-compose.override.py3.13.yml run --build --rm cicd-test make test.all
+	@cd $(CICD_DIR) && $(INFRA_COMPOSE_CMD) -f docker-compose.yml -f docker-compose.override.py3.13.yml run --build --rm cicd-test make test.all
 .PHONY: cicd.test.py313
 
 cicd.shell:: ## Open interactive shell in Docker container (Python 3.12)
-	cd $(CICD_DIR) && docker compose -f docker-compose.yml -f docker-compose.override.py3.12.yml run --build --rm cicd-test bash
+	cd $(CICD_DIR) && $(INFRA_COMPOSE_CMD) -f docker-compose.yml -f docker-compose.override.py3.12.yml run --build --rm cicd-test bash
 .PHONY: cicd.shell
 
 cicd.build:: ## Build Docker images for all Python versions
-	cd $(CICD_DIR) && docker compose -f docker-compose.yml -f docker-compose.override.py3.11.yml build
-	cd $(CICD_DIR) && docker compose -f docker-compose.yml -f docker-compose.override.py3.12.yml build
-	cd $(CICD_DIR) && docker compose -f docker-compose.yml -f docker-compose.override.py3.13.yml build
+	cd $(CICD_DIR) && $(INFRA_COMPOSE_CMD) -f docker-compose.yml -f docker-compose.override.py3.11.yml build
+	cd $(CICD_DIR) && $(INFRA_COMPOSE_CMD) -f docker-compose.yml -f docker-compose.override.py3.12.yml build
+	cd $(CICD_DIR) && $(INFRA_COMPOSE_CMD) -f docker-compose.yml -f docker-compose.override.py3.13.yml build
 .PHONY: cicd.build
 
 cicd.clean:: ## Stop and remove Docker containers and volumes
-	cd $(CICD_DIR) && docker compose down -v --remove-orphans
+	cd $(CICD_DIR) && $(INFRA_COMPOSE_CMD) down -v --remove-orphans
 .PHONY: cicd.clean
 
 cicd.erase:: areyousure ## Stop and remove Docker containers, volumes, and images
@@ -84,7 +92,7 @@ cicd.erase:: areyousure ## Stop and remove Docker containers, volumes, and image
 .PHONY: cicd.erase
 
 cicd.erase.internal:: # Internal: cleanup without confirmation (used by clean.full)
-	cd $(CICD_DIR) && docker compose down -v --rmi all --remove-orphans
+	cd $(CICD_DIR) && $(INFRA_COMPOSE_CMD) down -v --rmi all --remove-orphans
 	@echo "Force removing any remaining CICD images..."
-	@docker images --filter "reference=infra-test:*" --format "{{.ID}}" | xargs -r docker rmi -f 2>/dev/null || true
+	@$(INFRA_CONTAINER_CMD) images --filter "reference=infra-test:*" --format "{{.ID}}" | xargs -r $(INFRA_CONTAINER_CMD) rmi -f 2>/dev/null || true
 .PHONY: cicd.erase.internal

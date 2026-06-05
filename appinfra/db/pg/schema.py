@@ -98,15 +98,12 @@ class SchemaManager:
             cursor = dbapi_conn.cursor()
             cursor.execute(set_path_sql)
             cursor.close()
-
-        @event.listens_for(self._engine, "checkout")
-        def _on_checkout(dbapi_conn: Any, rec: Any, proxy: Any) -> None:
-            cursor = dbapi_conn.cursor()
-            cursor.execute(set_path_sql)
-            cursor.close()
+            # Commit to persist search_path at session level. Without this,
+            # the SET is part of an implicit transaction that gets rolled back
+            # when SQLAlchemy's pool resets the connection on return.
+            dbapi_conn.commit()
 
         self._connect_listener = _on_connect
-        self._checkout_listener = _on_checkout
         self._listeners_installed = True
         self._lg.debug(
             "installed schema listeners",
@@ -120,8 +117,6 @@ class SchemaManager:
 
         if hasattr(self, "_connect_listener"):
             event.remove(self._engine, "connect", self._connect_listener)
-        if hasattr(self, "_checkout_listener"):
-            event.remove(self._engine, "checkout", self._checkout_listener)
 
         self._listeners_installed = False
         self._lg.debug("removed schema listeners", extra={"schema": self._schema})

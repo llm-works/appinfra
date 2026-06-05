@@ -13,6 +13,10 @@ import os
 import pytest
 import sqlalchemy
 
+# All tests in this module exercise PG-backed fixtures; skip the whole module
+# with the sentinel reason if PG is unreachable.
+pytestmark = pytest.mark.require_pg
+
 
 @pytest.mark.integration
 class TestPGFixtures:
@@ -28,9 +32,8 @@ class TestPGFixtures:
         """Test that PostgreSQL connection is established."""
         assert pg_connection is not None
         # Test we can create a session
-        session = pg_connection.session()
-        assert session is not None
-        session.close()
+        with pg_connection.session() as session:
+            assert session is not None
 
     def test_pg_session_basic_query(self, pg_session):
         """Test that we can execute basic queries with pg_session."""

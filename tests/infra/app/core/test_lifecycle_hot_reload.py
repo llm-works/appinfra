@@ -255,6 +255,7 @@ logging:
         # Mock parsed args to avoid argparse trying to parse pytest args
         app._parsed_args = MagicMock()
         app._parsed_args.etc_dir = None
+        app._parsed_args.config = None
         app._parsed_args.log_level = None
         app._parsed_args.log_location = None
         app._parsed_args.log_micros = None
@@ -313,6 +314,7 @@ logging:
         # Mock parsed args
         app._parsed_args = MagicMock()
         app._parsed_args.etc_dir = None
+        app._parsed_args.config = None
         app._parsed_args.log_level = None
         app._parsed_args.log_location = None
         app._parsed_args.log_micros = None
@@ -359,6 +361,7 @@ logging:
         # Manually trigger config loading (partial setup)
         app._parsed_args = MagicMock()
         app._parsed_args.etc_dir = None
+        app._parsed_args.config = None
         app._parsed_args.log_level = None
         app._parsed_args.log_location = None
         app._parsed_args.log_micros = None
@@ -408,6 +411,7 @@ logging:
         # Mock parsed args to specify etc_dir
         app._parsed_args = MagicMock()
         app._parsed_args.etc_dir = str(etc_dir)
+        app._parsed_args.config = None
         app._parsed_args.log_level = None
         app._parsed_args.log_location = None
         app._parsed_args.log_micros = None

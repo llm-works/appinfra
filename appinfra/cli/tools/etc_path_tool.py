@@ -47,7 +47,7 @@ class EtcPathTool(Tool):
         except Exception:
             use_local = local
         if use_local:
-            from ...app.core.config import resolve_etc_dir
+            from ...config import resolve_etc_dir
 
             try:
                 print(resolve_etc_dir())

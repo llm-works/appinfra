@@ -13,7 +13,12 @@ docs_local := $(dir $(realpath $(lastword $(MAKEFILE_LIST))))
 # Resolve mkdocs config path using docs-config.sh
 # If INFRA_DOCS_CONFIG_FILE is set, use it directly from ETC_DIR
 # If empty, extract 'docs' section from INFRA_DEFAULT_CONFIG_FILE
+# Gated on PyYAML availability so `make setup` can run from a fresh venv (see Makefile.config).
+# When skipped, MKDOCS_CONFIG is left undefined — docs.* targets will fail at recipe time,
+# but parse-time (and `make setup`) completes.
+ifdef _INFRA_PYYAML_OK
 MKDOCS_CONFIG := $(shell CURDIR=$(CURDIR) $(docs_local)/../docs-config.sh "$(INFRA_DOCS_CONFIG_FILE)" $(ETC_DIR) $(INFRA_DEFAULT_CONFIG_FILE))
+endif
 
 ##@ Documentation
 

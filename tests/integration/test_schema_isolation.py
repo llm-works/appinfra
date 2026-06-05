@@ -21,6 +21,10 @@ from sqlalchemy.orm import declarative_base
 
 from appinfra.db.pg import PG
 
+# All tests in this module exercise a real PG instance; skip the whole module
+# with the sentinel reason if PG is unreachable.
+pytestmark = pytest.mark.require_pg
+
 
 @pytest.mark.integration
 class TestSchemaCreation:
@@ -165,6 +169,76 @@ class TestSchemaIsolation:
                 )
                 value = result.scalar()
                 assert value == "test"
+
+            # Test autocommit session also uses schema search_path
+            with pg.session(autocommit=True) as session:
+                result = session.execute(
+                    text("SELECT value FROM query_test_table WHERE id = 1")
+                )
+                value = result.scalar()
+                assert value == "test"
+
+        finally:
+            with pg_connection.engine.connect() as conn:
+                conn.execute(text(f'DROP SCHEMA IF EXISTS "{schema_name}" CASCADE'))
+                conn.commit()
+
+
+@pytest.mark.integration
+class TestSchemaPoolBehavior:
+    """Test schema isolation survives connection pool operations."""
+
+    def test_search_path_persists_after_pool_rollback(self, pg_connection, pg_logger):
+        """
+        Test search_path persists when connection is returned to pool and reused.
+
+        Regression test for: connect listener's SET search_path was rolled back
+        by SQLAlchemy's pool reset (ROLLBACK on connection return). The fix is
+        to commit after SET in the connect listener.
+
+        Key: We must NOT call create_schema/migrate before testing, because those
+        commits would accidentally persist the search_path, masking the bug.
+        """
+        schema_name = f"test_pool_{int(time.time())}_{os.getpid()}"
+
+        try:
+            # Pre-create schema using the shared pg_connection (not our test PG)
+            with pg_connection.engine.connect() as conn:
+                conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{schema_name}"'))
+                conn.execute(
+                    text(f'CREATE TABLE "{schema_name}".pool_test (id int PRIMARY KEY)')
+                )
+                conn.execute(text(f'INSERT INTO "{schema_name}".pool_test VALUES (42)'))
+                conn.commit()
+
+            # Create PG with pool_size=1 to force connection reuse
+            # DO NOT call create_schema() or migrate() - that would commit and mask bug
+            cfg = dict(pg_connection.cfg)
+            cfg["pool_size"] = 1
+            cfg["max_overflow"] = 0
+            pg = PG(pg_logger, cfg, schema=schema_name)
+
+            # First checkout - connect listener fires, sets search_path
+            # Return to pool without committing - triggers pool reset (ROLLBACK)
+            conn1 = pg.engine.connect()
+            result = conn1.execute(text("SHOW search_path"))
+            first_path = result.scalar()
+            assert schema_name in first_path, f"First checkout wrong: {first_path}"
+            conn1.close()  # Returns to pool, triggers ROLLBACK
+
+            # Second checkout - reuses same connection AFTER pool's ROLLBACK
+            # Bug: search_path reverted to "$user", public because SET was rolled back
+            conn2 = pg.engine.connect()
+            result = conn2.execute(text("SHOW search_path"))
+            second_path = result.scalar()
+            assert schema_name in second_path, (
+                f"search_path lost after pool reset! Got: {second_path}"
+            )
+
+            # Verify unqualified query works (uses search_path)
+            result = conn2.execute(text("SELECT id FROM pool_test"))
+            assert result.scalar() == 42
+            conn2.close()
 
         finally:
             with pg_connection.engine.connect() as conn:

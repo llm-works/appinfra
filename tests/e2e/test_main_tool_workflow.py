@@ -211,6 +211,7 @@ class TestMainToolWorkflow:
             .tools.with_tool(tool)
             .done()
             .with_main_tool("run")
+            .with_standard_args(log_level=True)
             .build()
         )
 

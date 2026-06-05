@@ -244,27 +244,31 @@ def pg_isolated(
 
 
 @pytest.fixture
-def pg_session_isolated(pg_isolated: PG) -> Generator[Any, None, None]:
+def pg_session_isolated(
+    pg_isolated: PG, request: pytest.FixtureRequest
+) -> Generator[Any, None, None]:
     """
     Create a database session with automatic commit/rollback.
 
     Provides a fresh session for each test. The session is committed on
-    success and rolled back on failure.
+    success and rolled back on failure (based on test outcome).
 
     Args:
         pg_isolated: Schema-isolated PG instance
+        request: pytest request fixture for test outcome detection
 
     Yields:
         SQLAlchemy session
     """
-    session = pg_isolated.session()
+    session = pg_isolated._create_session()
     try:
         yield session
-        session.commit()
-    except Exception:
-        session.rollback()
-        raise
     finally:
+        rep_call = getattr(request.node, "rep_call", None)
+        if rep_call is not None and rep_call.failed:
+            session.rollback()
+        else:
+            session.commit()
         session.close()
 
 
@@ -324,8 +328,9 @@ def pg_migrate_factory(
 
         # In tests
         def test_something(pg_with_tables):
-            session = pg_with_tables.session()
-            # Tables from Base are available
+            with pg_with_tables.session() as session:
+                # Tables from Base are available
+                pass
     """
 
     @contextmanager

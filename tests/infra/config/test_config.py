@@ -12,8 +12,9 @@ Tests the Config class functionality including:
 """
 
 import os
+import tempfile
 from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
@@ -24,6 +25,7 @@ from appinfra.config import (
     get_default_config,
     get_etc_dir,
     get_project_root,
+    resolve_etc_dir,
 )
 from appinfra.config.config import (
     _check_file_size,
@@ -1491,3 +1493,302 @@ app:
         assert config.app.server.config.port == 8080
         assert config.app.server.config.host == "remotehost"
         assert config.app.server.config.timeout == 30
+
+
+@pytest.mark.unit
+class TestEnvOverrideSubstitution:
+    """Env overrides must reach `${var}` references inside strings.
+
+    Regression: the YAML loader's include-time substitution pre-rendered
+    `${pgserver.host}` with raw YAML values *before* Config applied env
+    overrides, so URLs like `postgres://${pgserver.host}/db` kept the
+    pre-override value even when `INFRA_PGSERVER_HOST` was set.
+    appinfra.yaml._include now checks INFRA_* env vars first.
+    """
+
+    def test_env_override_substitutes_into_url(self, tmp_path, clean_env):
+        """${var} in a URL string picks up the env-overridden value."""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text(
+            "pgserver:\n"
+            "  host: 127.0.0.1\n"
+            "  port: 7432\n"
+            "  user: postgres\n"
+            "  pass: ''\n"
+            "dbs:\n"
+            "  unittest:\n"
+            '    url: "postgresql://${pgserver.user}:${pgserver.pass}'
+            '@${pgserver.host}:${pgserver.port}/infra_test"\n'
+        )
+        os.environ["INFRA_PGSERVER_HOST"] = "postgres"
+        os.environ["INFRA_PGSERVER_PORT"] = "5432"
+        config = Config(str(config_file))
+        assert config.pgserver.host == "postgres"
+        assert config.pgserver.port == 5432
+        assert (
+            config.dbs.unittest.url == "postgresql://postgres:@postgres:5432/infra_test"
+        )
+
+    def test_env_override_substitutes_across_include(self, tmp_path, clean_env):
+        """${var} resolved at !include time also picks up env overrides."""
+        included = tmp_path / "pg.yaml"
+        included.write_text(
+            "pgserver:\n"
+            "  host: 127.0.0.1\n"
+            "  port: 7432\n"
+            "dbs:\n"
+            "  unittest:\n"
+            '    url: "postgresql://${pgserver.host}:${pgserver.port}/db"\n'
+        )
+        main = tmp_path / "infra.yaml"
+        main.write_text(
+            "pgserver: !include pg.yaml#pgserver\ndbs: !include pg.yaml#dbs\n"
+        )
+        os.environ["INFRA_PGSERVER_HOST"] = "postgres"
+        os.environ["INFRA_PGSERVER_PORT"] = "5432"
+        config = Config(str(main))
+        assert config.dbs.unittest.url == "postgresql://postgres:5432/db"
+
+    def test_no_env_override_uses_yaml_values(self, tmp_path, clean_env):
+        """Without env overrides set, substitution uses YAML values as before."""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text(
+            "pgserver:\n"
+            "  host: 127.0.0.1\n"
+            "  port: 7432\n"
+            "dbs:\n"
+            "  unittest:\n"
+            '    url: "postgresql://${pgserver.host}:${pgserver.port}/db"\n'
+        )
+        config = Config(str(config_file))
+        assert config.dbs.unittest.url == "postgresql://127.0.0.1:7432/db"
+
+    def test_env_override_multi_underscore_resolves_via_canonical_alias(
+        self, tmp_path, clean_env
+    ):
+        """A multi-segment env var (`INFRA_DB_CONNECTION_POOL_SIZE`) reaches a
+        `${db.connection_pool.size}` reference inside an included section.
+
+        Without the canonical alias, `_collect_env_overrides_for_yaml` only
+        emits `db.connection.pool.size` (every `_` becomes `.`); the
+        include-time substitute then misses the override and renders the
+        included string with the raw YAML value (10), so the env override
+        cannot land at all — `Config._resolve` already sees a baked literal.
+        """
+        included = tmp_path / "db.yaml"
+        included.write_text(
+            "db:\n"
+            "  connection_pool:\n"
+            "    size: 10\n"
+            "  summary:\n"
+            '    size_str: "size=${db.connection_pool.size}"\n'
+        )
+        main = tmp_path / "main.yaml"
+        main.write_text("db: !include db.yaml#db\n")
+        os.environ["INFRA_DB_CONNECTION_POOL_SIZE"] = "42"
+        config = Config(str(main))
+        assert config.db.connection_pool.size == 42
+        assert config.db.summary.size_str == "size=42"
+
+    def test_env_overrides_disabled_does_not_reach_include_substitution(
+        self, tmp_path, clean_env
+    ):
+        """`enable_env_overrides=False` cleanly suppresses env at BOTH the
+        leaf-key override pass and the include-time `${var}` substitution.
+
+        Config achieves this by not passing an `env_overrides` dict to
+        yaml.load() — the YAML loader is pure local-context substitution
+        unless the caller explicitly opts in.
+        """
+        included = tmp_path / "pg.yaml"
+        included.write_text(
+            "pgserver:\n"
+            "  host: 127.0.0.1\n"
+            "dbs:\n"
+            "  unittest:\n"
+            '    url: "postgres://${pgserver.host}/db"\n'
+        )
+        main = tmp_path / "main.yaml"
+        main.write_text(
+            "pgserver: !include pg.yaml#pgserver\ndbs: !include pg.yaml#dbs\n"
+        )
+        os.environ["INFRA_PGSERVER_HOST"] = "postgres"
+        config = Config(str(main), enable_env_overrides=False)
+        assert config.pgserver.host == "127.0.0.1"
+        assert config.dbs.unittest.url == "postgres://127.0.0.1/db"
+
+
+# =============================================================================
+# Test resolve_etc_dir function
+# =============================================================================
+
+
+@pytest.mark.unit
+class TestResolveEtcDir:
+    """Test resolve_etc_dir function with four-tier fallback."""
+
+    def test_custom_path_valid_directory(self):
+        """Test Priority 1: Custom path provided and exists."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            custom_etc = Path(tmpdir) / "custom_etc"
+            custom_etc.mkdir()
+
+            result = resolve_etc_dir(str(custom_etc))
+
+            assert result == custom_etc.resolve()
+
+    def test_custom_path_nonexistent_raises(self):
+        """Test Priority 1: Custom path that doesn't exist raises error."""
+        with pytest.raises(
+            FileNotFoundError, match="Specified etc directory does not exist"
+        ):
+            resolve_etc_dir("/nonexistent/custom/etc")
+
+    def test_custom_path_not_directory_raises(self):
+        """Test Priority 1: Custom path that's a file raises error."""
+        with tempfile.NamedTemporaryFile(delete=False) as f:
+            temp_file = f.name
+
+        try:
+            with pytest.raises(
+                FileNotFoundError, match="Specified etc path is not a directory"
+            ):
+                resolve_etc_dir(temp_file)
+        finally:
+            os.unlink(temp_file)
+
+    def test_current_directory_etc_found(self):
+        """Test Priority 2: ./etc/ in current working directory."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            etc_dir = Path(tmpdir) / "etc"
+            etc_dir.mkdir()
+
+            original_cwd = os.getcwd()
+            try:
+                os.chdir(tmpdir)
+                result = resolve_etc_dir()
+
+                assert result == etc_dir
+            finally:
+                os.chdir(original_cwd)
+
+    def test_project_root_etc_via_get_etc_dir(self):
+        """Test Priority 3: Project root etc/ via get_etc_dir()."""
+        # This tests that resolve_etc_dir() calls get_etc_dir() when CWD etc/ doesn't exist
+        with patch("appinfra.config.config.get_etc_dir") as mock_get_etc_dir:
+            mock_project_etc = Path("/mock/project/etc")
+            mock_get_etc_dir.return_value = mock_project_etc
+
+            with tempfile.TemporaryDirectory() as tmpdir:
+                original_cwd = os.getcwd()
+                try:
+                    # Change to directory without etc/ subdirectory
+                    os.chdir(tmpdir)
+
+                    result = resolve_etc_dir()
+
+                    assert result == mock_project_etc
+                    mock_get_etc_dir.assert_called_once()
+                finally:
+                    os.chdir(original_cwd)
+
+    def test_infra_package_etc_fallback(self):
+        """Test Priority 4: Infra package etc/ directory."""
+        # When running in the actual infra project, Priority 4 will find the project etc/
+        # This test verifies the fallback path exists and is used when other priorities fail
+        with tempfile.TemporaryDirectory() as tmpdir:
+            original_cwd = os.getcwd()
+            try:
+                # Change to directory without etc/
+                os.chdir(tmpdir)
+
+                # Mock get_etc_dir to raise FileNotFoundError (no project root)
+                with patch("appinfra.config.config.get_etc_dir") as mock_get_etc_dir:
+                    mock_get_etc_dir.side_effect = FileNotFoundError("No project root")
+
+                    # The function should fall back to package etc/
+                    # In the real infra project, this will find the project etc/
+                    result = resolve_etc_dir()
+
+                    # Should return a path that exists
+                    assert result.exists()
+                    assert result.is_dir()
+                    assert result.name == "etc"
+            except FileNotFoundError:
+                # If no package etc/ exists (e.g., in a minimal test environment), that's ok
+                # The important thing is that we tried all fallback paths
+                pytest.skip("No package etc/ directory available for fallback test")
+            finally:
+                os.chdir(original_cwd)
+
+    def test_all_fallbacks_fail_raises(self):
+        """Test that FileNotFoundError is raised when all fallbacks fail."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            original_cwd = os.getcwd()
+            try:
+                # Change to directory without etc/
+                os.chdir(tmpdir)
+
+                # Mock get_etc_dir to raise FileNotFoundError
+                with patch("appinfra.config.config.get_etc_dir") as mock_get_etc_dir:
+                    mock_get_etc_dir.side_effect = FileNotFoundError("No project root")
+
+                    # Mock the package etc/ to not exist
+                    with patch("appinfra.config.config.Path") as mock_path_cls:
+                        # Make the package etc path not exist
+                        mock_package_etc = MagicMock()
+                        mock_package_etc.exists.return_value = False
+
+                        # Mock Path(__file__).parent.parent / "etc" navigation
+                        # (the function now lives in appinfra/config/config.py,
+                        # so one fewer .parent than in the prior location)
+                        mock_config_file = MagicMock()
+                        mock_config_file.parent.parent = MagicMock()
+                        mock_config_file.parent.parent.__truediv__.return_value = (
+                            mock_package_etc
+                        )
+
+                        mock_path_cls.return_value = mock_config_file
+                        mock_path_cls.cwd.return_value = Path(tmpdir)
+
+                        # Also need to handle Path(tmpdir) / "etc"
+                        def path_side_effect(arg):
+                            if arg == tmpdir:
+                                p = MagicMock()
+                                p.__truediv__.return_value.exists.return_value = False
+                                p.__truediv__.return_value.is_dir.return_value = False
+                                return p
+                            return mock_config_file
+
+                        mock_path_cls.side_effect = path_side_effect
+
+                        with pytest.raises(
+                            FileNotFoundError, match="Could not find etc directory"
+                        ):
+                            resolve_etc_dir()
+            finally:
+                os.chdir(original_cwd)
+
+    def test_custom_path_takes_precedence_over_cwd(self):
+        """Test that custom path overrides CWD etc/ when both exist."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Create custom etc/
+            custom_etc = Path(tmpdir) / "custom_etc"
+            custom_etc.mkdir()
+
+            # Create CWD with etc/
+            cwd_dir = Path(tmpdir) / "cwd"
+            cwd_dir.mkdir()
+            cwd_etc = cwd_dir / "etc"
+            cwd_etc.mkdir()
+
+            original_cwd = os.getcwd()
+            try:
+                os.chdir(cwd_dir)
+
+                result = resolve_etc_dir(str(custom_etc))
+
+                # Should use custom path, not CWD etc/
+                assert result == custom_etc.resolve()
+            finally:
+                os.chdir(original_cwd)

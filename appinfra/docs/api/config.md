@@ -287,7 +287,8 @@ pip install appinfra[validation]
 ```python
 from appinfra.config import (
     get_project_root,      # Find project root (contains etc/)
-    get_etc_dir,           # Get etc directory path
+    get_etc_dir,           # Get etc directory path (project root only)
+    resolve_etc_dir,       # Resolve etc dir with four-tier fallback
     get_config_file_path,  # Get path to config file
     get_default_config,    # Lazy-load default config
 )
@@ -298,11 +299,54 @@ etc = get_etc_dir()                 # /path/to/project/etc
 config_path = get_config_file_path()  # /path/to/project/etc/infra.yaml
 config_path = get_config_file_path("app.yaml")  # /path/to/project/etc/app.yaml
 
+# Resolve etc dir the way the framework does (custom path → ./etc → project root → package etc)
+etc = resolve_etc_dir()             # auto-detect
+etc = resolve_etc_dir("/srv/etc")   # explicit, validated strictly
+
 # Lazy-load default config (for scripts/examples)
 config = get_default_config()
 if config:
     db_host = config.database.host
 ```
+
+### Reading `app.etc_dir`
+
+`App.etc_dir` returns the framework's resolved etc directory for the current
+run. It is available no later than the start of `Tool.setup()` — sometimes set
+earlier (at build time for absolute `with_config_file()` paths) — so tools can
+read it directly:
+
+```python
+class MyTool(Tool):
+    def configure(self) -> None:
+        # Inside Tool.configure(), self.app.etc_dir is the resolved path
+        # (or None if etc_dir was not opted into).
+        with open(Path(self.app.etc_dir) / "mytool.yaml") as f:
+            self._settings = yaml.safe_load(f)
+```
+
+Resolution rules:
+
+- **`with_config_file("/abs/x.yaml")`** — `app.etc_dir` is the parent of the absolute
+  path.
+- **Deferred configs or `-c <path>`** — `app.etc_dir` is the etc directory used to
+  load that file.
+- **`with_standard_args(etc_dir=True)` only** (no config file registered):
+  - `--etc-dir /foo` valid → `app.etc_dir` is `/foo` (resolved).
+  - `--etc-dir /bad` missing → raises `FileNotFoundError` at setup (fail-fast).
+  - flag omitted → falls back through `./etc` → project root → bundled
+    `appinfra/etc/`. In practice `app.etc_dir` almost always resolves to *some*
+    path; `None` only if every fallback (including the bundled package etc) is
+    absent.
+- **`etc_dir` not opted in** — `app.etc_dir` is always `None`.
+
+For on-demand resolution outside the App lifecycle (e.g. standalone CLI tools),
+call `resolve_etc_dir()` directly.
+
+See
+[`examples/04_configuration/etc_dir_only_example.py`](../../examples/04_configuration/etc_dir_only_example.py)
+for a runnable app that loads its own YAML files from `app.etc_dir` without
+using `with_config_file()`.
 
 ## Constants
 

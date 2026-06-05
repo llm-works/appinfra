@@ -120,19 +120,17 @@ class PGTestHelperCore:
     def _cleanup_previous_tables(self):
         """Clean up any leftover debug tables from previous test runs."""
         try:
-            cleanup_session = self.pg.session()
-            tables_to_drop = _get_debug_tables_to_cleanup(cleanup_session)
+            with self.pg.session() as cleanup_session:
+                tables_to_drop = _get_debug_tables_to_cleanup(cleanup_session)
 
-            if tables_to_drop:
-                self.lg.info(
-                    f"🧹 Cleaning up {len(tables_to_drop)} leftover debug tables from previous runs..."
-                )
-                _drop_debug_tables(cleanup_session, tables_to_drop, self.lg)
-                self.lg.info("🧹 Cleanup complete!")
-            else:
-                self.lg.info("🧹 No leftover debug tables found")
-
-            cleanup_session.close()
+                if tables_to_drop:
+                    self.lg.info(
+                        f"🧹 Cleaning up {len(tables_to_drop)} leftover debug tables from previous runs..."
+                    )
+                    _drop_debug_tables(cleanup_session, tables_to_drop, self.lg)
+                    self.lg.info("🧹 Cleanup complete!")
+                else:
+                    self.lg.info("🧹 No leftover debug tables found")
 
         except Exception as e:
             self.lg.warning(f"⚠️  Warning: Could not cleanup previous tables: {e}")
@@ -152,7 +150,7 @@ class PGTestHelperCore:
                 - table_name: Unique name of the created table
                 - cleanup_needed: Boolean flag (initially False, set to True if test succeeds)
         """
-        session = self.pg.session()
+        session = self.pg._create_session()
         # Use UUID suffix to avoid collisions in parallel test runs
         unique_suffix = uuid.uuid4().hex[:8]
         test_table_name = f"{table_name_prefix}_{unique_suffix}"
@@ -176,10 +174,10 @@ class PGTestHelperCore:
             # Only cleanup if test passed
             if cleanup_needed:
                 try:
-                    cleanup_session = self.pg.session()
-                    cleanup_session.execute(sqlalchemy.text(f"DROP TABLE {table_name}"))
-                    cleanup_session.commit()  # Commit the DROP TABLE
-                    cleanup_session.close()
+                    with self.pg.session() as cleanup_session:
+                        cleanup_session.execute(
+                            sqlalchemy.text(f"DROP TABLE {table_name}")
+                        )
                     self.lg.info(
                         f"✅ Cleaned up table '{table_name}' after successful test"
                     )
@@ -237,28 +235,25 @@ class PGTestHelperCore:
         Returns:
             List of debug table names
         """
-        session = self.pg.session()
         try:
-            result = session.execute(
-                sqlalchemy.text(
-                    """
-                SELECT tablename FROM pg_tables
-                WHERE schemaname = 'public'
-                AND (tablename LIKE 'debug_test_table_%'
-                     OR tablename LIKE 'example_debug_%'
-                     OR tablename LIKE 'test_debug_%')
-                ORDER BY tablename
-            """
+            with self.pg.session(autocommit=True) as session:
+                result = session.execute(
+                    sqlalchemy.text(
+                        """
+                    SELECT tablename FROM pg_tables
+                    WHERE schemaname = 'public'
+                    AND (tablename LIKE 'debug_test_table_%'
+                         OR tablename LIKE 'example_debug_%'
+                         OR tablename LIKE 'test_debug_%')
+                    ORDER BY tablename
+                """
+                    )
                 )
-            )
-
-            return [row[0] for row in result.fetchall()]
+                return [row[0] for row in result.fetchall()]
 
         except Exception as e:
             self.lg.warning("could not list debug tables", extra={"error": str(e)})
             return []
-        finally:
-            session.close()
 
     def inspect_debug_table(self, table_name: str) -> dict | None:
         """
@@ -270,20 +265,20 @@ class PGTestHelperCore:
         Returns:
             Dictionary with table info and contents, or None if table doesn't exist
         """
-        session = self.pg.session()
         try:
-            if not _check_table_exists(session, table_name):
-                return None
+            with self.pg.session(autocommit=True) as session:
+                if not _check_table_exists(session, table_name):
+                    return None
 
-            columns = _get_table_columns(session, table_name)
-            contents = _get_table_contents(session, table_name, columns)
+                columns = _get_table_columns(session, table_name)
+                contents = _get_table_contents(session, table_name, columns)
 
-            return {
-                "table_name": table_name,
-                "columns": columns,
-                "contents": contents,
-                "row_count": len(contents),
-            }
+                return {
+                    "table_name": table_name,
+                    "columns": columns,
+                    "contents": contents,
+                    "row_count": len(contents),
+                }
 
         except Exception as e:
             self.lg.warning(
@@ -291,8 +286,6 @@ class PGTestHelperCore:
                 extra={"table_name": table_name, "error": str(e)},
             )
             return None
-        finally:
-            session.close()
 
     def cleanup_all_debug_tables(self):
         """Manually clean up all debug tables (useful for cleanup scripts)."""

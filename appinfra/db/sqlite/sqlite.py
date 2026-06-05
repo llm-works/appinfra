@@ -8,6 +8,8 @@ advanced features needed for file-based databases.
 
 from __future__ import annotations
 
+from collections.abc import Generator
+from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any
 
 import sqlalchemy
@@ -138,14 +140,35 @@ class SQLite(Interface):
         base.metadata.create_all(self._engine)
         self._lg.debug("migrated schema")
 
-    def session(self) -> Session:
+    @contextmanager
+    def session(self, autocommit: bool = False) -> Generator[Session, None, None]:
         """
-        Create a new database session.
+        Get a managed database session (context manager).
 
-        Returns:
+        Args:
+            autocommit: If True, raises NotImplementedError (SQLite doesn't support
+                        AUTOCOMMIT mode via this interface).
+
+        Yields:
             Database session instance
+
+        Raises:
+            NotImplementedError: If autocommit=True
         """
-        return self._SessionCls()
+        if autocommit:
+            raise NotImplementedError(
+                "SQLite does not support AUTOCOMMIT mode via session(). "
+                "Use the default transactional mode instead."
+            )
+        sa_session: Session = self._SessionCls()
+        try:
+            yield sa_session
+            sa_session.commit()
+        except Exception:
+            sa_session.rollback()
+            raise
+        finally:
+            sa_session.close()
 
     def dispose(self) -> None:
         """Dispose of the engine and close all connections."""

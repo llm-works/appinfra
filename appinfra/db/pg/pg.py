@@ -6,15 +6,15 @@ using composition pattern for clean separation of concerns.
 """
 
 import re
-from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+import threading
+from collections.abc import Callable, Generator
+from contextlib import contextmanager
+from typing import Any
 
 import sqlalchemy
 import sqlalchemy_utils
 from sqlalchemy import text
-
-if TYPE_CHECKING:  # pragma: no cover
-    from .scoped import ScopedPG
+from sqlalchemy.orm import Session
 
 from ...dot_dict import DotDict
 from ...log import Logger, LoggerFactory
@@ -82,6 +82,9 @@ class PG(Interface):
     _after_migrate_hooks: list[Callable[[Any], None]]
     # Schema isolation (optional)
     _schema_mgr: Any  # SchemaManager | None
+    # Scoped PG cache (schema_name -> ScopedPG, with lock for thread safety)
+    _scoped_cache: dict[str, "ScopedPG"]
+    _scoped_cache_lock: threading.Lock
 
     # Extension name validation pattern (defense-in-depth)
     _EXTENSION_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_-]*$")
@@ -116,6 +119,10 @@ class PG(Interface):
         # Initialize lifecycle hooks
         self._before_migrate_hooks = []
         self._after_migrate_hooks = []
+
+        # Initialize scoped PG cache (with lock for thread safety)
+        self._scoped_cache: dict[str, ScopedPG] = {}
+        self._scoped_cache_lock = threading.Lock()
 
         # Validate and create engine
         ConfigValidator.validate_config(cfg)
@@ -229,17 +236,23 @@ class PG(Interface):
 
     def scoped(self, schema_name: str) -> "ScopedPG":
         """
-        Get a scoped view of this PG for a specific schema.
+        Get a scoped PG for a specific schema with its own connection pool.
 
-        Sessions from the scoped PG will have search_path set at session level,
-        allowing a single PG instance to serve multiple schemas without
-        engine-level schema binding.
+        Each schema gets a dedicated connection pool with search_path enforced
+        at the connection level. ScopedPG instances are cached by schema name
+        to avoid creating multiple pools for the same schema.
+
+        Note:
+            Repeated calls with the same schema_name return the cached instance.
+            If you drop and recreate a schema, the cached ScopedPG's pool may
+            have stale connections. In that case, dispose the parent PG and
+            create a new one.
 
         Args:
             schema_name: PostgreSQL schema name for the scope
 
         Returns:
-            ScopedPG instance configured for the specified schema
+            ScopedPG instance with dedicated pool for the specified schema
 
         Raises:
             ValueError: If schema name is invalid
@@ -250,13 +263,34 @@ class PG(Interface):
             >>> with scoped.session() as session:
             ...     session.query(MyModel).all()  # Uses my_schema.* tables
 
-            >>> # Multiple scopes from same PG
+            >>> # Multiple scopes from same PG (each gets its own pool)
             >>> scope_a = pg.scoped("schema_a")
             >>> scope_b = pg.scoped("schema_b")
         """
-        from .scoped import ScopedPG
+        with self._scoped_cache_lock:
+            if schema_name not in self._scoped_cache:
+                self._scoped_cache[schema_name] = ScopedPG(self._lg, self, schema_name)
+            return self._scoped_cache[schema_name]
 
-        return ScopedPG(self._lg, self, schema_name)
+    def dispose_scoped_cache(self) -> None:
+        """
+        Dispose all cached ScopedPG instances and clear the cache.
+
+        Use during shutdown or when all scoped schemas are no longer needed.
+        Each ScopedPG's internal connection pool is disposed.
+
+        Example:
+            >>> pg = PG(logger, config)
+            >>> scoped_a = pg.scoped("schema_a")
+            >>> scoped_b = pg.scoped("schema_b")
+            >>> # ... use scoped instances ...
+            >>> pg.dispose_scoped_cache()  # Releases all scoped pools
+        """
+        with self._scoped_cache_lock:
+            for scoped in self._scoped_cache.values():
+                scoped._pg._engine.dispose()
+            self._scoped_cache.clear()
+        self._lg.trace("disposed scoped cache")
 
     def connect(self) -> Any:
         """
@@ -332,32 +366,71 @@ class PG(Interface):
         # Run after-migrate hooks
         self._run_hooks(self._after_migrate_hooks, "after_migrate")
 
-    def session(self) -> Any:
+    def _create_session(self) -> Session:
         """
-        Create a new database session with automatic reconnection if enabled.
+        Create a raw database session with automatic reconnection if enabled.
+
+        This is an internal method - prefer session() for managed sessions.
 
         Returns:
-            Database session instance
+            Raw SQLAlchemy session instance
+        """
+        self._session_mgr.set_connection_health(self._reconnect_strategy.is_healthy())
+        session: Session = self._session_mgr.session()
+        return session
+
+    @contextmanager
+    def session(self, autocommit: bool = False) -> Generator[Session, None, None]:
+        """
+        Get a managed database session.
+
+        Args:
+            autocommit: If True, use AUTOCOMMIT isolation (no transaction overhead).
+                        Each statement commits immediately. Use for read-heavy workloads.
+                        If False (default), wraps in a transaction with auto-commit on
+                        success and rollback on exception.
+
+        Yields:
+            SQLAlchemy session instance
 
         Raises:
             sqlalchemy.exc.SQLAlchemyError: If session creation fails
 
         Example:
             >>> pg = PG(logger, config)
-            >>> session = pg.session()
-            >>> try:
-            ...     result = session.execute(sqlalchemy.text("SELECT * FROM users"))
-            ...     users = result.fetchall()
-            ...     session.commit()
-            ... except Exception:
-            ...     session.rollback()
-            ...     raise
-            ... finally:
-            ...     session.close()
+            >>> # Transactional session (default)
+            >>> with pg.session() as session:
+            ...     session.execute(text("INSERT INTO users ..."))
+            ...     # Commits automatically on success
+            >>>
+            >>> # AUTOCOMMIT session (no transaction overhead)
+            >>> with pg.session(autocommit=True) as session:
+            ...     result = session.execute(text("SELECT * FROM users"))
+            ...     # No BEGIN/COMMIT round-trips
         """
-        # Update session manager's health status
-        self._session_mgr.set_connection_health(self._reconnect_strategy.is_healthy())
-        return self._session_mgr.session()
+        if autocommit:
+            with self._engine.connect().execution_options(
+                isolation_level="AUTOCOMMIT"
+            ) as conn:
+                if self._schema_mgr:
+                    conn.execute(
+                        text(f'SET search_path TO "{self._schema_mgr.schema}", public')
+                    )
+                sa_session = Session(bind=conn, expire_on_commit=False)
+                try:
+                    yield sa_session
+                finally:
+                    sa_session.close()
+        else:
+            sa_session = self._create_session()
+            try:
+                yield sa_session
+                sa_session.commit()
+            except Exception:
+                sa_session.rollback()
+                raise
+            finally:
+                sa_session.close()
 
     def health_check(self) -> dict[str, Any]:
         """
@@ -515,3 +588,168 @@ class PG(Interface):
                     )
                     raise
             conn.commit()
+
+
+class ScopedPG:
+    """
+    PG wrapper scoped to a specific PostgreSQL schema.
+
+    Uses a dedicated connection pool with schema enforced at connection level
+    via a connect event listener. All session operations consistently use
+    the configured schema.
+
+    Example:
+        >>> pg = PG(logger, config)  # Schema-agnostic
+        >>> scoped = pg.scoped("my_schema")
+        >>> with scoped.session() as session:
+        ...     session.query(MyModel).all()  # Uses my_schema.* tables
+
+        >>> # Multiple scopes from same PG (each gets its own pool)
+        >>> scope_a = pg.scoped("schema_a")
+        >>> scope_b = pg.scoped("schema_b")
+    """
+
+    def __init__(self, lg: Logger, parent_pg: PG, schema_name: str) -> None:
+        """
+        Initialize a scoped PG with dedicated connection pool.
+
+        Args:
+            lg: Logger instance
+            parent_pg: Parent PG instance (used for config and schema creation)
+            schema_name: PostgreSQL schema name for this scope
+
+        Raises:
+            ValueError: If schema name is invalid
+        """
+        from .schema import validate_schema_name
+
+        self._lg = lg
+        self._parent_pg = parent_pg
+
+        # Validate schema name
+        if not validate_schema_name(schema_name):
+            raise ValueError(
+                f"Invalid schema name '{schema_name}'. Must start with lowercase letter "
+                "and contain only lowercase letters, numbers, and underscores."
+            )
+        self._schema_name = schema_name
+
+        # Create dedicated PG with own pool, schema enforced at connection level
+        self._pg = PG(lg, parent_pg.cfg, schema=schema_name)
+
+    @contextmanager
+    def session(self, autocommit: bool = False) -> Generator[Session, None, None]:
+        """
+        Get a managed session for this schema.
+
+        Args:
+            autocommit: If True, use AUTOCOMMIT isolation (no transaction overhead).
+                        If False (default), wraps in a transaction.
+
+        Yields:
+            SQLAlchemy session configured for this schema
+
+        Example:
+            >>> with scoped.session() as session:
+            ...     result = session.execute(text("SELECT * FROM my_table"))
+            ...     # Commits automatically on success
+            >>>
+            >>> with scoped.session(autocommit=True) as session:
+            ...     result = session.execute(text("SELECT * FROM my_table"))
+            ...     # No transaction overhead
+        """
+        with self._pg.session(autocommit=autocommit) as session:
+            yield session
+
+    def connect(self) -> Any:
+        """
+        Get a raw database connection for this schema.
+
+        Use for operations requiring direct connection access (COPY, psycopg2).
+        Schema is enforced at connection level via the pool's connect listener.
+
+        Returns:
+            Database connection object
+
+        Example:
+            >>> with scoped.connect() as conn:
+            ...     # Direct connection access with schema set
+        """
+        return self._pg.connect()
+
+    def migrate(self, base: Any) -> None:
+        """
+        Run database migrations for this schema.
+
+        Creates tables defined in the SQLAlchemy declarative base within this
+        schema. Call ensure_schema() first if the schema doesn't exist.
+
+        Args:
+            base: SQLAlchemy declarative base class
+
+        Example:
+            >>> scoped = pg.scoped("tenant_a")
+            >>> scoped.ensure_schema()
+            >>> scoped.migrate(Base)  # Creates tables in tenant_a schema
+        """
+        self._pg.migrate(base)
+
+    def ensure_schema(self) -> None:
+        """
+        Create the PostgreSQL schema if it doesn't exist.
+
+        Uses the parent PG's connection to create the schema (avoids
+        chicken-and-egg with schema-scoped connections).
+
+        This is idempotent - safe to call multiple times.
+
+        Raises:
+            DatabaseError: If parent PG is in readonly mode
+
+        Example:
+            >>> scoped = pg.scoped("my_schema")
+            >>> scoped.ensure_schema()  # CREATE SCHEMA IF NOT EXISTS
+        """
+        from ...errors import DatabaseError
+
+        if self._parent_pg.readonly:
+            raise DatabaseError(
+                f"Cannot create schema '{self._schema_name}': PG is readonly",
+                schema=self._schema_name,
+            )
+        with self._parent_pg.engine.connect() as conn:
+            conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{self._schema_name}"'))
+            conn.commit()
+        self._lg.trace("ensured schema exists", extra={"schema": self._schema_name})
+
+    @property
+    def schema(self) -> str:
+        """Get the schema name for this scope."""
+        return self._schema_name
+
+    @property
+    def engine(self) -> sqlalchemy.engine.Engine:
+        """Get the underlying SQLAlchemy engine (dedicated to this schema)."""
+        return self._pg.engine
+
+    @property
+    def cfg(self) -> Any:
+        """Get the database configuration."""
+        return self._pg.cfg
+
+    def dispose(self) -> None:
+        """
+        Dispose the internal connection pool and remove from parent cache.
+
+        Use when a schema is dropped or no longer needed to release resources.
+        After calling dispose(), this ScopedPG instance should not be used.
+
+        Example:
+            >>> scoped = pg.scoped("temp_schema")
+            >>> # ... use scoped ...
+            >>> scoped.dispose()  # Releases pool, removes from cache
+        """
+        self._pg._engine.dispose()
+        with self._parent_pg._scoped_cache_lock:
+            self._parent_pg._scoped_cache.pop(self._schema_name, None)
+        self._lg.trace("disposed scoped pg", extra={"schema": self._schema_name})

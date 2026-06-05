@@ -14,7 +14,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from ...config import Config
+from ...config import Config, resolve_etc_dir
 from ...dot_dict import DotDict
 
 if TYPE_CHECKING:
@@ -32,6 +32,20 @@ from ..tools.base import Tool
 from ..tracing.traceable import Traceable
 from .config import ConfigLoader
 from .lifecycle import LifecycleManager
+
+# Shared default for standard CLI args (minimal by default - only help enabled)
+DEFAULT_STANDARD_ARGS: dict[str, bool] = {
+    "help": True,
+    "config_file": False,
+    "etc_dir": False,
+    "log_level": False,
+    "log_location": False,
+    "log_micros": False,
+    "log_topic": False,
+    "log_colors": False,
+    "log_json": False,
+    "quiet": False,
+}
 
 
 class App(Traceable):
@@ -62,17 +76,10 @@ class App(Traceable):
         self.lifecycle: LifecycleManager = LifecycleManager(self)
         self._parsed_args: argparse.Namespace | None = None
 
-        # Standard args configuration (set by builder, default: all enabled)
-        self._standard_args: dict[str, bool] = {
-            "etc_dir": True,
-            "log_level": True,
-            "log_location": True,
-            "log_micros": True,
-            "log_topic": True,
-            "log_colors": True,
-            "log_json": True,
-            "quiet": True,
-        }
+        # Standard args configuration (set by builder, minimal by default)
+        self._standard_args: dict[str, bool] = DEFAULT_STANDARD_ARGS.copy()
+        # Per-arg argparse kwarg overrides (set by builder via with_standard_arg)
+        self._standard_arg_overrides: dict[str, dict[str, Any]] = {}
 
         self._decorators: DecoratorAPI = DecoratorAPI(self)  # Decorator API support
         self._custom_args: list[tuple] = []  # Custom args (from builder)
@@ -100,6 +107,32 @@ class App(Traceable):
             or iterate over this list to set up watchers for all config files.
         """
         return getattr(self, "_loaded_config_paths", [])
+
+    @property
+    def etc_dir(self) -> str | None:
+        """Resolved etc directory for this run.
+
+        Available no later than the start of ``Tool.setup()``; sometimes set
+        earlier (at build time for absolute ``with_config_file()`` paths).
+        Resolution rules:
+
+        - If ``with_config_file("/abs/path.yaml")`` was used, the parent of the
+          absolute path wins.
+        - Else if any config file was loaded (deferred or via ``-c``), the etc
+          directory used during loading is stored.
+        - Else if the ``etc_dir`` standard arg is opted in (via
+          ``with_standard_args(etc_dir=True)``): ``resolve_etc_dir(args.etc_dir)``
+          runs post-parse. Explicit ``--etc-dir <path>`` is validated strictly
+          (raises ``FileNotFoundError`` on a bad path); a missing flag falls
+          back through ``./etc`` → project root → bundled ``appinfra/etc/``,
+          and is tolerant (leaves ``etc_dir`` as ``None`` only if every
+          fallback — including the bundled package etc — is absent).
+        - Else: ``None`` — the consumer didn't opt into etc_dir.
+
+        For on-demand resolution outside the App lifecycle, call
+        ``appinfra.config.resolve_etc_dir()`` directly.
+        """
+        return getattr(self, "_etc_dir", None)
 
     def set_main_tool(self, name: str) -> None:
         """
@@ -143,7 +176,8 @@ class App(Traceable):
 
         Override this method in subclasses to add custom arguments.
         """
-        self.parser.create_parser()
+        add_help = self._standard_args.get("help", True)
+        self.parser.create_parser(add_help=add_help)
         self.add_args()
 
     def add_args(self) -> None:
@@ -158,19 +192,44 @@ class App(Traceable):
 
     def add_default_args(self) -> None:
         """Add default command-line arguments."""
-        if self._standard_args.get("etc_dir", True):
+        if self._standard_args.get("config_file", False):
+            self.add_config_file_arg()
+
+        if self._standard_args.get("etc_dir", False):
             self.add_etc_dir_arg()
 
         self.add_log_default_args()
+
+    def _resolve_arg_kwargs(self, name: str, **defaults: Any) -> dict[str, Any]:
+        """Merge consumer overrides on top of framework defaults for a standard arg."""
+        overrides = self._standard_arg_overrides.get(name, {})
+        return {**defaults, **overrides}
+
+    def add_config_file_arg(self) -> None:
+        """Add config file command-line argument."""
+        self.parser.add_argument(
+            "-c",
+            "--config",
+            **self._resolve_arg_kwargs(
+                "config_file",
+                type=str,
+                default=None,
+                metavar="FILE",
+                help="configuration file name (default: infra.yaml or INFRA_DEFAULT_CONFIG_FILE)",
+            ),
+        )
 
     def add_etc_dir_arg(self) -> None:
         """Add etc directory command-line argument."""
         self.parser.add_argument(
             "--etc-dir",
-            type=str,
-            default=None,
-            metavar="DIR",
-            help="configuration directory (default: auto-detect ./etc/, project etc/, or package etc/)",
+            **self._resolve_arg_kwargs(
+                "etc_dir",
+                type=str,
+                default=None,
+                metavar="DIR",
+                help="configuration directory (default: auto-detect ./etc/, project etc/, or package etc/)",
+            ),
         )
 
     def add_argument(self, *args: Any, **kwargs: Any) -> None:
@@ -194,7 +253,9 @@ class App(Traceable):
     def _add_log_argument(self, flag_key: str, *args: Any, **kwargs: Any) -> None:
         """Add a logging argument if enabled in standard args."""
         if self._standard_args.get(flag_key, True):
-            self.parser.add_argument(*args, **kwargs)
+            self.parser.add_argument(
+                *args, **self._resolve_arg_kwargs(flag_key, **kwargs)
+            )
 
     def add_log_default_args(self) -> None:
         """Add logging-related command-line arguments."""
@@ -374,6 +435,12 @@ class App(Traceable):
         # Load and merge configuration
         auto_load_result = self._load_and_merge_config()
 
+        # Resolve etc_dir from --etc-dir / fallback chain when opted in but
+        # no config-file branch already set it. Lives here (not inside
+        # _load_and_merge_config) so the "independent of config loading"
+        # property is structural, not incidental.
+        self._resolve_etc_dir_if_opted_in()
+
         # Initialize lifecycle with final merged config and parsed args
         self.lifecycle.initialize(self.config, args=self._parsed_args)
 
@@ -395,10 +462,20 @@ class App(Traceable):
         Returns:
             Dict with 'etc_dir' and 'files' if config was loaded, None otherwise
         """
-        # Load deferred configs from etc-dir if any are configured
         load_result = None
-        if self._has_deferred_configs():
+
+        # Check for -c/--config CLI arg
+        cli_config = getattr(self._parsed_args, "config", None)
+
+        if cli_config and self._is_direct_path(cli_config):
+            # Direct path (absolute or ./): load directly, bypass etc-dir
+            load_result = self._load_direct_config(cli_config)
+        elif self._has_deferred_configs():
+            # Load deferred configs from etc-dir (cli_config overrides filename if set)
             load_result = self._load_deferred_configs()
+        elif cli_config:
+            # No deferred configs but -c provided: load from cwd
+            load_result = self._load_direct_config(cli_config)
 
         # Apply command-line args to config, preserving loaded YAML sections
         # CLI args override anything loaded from etc directory
@@ -408,6 +485,52 @@ class App(Traceable):
         )
 
         return load_result
+
+    def _resolve_etc_dir_if_opted_in(self) -> None:
+        """Populate self._etc_dir when the standard arg is enabled but no
+        config-file branch has set it.
+
+        Strict for explicit --etc-dir <path> (raises FileNotFoundError on a bad
+        path); tolerant when the user didn't pass the flag (leaves _etc_dir
+        unset if the fallback chain finds nothing, so app.etc_dir reads as None).
+        """
+        if hasattr(self, "_etc_dir"):
+            return
+        if not self._standard_args.get("etc_dir", False):
+            return
+
+        custom = getattr(self._parsed_args, "etc_dir", None)
+        try:
+            self._etc_dir = str(resolve_etc_dir(custom))
+        except FileNotFoundError:
+            if custom is not None:
+                raise
+
+    def _is_direct_path(self, path: str) -> bool:
+        """Check if path should be loaded directly (absolute or explicit relative)."""
+        return (
+            Path(path).is_absolute() or path.startswith("./") or path.startswith("../")
+        )
+
+    def _load_direct_config(self, config_path: str) -> dict | None:
+        """Load a config file directly from the given path."""
+        from .config import create_config
+
+        path = Path(config_path)
+        if not path.is_absolute():
+            path = Path.cwd() / path
+
+        try:
+            loaded_config = create_config(file_path=str(path), lg=None)
+            merged_config = self._merge_config_layers(self.config, loaded_config)
+
+            # Track loaded path and commit config
+            local_loaded_paths = [(str(path.parent), path.name, str(path))]
+            self._commit_loaded_configs(merged_config, local_loaded_paths)
+
+            return {"etc_dir": str(path.parent), "files": [path.name]}
+        except FileNotFoundError:
+            raise FileNotFoundError(f"Config file not found: {path}") from None
 
     def _has_deferred_configs(self) -> bool:
         """Check if there are any deferred config files to load."""
@@ -475,8 +598,6 @@ class App(Traceable):
 
         Uses local accumulators to avoid leaving partial state if a required file fails.
         """
-        from .config import resolve_etc_dir
-
         deferred_specs = self._get_deferred_config_specs()
         if not deferred_specs:
             return None
@@ -485,9 +606,12 @@ class App(Traceable):
         etc_dir = str(resolve_etc_dir(custom_etc_dir))
         programmatic_config = self.config
 
+        # Check for --config CLI arg to override first config file
+        cli_config_file = getattr(self._parsed_args, "config", None)
+
         # Load all files into local accumulators (raises on required file failure)
         local_config, local_loaded_paths, loaded_files = self._load_all_deferred_specs(
-            deferred_specs, etc_dir
+            deferred_specs, etc_dir, cli_config_file
         )
 
         # Re-apply programmatic config (highest precedence after CLI args)
@@ -499,26 +623,33 @@ class App(Traceable):
         return {"etc_dir": etc_dir, "files": loaded_files} if loaded_files else None
 
     def _load_all_deferred_specs(
-        self, deferred_specs: list, etc_dir: str
+        self, deferred_specs: list, etc_dir: str, cli_config_file: str | None = None
     ) -> tuple[DotDict, list[tuple[str, str, str]], list[str]]:
         """Load all deferred specs into local accumulators."""
         local_config: DotDict = DotDict()
         local_loaded_paths: list[tuple[str, str, str]] = []
         loaded_files: list[str] = []
 
-        for spec in deferred_specs:
-            config_path = Path(etc_dir) / spec.path
+        for i, spec in enumerate(deferred_specs):
+            # CLI --config overrides the first deferred config file
+            if i == 0 and cli_config_file:
+                filename = cli_config_file
+                optional = False  # CLI-provided files are always required
+            else:
+                filename = spec.path
+                optional = spec.optional
+            config_path = Path(etc_dir) / filename
             result = self._load_single_deferred_config_to_local(
-                spec.path,
+                filename,
                 config_path,
-                spec.optional,
+                optional,
                 etc_dir,
                 local_config,
                 local_loaded_paths,
             )
             if result is not None:
                 local_config = result
-                loaded_files.append(spec.path)
+                loaded_files.append(filename)
 
         return local_config, local_loaded_paths, loaded_files
 

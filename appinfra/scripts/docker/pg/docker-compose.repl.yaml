@@ -1,9 +1,15 @@
 # PostgreSQL Replication Mode (Primary + Standby)
 # Essential replication params are included; add more via pgserver.postgres_conf
+#
+# Makefile-orchestrated: NAME / IMAGE / PORT / PORT_R are required env vars;
+# COMMAND is optional (defaults to `postgres` via ${COMMAND:-postgres}). All
+# are set by Makefile.pg from the pgserver config (image is pre-resolved there
+# because podman-compose does not expand nested ${IMAGE:-postgres:${VERSION}}
+# defaults). Not intended for direct `docker compose -f ...` invocation.
 services:
   postgres-primary:
     container_name: ${NAME:?}-primary
-    image: ${IMAGE:-postgres:${VERSION}}
+    image: ${IMAGE:?}
     # Replication requires: wal_level, max_wal_senders, max_replication_slots, hot_standby, hba_file
     # User's postgres_conf params are appended (can override these defaults)
     command:
@@ -37,7 +43,7 @@ services:
 
   postgres-standby:
     container_name: ${NAME:?}-standby
-    image: ${IMAGE:-postgres:${VERSION}}
+    image: ${IMAGE:?}
     restart: always
     volumes:
       - "$PWD:$PWD"

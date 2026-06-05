@@ -54,6 +54,10 @@ make uninstall
 
 **Available extras:** `all`, `dev`, `sql`, `validation`, `docs`, `fastapi`, `hotreload`, `ui`
 
+**Wheel artifact:** `make install` also drops the built wheel into
+`$VENV/share/appinfra/wheels/` for each env it installs to (byte-identical to what's installed).
+Container builds and ops handoff can pull from there instead of the dev checkout's `dist/`.
+
 Alternatively, install directly with pip:
 
 ```bash

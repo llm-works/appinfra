@@ -19,7 +19,7 @@ from typing import Any, Self
 from ...config import Config
 from ...dot_dict import DotDict
 from ...yaml import deep_merge
-from ..core.app import App
+from ..core.app import DEFAULT_STANDARD_ARGS, App
 from ..server.handlers import Middleware
 from ..tools.base import Tool, ToolConfig
 from ..tracing.traceable import Traceable
@@ -198,6 +198,13 @@ def _initialize_foundation(app: App, builder: AppBuilder) -> None:
     if hasattr(builder, "_config_file"):
         app._config_file = builder._config_file  # type: ignore[attr-defined]
     app._standard_args = builder._standard_args.copy()
+    # _standard_arg_overrides is dict[str, dict[str, Any]] — copy one level deeper
+    # than _standard_args (dict[str, bool]) so per-arg overrides don't alias the
+    # builder's dicts if the builder is mutated after build().
+    app._standard_arg_overrides = {
+        name: dict(overrides)
+        for name, overrides in builder._standard_arg_overrides.items()
+    }
     _set_app_metadata(app, builder._name, builder._description, builder._version)
 
 
@@ -298,17 +305,8 @@ class AppBuilder:
     middleware, configuration, and lifecycle management.
     """
 
-    # Default standard args configuration
-    _DEFAULT_STANDARD_ARGS: dict[str, bool] = {
-        "etc_dir": True,
-        "log_level": True,
-        "log_location": True,
-        "log_micros": True,
-        "log_topic": True,
-        "quiet": True,
-        "log_colors": True,
-        "log_json": True,
-    }
+    # Default standard args configuration (minimal by default)
+    _DEFAULT_STANDARD_ARGS: dict[str, bool] = DEFAULT_STANDARD_ARGS
 
     def __init__(self, name: str | None = None):
         """Initialize the application builder."""
@@ -328,6 +326,7 @@ class AppBuilder:
         self._version: str | None = None
         self._main_cls: type | None = None
         self._standard_args: dict[str, bool] = self._DEFAULT_STANDARD_ARGS.copy()
+        self._standard_arg_overrides: dict[str, dict[str, Any]] = {}
         self._main_tool: str | None = None
         # Version tracking
         self._version_tracker: Any | None = None
@@ -466,8 +465,9 @@ class AppBuilder:
 
         if os.path.isabs(path) or not from_etc_dir:
             self._load_config_immediately(path, optional)
-        # else: Deferred loading - will be resolved from --etc-dir at runtime
-        # Config specs are tracked in _config_files list
+        else:
+            # Deferred loading - auto-enable etc_dir arg so user can specify directory
+            self._standard_args["etc_dir"] = True
 
         return self
 
@@ -504,10 +504,24 @@ class AppBuilder:
         self._main_tool = tool.name if isinstance(tool, Tool) else tool
         return self
 
+    # Alias that expands to all logging-related standard args
+    _LOG_ARGS_ALIAS = {
+        "log_level",
+        "log_location",
+        "log_micros",
+        "log_topic",
+        "log_colors",
+        "log_json",
+        "quiet",
+    }
+
     def _validate_standard_arg_name(self, name: str) -> None:
-        """Validate that argument name is a valid standard arg."""
+        """Validate that argument name is a valid standard arg or alias."""
         valid_args = {
+            "help",
+            "config_file",
             "etc_dir",
+            "log",  # Alias for all log args
             "log_level",
             "log_location",
             "log_micros",
@@ -554,6 +568,17 @@ class AppBuilder:
             for key in self._standard_args:
                 self._standard_args[key] = True
         else:
+            # Expand 'log' alias to all log args
+            if "log" in kwargs:
+                log_value = kwargs.pop("log")
+                if not isinstance(log_value, bool):
+                    raise ValueError(
+                        f"Value for 'log' must be a boolean, got {type(log_value).__name__}"
+                    )
+                for log_arg in self._LOG_ARGS_ALIAS:
+                    if log_arg not in kwargs:  # Don't override explicit settings
+                        kwargs[log_arg] = log_value
+
             # Validate and apply specific settings
             for name, enabled in kwargs.items():
                 self._validate_standard_arg_name(name)
@@ -563,6 +588,65 @@ class AppBuilder:
                     )
                 self._standard_args[name] = enabled
 
+        return self
+
+    def with_standard_arg(self, name: str, **overrides: Any) -> Self:
+        """
+        Override argparse kwargs for a single standard CLI argument.
+
+        Use this to customize the default value, help text, or any other argparse
+        parameter (``metavar``, ``type``, ``choices``, ``required``, ``nargs``,
+        ``action``, ...) of a standard arg without subclassing ``App``. Overrides
+        are merged on top of the framework's defaults at parser-build time, so
+        only the passed keys are changed.
+
+        Args:
+            name: Name of the standard arg to override (e.g. ``"etc_dir"``,
+                  ``"log_level"``). Must be one of the valid standard arg names.
+                  The ``"log"`` alias is rejected here — target a specific log
+                  arg (``log_level``, ``log_location``, ...) instead. ``"help"``
+                  is also rejected — toggle it with
+                  ``with_standard_args(help=...)`` (consumed via ``add_help``).
+            **overrides: argparse kwargs to merge. ``dest`` is rejected because
+                         the framework reads parsed args by a fixed attribute
+                         name set internally (which may differ from ``name`` —
+                         e.g. ``log_topic`` is read as ``args.log_topics``).
+
+        Returns:
+            AppBuilder: Self for method chaining.
+
+        Raises:
+            ValueError: If ``name`` is not a valid standard arg, is the ``"log"``
+                        alias or ``"help"``, or ``overrides`` contains ``"dest"``.
+
+        Note:
+            This method does NOT enable the arg — opt in with
+            ``with_standard_args(<name>=True)`` first (or rely on the framework
+            default). Overrides for a disabled arg are stored but never applied.
+
+        Example:
+            AppBuilder("myapp") \\
+                .with_standard_args(log_level=True) \\
+                .with_standard_arg("log_level", default="DEBUG", help="logging level") \\
+                .build()
+        """
+        self._validate_standard_arg_name(name)
+        if name == "log":
+            raise ValueError(
+                "'log' is an alias for multiple log args; use a specific name "
+                "(log_level, log_location, log_micros, log_topic, log_colors, log_json)"
+            )
+        if name == "help":
+            raise ValueError(
+                "'help' is consumed by argparse via add_help, not the standard-arg "
+                "kwargs path; toggle it with with_standard_args(help=...) instead"
+            )
+        if "dest" in overrides:
+            raise ValueError(
+                f"Cannot override 'dest' for standard arg '{name}': "
+                f"the framework reads parsed args by their canonical attribute name"
+            )
+        self._standard_arg_overrides.setdefault(name, {}).update(overrides)
         return self
 
     def without_standard_args(self) -> Self:

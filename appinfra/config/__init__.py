@@ -19,6 +19,7 @@ from .config import (
     get_default_config,
     get_etc_dir,
     get_project_root,
+    resolve_etc_dir,
 )
 from .constants import MAX_CONFIG_SIZE_BYTES
 from .watcher import ConfigWatcher
@@ -48,6 +49,7 @@ __all__ = [
     "Config",
     "get_project_root",
     "get_etc_dir",
+    "resolve_etc_dir",
     "get_config_file_path",
     "get_default_config",
     "PROJECT_ROOT",

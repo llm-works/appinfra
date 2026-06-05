@@ -10,6 +10,104 @@ For API stability guarantees and deprecation policy, see
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-06-04
+
+### Added
+- `AppBuilder.with_standard_arg(name, **argparse_kwargs)` overrides any argparse kwarg
+  (`default`, `help`, `metavar`, ...) of a standard CLI arg without subclassing `App`. Example:
+  `.with_standard_args(log_level=True).with_standard_arg("log_level", default="DEBUG")`.
+- `App.etc_dir` property exposes the framework-resolved etc directory for the current run.
+  Populated when `etc_dir` is opted in via `with_standard_args(etc_dir=True)`, even without
+  `with_config_file()`. See `examples/04_configuration/etc_dir_only_example.py`.
+- `PG.session(autocommit=True)` mode for AUTOCOMMIT isolation — avoids BEGIN/COMMIT round-trips
+  for better performance on read-heavy workloads. Each statement commits immediately.
+- `-c/--config` CLI argument for config file selection — works standalone (direct path) or with
+  `with_config_file()` (overrides filename within etc-dir); absolute paths and `./` prefixed paths
+  load directly, plain filenames resolve from etc-dir or cwd
+- `log` alias for `with_standard_args()` — `with_standard_args(log=True)` enables all 7 log-related
+  args at once (`log_level`, `log_location`, `log_micros`, `log_topic`, `log_colors`, `log_json`,
+  `quiet`)
+- `help` standard arg — controls whether `-h/--help` is added (default: True)
+- `config_file` standard arg — controls whether `-c/--config` is added (default: False)
+- `pg.clean.internal` Makefile target — no-confirmation entry point for dropping all configured
+  databases. Lets downstream projects compose database cleanup into their own higher-level
+  targets without re-prompting. Mirrors the existing `cicd.erase.internal` /
+  `pg.server.clean.internal` pattern.
+- `INFRA_CONTAINER_CMD` / `INFRA_COMPOSE_CMD` configuration — parameterizes the container runtime
+  used by `pg.*` / `cicd.*` Makefile targets and the helper shell scripts. Defaults to `docker` /
+  `docker compose`; set to `podman` / `podman compose` in `Makefile.local` to run the local-dev
+  container layer under Podman.
+- `INFRA_NO_CONFIRM=1` env var — bypasses the `areyousure` confirmation prompt for destructive
+  Make targets (`pg.server.down`, `pg.server.clean`, `cicd.erase`, `install`, ...). For CI and
+  non-interactive scripts.
+- CI: `check-no-db` job verifies that `make check` passes on a clean runner with no postgres,
+  docker, or podman — the path a fresh contributor takes on first clone. Catches regressions
+  where tests forget to skip on PG-unavailable, or imports require runtime services.
+
+### Removed
+- `make release` and `make release.check` — targeted a non-existent `master` branch and
+  bypassed the documented release flow (release PR to develop, `--no-ff` merge to main,
+  semver tag, CHANGELOG promotion). Use the documented protocol instead.
+- `pg.do_clean` Makefile target — unfinished extension stub (typo'd `$(pg_databases)`,
+  hardcoded `proxy` database, kept `areyousure` despite being intended as a no-confirm
+  variant). Replaced by `pg.clean.internal`.
+
+### Changed
+- **Breaking:** `PG.session()` is now a context manager that auto-commits on success, rolls back on
+  exception, and always closes. Code using `session = pg.session()` must change to
+  `with pg.session() as session:`. Use `pg._create_session()` if you need raw session access
+  (internal use only). New `autocommit=True` parameter enables AUTOCOMMIT isolation for read-heavy
+  workloads.
+- **Breaking:** `ScopedPG` now uses a dedicated connection pool per schema (was: shared pool with
+  `SET LOCAL search_path` per transaction). This ensures consistent schema isolation for all
+  operations. `ScopedPG` instances are cached by schema name on the parent PG to avoid creating
+  redundant pools. The `session(autocommit=True)` parameter is forwarded to the internal PG.
+- **Breaking:** Standard CLI args are now disabled by default (except `help`). Apps must explicitly
+  opt-in via `with_standard_args()`. This makes minimal apps truly minimal (`-h` only). Use
+  `with_standard_args()` with no arguments to enable all, or selectively enable with
+  `with_standard_args(log=True, etc_dir=True)`.
+- `with_config_file(from_etc_dir=True)` now automatically enables the `etc_dir` standard arg, so
+  `--etc-dir` is available without explicit opt-in when using deferred config loading
+- PG-dependent tests now skip via a single `@pytest.mark.require_pg` marker with reason
+  `pg-unavailable`, so `make check` shows one aggregated banner instead of per-test skip noise
+- Internal refactor of `appinfra/yaml/__init__.py`: 7 per-load parameters consolidated behind a
+  `_LoadContext` dataclass so private helpers no longer re-thread the bag (worst signature went
+  from 10 to 4 params). Public `load()` / `load_file()` signatures unchanged
+- `make install` now builds a wheel (`pip wheel . --no-deps -w dist/`) and publishes it to each
+  `$VENV/share/$INFRA_DEV_PKG_NAME/wheels/` with mode derived from `$VENV/share/` (refuses to
+  install when `$VENV/share/` does not exist). Consumers (container builds, ops handoff) read
+  from the stable per-venv path instead of the dev checkout
+- `pg.clean.internal` validates each database name against `^[A-Za-z_][A-Za-z0-9_]*$` and skips
+  unsafe entries; valid names are passed as quoted identifiers to `DROP DATABASE`. Closes a
+  small SQL-interpolation sharp edge in the existing loop body
+- `pg.server.up`, `pg.server.down`, `pg.server.reboot`, and `pg.server.up.repl` now block on
+  readiness/teardown (up to 30s) before returning, instead of returning immediately after
+  `compose up -d` / `down`. Eliminates flaky "not ready" failures in chained targets. The
+  underlying `pg.server.wait.up` auto-detects single vs replication mode. Downstream callers
+  with their own readiness loop will see harmless double-waits.
+
+### Fixed
+- `SchemaManager` connect listener now commits after `SET search_path` — fixes search_path being
+  rolled back by SQLAlchemy's pool reset when a connection is returned without an explicit commit
+- `SchemaManager` no longer executes redundant `SET search_path` on every connection checkout —
+  the `connect` listener already sets it when connections are created, eliminating an extra
+  network round-trip per query (significant for high-latency connections like VPN tunnels)
+- `make check` no longer spams `STATUS_DIR/skips: No such file or directory` under fail-fast —
+  `record_skips` rewritten from `grep | while` (loop ran in a grandchild subshell that outlived
+  `kill -KILL` on its bg job) to `mapfile` + `for`, with a `wait` in cleanup before `rm -rf`
+- `make setup` is now stable — `appinfra scripts-path` was emitting a "build info" log line on
+  stdout, mangling `$(…)` so the install_deps.py path test failed; setup now uses
+  `appinfra -q scripts-path` and adds `sql,service` to `INFRA_DEV_SETUP_EXTRAS` as a fallback
+- `make setup` can now bootstrap when PyYAML is missing — `Makefile.config` probes for `yaml`
+  once and exposes `_INFRA_PYYAML_OK`; `Makefile.pg` and `Makefile.docs` gate their parse-time
+  `$(shell ...)` calls on it so setup completes from a fresh venv
+- `make env` now prints `INFRA_DOCS_CONFIG_FILE` / `INFRA_PG_CONFIG_FILE` values; previously
+  referenced the undefined names `INFRA_DOCS_CONFIG` / `INFRA_PG_CONFIG`, so the output was empty
+- `Makefile.cicd` now self-resolves its include path via `cicd_local := $(dir $(realpath ...))`
+  (the same pattern `Makefile.pg` already uses); previously depended on the caller defining a
+  `$(local)` variable, silently breaking downstream consumers that included `Makefile.cicd`
+  standalone
+
 ## [0.7.0] - 2026-05-07
 
 ### Added
@@ -584,7 +682,8 @@ as config. Affected: `ConfigValidator`, `PG.readonly`, `PG.migrate()`,
 ### Changed
 - Package renamed to `appinfra` (install and import both use `appinfra`)
 
-[Unreleased]: https://github.com/llm-works/appinfra/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/llm-works/appinfra/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/llm-works/appinfra/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/llm-works/appinfra/compare/v0.6.1...v0.7.0
 [0.6.1]: https://github.com/llm-works/appinfra/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/llm-works/appinfra/compare/v0.5.0...v0.6.0

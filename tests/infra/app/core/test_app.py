@@ -214,8 +214,9 @@ class TestAddLogDefaultArgs:
     """Test add_log_default_args method (lines 106-122)."""
 
     def test_add_log_default_args_adds_log_level(self):
-        """Test log-level argument is added."""
+        """Test log-level argument is added when enabled."""
         app = App()
+        app._standard_args["log_level"] = True
         app.parser.create_parser()
 
         app.add_log_default_args()
@@ -225,8 +226,9 @@ class TestAddLogDefaultArgs:
         assert args.log_level == "debug"
 
     def test_add_log_default_args_adds_log_location(self):
-        """Test log-location argument is added."""
+        """Test log-location argument is added when enabled."""
         app = App()
+        app._standard_args["log_location"] = True
         app.parser.create_parser()
 
         app.add_log_default_args()
@@ -235,8 +237,9 @@ class TestAddLogDefaultArgs:
         assert args.log_location == 2
 
     def test_add_log_default_args_adds_log_micros(self):
-        """Test log-micros argument is added."""
+        """Test log-micros argument is added when enabled."""
         app = App()
+        app._standard_args["log_micros"] = True
         app.parser.create_parser()
 
         app.add_log_default_args()
@@ -245,8 +248,9 @@ class TestAddLogDefaultArgs:
         assert args.log_micros is True
 
     def test_add_log_default_args_adds_quiet(self):
-        """Test quiet argument is added."""
+        """Test quiet argument is added when enabled."""
         app = App()
+        app._standard_args["quiet"] = True
         app.parser.create_parser()
 
         app.add_log_default_args()
@@ -255,8 +259,10 @@ class TestAddLogDefaultArgs:
         assert args.quiet is True
 
     def test_add_log_default_args_short_flags(self):
-        """Test short flags work."""
+        """Test short flags work when enabled."""
         app = App()
+        app._standard_args["log_level"] = True
+        app._standard_args["quiet"] = True
         app.parser.create_parser()
 
         app.add_log_default_args()
@@ -845,8 +851,9 @@ class TestEtcDirArgument:
     """Test --etc-dir command-line argument parsing and handling."""
 
     def test_etc_dir_argument_exists(self):
-        """Test that --etc-dir argument is added by default."""
+        """Test that --etc-dir argument is added when enabled."""
         app = App()
+        app._standard_args["etc_dir"] = True
         app.create_args()
 
         # Parse with --etc-dir
@@ -859,6 +866,7 @@ class TestEtcDirArgument:
     def test_etc_dir_default_is_none(self):
         """Test that --etc-dir defaults to None (auto-detect)."""
         app = App()
+        app._standard_args["etc_dir"] = True
         app.create_args()
 
         with patch.object(sys, "argv", ["test"]):
@@ -870,6 +878,7 @@ class TestEtcDirArgument:
     def test_etc_dir_stored_in_config(self):
         """Test that etc_dir is stored in config after parsing."""
         app = App()
+        app._standard_args["etc_dir"] = True
         app.create_args()
 
         with patch.object(sys, "argv", ["test", "--etc-dir", "/custom/etc"]):
@@ -913,6 +922,7 @@ class TestDeferredConfigLoading:
             # Don't create the config file
 
             app = App()
+            app._standard_args["etc_dir"] = True
             app._config_files = [  # type: ignore[attr-defined]
                 ConfigFileSpec(
                     path="nonexistent.yaml", from_etc_dir=True, optional=False
@@ -935,6 +945,7 @@ class TestDeferredConfigLoading:
             # Don't create the config file
 
             app = App()
+            app._standard_args["etc_dir"] = True
             app._config_files = [  # type: ignore[attr-defined]
                 ConfigFileSpec(
                     path="nonexistent.yaml", from_etc_dir=True, optional=True
@@ -965,6 +976,7 @@ class TestDeferredConfigLoading:
             (etc_dir / "invalid.yaml").write_text("invalid: yaml: content: [")
 
             app = App()
+            app._standard_args["etc_dir"] = True
             app._config_files = [  # type: ignore[attr-defined]
                 ConfigFileSpec(path="invalid.yaml", from_etc_dir=True, optional=False)
             ]
@@ -987,6 +999,7 @@ class TestDeferredConfigLoading:
             (etc_dir / "invalid.yaml").write_text("invalid: yaml: content: [")
 
             app = App()
+            app._standard_args["etc_dir"] = True
             app._config_files = [  # type: ignore[attr-defined]
                 ConfigFileSpec(path="invalid.yaml", from_etc_dir=True, optional=True)
             ]
@@ -1016,6 +1029,7 @@ class TestDeferredConfigLoading:
             (etc_dir / "app.yaml").write_text("test_key: test_value\n")
 
             app = App()
+            app._standard_args["etc_dir"] = True
             app._config_files = [  # type: ignore[attr-defined]
                 ConfigFileSpec(path="app.yaml", from_etc_dir=True, optional=False)
             ]
@@ -1032,6 +1046,66 @@ class TestDeferredConfigLoading:
             # Config should be loaded
             assert hasattr(app.config, "test_key")
             assert app.config.test_key == "test_value"
+
+    def test_is_direct_path_absolute(self):
+        """Test _is_direct_path returns True for absolute paths."""
+        app = App()
+        assert app._is_direct_path("/etc/app/config.yaml") is True
+        assert app._is_direct_path("/config.yaml") is True
+
+    def test_is_direct_path_explicit_relative(self):
+        """Test _is_direct_path returns True for ./ and ../ paths."""
+        app = App()
+        assert app._is_direct_path("./config.yaml") is True
+        assert app._is_direct_path("../config.yaml") is True
+        assert app._is_direct_path("./subdir/config.yaml") is True
+
+    def test_is_direct_path_plain_filename(self):
+        """Test _is_direct_path returns False for plain filenames."""
+        app = App()
+        assert app._is_direct_path("config.yaml") is False
+        assert app._is_direct_path("subdir/config.yaml") is False
+
+    def test_load_direct_config_absolute_path(self):
+        """Test _load_direct_config loads from absolute path."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "config.yaml"
+            config_path.write_text("direct_key: direct_value\n")
+
+            app = App()
+            result = app._load_direct_config(str(config_path))
+
+            assert result is not None
+            assert result["files"] == ["config.yaml"]
+            assert hasattr(app.config, "direct_key")
+            assert app.config.direct_key == "direct_value"
+
+    def test_load_direct_config_relative_path(self):
+        """Test _load_direct_config loads from relative path (resolved to cwd)."""
+        import os
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "config.yaml"
+            config_path.write_text("relative_key: relative_value\n")
+
+            # Change to tmpdir so relative path works
+            old_cwd = os.getcwd()
+            try:
+                os.chdir(tmpdir)
+                app = App()
+                result = app._load_direct_config("./config.yaml")
+
+                assert result is not None
+                assert hasattr(app.config, "relative_key")
+                assert app.config.relative_key == "relative_value"
+            finally:
+                os.chdir(old_cwd)
+
+    def test_load_direct_config_missing_file_raises(self):
+        """Test _load_direct_config raises for missing file."""
+        app = App()
+        with pytest.raises(FileNotFoundError, match="Config file not found"):
+            app._load_direct_config("/nonexistent/config.yaml")
 
     def test_log_config_loading_logs_stored_errors(self):
         """Test that _log_config_loading logs errors stored during deferred loading."""
@@ -1381,3 +1455,140 @@ class TestCreateConfigWatcherMethod:
         watcher = app.create_config_watcher()
 
         assert watcher._lg is mock_logger
+
+
+@pytest.mark.unit
+class TestAppEtcDirProperty:
+    """Test App.etc_dir property exposes the resolved etc directory."""
+
+    def test_returns_cached_value_set_by_config_load(self):
+        """If config loading already populated _etc_dir, the property reuses it."""
+        app = App()
+        app._etc_dir = "/cached/etc"  # type: ignore[attr-defined]
+
+        assert app.etc_dir == "/cached/etc"
+
+    def test_returns_none_when_unset(self):
+        """Before any config is resolved, the property returns None."""
+        app = App()
+        assert app._parsed_args is None
+        assert app.etc_dir is None
+
+    def test_returns_none_even_when_parsed_args_present(self):
+        """Property does not auto-resolve from _parsed_args; framework must set _etc_dir."""
+        app = App()
+        app._parsed_args = argparse.Namespace(etc_dir="/some/path")
+        # No config loaded yet -> framework hasn't set _etc_dir
+        assert app.etc_dir is None
+
+    def test_reflects_framework_set_value(self):
+        """Property returns whatever the framework wrote to _etc_dir."""
+        app = App()
+        app._etc_dir = "/cached/etc"  # type: ignore[attr-defined]
+
+        # Mutating _parsed_args after the framework sets _etc_dir must not affect the value.
+        app._parsed_args = argparse.Namespace(etc_dir="/totally/different")
+
+        assert app.etc_dir == "/cached/etc"
+
+
+@pytest.mark.unit
+class TestEtcDirResolutionOnOptIn:
+    """Verify _resolve_etc_dir_if_opted_in populates _etc_dir from --etc-dir or
+    the fallback chain when the standard arg is enabled — even without any
+    registered config files."""
+
+    def test_explicit_etc_dir_resolves_and_sets(self, tmp_path):
+        custom = tmp_path / "myetc"
+        custom.mkdir()
+
+        app = App()
+        app._standard_args = {"etc_dir": True}
+        app._parsed_args = argparse.Namespace(etc_dir=str(custom))
+
+        app._resolve_etc_dir_if_opted_in()
+
+        assert app.etc_dir == str(custom.resolve())
+
+    def test_explicit_bad_etc_dir_raises(self):
+        app = App()
+        app._standard_args = {"etc_dir": True}
+        app._parsed_args = argparse.Namespace(etc_dir="/definitely/not/there")
+
+        with pytest.raises(FileNotFoundError):
+            app._resolve_etc_dir_if_opted_in()
+
+    def test_fallback_resolves_when_flag_omitted(self, monkeypatch, tmp_path):
+        cwd_etc = tmp_path / "etc"
+        cwd_etc.mkdir()
+        monkeypatch.chdir(tmp_path)
+
+        app = App()
+        app._standard_args = {"etc_dir": True}
+        app._parsed_args = argparse.Namespace(etc_dir=None)
+
+        app._resolve_etc_dir_if_opted_in()
+
+        assert Path(app.etc_dir).resolve() == cwd_etc.resolve()
+
+    def test_fallback_miss_is_tolerant(self, monkeypatch, tmp_path):
+        """When the user didn't pass --etc-dir and no fallback exists, leave
+        _etc_dir unset (app.etc_dir returns None) — don't raise."""
+        empty = tmp_path / "empty"
+        empty.mkdir()
+        monkeypatch.chdir(empty)
+
+        app = App()
+        app._standard_args = {"etc_dir": True}
+        app._parsed_args = argparse.Namespace(etc_dir=None)
+
+        # Force the project-root and package-etc fallbacks to also fail.
+        from appinfra.config import config as _config_mod
+
+        monkeypatch.setattr(
+            _config_mod,
+            "get_etc_dir",
+            lambda: (_ for _ in ()).throw(FileNotFoundError("no project root")),
+        )
+        monkeypatch.setattr(_config_mod, "_get_package_etc_dir", lambda: None)
+
+        app._resolve_etc_dir_if_opted_in()  # must not raise
+
+        assert app.etc_dir is None
+
+    def test_not_opted_in_is_noop(self, tmp_path):
+        app = App()
+        app._standard_args = {"etc_dir": False}
+        app._parsed_args = argparse.Namespace(etc_dir=str(tmp_path))
+
+        app._resolve_etc_dir_if_opted_in()
+
+        assert app.etc_dir is None
+
+    def test_already_set_is_not_overwritten(self):
+        """If config loading already set _etc_dir, don't clobber it."""
+        app = App()
+        app._standard_args = {"etc_dir": True}
+        app._etc_dir = "/loaded/by/config/file"  # type: ignore[attr-defined]
+        app._parsed_args = argparse.Namespace(etc_dir="/from/cli")
+
+        app._resolve_etc_dir_if_opted_in()
+
+        assert app.etc_dir == "/loaded/by/config/file"
+
+
+@pytest.mark.unit
+class TestResolveEtcDirReExport:
+    """Verify resolve_etc_dir is reachable from the public import paths."""
+
+    def test_appinfra_root_namespace(self):
+        from appinfra import resolve_etc_dir as r1
+        from appinfra.config import resolve_etc_dir as r2
+
+        assert r1 is r2
+
+    def test_appinfra_app_namespace(self):
+        from appinfra.app import resolve_etc_dir as r1
+        from appinfra.config import resolve_etc_dir as r2
+
+        assert r1 is r2

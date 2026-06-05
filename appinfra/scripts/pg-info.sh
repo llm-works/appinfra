@@ -20,7 +20,7 @@ if [ "$1" = "--short" ]; then
 fi
 
 # Arguments passed from Makefile
-PG_DOCKER_IMAGE="$1"
+PG_CONTAINER_NAME="$1"
 PG_VERSION="$2"
 PG_HOST="$3"
 PG_PORT="$4"
@@ -90,17 +90,29 @@ echo -e "${BOLD}${CYAN}PostgreSQL Infrastructure Status${RESET}"
 echo -e "${CYAN}================================${RESET}"
 echo ""
 
-# Docker containers
-echo -e "${BOLD}DOCKER CONTAINERS${RESET}"
-echo -e "${GRAY}-----------------${RESET}"
-docker ps -a --filter "name=${PG_DOCKER_IMAGE}" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" 2>/dev/null || echo "No PostgreSQL containers found"
+# Containers (runtime via INFRA_CONTAINER_CMD; defaults to docker)
+echo -e "${BOLD}CONTAINERS${RESET}"
+echo -e "${GRAY}----------${RESET}"
+container_runtime="${INFRA_CONTAINER_CMD:-docker}"
+container_output=$(${container_runtime} ps -a --filter "name=${PG_CONTAINER_NAME}" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" 2>&1)
+container_exit=$?
+if [ $container_exit -ne 0 ]; then
+    echo -e "${RED}Error from '${container_runtime}' (exit $container_exit):${RESET}"
+    echo "$container_output"
+    exit $container_exit
+elif [ "$(echo "$container_output" | wc -l)" -le 1 ]; then
+    # Output is only the header row (or empty) — no matching containers
+    echo "No PostgreSQL containers found"
+else
+    echo "$container_output"
+fi
 echo ""
 
 # System configuration
 echo -e "${BOLD}SYSTEM CONFIGURATION${RESET}"
 echo -e "${GRAY}--------------------${RESET}"
 echo -e "Version:          ${BLUE}PostgreSQL ${PG_VERSION}${RESET}"
-echo -e "Docker Image:     ${BLUE}${PG_DOCKER_IMAGE}${RESET}"
+echo -e "Container Name:   ${BLUE}${PG_CONTAINER_NAME}${RESET}"
 if [ "$PG_REPLICA_ENABLED" = "true" ]; then
     echo -e "Primary Port:     ${BLUE}${PG_PORT}${RESET}"
     echo -e "Standby Port:     ${BLUE}${PG_PORT_R}${RESET}"

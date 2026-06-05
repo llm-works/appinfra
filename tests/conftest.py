@@ -6,11 +6,20 @@ and shared fixtures for the infra test suite.
 """
 
 import shutil
+import sys
 import tempfile
 from collections.abc import Generator
 from pathlib import Path
 
 import pytest
+
+from tests.helpers.pg.probe import (
+    PG_SKIP_REASON,
+    PG_STATUS_KEY,
+    REQUIRE_PG_MARKER,
+    probe,
+    resolve_pgserver_endpoint,
+)
 
 # =============================================================================
 # Plugin Registration
@@ -31,24 +40,28 @@ pytest_plugins = [
 
 
 def pytest_configure(config):
-    """Register custom markers."""
-    config.addinivalue_line(
-        "markers", "unit: Unit tests (fast, isolated, no external dependencies)"
-    )
-    config.addinivalue_line(
-        "markers", "integration: Integration tests (may use DB, network, filesystem)"
-    )
-    config.addinivalue_line("markers", "performance: Performance/benchmark tests")
-    config.addinivalue_line(
-        "markers", "security: Security-focused tests (injection, validation, etc.)"
-    )
-    config.addinivalue_line(
-        "markers", "e2e: End-to-end tests (full system integration)"
-    )
-    config.addinivalue_line("markers", "slow: Tests that take >1 second to run")
-    config.addinivalue_line(
-        "markers", "asyncio: Mark test as an async test (requires async runner)"
-    )
+    """Probe PG availability once per session.
+
+    Custom markers are registered declaratively in pyproject.toml under
+    [tool.pytest.ini_options].markers. The `asyncio` marker is registered
+    by the pytest-asyncio plugin itself.
+    """
+    # One-shot PG reachability probe. Stashed so pytest_collection_modifyitems
+    # and the pg_available fixture read the same result.
+    host, port = resolve_pgserver_endpoint()
+    available = probe(host, port)
+    config.stash[PG_STATUS_KEY] = {
+        "host": host,
+        "port": port,
+        "available": available,
+    }
+    if not available:
+        # One-line notice so the developer can see which endpoint failed when
+        # PG-dependent tests start skipping with the sentinel reason.
+        print(
+            f"PG probe: {host}:{port} unreachable; PG-dependent tests will skip",
+            file=sys.stderr,
+        )
 
 
 # =============================================================================
@@ -133,6 +146,15 @@ def pytest_collection_modifyitems(config, items):
             for mark in item.iter_markers()
         ):
             item.add_marker(pytest.mark.unit)
+
+    # Skip @pytest.mark.require_pg tests with the uniform sentinel reason when
+    # PG is unreachable. The terminal-summary banner consolidates them.
+    status = config.stash.get(PG_STATUS_KEY, None)
+    if status and not status["available"]:
+        skip_marker = pytest.mark.skip(reason=PG_SKIP_REASON)
+        for item in items:
+            if any(m.name == REQUIRE_PG_MARKER for m in item.iter_markers()):
+                item.add_marker(skip_marker)
 
 
 # =============================================================================

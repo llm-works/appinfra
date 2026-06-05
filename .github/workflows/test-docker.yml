@@ -22,6 +22,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -61,6 +63,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Set up Docker layer caching
         uses: actions/cache@v4
@@ -89,17 +93,32 @@ jobs:
         working-directory: appinfra/scripts/cicd
         run: docker compose down -v
 
-  # Summary job: required check that passes when all test matrix jobs pass
+  # Summary job: required `Test` check that aggregates repo-specific test lanes
+  # not covered by the repo-wide branch-protection standard (Lint, Test, Coverage).
+  # Coverage is intentionally NOT listed here — it is required directly via branch
+  # protection on every repo, so adding it here would only double-gate.
   test-summary:
     name: Test
     runs-on: ubuntu-latest
-    needs: test
+    needs: [test, podman, check-no-db, install]
     if: always()
     steps:
-      - name: Check test matrix status
+      - name: Check test results
         run: |
           if [[ "${{ needs.test.result }}" != "success" ]]; then
             echo "Test matrix failed"
+            exit 1
+          fi
+          if [[ "${{ needs.podman.result }}" != "success" ]]; then
+            echo "Podman compatibility check failed"
+            exit 1
+          fi
+          if [[ "${{ needs.check-no-db.result }}" != "success" ]]; then
+            echo "No-DB fresh-install check failed"
+            exit 1
+          fi
+          if [[ "${{ needs.install.result }}" != "success" ]]; then
+            echo "Install verification failed"
             exit 1
           fi
           echo "All tests passed"
@@ -114,6 +133,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Set up Docker layer caching
         uses: actions/cache@v4
@@ -163,3 +184,192 @@ jobs:
         if: always()
         working-directory: appinfra/scripts/cicd
         run: docker compose down -v
+
+  # Podman compatibility: verify the local-dev container layer works under
+  # rootless podman + podman-compose. Tests the same code paths a podman-only
+  # contributor would hit (Makefile.local override, INFRA_CONTAINER_CMD /
+  # INFRA_COMPOSE_CMD propagation, image pre-resolution, container lifecycle).
+  #
+  # Smoke test, not full parity: single Python version (3.12), single-instance
+  # pg only. Replication mode is not exercised here — the matrix `test` job
+  # covers cross-version Python; cross-runtime parity for replication is a
+  # follow-up if podman-specific replication issues land.
+  podman:
+    name: Podman
+    runs-on: ubuntu-latest
+    needs: lint
+    timeout-minutes: 8
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          # [all] matches the Dockerfile-based test matrix: includes sql,
+          # fastapi, validation, etc. that integration tests import via
+          # tests/conftest.py and tests/helpers/pg.
+          python -m pip install -e ".[all]"
+          sudo apt-get update
+          sudo apt-get install -y podman-compose postgresql-client
+
+      - name: Show runtime versions
+        run: |
+          podman --version
+          podman-compose --version
+          podman info --format '{{.Host.Security.Rootless}}'
+
+      - name: Configure container runtime override
+        run: |
+          cat > Makefile.local <<'EOF'
+          PYTHON              := python
+          INFRA_CONTAINER_CMD := podman
+          INFRA_COMPOSE_CMD   := podman-compose
+          EOF
+          echo "Makefile.local contents:"
+          cat Makefile.local
+          echo ""
+          make config
+
+      - name: Start postgres under podman
+        run: make pg.server.up
+
+      - name: Create test database
+        run: psql -h 127.0.0.1 -p 7432 -U postgres -c "CREATE DATABASE infra_test;"
+
+      - name: Run integration tests
+        run: make test.integration
+
+      - name: Stop postgres
+        if: always()
+        env:
+          INFRA_NO_CONFIRM: '1'
+        run: make pg.server.down
+
+  # Fresh-install check: verify `make check` passes on a clean ubuntu runner
+  # with no postgres, no docker, no podman. Mirrors the path a new contributor
+  # takes on first clone — `make setup` followed by `make check` — and catches
+  # regressions where pytest tests forget to skip on PG-unavailable, or
+  # imports require runtime services. Single Python version (3.12); the matrix
+  # `test` job already covers cross-version compat with a DB.
+  check-no-db:
+    name: Check (no DB)
+    runs-on: ubuntu-latest
+    needs: lint
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Configure Python for Makefile
+        run: |
+          # Makefile.env requires PYTHON/INFRA_ENV_PYTHON to point to an
+          # executable. The setup-python action puts python on PATH; resolve
+          # it to an absolute path so `[ -x "$pyenv" ]` checks in Makefile.dev
+          # pass under `make setup`.
+          echo "INFRA_ENV_PYTHON := $(which python)" > Makefile.local
+          cat Makefile.local
+
+      - name: Install dependencies via make setup
+        run: |
+          python -m pip install --upgrade pip
+          make setup
+
+      - name: Run make check (no postgres, no docker, no podman)
+        run: make check
+
+  # Install verification: run `make install` against a clean ubuntu runner and
+  # confirm the wheel is published to $prefix/share/$pkg/wheels/ with the mode
+  # derived from $prefix/share/, and that the install refuses on a fresh venv
+  # where $prefix/share/ is missing. Guards Makefile.install against regressions
+  # in the wheel-publish path, which is otherwise untested in CI.
+  install:
+    name: Install
+    runs-on: ubuntu-latest
+    needs: lint
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Configure Python for Makefile
+        run: echo "INFRA_ENV_PYTHON := $(which python)" > Makefile.local
+
+      - name: Install dependencies via make setup
+        run: |
+          python -m pip install --upgrade pip
+          make setup
+
+      - name: Pre-create $prefix/share at mode 2775 (setgid)
+        run: |
+          prefix="$(python -c 'import sys; print(sys.prefix)')"
+          # setup-python's toolcache dir is root-owned. Take ownership so the
+          # subsequent chmod 2775 actually retains the setgid bit — Linux
+          # silently strips S_ISGID via chmod() when the caller doesn't own
+          # the file's group (chmod(2)).
+          sudo mkdir -p "$prefix/share"
+          sudo chown "$(id -u):$(id -g)" "$prefix/share"
+          chmod 2775 "$prefix/share"
+          mode=$(stat -c %a "$prefix/share")
+          echo "share/ at $prefix/share mode $mode"
+          [ "$mode" = "2775" ] || { echo "ERROR: pre-create chmod 2775 did not stick (got $mode)"; exit 1; }
+
+      - name: Run make install
+        run: INFRA_NO_CONFIRM=1 make install
+
+      - name: Verify published wheel path and modes
+        run: |
+          set -e
+          prefix="$(python -c 'import sys; print(sys.prefix)')"
+          pkg=appinfra
+          wheels_dir="$prefix/share/$pkg/wheels"
+          test -d "$wheels_dir" || { echo "ERROR: $wheels_dir not created"; exit 1; }
+          wheel=$(find "$wheels_dir" -maxdepth 1 -name '*.whl' | head -1)
+          test -n "$wheel" || { echo "ERROR: no .whl in $wheels_dir"; exit 1; }
+          pkg_mode=$(stat -c %a "$prefix/share/$pkg")
+          wheels_mode=$(stat -c %a "$wheels_dir")
+          wheel_mode=$(stat -c %a "$wheel")
+          echo "modes: $pkg/=$pkg_mode wheels/=$wheels_mode wheel=$wheel_mode"
+          [ "$pkg_mode"    = "2775" ] || { echo "ERROR: $pkg/ mode $pkg_mode != 2775 (setgid lost)"; exit 1; }
+          [ "$wheels_mode" = "2775" ] || { echo "ERROR: wheels/ mode $wheels_mode != 2775 (setgid lost)"; exit 1; }
+          [ "$wheel_mode"  = "664"  ] || { echo "ERROR: wheel mode $wheel_mode != 664"; exit 1; }
+          echo "OK: wheel at $wheel"
+
+      - name: Verify make install refuses when $prefix/share/ is missing
+        run: |
+          python -m venv /tmp/fresh-venv
+          test ! -d /tmp/fresh-venv/share || { echo "ERROR: fresh venv unexpectedly has share/"; exit 1; }
+          if INFRA_NO_CONFIRM=1 PYTHON_ENVS=/tmp/fresh-venv/bin/python make install > /tmp/install.log 2>&1; then
+            echo "ERROR: make install should have failed but succeeded"
+            cat /tmp/install.log
+            exit 1
+          fi
+          grep -q "does not exist" /tmp/install.log || { echo "ERROR: expected 'does not exist' in error output"; cat /tmp/install.log; exit 1; }
+          echo "OK: install refused with expected error"

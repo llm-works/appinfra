@@ -73,7 +73,10 @@ def _get_project_root_from_config(config_path: Path) -> Path | None:
 
 
 def _load_yaml_with_includes(
-    fname_path: Any, merge_strategy: str, project_root: Path | None = None
+    fname_path: Any,
+    merge_strategy: str,
+    project_root: Path | None = None,
+    env_overrides: dict[str, str] | None = None,
 ) -> tuple[Any, dict[str, Path | None]]:
     """
     Load YAML file with include support.
@@ -82,6 +85,8 @@ def _load_yaml_with_includes(
         fname_path: Path to the YAML file to load
         merge_strategy: Strategy for merging includes
         project_root: Optional project root to restrict includes (security feature)
+        env_overrides: Optional explicit name→value map applied during
+            include-time ${var} substitution (forwarded to yaml.load).
     """
     from ..yaml import load as yaml_load
 
@@ -93,6 +98,7 @@ def _load_yaml_with_includes(
                 merge_strategy=merge_strategy,
                 track_sources=True,
                 project_root=project_root,
+                env_overrides=env_overrides,
             )
         except yaml.YAMLError as e:
             raise e
@@ -200,23 +206,35 @@ class Config(DotDict):
 
         fname_path = Path(fname).resolve()
         _check_file_size(fname_path)
-        self._config_path = fname_path  # Store for get_source_files()
+        self._config_path = fname_path
 
-        # Determine project root from config file location for security checks.
-        # This allows appinfra to work correctly when used as a submodule,
-        # where the consuming project's config should define the boundary.
-        proj_root = _get_project_root_from_config(fname_path)
-
-        config_data, source_map = _load_yaml_with_includes(
-            fname_path, self._merge_strategy, project_root=proj_root
-        )
-        self._source_map = source_map  # Store for get_source_files()
+        config_data, self._source_map = self._read_yaml(fname_path)
 
         if self._enable_env_overrides:
             config_data = self._apply_env_overrides(config_data)
 
         self.set(**config_data)
         self.set(**self._resolve(self.dict()))
+
+    def _read_yaml(self, fname_path: Path) -> tuple[Any, dict[str, Path | None]]:
+        """
+        Load the YAML file with env-aware include-time substitution.
+
+        Computes the project root (security boundary) and the env-override map
+        and hands them to the YAML loader. The env map is what lets URL strings
+        pick up env values during include-time `${var}` substitution —
+        otherwise raw YAML values get baked in before `_apply_env_overrides`
+        runs and Config._resolve has nothing left to substitute.
+        """
+        proj_root = _get_project_root_from_config(fname_path)
+        env_overrides = (
+            self._collect_env_overrides_for_yaml()
+            if self._enable_env_overrides
+            else None
+        )
+        return _load_yaml_with_includes(
+            fname_path, self._merge_strategy, proj_root, env_overrides
+        )
 
     def reload(self) -> Self:
         """Reload configuration from disk.
@@ -303,6 +321,34 @@ class Config(DotDict):
             self._set_nested_value(config_data, config_path, env_value)
 
         return config_data
+
+    def _collect_env_overrides_for_yaml(self) -> dict[str, str]:
+        """
+        Build the name→value map passed to yaml.load() so include-time
+        `${var}` substitution uses env-overridden values.
+
+        For each `INFRA_*` env var, two aliases are inserted:
+
+        - Dotted form: every underscore in the env name becomes `.`
+          (e.g. `INFRA_PGSERVER_HOST` → `pgserver.host`). Matches simple
+          `${pgserver.host}` references.
+
+        - Canonical form: env name lowercased with the prefix stripped,
+          underscores preserved (e.g. `INFRA_DB_CONNECTION_POOL_SIZE` →
+          `db_connection_pool_size`). The include-time substitute normalizes
+          its lookup key the same way (`.`/`-` → `_`), so multi-word YAML
+          references like `${db.connection_pool.size}` resolve unambiguously.
+
+        Values are the raw env strings — typed conversion happens later in
+        `_apply_env_overrides` on the parsed dict.
+        """
+        overrides: dict[str, str] = {}
+        for env_key, env_value in self._collect_env_vars().items():
+            dotted = ".".join(self._env_key_to_path(env_key))
+            overrides[dotted] = env_value
+            canonical = env_key[len(self._env_prefix) :].lower()
+            overrides[canonical] = env_value
+        return overrides
 
     def _collect_env_vars(self) -> dict[str, str]:
         """
@@ -637,6 +683,81 @@ def get_etc_dir() -> Path:
         FileNotFoundError: If the project root cannot be found
     """
     return get_project_root() / "etc"
+
+
+def _validate_custom_etc_path(custom_path: str) -> Path:
+    """Validate and return custom etc directory path."""
+    path = Path(custom_path).resolve()
+    if not path.exists():
+        raise FileNotFoundError(
+            f"Specified etc directory does not exist: {custom_path}"
+        )
+    if not path.is_dir():
+        raise FileNotFoundError(f"Specified etc path is not a directory: {custom_path}")
+    return path
+
+
+def _get_package_etc_dir() -> Path | None:
+    """Try to get etc directory bundled inside the appinfra package."""
+    # appinfra/config/config.py -> appinfra/config -> appinfra -> appinfra/etc
+    package_etc = Path(__file__).parent.parent / "etc"
+    if package_etc.exists() and package_etc.is_dir():
+        return package_etc
+    return None
+
+
+def resolve_etc_dir(custom_path: str | None = None) -> Path:
+    """
+    Resolve the etc directory with intelligent fallback.
+
+    Resolution order:
+    1. If custom_path provided, use it (from --etc-dir)
+    2. Try ./etc/ in current working directory
+    3. Try project root etc/ (walk up to find etc/infra.yaml)
+    4. Fall back to infra package etc/ directory
+
+    Args:
+        custom_path: Custom etc directory path from --etc-dir argument
+
+    Returns:
+        Path to etc directory
+
+    Raises:
+        FileNotFoundError: If no etc directory can be found
+
+    Example:
+        # With custom path
+        etc_dir = resolve_etc_dir("/path/to/custom/etc")
+
+        # Auto-detection
+        etc_dir = resolve_etc_dir()  # Uses fallback chain
+    """
+    # Priority 1: Custom path from --etc-dir
+    if custom_path:
+        return _validate_custom_etc_path(custom_path)
+
+    # Priority 2: Current working directory ./etc/
+    cwd_etc = Path.cwd() / "etc"
+    if cwd_etc.exists() and cwd_etc.is_dir():
+        return cwd_etc
+
+    # Priority 3: Project root etc/ (walk up to find etc/infra.yaml)
+    try:
+        return get_etc_dir()  # Uses existing get_project_root() logic
+    except FileNotFoundError:
+        pass
+
+    # Priority 4: Infra package etc/ directory
+    package_etc = _get_package_etc_dir()
+    if package_etc:
+        return package_etc
+
+    raise FileNotFoundError(
+        "Could not find etc directory. Tried:\n"
+        f"  1. Current directory: {cwd_etc}\n"
+        f"  2. Project root (via etc/infra.yaml marker)\n"
+        f"  3. Infra package directory"
+    )
 
 
 # Default config filename - can be overridden via INFRA_DEFAULT_CONFIG_FILE env var

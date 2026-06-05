@@ -26,31 +26,31 @@ class TestWithStandardArgsMethod:
         builder.with_standard_args()
         assert all(builder._standard_args.values())
 
-    def test_specific_kwargs_disable_individual_args(self):
-        """Test specific kwargs can disable individual args."""
+    def test_specific_kwargs_enable_individual_args(self):
+        """Test specific kwargs can enable individual args."""
         builder = AppBuilder("test")
 
-        # Disable specific args
-        builder.with_standard_args(log_location=False, log_micros=False)
+        # Enable specific args (defaults are all False except help)
+        builder.with_standard_args(log_location=True, log_micros=True)
 
-        assert builder._standard_args["log_location"] is False
-        assert builder._standard_args["log_micros"] is False
-        # Others should still be enabled
-        assert builder._standard_args["etc_dir"] is True
-        assert builder._standard_args["log_level"] is True
-        assert builder._standard_args["quiet"] is True
+        assert builder._standard_args["log_location"] is True
+        assert builder._standard_args["log_micros"] is True
+        # Others should still be disabled
+        assert builder._standard_args["etc_dir"] is False
+        assert builder._standard_args["log_level"] is False
+        assert builder._standard_args["quiet"] is False
 
     def test_multiple_kwargs_work_together(self):
         """Test multiple keyword arguments work together."""
         builder = AppBuilder("test")
 
-        builder.with_standard_args(etc_dir=False, log_level=False, log_location=False)
+        builder.with_standard_args(etc_dir=True, log_level=True, log_location=True)
 
-        assert builder._standard_args["etc_dir"] is False
-        assert builder._standard_args["log_level"] is False
-        assert builder._standard_args["log_location"] is False
-        assert builder._standard_args["log_micros"] is True
-        assert builder._standard_args["quiet"] is True
+        assert builder._standard_args["etc_dir"] is True
+        assert builder._standard_args["log_level"] is True
+        assert builder._standard_args["log_location"] is True
+        assert builder._standard_args["log_micros"] is False
+        assert builder._standard_args["quiet"] is False
 
     def test_invalid_arg_name_raises_value_error(self):
         """Test invalid argument name raises ValueError."""
@@ -101,6 +101,34 @@ class TestWithStandardArgsMethod:
         assert builder._standard_args["log_location"] is True
         assert builder._standard_args["log_micros"] is True
 
+    def test_log_alias_enables_all_log_args(self):
+        """Test log=True enables all logging-related args."""
+        builder = AppBuilder("test")
+
+        builder.with_standard_args(log=True)
+
+        # All log args should be enabled
+        assert builder._standard_args["log_level"] is True
+        assert builder._standard_args["log_location"] is True
+        assert builder._standard_args["log_micros"] is True
+        assert builder._standard_args["log_topic"] is True
+        assert builder._standard_args["log_colors"] is True
+        assert builder._standard_args["log_json"] is True
+        assert builder._standard_args["quiet"] is True
+        # Non-log args should still be disabled
+        assert builder._standard_args["etc_dir"] is False
+        assert builder._standard_args["config_file"] is False
+
+    def test_log_alias_with_override(self):
+        """Test log=True can be overridden by explicit settings."""
+        builder = AppBuilder("test")
+
+        # log=True but quiet=False should keep quiet disabled
+        builder.with_standard_args(log=True, quiet=False)
+
+        assert builder._standard_args["log_level"] is True
+        assert builder._standard_args["quiet"] is False  # Override wins
+
 
 @pytest.mark.unit
 class TestWithoutStandardArgsMethod:
@@ -110,7 +138,8 @@ class TestWithoutStandardArgsMethod:
         """Test method disables all standard arguments."""
         builder = AppBuilder("test")
 
-        # All should be enabled by default
+        # First enable all
+        builder.with_standard_args()
         assert all(builder._standard_args.values())
 
         # Disable all
@@ -144,27 +173,30 @@ class TestWithoutStandardArgsMethod:
 class TestStandardArgsIntegration:
     """Test standard args integration with App class."""
 
-    def test_all_args_added_by_default(self):
-        """Test all args are added to parser by default."""
+    def test_minimal_args_by_default(self):
+        """Test only help is added to parser by default (minimal CLI)."""
         app = AppBuilder("test").build()
         app.create_args()
 
         # Get the parser's arguments
         parser_args = {action.dest for action in app.parser.parser._actions}
 
-        assert "etc_dir" in parser_args
-        assert "log_level" in parser_args
-        assert "log_location" in parser_args
-        assert "log_micros" in parser_args
-        assert "quiet" in parser_args
-        assert "log_colors" in parser_args
-        assert "log_json" in parser_args
+        # Only help should be present by default
+        assert "help" in parser_args
 
-    def test_disabled_args_not_added_to_parser(self):
-        """Test disabled args are not added to parser."""
+        # These should NOT be present by default
+        assert "etc_dir" not in parser_args
+        assert "log_level" not in parser_args
+        assert "log_location" not in parser_args
+        assert "log_micros" not in parser_args
+        assert "quiet" not in parser_args
+        assert "config" not in parser_args
+
+    def test_enabled_args_added_to_parser(self):
+        """Test enabled args are added to parser."""
         app = (
             AppBuilder("test")
-            .with_standard_args(log_location=False, log_micros=False)
+            .with_standard_args(etc_dir=True, log_level=True, quiet=True)
             .build()
         )
         app.create_args()
@@ -201,9 +233,13 @@ class TestStandardArgsIntegration:
         assert "log_micros" not in parser_args
         assert "quiet" not in parser_args
 
-    def test_partial_disable_works_correctly(self):
-        """Test partial disable of args works correctly."""
-        app = AppBuilder("test").with_standard_args(etc_dir=False, quiet=False).build()
+    def test_partial_enable_works_correctly(self):
+        """Test partial enable of args works correctly."""
+        app = (
+            AppBuilder("test")
+            .with_standard_args(log_level=True, log_location=True, log_micros=True)
+            .build()
+        )
         app.create_args()
 
         parser_args = {action.dest for action in app.parser.parser._actions}
@@ -220,47 +256,57 @@ class TestStandardArgsIntegration:
     def test_configuration_passed_from_builder_to_app(self):
         """Test standard args configuration is passed from builder to app."""
         builder = AppBuilder("test")
-        builder.with_standard_args(log_location=False)
+        builder.with_standard_args(log_location=True, etc_dir=True)
 
         app = builder.build()
 
         # App should have the same configuration
-        assert app._standard_args["log_location"] is False
+        assert app._standard_args["log_location"] is True
         assert app._standard_args["etc_dir"] is True
+        # Others should still be disabled (default)
+        assert app._standard_args["log_micros"] is False
 
 
 @pytest.mark.integration
-class TestBackwardCompatibility:
-    """Test backward compatibility - existing code works unchanged."""
+class TestMinimalDefaults:
+    """Test minimal default behavior - only help by default."""
 
-    def test_default_behavior_unchanged(self):
-        """Test default behavior adds all args (backward compatible)."""
+    def test_default_behavior_is_minimal(self):
+        """Test default behavior only adds help (minimal CLI)."""
         app = AppBuilder("test").build()
         app.create_args()
 
         parser_args = {action.dest for action in app.parser.parser._actions}
 
-        # All standard args should be present by default
-        assert "etc_dir" in parser_args
-        assert "log_level" in parser_args
-        assert "log_location" in parser_args
-        assert "log_micros" in parser_args
-        assert "quiet" in parser_args
+        # Only help should be present by default
+        assert "help" in parser_args
+        assert "etc_dir" not in parser_args
+        assert "log_level" not in parser_args
+        assert "config" not in parser_args
 
-    def test_existing_code_works_without_modification(self):
-        """Test existing code without new methods works identically."""
-        # Simulate existing code that doesn't use the new methods
-        app = AppBuilder("test").with_name("MyApp").with_description("Test app").build()
+    def test_opt_in_pattern_for_standard_args(self):
+        """Test the recommended opt-in pattern for enabling standard args."""
+        app = (
+            AppBuilder("test")
+            .with_name("MyApp")
+            .with_description("Test app")
+            .with_standard_args(
+                etc_dir=True, config_file=True, log_level=True, quiet=True
+            )
+            .build()
+        )
         app.create_args()
 
         parser_args = {action.dest for action in app.parser.parser._actions}
 
-        # All standard args should still be present
+        # Opted-in args should be present
         assert "etc_dir" in parser_args
+        assert "config" in parser_args
         assert "log_level" in parser_args
-        assert "log_location" in parser_args
-        assert "log_micros" in parser_args
         assert "quiet" in parser_args
+        # Not opted-in args should NOT be present
+        assert "log_location" not in parser_args
+        assert "log_micros" not in parser_args
 
 
 @pytest.mark.unit
@@ -313,3 +359,191 @@ class TestEdgeCases:
 
         # Final state should be all enabled (last call)
         assert all(builder._standard_args.values())
+
+
+@pytest.mark.unit
+class TestWithStandardArgMethod:
+    """Test AppBuilder.with_standard_arg() per-arg override behavior."""
+
+    def test_stores_overrides_under_arg_name(self):
+        builder = AppBuilder("test").with_standard_arg(
+            "etc_dir", default="./etc", help="config dir"
+        )
+
+        assert builder._standard_arg_overrides == {
+            "etc_dir": {"default": "./etc", "help": "config dir"}
+        }
+
+    def test_multiple_calls_merge_keys(self):
+        builder = AppBuilder("test")
+        builder.with_standard_arg("etc_dir", default="./etc")
+        builder.with_standard_arg("etc_dir", help="new help")
+
+        assert builder._standard_arg_overrides["etc_dir"] == {
+            "default": "./etc",
+            "help": "new help",
+        }
+
+    def test_later_call_overwrites_same_key(self):
+        builder = AppBuilder("test")
+        builder.with_standard_arg("etc_dir", default="./etc")
+        builder.with_standard_arg("etc_dir", default="/srv/etc")
+
+        assert builder._standard_arg_overrides["etc_dir"]["default"] == "/srv/etc"
+
+    def test_invalid_name_rejected(self):
+        builder = AppBuilder("test")
+        with pytest.raises(ValueError, match="Invalid standard argument name"):
+            builder.with_standard_arg("not_a_real_arg", default="x")
+
+    def test_log_alias_rejected(self):
+        builder = AppBuilder("test")
+        with pytest.raises(ValueError, match="'log' is an alias"):
+            builder.with_standard_arg("log", default="warning")
+
+    def test_help_rejected(self):
+        # 'help' is consumed via add_help, not the standard-arg kwargs path,
+        # so overrides would be silently dropped. Reject instead.
+        builder = AppBuilder("test")
+        with pytest.raises(ValueError, match="'help' is consumed by argparse"):
+            builder.with_standard_arg("help", help="custom")
+
+    def test_dest_override_rejected(self):
+        builder = AppBuilder("test")
+        with pytest.raises(ValueError, match="Cannot override 'dest'"):
+            builder.with_standard_arg("etc_dir", dest="my_etc_dir")
+
+    def test_method_chains(self):
+        builder = AppBuilder("test")
+        result = builder.with_standard_arg("etc_dir", default="./etc")
+        assert result is builder
+
+
+@pytest.mark.integration
+class TestStandardArgOverrideIntegration:
+    """Verify with_standard_arg overrides reach the parser."""
+
+    @staticmethod
+    def _action_for(app, dest: str):
+        return next(a for a in app.parser.parser._actions if a.dest == dest)
+
+    def test_default_override_reaches_parser(self):
+        app = (
+            AppBuilder("test")
+            .with_standard_args(etc_dir=True)
+            .with_standard_arg("etc_dir", default="./etc")
+            .build()
+        )
+        app.create_args()
+
+        action = self._action_for(app, "etc_dir")
+        assert action.default == "./etc"
+
+    def test_help_override_reaches_parser(self):
+        app = (
+            AppBuilder("test")
+            .with_standard_args(etc_dir=True)
+            .with_standard_arg("etc_dir", help="custom etc help")
+            .build()
+        )
+        app.create_args()
+
+        action = self._action_for(app, "etc_dir")
+        assert action.help == "custom etc help"
+
+    def test_override_for_disabled_arg_is_silently_ignored(self):
+        app = (
+            AppBuilder("test")
+            .without_standard_args()
+            .with_standard_arg("etc_dir", default="./etc")
+            .build()
+        )
+        app.create_args()
+
+        parser_dests = {a.dest for a in app.parser.parser._actions}
+        assert "etc_dir" not in parser_dests
+
+    def test_override_only_changes_specified_keys(self):
+        """Framework defaults survive for kwargs not in the override."""
+        app = (
+            AppBuilder("test")
+            .with_standard_args(etc_dir=True)
+            .with_standard_arg("etc_dir", default="./etc")
+            .build()
+        )
+        app.create_args()
+
+        action = self._action_for(app, "etc_dir")
+        assert action.default == "./etc"
+        # metavar and type came from the framework
+        assert action.metavar == "DIR"
+        assert action.type is str
+
+    def test_log_level_override(self):
+        app = (
+            AppBuilder("test")
+            .with_standard_args(log_level=True)
+            .with_standard_arg("log_level", default="warning")
+            .build()
+        )
+        app.create_args()
+
+        assert self._action_for(app, "log_level").default == "warning"
+
+    def test_config_file_override(self):
+        app = (
+            AppBuilder("test")
+            .with_standard_args(config_file=True)
+            .with_standard_arg("config_file", default="prod.yaml", help="prod config")
+            .build()
+        )
+        app.create_args()
+
+        action = self._action_for(app, "config")
+        assert action.default == "prod.yaml"
+        assert action.help == "prod config"
+
+    def test_multi_kwarg_override_all_applied(self):
+        """Overriding default + metavar + help in one call applies all three."""
+        app = (
+            AppBuilder("test")
+            .with_standard_args(etc_dir=True)
+            .with_standard_arg(
+                "etc_dir", default="/srv/etc", metavar="PATH", help="srv etc"
+            )
+            .build()
+        )
+        app.create_args()
+
+        action = self._action_for(app, "etc_dir")
+        assert action.default == "/srv/etc"
+        assert action.metavar == "PATH"
+        assert action.help == "srv etc"
+
+    def test_log_topic_override(self):
+        """log_topic's dest is log_topics; override must still find the action by dest."""
+        app = (
+            AppBuilder("test")
+            .with_standard_args(log_topic=True)
+            .with_standard_arg("log_topic", help="custom topic help")
+            .build()
+        )
+        app.create_args()
+
+        action = self._action_for(app, "log_topics")
+        assert action.help == "custom topic help"
+
+    def test_quiet_override(self):
+        """quiet is a store_true flag — overriding help works without disturbing the action."""
+        app = (
+            AppBuilder("test")
+            .with_standard_args(quiet=True)
+            .with_standard_arg("quiet", help="silence the build")
+            .build()
+        )
+        app.create_args()
+
+        action = self._action_for(app, "quiet")
+        assert action.help == "silence the build"
+        # store_true machinery preserved
+        assert action.const is True

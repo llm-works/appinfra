@@ -366,7 +366,8 @@ class TestFlushBatch:
     ):
         """Test handles database errors without raising."""
         handler.batch = [{"timestamp": datetime.now(), "message": "Test"}]
-        mock_db_interface.session.return_value.__enter__.return_value.commit.side_effect = Exception(
+        # Mock execute to fail (session.commit is now internal to context manager)
+        mock_db_interface.session.return_value.__enter__.return_value.execute.side_effect = Exception(
             "DB error"
         )
 
