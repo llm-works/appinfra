@@ -33,7 +33,9 @@ services:
     restart: always
     volumes:
       - "$PWD:$PWD"
-      - pgdata_primary:/var/lib/postgresql/data
+      # Mount one level above PGDATA: pg18+ uses /var/lib/postgresql/<MAJOR>/docker
+      # and refuses to start when the mount lands on /var/lib/postgresql/data.
+      - pgdata_primary:/var/lib/postgresql
       - ${PWD}/scripts/docker/pg/pg_hba.conf:/etc/postgresql/pg_hba.conf:ro
     working_dir: $PWD
     ports:
@@ -53,7 +55,8 @@ services:
     restart: always
     volumes:
       - "$PWD:$PWD"
-      - pgdata_standby:/var/lib/postgresql/data
+      # Mount one level above PGDATA (see primary comment).
+      - pgdata_standby:/var/lib/postgresql
     working_dir: $PWD
     ports:
       - ${PORT_R:?}:${PORT_R}
@@ -65,15 +68,16 @@ services:
         condition: service_healthy
     entrypoint: >
       bash -c "
-        rm -rf /var/lib/postgresql/data/*
+        pgdata=\"$${PGDATA:-/var/lib/postgresql/data}\"
+        rm -rf \"$$pgdata\"/*
         until pg_isready -h postgres-primary -p ${PORT} -U postgres; do
           echo 'Waiting for primary to be ready...'
           sleep 2
         done
         echo 'Primary is ready, starting base backup...'
-        PGPASSWORD='' pg_basebackup -h postgres-primary -p ${PORT} -U postgres -D /var/lib/postgresql/data -Fp -Xs -P -R
-        chown -R postgres:postgres /var/lib/postgresql/data
-        chmod 0700 /var/lib/postgresql/data
+        PGPASSWORD='' pg_basebackup -h postgres-primary -p ${PORT} -U postgres -D \"$$pgdata\" -Fp -Xs -P -R
+        chown -R postgres:postgres \"$$pgdata\"
+        chmod 0700 \"$$pgdata\"
         echo 'Base backup complete, starting standby server...'
         exec gosu postgres postgres \
           -c \"${PG_MAX_CONNECTIONS:-max_connections=128}\" \
