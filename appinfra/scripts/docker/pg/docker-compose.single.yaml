@@ -22,9 +22,15 @@ services:
     restart: always
     volumes:
       - "$PWD:$PWD"
+      # Mount one level above PGDATA: pg18+ uses /var/lib/postgresql/<MAJOR>/docker
+      # and refuses to start when the mount lands on /var/lib/postgresql/data.
+      - pgdata:/var/lib/postgresql
     working_dir: $PWD
     ports:
       - ${PORT:?}:${PORT}
     environment:
       - POSTGRES_HOST_AUTH_METHOD=trust
       - PGPORT=${PORT}
+
+volumes:
+  pgdata:

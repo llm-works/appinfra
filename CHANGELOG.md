@@ -24,6 +24,11 @@ For API stability guarantees and deprecation policy, see
   string-form commands per the Compose spec.
 - Replication primary now applies the whitelisted `postgres_conf` entries. Previously its
   hardcoded command list ignored user-supplied settings entirely.
+- Single-instance pgserver now persists `PGDATA` on a named volume, matching replication
+  mode; `make pg.server.down` no longer destroys database contents.
+  `make pg.server.clean` remains the explicit destructive verb.
+- `pg.server.clean` removes volumes for any `pgserver.name`, not only the default.
+  The filter previously hardcoded `infra-pg` and leaked volumes for renamed consumers.
 
 ## [0.8.0] - 2026-06-04
 

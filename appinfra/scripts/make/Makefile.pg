@@ -204,7 +204,7 @@ pg.server.clean.internal:: # Internal: cleanup without confirmation (used by cle
 	@$(INFRA_CONTAINER_CMD) ps -a --filter "name=$(PG_CONTAINER_NAME)" --format "{{.Names}}" | xargs -r $(INFRA_CONTAINER_CMD) stop 2>/dev/null || true
 	@$(INFRA_CONTAINER_CMD) ps -a --filter "name=$(PG_CONTAINER_NAME)" --format "{{.Names}}" | xargs -r $(INFRA_CONTAINER_CMD) rm 2>/dev/null || true
 	@echo "Removing PostgreSQL volumes..."
-	@$(INFRA_CONTAINER_CMD) volume ls --filter "name=infra-pg" --format "{{.Name}}" | xargs -r $(INFRA_CONTAINER_CMD) volume rm 2>/dev/null || true
+	@$(INFRA_CONTAINER_CMD) volume ls --filter "name=$(PG_CONTAINER_NAME)" --format "{{.Name}}" | xargs -r $(INFRA_CONTAINER_CMD) volume rm 2>/dev/null || true
 	@echo "Removing PostgreSQL networks..."
 	@$(INFRA_CONTAINER_CMD) network ls --filter "name=$(PG_CONTAINER_NAME)" --format "{{.Name}}" | xargs -r $(INFRA_CONTAINER_CMD) network rm 2>/dev/null || true
 	@echo "Removing PostgreSQL images (force)..."
