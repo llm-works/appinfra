@@ -138,3 +138,11 @@ class TestPgConfigSh:
         assert result.returncode != 0
         assert "max_connections" in result.stderr
         assert "null" in result.stderr
+
+    def test_postgres_conf_must_be_mapping(self, tmp_path: Path) -> None:
+        result = _run_expect_failure(
+            tmp_path,
+            "pgserver:\n  postgres_conf: not_a_dict\n",
+        )
+        assert result.returncode != 0
+        assert "mapping" in result.stderr

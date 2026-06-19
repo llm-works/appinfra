@@ -56,6 +56,9 @@ def render(key, value):
     return f'{key}={value}'
 
 postgres_conf = cfg.get('postgres_conf', {}) or {}
+if not isinstance(postgres_conf, dict):
+    sys.stderr.write(f'pg-config: postgres_conf must be a mapping, got {type(postgres_conf).__name__}\n')
+    sys.exit(1)
 unknown = sorted(set(postgres_conf) - SUPPORTED)
 if unknown:
     sys.stderr.write(
