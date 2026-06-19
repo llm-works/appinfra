@@ -10,6 +10,21 @@ For API stability guarantees and deprecation policy, see
 
 ## [Unreleased]
 
+### Changed
+- `pgserver.postgres_conf` is now a curated whitelist (`max_connections`,
+  `shared_preload_libraries`, `work_mem`, `autovacuum`) rather than an open-ended dict.
+  Unknown keys produce an error listing the supported set. The compose YAMLs use a
+  static argv list with `${PG_<KEY>:-<key>=<default>}` slots, sidestepping the
+  Compose string-vs-list `command:` ambiguity between docker-compose and podman-compose.
+
+### Fixed
+- `make pg.server.up` with non-empty `pgserver.postgres_conf` now works under both
+  docker-compose and podman-compose. The previous form (string `command:` with
+  `${COMMAND}` substitution) failed under podman-compose because it does not shlex-split
+  string-form commands per the Compose spec.
+- Replication primary now applies the whitelisted `postgres_conf` entries. Previously its
+  hardcoded command list ignored user-supplied settings entirely.
+
 ## [0.8.0] - 2026-06-04
 
 ### Added

@@ -182,13 +182,20 @@ modified images will fail to start.
 
 #### PostgreSQL Configuration (`postgres_conf`)
 
-Control PostgreSQL server parameters via the `postgres_conf` dictionary. Each key-value pair is
-passed as a `-c key=value` argument to the postgres command.
+Control a curated set of PostgreSQL server parameters via the `postgres_conf` dictionary. Each
+configured key is passed as a `-c key=value` argument to the postgres command at start. Unknown
+keys raise an error listing the supported set.
 
-**Supported value types:**
-- **Strings/integers:** passed directly (`max_connections: 500` → `-c max_connections=500`)
-- **Booleans:** converted to on/off (`autovacuum: true` → `-c autovacuum=on`)
-- **Lists:** joined with commas (`shared_preload_libraries: [a, b]` → `-c shared_preload_libraries=a,b`)
+**Supported keys:**
+
+| Key | Value type | Postgres default | Use |
+|---|---|---|---|
+| `max_connections` | integer | 128 | Connection pool cap (e.g. for parallel test runs) |
+| `shared_preload_libraries` | list of strings | empty | Load extensions at startup (e.g. `pg_stat_statements`, `timescaledb`) |
+| `work_mem` | string with unit | `4MB` | Per-operation working memory |
+| `autovacuum` | bool | `on` | Background table maintenance |
+
+Booleans become `on`/`off`; lists are comma-joined.
 
 **Example:**
 ```yaml
@@ -204,6 +211,9 @@ pgserver:
     work_mem: 256MB
     autovacuum: true
 ```
+
+**Need a knob not in the table?** File an issue or PR — each addition is small (one entry
+in `pg-config.sh`'s whitelist plus one slot in both compose YAMLs).
 
 #### Recommended PostgreSQL Settings
 
