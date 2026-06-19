@@ -129,3 +129,12 @@ class TestPgConfigSh:
         # Error message includes the supported set so the user knows the contract.
         assert "max_connections" in result.stderr
         assert "shared_preload_libraries" in result.stderr
+
+    def test_null_value_errors_with_clear_message(self, tmp_path: Path) -> None:
+        result = _run_expect_failure(
+            tmp_path,
+            "pgserver:\n  postgres_conf:\n    max_connections:\n",  # null value
+        )
+        assert result.returncode != 0
+        assert "max_connections" in result.stderr
+        assert "null" in result.stderr

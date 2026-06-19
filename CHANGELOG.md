@@ -11,7 +11,7 @@ For API stability guarantees and deprecation policy, see
 ## [Unreleased]
 
 ### Changed
-- `pgserver.postgres_conf` is now a curated whitelist (`max_connections`,
+- **Breaking:** `pgserver.postgres_conf` is now a curated whitelist (`max_connections`,
   `shared_preload_libraries`, `work_mem`, `autovacuum`) rather than an open-ended dict.
   Unknown keys produce an error listing the supported set. The compose YAMLs use a
   static argv list with `${PG_<KEY>:-<key>=<default>}` slots, sidestepping the

@@ -76,10 +76,10 @@ services:
         chmod 0700 /var/lib/postgresql/data
         echo 'Base backup complete, starting standby server...'
         exec gosu postgres postgres \
-          -c '${PG_MAX_CONNECTIONS:-max_connections=128}' \
-          -c '${PG_SHARED_PRELOAD_LIBRARIES:-shared_preload_libraries=}' \
-          -c '${PG_WORK_MEM:-work_mem=4MB}' \
-          -c '${PG_AUTOVACUUM:-autovacuum=on}'
+          -c ${PG_MAX_CONNECTIONS:-max_connections=128} \
+          -c ${PG_SHARED_PRELOAD_LIBRARIES:-shared_preload_libraries=} \
+          -c ${PG_WORK_MEM:-work_mem=4MB} \
+          -c ${PG_AUTOVACUUM:-autovacuum=on}
       "
 
 volumes:

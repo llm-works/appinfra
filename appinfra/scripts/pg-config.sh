@@ -64,6 +64,12 @@ if unknown:
     )
     sys.exit(1)
 
+# Check for null values (e.g., "max_connections:" with no value in YAML)
+for k, v in postgres_conf.items():
+    if v is None:
+        sys.stderr.write(f'pg-config: postgres_conf.{k} is null; provide a value or remove the key\n')
+        sys.exit(1)
+
 knobs = {k.upper(): render(k, postgres_conf[k]) for k in postgres_conf}
 
 parts = [
