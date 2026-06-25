@@ -266,6 +266,7 @@ class TestDefault:
 
 
 @pytest.mark.unit
+@pytest.mark.usefixtures("clean_env")
 class TestCreateConfig:
     """Test create_config function (lines 168-224)."""
 
@@ -422,6 +423,7 @@ list_item:
 
 
 @pytest.mark.integration
+@pytest.mark.usefixtures("clean_env")
 class TestConfigIntegration:
     """Test configuration integration scenarios."""
 

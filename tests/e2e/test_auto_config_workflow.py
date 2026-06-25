@@ -24,6 +24,7 @@ from appinfra.app.builder import AppBuilder
 
 
 @pytest.mark.e2e
+@pytest.mark.usefixtures("clean_env")
 class TestConfigFileWorkflow:
     """E2E tests for config file loading workflow."""
 
@@ -497,6 +498,7 @@ class TestConfigFileWorkflow:
 
 
 @pytest.mark.e2e
+@pytest.mark.usefixtures("clean_env")
 class TestConfigSectionIncludeWorkflow:
     """E2E tests for section includes with variable resolution."""
 
@@ -635,6 +637,7 @@ class TestConfigSectionIncludeWorkflow:
 
 
 @pytest.mark.e2e
+@pytest.mark.usefixtures("clean_env")
 class TestConfigIncludeErrorWorkflow:
     """E2E tests for config file include error handling workflow."""
 
@@ -768,6 +771,7 @@ name: test-app
 
 
 @pytest.mark.e2e
+@pytest.mark.usefixtures("clean_env")
 class TestLogOutputCliOverrides:
     """E2E tests for --log-json and --no-log-colors CLI overrides."""
 

@@ -389,6 +389,7 @@ class TestConfigLoading:
 
 
 @pytest.mark.unit
+@pytest.mark.usefixtures("clean_env")
 class TestEnvVarHandling:
     """Test environment variable override handling."""
 

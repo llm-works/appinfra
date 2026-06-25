@@ -32,6 +32,7 @@ from appinfra.config.config import (
     _preserve_config_attributes,
     _restore_config_attributes,
 )
+from appinfra.errors import UndeclaredConfigPathError
 
 # =============================================================================
 # Fixtures
@@ -95,18 +96,7 @@ files:
     return str(config_file)
 
 
-@pytest.fixture
-def clean_env():
-    """Clean environment variables before and after test."""
-    original_env = os.environ.copy()
-    # Remove any INFRA_* variables
-    for key in list(os.environ.keys()):
-        if key.startswith("INFRA_"):
-            del os.environ[key]
-    yield
-    # Restore original environment
-    os.environ.clear()
-    os.environ.update(original_env)
+# clean_env fixture is in tests/conftest.py
 
 
 # =============================================================================
@@ -115,6 +105,7 @@ def clean_env():
 
 
 @pytest.mark.unit
+@pytest.mark.usefixtures("clean_env")
 class TestConfigInitialization:
     """Test Config class initialization."""
 
@@ -173,6 +164,7 @@ class TestConfigInitialization:
 
 
 @pytest.mark.unit
+@pytest.mark.usefixtures("clean_env")
 class TestVariableSubstitution:
     """Test ${variable} substitution in configuration values."""
 
@@ -236,6 +228,7 @@ values:
 
 
 @pytest.mark.unit
+@pytest.mark.usefixtures("clean_env")
 class TestSecurity:
     """Test security fixes and protections."""
 
@@ -380,6 +373,54 @@ class TestEnvironmentOverrides:
         # Each element converted to its proper type
         assert config.data.values == ["text", 123, True, 3.14]
 
+    def test_env_override_list_single_value_wraps(self, tmp_path, clean_env):
+        """Single-value override against a declared list wraps to one-element list."""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("cluster:\n  endpoints: ['http://localhost']\n")
+        os.environ["INFRA_CLUSTER_ENDPOINTS"] = "http://prod"
+        config = Config(str(config_file))
+        assert config.cluster.endpoints == ["http://prod"]
+
+    def test_env_override_list_empty_default_wraps(self, tmp_path, clean_env):
+        """Empty-list default still anchors the type for single-value override."""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("hosts: []\n")
+        os.environ["INFRA_HOSTS"] = "alice"
+        config = Config(str(config_file))
+        assert config.hosts == ["alice"]
+
+    def test_env_override_list_numeric_wraps(self, tmp_path, clean_env):
+        """Numeric scalar override against numeric list wraps."""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("ports: [1, 2]\n")
+        os.environ["INFRA_PORTS"] = "5"
+        config = Config(str(config_file))
+        assert config.ports == [5]
+
+    def test_env_override_list_null_clears(self, tmp_path, clean_env):
+        """Null override against a declared list clears it, does not produce [None]."""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("hosts: ['a', 'b']\n")
+        os.environ["INFRA_HOSTS"] = "null"
+        config = Config(str(config_file))
+        assert config.hosts is None
+
+    def test_env_override_list_empty_string_clears(self, tmp_path, clean_env):
+        """Empty-string override against a declared list clears it."""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("hosts: ['a', 'b']\n")
+        os.environ["INFRA_HOSTS"] = ""
+        config = Config(str(config_file))
+        assert config.hosts is None
+
+    def test_env_override_list_hyphenated_key_wraps(self, tmp_path, clean_env):
+        """Yaml-peek works against hyphenated keys with underscore env var."""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("web-auth:\n  staging-users: ['x']\n")
+        os.environ["INFRA_WEB_AUTH_STAGING_USERS"] = "alice"
+        config = Config(str(config_file))
+        assert config["web-auth"]["staging-users"] == ["alice"]
+
     def test_env_override_null_value(self, tmp_path, clean_env):
         """Test environment override for null values."""
         config_file = tmp_path / "config.yaml"
@@ -410,11 +451,27 @@ class TestEnvironmentOverrides:
         config = Config(temp_yaml_file)
         assert config.database.host == "remote.example.com"
 
-    def test_env_override_creates_missing_sections(self, temp_yaml_file, clean_env):
-        """Test that env overrides create missing config sections."""
+    def test_env_override_undeclared_path_raises(self, temp_yaml_file, clean_env):
+        """Override on an undeclared yaml path raises UndeclaredConfigPathError."""
         os.environ["INFRA_NEW_SECTION_NEW_KEY"] = "new_value"
+        with pytest.raises(UndeclaredConfigPathError) as exc_info:
+            Config(temp_yaml_file)
+        assert exc_info.value.env_name == "INFRA_NEW_SECTION_NEW_KEY"
+        assert exc_info.value.path == ["new", "section", "new", "key"]
+
+    def test_appinfra_tooling_env_vars_skipped(self, temp_yaml_file, clean_env):
+        """Vars in APPINFRA_TOOLING_ENV_VARS bypass Config override matching.
+
+        Without this skip, shell-script vars like INFRA_DEV_PKG_NAME would
+        raise UndeclaredConfigPathError because they have no yaml field.
+        """
+        os.environ["INFRA_DEV_PKG_NAME"] = "appinfra"
+        os.environ["INFRA_CHECK_PYTEST_SUITE"] = "unit"
+        # Config load must not raise even though these paths are undeclared.
         config = Config(temp_yaml_file)
-        assert config.new.section.new.key == "new_value"
+        # And they must not have been quietly written into the config tree.
+        assert not config.has("dev.pkg.name")
+        assert not config.has("check.pytest.suite")
 
     def test_env_override_preserves_existing_structure(self, temp_yaml_file, clean_env):
         """Test that env overrides don't destroy existing structure."""
@@ -476,14 +533,13 @@ class TestEnvironmentOverrides:
         config = Config(str(config_file))
         assert config["app-config"]["cache-settings"].ttl == 600
 
-    def test_env_override_creates_hyphenated_sections(self, tmp_path, clean_env):
-        """Test that env overrides can create new hyphenated sections."""
+    def test_env_override_undeclared_hyphenated_path_raises(self, tmp_path, clean_env):
+        """Undeclared hyphenated paths also raise."""
         config_file = tmp_path / "config.yaml"
         config_file.write_text("app:\n  name: test")
         os.environ["INFRA_NEW_SECTION_API_SERVER_PORT"] = "9000"
-        config = Config(str(config_file))
-        # Creates with underscores since key doesn't exist
-        assert config.new.section.api.server.port == 9000
+        with pytest.raises(UndeclaredConfigPathError):
+            Config(str(config_file))
 
     def test_env_override_exact_match_preferred(self, tmp_path, clean_env):
         """Test that exact matches are preferred over normalized matches."""
@@ -506,15 +562,13 @@ class TestEnvironmentOverrides:
         config = Config(str(config_file))
         assert config.api["rate-limit_config"].max_requests == 500
 
-    def test_env_override_scalar_value_replaced(self, tmp_path, clean_env):
-        """Test that env override replaces scalar values when creating nested path."""
+    def test_env_override_nest_under_scalar_raises(self, tmp_path, clean_env):
+        """Cannot traverse into a scalar yaml field — raise."""
         config_file = tmp_path / "config.yaml"
         config_file.write_text('services:\n  web-server: "http://localhost"\n')
         os.environ["INFRA_SERVICES_WEB_SERVER_PORT"] = "8080"
-        config = Config(str(config_file))
-        # Scalar is replaced with dict to allow nested value
-        assert isinstance(config.services["web-server"], dict)
-        assert config.services["web-server"].port == 8080
+        with pytest.raises(UndeclaredConfigPathError):
+            Config(str(config_file))
 
     def test_env_override_scalar_value_direct(self, tmp_path, clean_env):
         """Test that env override can directly replace a scalar value."""
@@ -525,14 +579,13 @@ class TestEnvironmentOverrides:
         # Direct replacement works
         assert config.services["web-server"] == "https://example.com"
 
-    def test_env_override_list_value_ignored(self, tmp_path, clean_env):
-        """Test that env override ignores attempts to nest under list values."""
+    def test_env_override_nest_under_list_raises(self, tmp_path, clean_env):
+        """Cannot traverse into a list yaml field — raise."""
         config_file = tmp_path / "config.yaml"
         config_file.write_text("services:\n  web-servers:\n    - host1\n    - host2\n")
         os.environ["INFRA_SERVICES_WEB_SERVERS_PRIMARY_HOST"] = "host1"
-        config = Config(str(config_file))
-        # List value is unchanged (cannot traverse into lists)
-        assert config.services["web-servers"] == ["host1", "host2"]
+        with pytest.raises(UndeclaredConfigPathError):
+            Config(str(config_file))
 
     def test_env_override_list_value_direct(self, tmp_path, clean_env):
         """Test that env override can directly replace a list value."""
@@ -543,15 +596,13 @@ class TestEnvironmentOverrides:
         # Direct list replacement works
         assert config.services["web-servers"] == ["host1", "host2", "host3"]
 
-    def test_env_override_null_value_replaced(self, tmp_path, clean_env):
-        """Test that env override replaces null values when creating nested path."""
+    def test_env_override_nest_under_null_raises(self, tmp_path, clean_env):
+        """Cannot traverse into a null yaml field — raise."""
         config_file = tmp_path / "config.yaml"
         config_file.write_text("services:\n  web-server: null\n")
         os.environ["INFRA_SERVICES_WEB_SERVER_PORT"] = "8080"
-        config = Config(str(config_file))
-        # Null is replaced with dict to allow nested value
-        assert isinstance(config.services["web-server"], dict)
-        assert config.services["web-server"].port == 8080
+        with pytest.raises(UndeclaredConfigPathError):
+            Config(str(config_file))
 
     def test_env_override_null_value_direct(self, tmp_path, clean_env):
         """Test that env override can directly set a null value to non-null."""
@@ -599,17 +650,13 @@ class TestEnvironmentOverrides:
         assert config.db.connection_pool.size == 50
         assert config.db.connection_pool.timeout == 60
 
-    def test_env_override_creates_nested_dicts(self, tmp_path, clean_env):
-        """Test env override creates intermediate dicts for new paths."""
+    def test_env_override_undeclared_nested_path_raises(self, tmp_path, clean_env):
+        """Override that would create a new nested subtree raises."""
         config_file = tmp_path / "config.yaml"
         config_file.write_text("logging:\n  level: info\n")
-        # This creates a new nested path
         os.environ["INFRA_LOGGING_EXTRA_NESTED_VALUE"] = "test"
-        config = Config(str(config_file))
-        # Should create the nested structure
-        assert config.logging.extra.nested.value == "test"
-        # Original value preserved
-        assert config.logging.level == "info"
+        with pytest.raises(UndeclaredConfigPathError):
+            Config(str(config_file))
 
 
 # =============================================================================
@@ -618,6 +665,7 @@ class TestEnvironmentOverrides:
 
 
 @pytest.mark.unit
+@pytest.mark.usefixtures("clean_env")
 class TestPathResolution:
     """Test path resolution via !path YAML tag."""
 
@@ -708,6 +756,7 @@ urls:
 
 
 @pytest.mark.unit
+@pytest.mark.usefixtures("clean_env")
 class TestFileValidation:
     """Test file size validation and error handling."""
 
@@ -929,6 +978,7 @@ class TestUtilityFunctions:
 
 
 @pytest.mark.unit
+@pytest.mark.usefixtures("clean_env")
 class TestValidation:
     """Test configuration validation."""
 
@@ -959,6 +1009,7 @@ class TestValidation:
 
 
 @pytest.mark.unit
+@pytest.mark.usefixtures("clean_env")
 class TestSourceFileTracking:
     """Test get_source_files() functionality for config file tracking."""
 
@@ -1043,6 +1094,7 @@ class TestSourceFileTracking:
 
 
 @pytest.mark.integration
+@pytest.mark.usefixtures("clean_env")
 class TestIntegrationScenarios:
     """Test real-world configuration scenarios."""
 
@@ -1173,6 +1225,7 @@ files:
 
 
 @pytest.mark.unit
+@pytest.mark.usefixtures("clean_env")
 class TestEdgeCases:
     """Test edge cases and boundary conditions."""
 
@@ -1265,6 +1318,7 @@ no_value: no
 
 
 @pytest.mark.unit
+@pytest.mark.usefixtures("clean_env")
 class TestConfigErrors:
     """Test configuration error handling."""
 
@@ -1310,6 +1364,7 @@ database:
 
 
 @pytest.mark.unit
+@pytest.mark.usefixtures("clean_env")
 class TestConfigReload:
     """Test Config.reload() method."""
 
@@ -1388,6 +1443,7 @@ class TestConfigReload:
 # =============================================================================
 
 
+@pytest.mark.usefixtures("clean_env")
 class TestConfigDotDictIntegration:
     """Test Config compatibility with DotDict dict subclass changes."""
 

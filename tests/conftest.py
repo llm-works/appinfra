@@ -5,6 +5,7 @@ This module provides central pytest configuration, custom markers,
 and shared fixtures for the infra test suite.
 """
 
+import os
 import shutil
 import sys
 import tempfile
@@ -67,6 +68,24 @@ def pytest_configure(config):
 # =============================================================================
 # Shared Fixtures
 # =============================================================================
+
+
+@pytest.fixture
+def clean_env():
+    """Clear INFRA_* environment variables for isolated config tests.
+
+    Tests loading Config from minimal yaml files with `enable_env_overrides=True`
+    will fail if CI has INFRA_* env vars for paths not in the yaml (e.g., CI sets
+    INFRA_PGSERVER_PASS but test yaml has no pgserver section). This raises
+    UndeclaredConfigPathError. Use this fixture to isolate such tests.
+    """
+    original_env = os.environ.copy()
+    for key in list(os.environ.keys()):
+        if key.startswith("INFRA_"):
+            del os.environ[key]
+    yield
+    os.environ.clear()
+    os.environ.update(original_env)
 
 
 @pytest.fixture

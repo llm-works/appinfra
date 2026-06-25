@@ -16,8 +16,15 @@ For API stability guarantees and deprecation policy, see
   Unknown keys produce an error listing the supported set. The compose YAMLs use a
   static argv list with `${PG_<KEY>:-<key>=<default>}` slots, sidestepping the
   Compose string-vs-list `command:` ambiguity between docker-compose and podman-compose.
+- **Breaking:** `INFRA_*` env overrides on undeclared yaml paths now raise
+  `UndeclaredConfigPathError` instead of silently creating fields. Declare a default
+  in yaml first (`field: ''` for scalar, `field: []` for list). Shell-script and
+  Makefile env vars are registered in `APPINFRA_TOOLING_ENV_VARS` and skipped.
 
 ### Fixed
+- `INFRA_*` env overrides on declared list fields preserve list type for single-value
+  overrides (previously a value with no comma became a string, breaking list-typed
+  consumers). Null clears the field; comma-separated overrides unchanged.
 - `make pg.server.up` with non-empty `pgserver.postgres_conf` now works under both
   docker-compose and podman-compose. The previous form (string `command:` with
   `${COMMAND}` substitution) failed under podman-compose because it does not shlex-split

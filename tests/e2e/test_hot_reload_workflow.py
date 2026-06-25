@@ -24,6 +24,7 @@ from appinfra.app.builder import AppBuilder
 
 
 @pytest.mark.e2e
+@pytest.mark.usefixtures("clean_env")
 class TestHotReloadWorkflow:
     """E2E tests for hot-reload configuration workflow."""
 
@@ -365,6 +366,7 @@ class TestHotReloadWorkflow:
 
 
 @pytest.mark.e2e
+@pytest.mark.usefixtures("clean_env")
 class TestHotReloadRealWatcher:
     """E2E tests using real ConfigWatcher (requires watchdog)."""
 

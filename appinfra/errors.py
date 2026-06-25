@@ -59,6 +59,30 @@ class ConfigError(InfraError):
     pass
 
 
+class UndeclaredConfigPathError(ConfigError):
+    """
+    Env override targets a yaml path that is not declared.
+
+    Yaml is the schema for INFRA_* overrides: every overridable field must
+    have a declared default in yaml (`field: ''` or `field: null` for a
+    scalar, `field: []` for a list). Overrides on undeclared paths fail fast
+    at config-load time rather than silently creating fields whose type
+    cannot be inferred.
+    """
+
+    def __init__(self, env_prefix: str, path: list[str]) -> None:
+        env_name = env_prefix + "_".join(p.upper() for p in path)
+        dotpath = ".".join(path)
+        message = (
+            f"env override {env_name} targets undeclared yaml path '{dotpath}'. "
+            f"Declare it in yaml first (e.g. `{path[-1]}: ''` for a scalar or "
+            f"`{path[-1]}: []` for a list)."
+        )
+        super().__init__(message, env_name=env_name, path=path)
+        self.env_name = env_name
+        self.path = path
+
+
 class DatabaseError(InfraError):
     """
     Database-related errors.
