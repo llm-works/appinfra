@@ -61,6 +61,8 @@ APPINFRA_TOOLING_ENV_VARS: frozenset[str] = frozenset(
         "INFRA_PYTEST_TESTS_DIR",
         "INFRA_PYYAML_OK",
         "INFRA_ROOT",
+        "INFRA_TEST_LOGGING_COLORS_ENABLED",
+        "INFRA_TEST_LOGGING_LEVEL",
     }
 )
 
@@ -402,13 +404,14 @@ class Config(DotDict):
         """
         Collect environment variables with the configured prefix, excluding
         names registered in `APPINFRA_TOOLING_ENV_VARS` (consumed by scripts
-        and Makefiles, not as yaml overrides).
+        and Makefiles, not as yaml overrides). The tooling exclusion only
+        applies when using the default INFRA_ prefix.
         """
         env_vars = {}
         for key, value in os.environ.items():
             if not key.startswith(self._env_prefix):
                 continue
-            if key in APPINFRA_TOOLING_ENV_VARS:
+            if self._env_prefix == "INFRA_" and key in APPINFRA_TOOLING_ENV_VARS:
                 continue
             env_vars[key] = value
         return env_vars
