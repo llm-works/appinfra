@@ -159,6 +159,7 @@ class TestConfigWatcherDebounce:
 
 
 @pytest.mark.integration
+@pytest.mark.usefixtures("clean_env")
 class TestConfigWatcherIntegration:
     """Integration tests for ConfigWatcher with LogConfigReloader."""
 

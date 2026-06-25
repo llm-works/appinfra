@@ -1156,6 +1156,7 @@ class TestSubprocessLoggerInjection:
 
 
 @pytest.mark.integration
+@pytest.mark.usefixtures("clean_env")
 class TestSubprocessLoggerMiddlewareOrdering:
     """Integration test for middleware ordering with subprocess logger."""
 

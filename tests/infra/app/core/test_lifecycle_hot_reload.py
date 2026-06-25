@@ -221,6 +221,7 @@ class TestStopHotReloadWatcher:
 
 
 @pytest.mark.integration
+@pytest.mark.usefixtures("clean_env")
 class TestHotReloadYamlOnlyIntegration:
     """Integration tests for hot-reload with YAML-only configuration."""
 

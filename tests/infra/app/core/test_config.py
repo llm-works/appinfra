@@ -423,6 +423,7 @@ list_item:
 
 
 @pytest.mark.integration
+@pytest.mark.usefixtures("clean_env")
 class TestConfigIntegration:
     """Test configuration integration scenarios."""
 

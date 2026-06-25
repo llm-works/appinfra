@@ -1094,6 +1094,7 @@ class TestSourceFileTracking:
 
 
 @pytest.mark.integration
+@pytest.mark.usefixtures("clean_env")
 class TestIntegrationScenarios:
     """Test real-world configuration scenarios."""
 
