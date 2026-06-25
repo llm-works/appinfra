@@ -14,7 +14,55 @@ from typing import Any, Self
 import yaml  # type: ignore[import-untyped]
 
 from ..dot_dict import DotDict
+from ..errors import UndeclaredConfigPathError
 from .constants import MAX_CONFIG_SIZE_BYTES
+
+# Inventory of `INFRA_*` env vars consumed by appinfra's own tooling (shell
+# scripts, Makefiles, pytest fixtures) rather than as yaml config overrides.
+# Listed by exact name. Excluded vars never reach `_set_nested_value`, so they
+# neither override yaml fields nor trigger `UndeclaredConfigPathError`.
+#
+# When adding a new INFRA_* env var read directly via os.environ (not through
+# Config), add it here so Config does not try to interpret it as an override.
+APPINFRA_TOOLING_ENV_VARS: frozenset[str] = frozenset(
+    {
+        "INFRA_CHECK_PYTEST_SUITE",
+        "INFRA_CICD_PYTHON_VERSION",
+        "INFRA_CLEAN_PRESERVE",
+        "INFRA_COMPOSE_CMD",
+        "INFRA_CONTAINER_CMD",
+        "INFRA_DEFAULT_CONFIG_FILE",
+        "INFRA_DEV_CHECK_SCRIPT",
+        "INFRA_DEV_CQ_EXCLUDE",
+        "INFRA_DEV_CQ_STRICT",
+        "INFRA_DEV_DOCSTRING_THRESHOLD",
+        "INFRA_DEV_INSTALL_EXTRAS",
+        "INFRA_DEV_MYPY_FLAGS",
+        "INFRA_DEV_PKG_NAME",
+        "INFRA_DEV_PROJECT_ROOT",
+        "INFRA_DEV_SETUP_EXTRAS",
+        "INFRA_DEV_SKIP_TARGETS",
+        "INFRA_DISABLE_GROUPS",
+        "INFRA_DISABLE_TARGETS",
+        "INFRA_DOCS_CONFIG_FILE",
+        "INFRA_DOCS_OUTPUT_DIR",
+        "INFRA_DRY_RUN",
+        "INFRA_ENV_PYTHON",
+        "INFRA_NO_CONFIRM",
+        "INFRA_PG_CONFIG_FILE",
+        "INFRA_PG_CONFIG_KEY",
+        "INFRA_PG_DATABASES",
+        "INFRA_PG_HOST",
+        "INFRA_PG_USER",
+        "INFRA_PYTEST_ARGS",
+        "INFRA_PYTEST_COVERAGE_MARKERS",
+        "INFRA_PYTEST_COVERAGE_PKG",
+        "INFRA_PYTEST_COVERAGE_THRESHOLD",
+        "INFRA_PYTEST_TESTS_DIR",
+        "INFRA_PYYAML_OK",
+        "INFRA_ROOT",
+    }
+)
 
 # Helper functions for Config._load()
 
@@ -352,15 +400,17 @@ class Config(DotDict):
 
     def _collect_env_vars(self) -> dict[str, str]:
         """
-        Collect all environment variables with the configured prefix.
-
-        Returns:
-            Dictionary of environment variable names and values
+        Collect environment variables with the configured prefix, excluding
+        names registered in `APPINFRA_TOOLING_ENV_VARS` (consumed by scripts
+        and Makefiles, not as yaml overrides).
         """
         env_vars = {}
         for key, value in os.environ.items():
-            if key.startswith(self._env_prefix):
-                env_vars[key] = value
+            if not key.startswith(self._env_prefix):
+                continue
+            if key in APPINFRA_TOOLING_ENV_VARS:
+                continue
+            env_vars[key] = value
         return env_vars
 
     def _env_key_to_path(self, env_key: str) -> list[str]:
@@ -381,15 +431,22 @@ class Config(DotDict):
         """
         Set a nested value in the configuration dictionary.
 
-        Uses context-aware matching for hyphenated keys:
-        - Traverses the YAML structure intelligently
-        - Tries to match existing keys by combining path components with hyphens
-        - Treats hyphens and underscores as equivalent during comparison
+        Yaml is the schema: every component of `path` must match an existing
+        key at its level. Hyphenated yaml keys (e.g. `web-server`) are matched
+        against underscore-separated env components (e.g. `WEB_SERVER`) via
+        greedy multi-component matching. Any unmatched component raises
+        `UndeclaredConfigPathError` — env overrides cannot introduce new
+        fields, only override declared ones.
 
         Args:
-            data: Configuration dictionary to modify
-            path: List of keys representing the path to the value
-            value: Value to set
+            data: Configuration dictionary to modify.
+            path: List of keys representing the path to the value.
+            value: Raw env value (string) to convert and assign.
+
+        Raises:
+            UndeclaredConfigPathError: If any segment of `path` does not
+                match a declared yaml key at its level, or if traversal
+                hits a non-dict before reaching the leaf.
         """
         if not path:
             return
@@ -399,60 +456,42 @@ class Config(DotDict):
         i = 0
 
         while i < len(path):
-            if current is None:
-                return
-
-            # Cannot traverse into non-dict values (scalars, lists, etc.)
             if not isinstance(current, dict):
-                return
+                # Traversed into a scalar/list before reaching the leaf —
+                # the intermediate yaml field is the wrong shape for this
+                # override path.
+                raise UndeclaredConfigPathError(self._env_prefix, path)
 
-            remaining_components = len(path) - i
+            remaining = len(path) - i
             matched_key, consumed = self._match_key_greedy(current, path, i)
-            is_final = consumed > 0 and consumed == remaining_components
-            is_final = is_final or (consumed == 0 and remaining_components == 1)
 
-            if is_final:
-                self._set_final_value(current, path[i], matched_key, converted_value)
+            if matched_key is None:
+                raise UndeclaredConfigPathError(self._env_prefix, path)
+
+            if consumed == remaining:
+                self._set_final_value(current, matched_key, converted_value)
                 return
 
-            i = self._traverse_to_next_level(current, path, i, matched_key, consumed)
-            if i < 0:
-                # Cannot traverse further (e.g., hit a list)
-                return
-            current = current[matched_key] if matched_key else current[path[i - 1]]
+            current = current[matched_key]
+            i += consumed
 
-    def _set_final_value(
-        self, target: dict, part: str, matched_key: str | None, value: Any
-    ) -> None:
-        """Set the final value in the target dictionary."""
-        target[matched_key if matched_key else part] = value
+    def _set_final_value(self, target: dict, key: str, value: Any) -> None:
+        """Assign a converted env value to the matched yaml key.
 
-    def _traverse_to_next_level(
-        self,
-        current: dict,
-        path: list[str],
-        idx: int,
-        matched_key: str | None,
-        consumed: int,
-    ) -> int:
-        """Traverse to next level or create new section, return new index."""
-        if matched_key:
-            matched_val = current.get(matched_key)
-            if isinstance(matched_val, dict):
-                return idx + consumed
-            # Matched key exists but is not a dict
-            # Only replace scalars/None with dicts to allow nesting
-            # Lists are not replaced (cannot traverse into lists)
-            if matched_val is None or isinstance(matched_val, (str, int, float, bool)):
-                current[matched_key] = {}
-                return idx + consumed
-            # For lists or other types, stop traversal (no modification)
-            return -1
-
-        part = path[idx]
-        if part not in current:
-            current[part] = {}
-        return idx + 1
+        When the existing yaml value is a list, a non-None scalar override
+        is wrapped into a single-element list so the declared type is
+        preserved. The comma path in `_convert_env_value` already produces
+        a list and is unaffected. A null override clears the field rather
+        than producing `[None]`.
+        """
+        existing = target.get(key)
+        if (
+            isinstance(existing, list)
+            and value is not None
+            and not isinstance(value, list)
+        ):
+            value = [value]
+        target[key] = value
 
     def _match_key_greedy(
         self, data: dict, path: list[str], start_idx: int
