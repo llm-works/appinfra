@@ -281,20 +281,71 @@ INFRA_SERVICES_CACHE_CONFIG_TTL=600
 2. Exact match with hyphens (e.g., `web-server`)
 3. Normalized match (e.g., `web-server` or `web_server`)
 
-**Edge cases:**
-- **Scalar values**: Replaced with dict when creating nested paths
-  ```yaml
-  # Before: web-server: "http://localhost"
-  # After INFRA_SERVICES_WEB_SERVER_PORT=8080
-  # Result: web-server: {port: 8080}
-  ```
-- **List values**: Nested overrides are ignored (cannot traverse into lists)
-  ```yaml
-  # YAML: web-servers: [host1, host2]
-  # INFRA_SERVICES_WEB_SERVERS_PRIMARY=host3  # Ignored
-  # INFRA_SERVICES_WEB_SERVERS=host3,host4,host5  # Works (replaces entire list)
-  ```
-- **Null values**: Replaced with dict when creating nested paths
+### List Type Preservation
+
+When overriding a field declared as a list in YAML, single-value overrides are automatically
+wrapped into a one-element list:
+
+```yaml
+# YAML
+cluster:
+  endpoints: ['http://localhost']
+```
+
+```bash
+# Single value wraps to list
+INFRA_CLUSTER_ENDPOINTS=http://prod
+# Result: endpoints: ['http://prod']
+
+# Comma-separated still works
+INFRA_CLUSTER_ENDPOINTS=http://a,http://b
+# Result: endpoints: ['http://a', 'http://b']
+
+# Null/empty clears the field
+INFRA_CLUSTER_ENDPOINTS=null
+# Result: endpoints: null
+```
+
+### Undeclared Path Errors
+
+Environment overrides can only target paths that exist in the YAML file. Attempting to override
+an undeclared path raises `UndeclaredConfigPathError`:
+
+```yaml
+# YAML
+logging:
+  level: info
+# No 'database' section declared
+```
+
+```bash
+# This raises UndeclaredConfigPathError
+INFRA_DATABASE_HOST=localhost
+
+# Fix: declare the field in YAML first
+# database:
+#   host: ''
+```
+
+To add a new overridable field, declare it in YAML with a default value (`''` for scalar,
+`[]` for list, `null` for optional).
+
+**Cannot traverse into non-dict values:** Nested overrides on scalar, list, or null fields also
+raise `UndeclaredConfigPathError`:
+
+```yaml
+# YAML
+services:
+  web-server: "http://localhost"  # scalar, not a dict
+```
+
+```bash
+# This raises UndeclaredConfigPathError (cannot nest under scalar)
+INFRA_SERVICES_WEB_SERVER_PORT=8080
+
+# This works (direct replacement)
+INFRA_SERVICES_WEB_SERVER=https://prod.example.com
+```
 
 ### Variable Substitution
 
