@@ -63,6 +63,7 @@ def _worker_loop(
 
 
 @pytest.mark.e2e
+@pytest.mark.usefixtures("clean_env")
 class TestSubprocessContextHotReload:
     """E2E tests for SubprocessContext hot-reload in multiple processes."""
 
