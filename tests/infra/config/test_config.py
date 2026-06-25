@@ -96,18 +96,7 @@ files:
     return str(config_file)
 
 
-@pytest.fixture
-def clean_env():
-    """Clean environment variables before and after test."""
-    original_env = os.environ.copy()
-    # Remove any INFRA_* variables
-    for key in list(os.environ.keys()):
-        if key.startswith("INFRA_"):
-            del os.environ[key]
-    yield
-    # Restore original environment
-    os.environ.clear()
-    os.environ.update(original_env)
+# clean_env fixture is in tests/conftest.py
 
 
 # =============================================================================
@@ -116,6 +105,7 @@ def clean_env():
 
 
 @pytest.mark.unit
+@pytest.mark.usefixtures("clean_env")
 class TestConfigInitialization:
     """Test Config class initialization."""
 
@@ -174,6 +164,7 @@ class TestConfigInitialization:
 
 
 @pytest.mark.unit
+@pytest.mark.usefixtures("clean_env")
 class TestVariableSubstitution:
     """Test ${variable} substitution in configuration values."""
 
@@ -237,6 +228,7 @@ values:
 
 
 @pytest.mark.unit
+@pytest.mark.usefixtures("clean_env")
 class TestSecurity:
     """Test security fixes and protections."""
 
@@ -673,6 +665,7 @@ class TestEnvironmentOverrides:
 
 
 @pytest.mark.unit
+@pytest.mark.usefixtures("clean_env")
 class TestPathResolution:
     """Test path resolution via !path YAML tag."""
 
@@ -763,6 +756,7 @@ urls:
 
 
 @pytest.mark.unit
+@pytest.mark.usefixtures("clean_env")
 class TestFileValidation:
     """Test file size validation and error handling."""
 
@@ -984,6 +978,7 @@ class TestUtilityFunctions:
 
 
 @pytest.mark.unit
+@pytest.mark.usefixtures("clean_env")
 class TestValidation:
     """Test configuration validation."""
 
@@ -1014,6 +1009,7 @@ class TestValidation:
 
 
 @pytest.mark.unit
+@pytest.mark.usefixtures("clean_env")
 class TestSourceFileTracking:
     """Test get_source_files() functionality for config file tracking."""
 
@@ -1228,6 +1224,7 @@ files:
 
 
 @pytest.mark.unit
+@pytest.mark.usefixtures("clean_env")
 class TestEdgeCases:
     """Test edge cases and boundary conditions."""
 
@@ -1320,6 +1317,7 @@ no_value: no
 
 
 @pytest.mark.unit
+@pytest.mark.usefixtures("clean_env")
 class TestConfigErrors:
     """Test configuration error handling."""
 
@@ -1365,6 +1363,7 @@ database:
 
 
 @pytest.mark.unit
+@pytest.mark.usefixtures("clean_env")
 class TestConfigReload:
     """Test Config.reload() method."""
 
@@ -1443,6 +1442,7 @@ class TestConfigReload:
 # =============================================================================
 
 
+@pytest.mark.usefixtures("clean_env")
 class TestConfigDotDictIntegration:
     """Test Config compatibility with DotDict dict subclass changes."""
 

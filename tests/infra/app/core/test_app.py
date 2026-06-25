@@ -281,7 +281,7 @@ class TestAddLogDefaultArgs:
 class TestSetupConfig:
     """Test setup_config method (lines 154-156)."""
 
-    def test_setup_config_with_file_path(self):
+    def test_setup_config_with_file_path(self, clean_env):
         """Test setup_config loads from file path."""
         with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
             f.write("key: value\n")
@@ -296,7 +296,7 @@ class TestSetupConfig:
         finally:
             Path(temp_path).unlink()
 
-    def test_setup_config_with_load_all(self):
+    def test_setup_config_with_load_all(self, clean_env):
         """Test setup_config with load_all."""
         with tempfile.TemporaryDirectory() as tmpdir:
             (Path(tmpdir) / "config.yaml").write_text("loaded: true\n")
@@ -1019,7 +1019,7 @@ class TestDeferredConfigLoading:
             assert filename == "invalid.yaml"
             assert isinstance(error, Exception)
 
-    def test_load_deferred_config_loads_and_merges_config(self):
+    def test_load_deferred_config_loads_and_merges_config(self, clean_env):
         """Test that _load_deferred_config loads and returns config info."""
         from appinfra.app.builder.app import ConfigFileSpec
 
@@ -1066,7 +1066,7 @@ class TestDeferredConfigLoading:
         assert app._is_direct_path("config.yaml") is False
         assert app._is_direct_path("subdir/config.yaml") is False
 
-    def test_load_direct_config_absolute_path(self):
+    def test_load_direct_config_absolute_path(self, clean_env):
         """Test _load_direct_config loads from absolute path."""
         with tempfile.TemporaryDirectory() as tmpdir:
             config_path = Path(tmpdir) / "config.yaml"
@@ -1080,7 +1080,7 @@ class TestDeferredConfigLoading:
             assert hasattr(app.config, "direct_key")
             assert app.config.direct_key == "direct_value"
 
-    def test_load_direct_config_relative_path(self):
+    def test_load_direct_config_relative_path(self, clean_env):
         """Test _load_direct_config loads from relative path (resolved to cwd)."""
         import os
 

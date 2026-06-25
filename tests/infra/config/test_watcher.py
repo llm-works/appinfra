@@ -528,6 +528,7 @@ class TestConfigWatcherReloadPaths:
 
 
 @pytest.mark.unit
+@pytest.mark.usefixtures("clean_env")
 class TestConfigWatcherIncludedFiles:
     """Tests for watching included configuration files."""
 
@@ -713,6 +714,7 @@ class TestConfigWatcherIncludedFiles:
 
 
 @pytest.mark.unit
+@pytest.mark.usefixtures("clean_env")
 class TestConfigWatcherSectionCallbacks:
     """Tests for section-specific callbacks."""
 
@@ -909,6 +911,7 @@ app:
 
 
 @pytest.mark.unit
+@pytest.mark.usefixtures("clean_env")
 class TestConfigWatcherMultiConfig:
     """Tests for multi-config file scenarios."""
 

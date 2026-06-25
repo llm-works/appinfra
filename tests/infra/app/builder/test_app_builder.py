@@ -632,7 +632,7 @@ class TestAppBuilderFluentMethods:
         assert builder._config_files[0].from_etc_dir is True
         assert result is builder
 
-    def test_with_config_file_multiple_immediate_merges(self):
+    def test_with_config_file_multiple_immediate_merges(self, clean_env):
         """Test that multiple immediate config files are merged correctly."""
         import tempfile
         from pathlib import Path
