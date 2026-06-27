@@ -232,10 +232,11 @@ class JSONFormatter(logging.Formatter):
         preferred ``__str__`` form (or an opt-in ``__masked_str__``) reach the
         encoder as their string form rather than being destructured.
         """
-        from ..serialize import coerce_tree
+        from ..serialize import coerce_leaf, coerce_tree
 
         sanitized = {}
         for key, value in extra.items():
+            key = coerce_leaf(key)
             try:
                 value = coerce_tree(value)
                 json.dumps(value)
