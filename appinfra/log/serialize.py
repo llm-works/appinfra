@@ -58,7 +58,7 @@ def coerce_tree(value: Any, _seen: set[int] | None = None) -> Any:
         _seen = _seen | {obj_id}
 
     if isinstance(value, dict):
-        return {k: coerce_tree(v, _seen) for k, v in value.items()}
+        return {coerce_leaf(k): coerce_tree(v, _seen) for k, v in value.items()}
     if isinstance(value, list):
         return [coerce_tree(v, _seen) for v in value]
     if isinstance(value, tuple):

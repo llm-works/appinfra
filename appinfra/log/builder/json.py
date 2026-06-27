@@ -236,11 +236,11 @@ class JSONFormatter(logging.Formatter):
 
         sanitized = {}
         for key, value in extra.items():
-            value = coerce_tree(value)
             try:
+                value = coerce_tree(value)
                 json.dumps(value)
                 sanitized[key] = value
-            except (TypeError, ValueError):
+            except Exception:
                 sanitized[key] = str(value)
         return sanitized
 
