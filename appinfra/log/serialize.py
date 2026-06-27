@@ -37,22 +37,34 @@ def coerce_leaf(value: Any) -> Any:
     return value
 
 
-def coerce_tree(value: Any) -> Any:
-    """Recursively apply ``coerce_leaf`` through dict/list/tuple containers.
+def coerce_tree(value: Any, _seen: set[int] | None = None) -> Any:
+    """Recursively apply ``coerce_leaf`` through dict/list/tuple/set containers.
 
     Container types are walked so that opaque values nested inside extras are
     coerced wherever they appear. Plain scalars and non-container objects
     that ``coerce_leaf`` does not transform are returned as-is.
     """
+    if _seen is None:
+        _seen = set()
+
     coerced = coerce_leaf(value)
     if coerced is not value:
         return coerced
+
+    if isinstance(value, (dict, list, tuple, set)):
+        obj_id = id(value)
+        if obj_id in _seen:
+            return "<cyclic reference>"
+        _seen = _seen | {obj_id}
+
     if isinstance(value, dict):
-        return {k: coerce_tree(v) for k, v in value.items()}
+        return {k: coerce_tree(v, _seen) for k, v in value.items()}
     if isinstance(value, list):
-        return [coerce_tree(v) for v in value]
+        return [coerce_tree(v, _seen) for v in value]
     if isinstance(value, tuple):
-        return tuple(coerce_tree(v) for v in value)
+        return tuple(coerce_tree(v, _seen) for v in value)
+    if isinstance(value, set):
+        return {coerce_tree(v, _seen) for v in value}
     return value
 
 

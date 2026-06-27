@@ -102,6 +102,33 @@ class TestCoerceTree:
         out = coerce_tree({"a": [{"b": _Masked("xyz999")}]})
         assert out == {"a": [{"b": "masked(xy...)"}]}
 
+    def test_recurses_into_set(self):
+        out = coerce_tree({_Masked("abcdef"), "plain"})
+        assert out == {"masked(ab...)", "plain"}
+
+    def test_cyclic_dict_returns_marker(self):
+        d: dict = {"key": "value"}
+        d["self"] = d
+        out = coerce_tree(d)
+        assert out["key"] == "value"
+        assert out["self"] == "<cyclic reference>"
+
+    def test_cyclic_list_returns_marker(self):
+        lst: list = [1, 2]
+        lst.append(lst)
+        out = coerce_tree(lst)
+        assert out[0] == 1
+        assert out[1] == 2
+        assert out[2] == "<cyclic reference>"
+
+    def test_deeply_nested_cycle(self):
+        inner: dict = {"inner": True}
+        outer = {"level1": {"level2": inner}}
+        inner["back"] = outer
+        out = coerce_tree(outer)
+        assert out["level1"]["level2"]["inner"] is True
+        assert out["level1"]["level2"]["back"] == "<cyclic reference>"
+
     @pytest.mark.skipif(not _HAVE_SA, reason="sqlalchemy not installed")
     def test_url_in_dict(self):
         url = SAURL.create(
