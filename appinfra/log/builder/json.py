@@ -226,15 +226,21 @@ class JSONFormatter(logging.Formatter):
             return datetime.fromtimestamp(record.created).isoformat()
 
     def _sanitize_extra_fields(self, extra: dict[str, Any]) -> dict[str, Any]:
-        """Sanitize extra fields to ensure JSON serializability."""
+        """Sanitize extra fields to ensure JSON serializability.
+
+        Walks the value with ``coerce_tree`` first so opaque types with a
+        preferred ``__str__`` form (or an opt-in ``__masked_str__``) reach the
+        encoder as their string form rather than being destructured.
+        """
+        from ..serialize import coerce_tree
+
         sanitized = {}
         for key, value in extra.items():
+            value = coerce_tree(value)
             try:
-                # Test if the value is JSON serializable
                 json.dumps(value)
                 sanitized[key] = value
             except (TypeError, ValueError):
-                # Convert non-serializable values to strings
                 sanitized[key] = str(value)
         return sanitized
 
