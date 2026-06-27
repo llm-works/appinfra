@@ -131,6 +131,15 @@ class MPQueueHandler(logging.Handler):
         if isinstance(obj, BaseException):
             return self._format_exception_in_context(obj)
 
+        # Opaque types with a preferred string form (e.g., sqlalchemy URL,
+        # objects exposing __masked_str__) must be coerced before the tuple
+        # branch below would otherwise destructure them positionally.
+        from ..serialize import coerce_leaf
+
+        coerced = coerce_leaf(obj)
+        if coerced is not obj:
+            return coerced
+
         # Cycle detection for mutable container types
         if isinstance(obj, (dict, list, set)):
             if id(obj) in seen:
