@@ -15,7 +15,6 @@ from __future__ import annotations
 import datetime
 import os
 import re
-import warnings
 from collections.abc import Callable, Hashable
 from io import StringIO
 from pathlib import Path
@@ -26,13 +25,12 @@ import yaml  # type: ignore[import-untyped]
 from ._include import _extract_section_data
 from ._utils import _file_exists
 from .types import (
-    ENV_VAR_PATTERN,
     DeepMergeDict,
     DeepMergeWrapper,
     ErrorContext,
     IncludeContext,
     ResetValue,
-    SecretLiteralWarning,
+    SecretStr,
 )
 
 # Pattern to match !deep *anchor and transform to !deep anchor
@@ -774,35 +772,20 @@ class Loader(yaml.SafeLoader):
 
     def secret_constructor(self, node: Any) -> str:
         """
-        Construct value from !secret tag with validation.
+        Reject solo ``!secret`` — always raises.
 
-        Validates that secret values use environment variable syntax ${VAR_NAME}.
-        Emits SecurityWarning if a literal value is detected.
-
-        Args:
-            node: YAML node containing the secret value
-
-        Returns:
-            The secret value string (env var reference or literal)
-
-        Example:
-            password: !secret ${DB_PASSWORD}    # Valid - env var syntax
-            api_key: !secret my_actual_key      # Warning - literal value
+        ``!secret`` only carries meaning inside a chain: ``!env VAR !secret``
+        (or the reversed ``!secret !env VAR``) resolves the variable and
+        returns a ``SecretStr`` that stays masked in logs. Solo ``!secret X``
+        would silently return a plain ``str`` that leaks unmasked, so it's
+        rejected at parse time.
         """
-        value: str = self.construct_scalar(node)
-
-        if not ENV_VAR_PATTERN.match(value):
-            ctx = self._create_error_context(node)
-            # Truncate for security - don't log full secret in warning
-            display_value = value[:20] + "..." if len(value) > 20 else value
-            warnings.warn(
-                f"Secret value appears to be a literal instead of env var reference "
-                f"({ctx.format_location()}). Use ${{VAR_NAME}} syntax. Found: {display_value}",
-                SecretLiteralWarning,
-                stacklevel=6,  # Point to YAML load call site
-            )
-
-        return value
+        ctx = self._create_error_context(node)
+        raise yaml.YAMLError(
+            f"Solo `!secret` is not supported ({ctx.format_location()}). "
+            "Use `!env VAR !secret` (or `!secret !env VAR`) to resolve VAR "
+            "and wrap the result in a SecretStr."
+        )
 
     def path_constructor(self, node: Any) -> str:
         """
@@ -1264,11 +1247,23 @@ class Loader(yaml.SafeLoader):
             # Shallow merge: later values override
             target.update(merge_value)
 
+    def _lookup_env(self, name: str) -> str | None:
+        """Resolve ``name`` via ``env_overrides`` first, then ``os.environ``.
+
+        The overrides map is checked before the process environment so callers
+        that construct a ``Loader`` with an explicit ``env_overrides={...}``
+        get deterministic values regardless of ambient env.
+        """
+        if self.env_overrides is not None and name in self.env_overrides:
+            return self.env_overrides[name]
+        return os.environ.get(name)
+
     def _construct_env(self, node: Any, optional: bool = False) -> str | None:
         """
         Core logic for !env and !env? constructors.
 
         Resolves environment variable references with optional default values.
+        Consults ``self.env_overrides`` before ``os.environ``.
 
         Args:
             node: YAML node containing the env var spec
@@ -1289,9 +1284,10 @@ class Loader(yaml.SafeLoader):
                 raise yaml.YAMLError(
                     f"Empty environment variable name ({ctx.format_location()})"
                 )
-            return os.environ.get(var_name, default)
+            resolved = self._lookup_env(var_name)
+            return resolved if resolved is not None else default
 
-        result = os.environ.get(value)
+        result = self._lookup_env(value)
         if result is None and not optional:
             ctx = self._create_error_context(node)
             raise yaml.YAMLError(
@@ -1403,3 +1399,18 @@ def _compose_include_deep(loader: Loader, node: yaml.Node) -> DeepMergeWrapper:
 def _compose_include_optional_deep(loader: Loader, node: yaml.Node) -> DeepMergeWrapper:
     """!deep !include? "x.yaml" or !include? "x.yaml" !deep — optional deep include."""
     return loader._construct_deep_include(node, optional=True)
+
+
+@register_chain("env", "secret")
+def _compose_env_secret(loader: Loader, node: yaml.Node) -> SecretStr:
+    """!secret !env VAR or !env VAR !secret — resolve VAR, wrap masked."""
+    value = loader._construct_env(node, optional=False)
+    assert value is not None  # non-optional path raises otherwise
+    return SecretStr(value)
+
+
+@register_chain("env?", "secret")
+def _compose_env_optional_secret(loader: Loader, node: yaml.Node) -> SecretStr | None:
+    """!secret !env? VAR or !env? VAR !secret — resolve VAR, wrap masked, None if missing."""
+    value = loader._construct_env(node, optional=True)
+    return SecretStr(value) if value is not None else None

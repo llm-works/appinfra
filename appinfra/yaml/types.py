@@ -3,8 +3,8 @@ Type definitions, patterns, and warning classes for YAML processing.
 
 This module contains:
 - ErrorContext and IncludeContext dataclasses for error reporting
-- Regex patterns for environment variables and document includes
-- SecretLiteralWarning for !secret tag validation
+- Regex pattern for document-level !include directives
+- SecretStr wrapper for masked-by-default secret values
 """
 
 import re
@@ -43,9 +43,6 @@ class IncludeContext(ErrorContext):
     max_include_depth: int = 10
 
 
-# Pattern for environment variable references: ${VAR_NAME}
-ENV_VAR_PATTERN = re.compile(r"^\$\{[A-Za-z_][A-Za-z0-9_]*\}$")
-
 # Pattern for document-level !include directives (at column 0)
 # Matches: !include "./path.yaml" or !include '/path.yaml' or !include path.yaml
 # Also matches: !include? for optional includes (return {} if file missing)
@@ -60,10 +57,47 @@ DOCUMENT_INCLUDE_PATTERN = re.compile(
 )
 
 
-class SecretLiteralWarning(UserWarning):
-    """Warning emitted when a !secret tagged value appears to be a literal instead of env var."""
+class SecretStr:
+    """
+    Masked-by-default wrapper for a sensitive string value.
 
-    pass
+    Not a ``str`` subclass. Every string-form conversion (``str``, ``repr``,
+    ``format``) returns ``'***'`` so the value cannot leak through logging,
+    f-strings, ``%``-formatting, or ``print``. The plaintext is only
+    available via ``.reveal()``.
+
+    Equality compares underlying values so config round-trips work in tests.
+    Hashing is deliberately omitted; secrets should not be dict keys or set
+    members.
+    """
+
+    __slots__ = ("_value",)
+    _MASK = "***"
+
+    def __init__(self, value: str) -> None:
+        if not isinstance(value, str):
+            raise TypeError(f"SecretStr requires a str, got {type(value).__name__}")
+        self._value = value
+
+    def reveal(self) -> str:
+        """Return the underlying plaintext. The only path to the raw value."""
+        return self._value
+
+    def __str__(self) -> str:
+        return self._MASK
+
+    def __repr__(self) -> str:
+        return f"SecretStr('{self._MASK}')"
+
+    def __format__(self, format_spec: str) -> str:
+        return self._MASK
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, SecretStr):
+            return self._value == other._value
+        return NotImplemented
+
+    __hash__ = None  # type: ignore[assignment]
 
 
 class DeepMergeWrapper:

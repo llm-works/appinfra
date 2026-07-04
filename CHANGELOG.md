@@ -14,8 +14,22 @@ For API stability guarantees and deprecation policy, see
 - Generic tag chain composition for YAML loader: `!policy !source ARG` or `!source ARG !policy`
   syntax normalizes to a canonical `!chain:source+policy` form with registry-gated dispatch.
   Initial chains: `!deep !include` and `!deep !include?` (backward-compatible).
+- `SecretStr` wrapper in `appinfra.yaml` for masked-by-default secret values. Not a `str`
+  subclass — `str()`, `repr()`, and `format()` all return `'***'`; plaintext access requires
+  an explicit `.reveal()` call.
+- `!env VAR !secret` (and its reversal `!secret !env VAR`) chain: resolves `VAR` through
+  `env_overrides` then `os.environ` and returns a `SecretStr`. Optional variant with `!env?`.
+- `!env` now consults the loader's `env_overrides` map before falling back to `os.environ`.
 
 ### Changed
+- **Breaking:** Solo `!secret ${VAR}` is rejected at parse time. Use `!env VAR !secret`
+  which resolves the variable and returns a `SecretStr`. The old form returned a plain
+  string that logged unmasked.
+- **Breaking:** Removed `HasMaskedStr` protocol and its `__masked_str__` opt-in from
+  `appinfra.log.serialize`. Types wanting masked logging should use `SecretStr` (or
+  override `__str__` directly).
+- **Breaking:** Removed `SecretLiteralWarning` from `appinfra.yaml` public API (dead
+  code — solo `!secret` no longer reaches a validation path).
 - **Breaking:** `pgserver.postgres_conf` is now a curated whitelist (`max_connections`,
   `shared_preload_libraries`, `work_mem`, `autovacuum`) rather than an open-ended dict.
   Unknown keys produce an error listing the supported set. The compose YAMLs use a

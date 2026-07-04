@@ -229,8 +229,8 @@ class JSONFormatter(logging.Formatter):
         """Sanitize extra fields to ensure JSON serializability.
 
         Walks the value with ``coerce_tree`` first so opaque types with a
-        preferred ``__str__`` form (or an opt-in ``__masked_str__``) reach the
-        encoder as their string form rather than being destructured.
+        preferred ``__str__`` form reach the encoder as their string form
+        rather than being destructured.
         """
         from ..serialize import coerce_leaf, coerce_tree
 

@@ -8,19 +8,9 @@ representation. The stdlib JSON encoder would otherwise destructure them
 positionally and the multiprocessing queue sanitizer would strip them to a
 plain ``tuple``. ``coerce_leaf`` / ``coerce_tree`` give those values their
 preferred string form before either path runs.
-
-Call sites can opt their own types into the same behavior by defining
-``__masked_str__`` -- see ``HasMaskedStr``.
 """
 
-from typing import Any, Protocol, runtime_checkable
-
-
-@runtime_checkable
-class HasMaskedStr(Protocol):
-    """Opt-in protocol: values logged in ``extra`` are rendered via this method."""
-
-    def __masked_str__(self) -> str: ...
+from typing import Any
 
 
 def coerce_leaf(value: Any) -> Any:
@@ -29,9 +19,6 @@ def coerce_leaf(value: Any) -> Any:
     The result is ``value`` (unchanged) when no coercion applies, so callers
     can use identity (``coerced is not value``) to detect a transformation.
     """
-    masked = getattr(value, "__masked_str__", None)
-    if callable(masked):
-        return masked()
     if _is_sqlalchemy_url(value):
         return str(value)
     return value

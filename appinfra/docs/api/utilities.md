@@ -501,12 +501,42 @@ app_name: myapp
 Optional includes are useful for environment-specific overrides that don't exist in all deployments.
 Unlike `!include`, missing files don't raise errors - they silently return an empty dict.
 
-**`!secret`** - Mark sensitive values (warns if not using env var syntax):
+**`!env`** - Resolve an environment variable, with an optional default:
 
 ```yaml
-password: !secret ${DB_PASSWORD}    # Valid - env var reference
-api_key: !secret my_literal_key     # Warning - should use ${VAR} syntax
+api_key: !env GOOGLE_API_KEY           # Required - raises if unset
+timeout: !env TIMEOUT:30               # Falls back to '30' if unset
+debug_key: !env? DEBUG_API_KEY         # Optional - None if unset
+log_level: !env? LOG_LEVEL:INFO        # Optional with default
 ```
+
+Resolution consults the loader's `env_overrides` map first (passed by callers like
+`Config`), then falls back to `os.environ`. Values are returned as plain strings.
+
+**`!secret`** - Only valid as part of a chain with `!env`:
+
+```yaml
+password: !env DB_PASSWORD !secret     # Postfix form
+api_key:  !secret !env API_KEY         # Prefix form (equivalent)
+token:    !env? TOKEN !secret          # Optional - None if TOKEN unset
+```
+
+Both orderings resolve `!env` first, then wrap the resolved value in a `SecretStr`
+that masks itself in every string form (`str`, `repr`, `format`, `%`, f-strings all
+produce `'***'`). The plaintext is only reachable via `.reveal()`:
+
+```python
+from appinfra.yaml import SecretStr, load
+
+config = load(open("app.yaml"), env_overrides={"DB_PASSWORD": "hunter2"})
+config["password"]              # SecretStr('***')
+str(config["password"])         # '***'
+f"{config['password']}"         # '***'
+config["password"].reveal()     # 'hunter2'  ← only path to plaintext
+```
+
+Solo `!secret ${VAR}` raises `yaml.YAMLError` at parse time — the plain-string
+result of the old form leaked in logs. Migrate to `!env VAR !secret`.
 
 **`!path`** - Resolve paths relative to config file location with tilde expansion:
 
