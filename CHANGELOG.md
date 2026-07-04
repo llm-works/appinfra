@@ -10,6 +10,11 @@ For API stability guarantees and deprecation policy, see
 
 ## [Unreleased]
 
+### Added
+- Generic tag chain composition for YAML loader: `!policy !source ARG` or `!source ARG !policy`
+  syntax normalizes to a canonical `!chain:source+policy` form with registry-gated dispatch.
+  Initial chains: `!deep !include` and `!deep !include?` (backward-compatible).
+
 ### Changed
 - **Breaking:** `pgserver.postgres_conf` is now a curated whitelist (`max_connections`,
   `shared_preload_libraries`, `work_mem`, `autovacuum`) rather than an open-ended dict.
