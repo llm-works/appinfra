@@ -156,6 +156,13 @@ class TestJSONFormatterSanitize:
         out = formatter._sanitize_extra_fields(extra)
         assert out == extra
 
+    def test_secret_str_masked_in_extra(self):
+        from appinfra.yaml import SecretStr
+
+        formatter = JSONFormatter()
+        out = formatter._sanitize_extra_fields({"pwd": SecretStr("hunter2")})
+        assert "hunter2" not in str(out)
+
     @pytest.mark.skipif(not _HAVE_SA, reason="sqlalchemy not installed")
     def test_format_end_to_end_url_not_destructured(self):
         """Regression guard: rendered JSON must carry the URL as a string."""
