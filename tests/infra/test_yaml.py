@@ -3424,6 +3424,27 @@ class TestTagChainPreprocessing:
         twice = preprocess_tag_chains(once)
         assert once == twice
 
+    def test_tag_like_patterns_inside_quoted_values_not_rewritten(self):
+        """Quoted scalar values containing tag-like patterns are left unchanged.
+
+        Regression test for CodeRabbit finding: the chain preprocessor was
+        matching tag patterns anywhere in the file, including inside quoted
+        strings where they are literal text, not YAML tags.
+        """
+        from appinfra.yaml.loader import preprocess_tag_chains
+
+        double_quoted = 'msg: "literal !deep !include x.yaml"'
+        assert preprocess_tag_chains(double_quoted) == double_quoted
+
+        single_quoted = "msg: 'literal !secret !env FOO'"
+        assert preprocess_tag_chains(single_quoted) == single_quoted
+
+    def test_quoted_values_with_tag_like_patterns_load_correctly(self):
+        """End-to-end: quoted strings with tag-like patterns load as literals."""
+        content = 'msg: "example !deep !include syntax"'
+        data = load(StringIO(content))
+        assert data["msg"] == "example !deep !include syntax"
+
 
 @pytest.mark.unit
 class TestTagChainRegistry:

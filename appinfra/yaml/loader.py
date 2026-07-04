@@ -104,28 +104,51 @@ def _canonical_chain_suffix(source: str, policies: list[str]) -> str:
     return "+".join([source] + sorted(policies))
 
 
-def _preprocess_chain_prefix(content: str) -> str:
-    """Rewrite prefix-form chains: !P1 !P2 ... !SOURCE ARG."""
-
-    def sub(m: re.Match) -> str:
-        tags = [t[1:] for t in _TAG_TOKEN_RE.findall(m.group(1))]
-        arg = m.group(2)
-        source, policies = tags[-1], tags[:-1]
-        return f"!chain:{_canonical_chain_suffix(source, policies)} {arg}"
-
-    return _CHAIN_PREFIX_PATTERN.sub(sub, content)
+def _sub_prefix(m: re.Match) -> str:
+    """Substitution callback for prefix-form chains."""
+    tags = [t[1:] for t in _TAG_TOKEN_RE.findall(m.group(1))]
+    arg = m.group(2)
+    source, policies = tags[-1], tags[:-1]
+    return f"!chain:{_canonical_chain_suffix(source, policies)} {arg}"
 
 
-def _preprocess_chain_postfix(content: str) -> str:
-    """Rewrite postfix-form chains: !SOURCE ARG !P1 !P2 ..."""
+def _sub_postfix(m: re.Match) -> str:
+    """Substitution callback for postfix-form chains."""
+    source = m.group(1)[1:]
+    arg = m.group(2)
+    policies = [t[1:] for t in _TAG_TOKEN_RE.findall(m.group(3))]
+    return f"!chain:{_canonical_chain_suffix(source, policies)} {arg}"
 
-    def sub(m: re.Match) -> str:
-        source = m.group(1)[1:]
-        arg = m.group(2)
-        policies = [t[1:] for t in _TAG_TOKEN_RE.findall(m.group(3))]
-        return f"!chain:{_canonical_chain_suffix(source, policies)} {arg}"
 
-    return _CHAIN_POSTFIX_PATTERN.sub(sub, content)
+# Pattern to detect a YAML value that starts with a quote (scalar value is quoted).
+# Matches: colon, optional space, then opening quote. The entire value is literal.
+_QUOTED_VALUE_LINE = re.compile(r'^([^:]*:[ \t]*)(["\'])(.*)$')
+
+
+def _rewrite_line(line: str) -> str:
+    """Rewrite tag chains in a single line, protecting fully-quoted values."""
+    m = _QUOTED_VALUE_LINE.match(line)
+    if m:
+        prefix, quote, rest = m.groups()
+        close_idx = _find_closing_quote(rest, quote)
+        if close_idx is not None:
+            return line
+    line = _CHAIN_PREFIX_PATTERN.sub(_sub_prefix, line)
+    line = _CHAIN_POSTFIX_PATTERN.sub(_sub_postfix, line)
+    return line
+
+
+def _find_closing_quote(s: str, quote: str) -> int | None:
+    """Find the index of the closing quote, handling escapes."""
+    i = 0
+    while i < len(s):
+        if s[i] == "\\":
+            i += 2
+        elif s[i] == quote:
+            return i
+        else:
+            i += 1
+    return None
 
 
 def preprocess_tag_chains(content: str) -> str:
@@ -135,10 +158,12 @@ def preprocess_tag_chains(content: str) -> str:
     postfix regex when adjacent to unrelated content. The ``!chain:`` synthetic
     tag is excluded from ``_TAG_TOKEN``, so a second pass over already-rewritten
     input is a no-op.
+
+    Lines where the YAML value starts with a quote are protected — the entire
+    scalar is literal, so any tag-like patterns inside are not rewritten.
     """
-    content = _preprocess_chain_prefix(content)
-    content = _preprocess_chain_postfix(content)
-    return content
+    lines = content.split("\n")
+    return "\n".join(_rewrite_line(line) for line in lines)
 
 
 def preprocess_deep_tags(content: str) -> str:
