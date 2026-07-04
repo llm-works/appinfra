@@ -1191,6 +1191,28 @@ class TestSecretStr:
         with pytest.raises(TypeError):
             SecretStr(123)  # type: ignore[arg-type]
 
+    def test_rejects_secret_str_value(self):
+        # Constructor is strict: only str accepted. Boundary code that wants
+        # to accept SecretStr too must go through SecretStr.ensure().
+        with pytest.raises(TypeError):
+            SecretStr(SecretStr("x"))  # type: ignore[arg-type]
+
+    def test_ensure_none_passes_through(self):
+        assert SecretStr.ensure(None) is None
+
+    def test_ensure_str_wraps(self):
+        result = SecretStr.ensure("hunter2")
+        assert isinstance(result, SecretStr)
+        assert result.reveal() == "hunter2"
+
+    def test_ensure_secret_preserves_identity(self):
+        existing = SecretStr("hunter2")
+        assert SecretStr.ensure(existing) is existing
+
+    def test_ensure_rejects_other_types(self):
+        with pytest.raises(TypeError):
+            SecretStr.ensure(123)  # type: ignore[arg-type]
+
 
 # =============================================================================
 # Solo !secret rejection
