@@ -2834,16 +2834,16 @@ config:
         assert result["config"]["options"]["cache"] is True
 
     def test_preprocessing_transforms_syntax(self):
-        """Test that !deep !include is correctly preprocessed."""
+        """Test that !deep !include is correctly preprocessed to the canonical chain form."""
         from appinfra.yaml.loader import preprocess_deep_tags
 
         content = '<<: !deep !include? "./overlay.yaml"'
         result = preprocess_deep_tags(content)
-        assert result == '<<: !deep-include? "./overlay.yaml"'
+        assert result == '<<: !chain:include?+deep "./overlay.yaml"'
 
         content2 = "<<: !deep !include './base.yaml'"
         result2 = preprocess_deep_tags(content2)
-        assert result2 == "<<: !deep-include './base.yaml'"
+        assert result2 == "<<: !chain:include+deep './base.yaml'"
 
 
 # =============================================================================
@@ -3346,3 +3346,157 @@ extracted: !include './config.yaml#level1.level2.level3'
             data = load(f, current_file=main_file)
 
         assert data["extracted"]["data"] == "root_value"
+
+
+# =============================================================================
+# Tag Chain Mechanism Tests
+# =============================================================================
+
+
+@pytest.mark.unit
+class TestTagChainPreprocessing:
+    """Tests for the generic tag chain preprocessor."""
+
+    def test_prefix_and_postfix_produce_identical_canonical_form(self):
+        """Both orderings normalize to the same synthetic !chain: tag."""
+        from appinfra.yaml.loader import preprocess_tag_chains
+
+        prefix = preprocess_tag_chains('a: !deep !include "x.yaml"')
+        postfix = preprocess_tag_chains('a: !include "x.yaml" !deep')
+        assert prefix == postfix == 'a: !chain:include+deep "x.yaml"'
+
+    def test_arbitrary_length_chain(self):
+        """Chains of 3+ tags are supported with policies sorted alphabetically."""
+        from appinfra.yaml.loader import preprocess_tag_chains
+
+        prefix = preprocess_tag_chains("a: !audit !secret !env FOO")
+        postfix = preprocess_tag_chains("a: !env FOO !secret !audit")
+        assert prefix == postfix == "a: !chain:env+audit+secret FOO"
+
+    def test_policies_sorted_for_stable_canonical_form(self):
+        """Policy order in source syntax does not affect the canonical form."""
+        from appinfra.yaml.loader import preprocess_tag_chains
+
+        a = preprocess_tag_chains("k: !audit !secret !env X")
+        b = preprocess_tag_chains("k: !secret !audit !env X")
+        assert a == b
+
+    def test_single_tag_untouched(self):
+        """A lone tag is not a chain and passes through unchanged."""
+        from appinfra.yaml.loader import preprocess_tag_chains
+
+        assert preprocess_tag_chains("a: !env FOO") == "a: !env FOO"
+        assert preprocess_tag_chains("a: !secret X") == "a: !secret X"
+
+    def test_optional_variant_preserved(self):
+        """The ? marker on !include? / !env? survives the rewrite."""
+        from appinfra.yaml.loader import preprocess_tag_chains
+
+        assert (
+            preprocess_tag_chains('a: !deep !include? "x.yaml"')
+            == 'a: !chain:include?+deep "x.yaml"'
+        )
+
+    def test_adjacent_include_lines_not_treated_as_chain(self):
+        """Document-level !include on consecutive lines must not merge into a chain.
+
+        Regression test — the chain regex must be single-line-scoped so a following
+        !include on the next line is a separate document-level tag, not a policy.
+        """
+        from appinfra.yaml.loader import preprocess_tag_chains
+
+        content = '!include "./base1.yaml"\n!include "./base2.yaml"\nname: app\n'
+        assert preprocess_tag_chains(content) == content
+
+    def test_quoted_arg_with_spaces(self):
+        """Quoted args containing whitespace are preserved intact."""
+        from appinfra.yaml.loader import preprocess_tag_chains
+
+        content = 'x: !deep !include "path with space.yaml"'
+        result = preprocess_tag_chains(content)
+        assert result == 'x: !chain:include+deep "path with space.yaml"'
+
+    def test_reapplying_preprocessor_is_idempotent(self):
+        """The synthetic !chain: tag is excluded from further matching."""
+        from appinfra.yaml.loader import preprocess_tag_chains
+
+        once = preprocess_tag_chains("a: !secret !env FOO")
+        twice = preprocess_tag_chains(once)
+        assert once == twice
+
+
+@pytest.mark.unit
+class TestTagChainRegistry:
+    """Tests for the composer registration and dispatch machinery."""
+
+    def test_duplicate_registration_raises(self):
+        """register_chain refuses to overwrite an existing composer."""
+        from appinfra.yaml.loader import register_chain
+
+        with pytest.raises(ValueError, match="already registered"):
+
+            @register_chain("include", "deep")
+            def _dup(loader, node):
+                return None
+
+    def test_unknown_chain_raises_with_supported_listing(self):
+        """Chains not in the registry fail at parse time with a helpful message."""
+        content = "a: !nosuch !env FOO"
+        with pytest.raises(yaml.YAMLError) as exc:
+            load(StringIO(content))
+        msg = str(exc.value)
+        assert "Unsupported tag chain" in msg
+        assert "Supported chains" in msg
+        # The one registered chain should be listed
+        assert "!include" in msg and "!deep" in msg
+
+
+@pytest.mark.integration
+class TestDeepIncludeChainSyntax:
+    """End-to-end tests for !deep !include via the chain mechanism.
+
+    !deep !include uses override semantics — the included file wins over
+    document values on conflict. Both prefix and postfix orderings share
+    the same composer, so they must produce identical results.
+    """
+
+    def _write_overlay(self, tmp_path):
+        overlay = tmp_path / "overlay.yaml"
+        overlay.write_text("db:\n  host: overlay-host\n  port: 6543\n")
+        return overlay
+
+    def test_prefix_deep_include(self, tmp_path):
+        """!deep !include (prefix form) — overlay wins, document contributes non-conflict keys."""
+        self._write_overlay(tmp_path)
+        main_content = (
+            "db:\n  host: doc-host\n  timeout: 30\n\n"
+            '<<: !deep !include "./overlay.yaml"\n'
+        )
+        data = load(StringIO(main_content), current_file=tmp_path / "main.yaml")
+        assert data["db"] == {"host": "overlay-host", "port": 6543, "timeout": 30}
+
+    def test_postfix_deep_include(self, tmp_path):
+        """!include ... !deep (postfix form) — identical semantics."""
+        self._write_overlay(tmp_path)
+        main_content = (
+            "db:\n  host: doc-host\n  timeout: 30\n\n"
+            '<<: !include "./overlay.yaml" !deep\n'
+        )
+        data = load(StringIO(main_content), current_file=tmp_path / "main.yaml")
+        assert data["db"] == {"host": "overlay-host", "port": 6543, "timeout": 30}
+
+    def test_prefix_and_postfix_yield_same_result(self, tmp_path):
+        """The two syntaxes produce byte-identical loaded output."""
+        self._write_overlay(tmp_path)
+        doc = "db:\n  host: doc-host\n  timeout: 30\n\n"
+        prefix_content = doc + '<<: !deep !include "./overlay.yaml"\n'
+        postfix_content = doc + '<<: !include "./overlay.yaml" !deep\n'
+        p = load(StringIO(prefix_content), current_file=tmp_path / "main.yaml")
+        q = load(StringIO(postfix_content), current_file=tmp_path / "main.yaml")
+        assert p == q
+
+    def test_postfix_optional_deep_include(self, tmp_path):
+        """!include? ... !deep — optional deep include, tolerates missing file."""
+        main_content = 'db:\n  host: only-me\n\n<<: !include? "./absent.yaml" !deep\n'
+        data = load(StringIO(main_content), current_file=tmp_path / "main.yaml")
+        assert data["db"] == {"host": "only-me"}
