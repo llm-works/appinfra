@@ -13,7 +13,7 @@ import yaml
 
 from appinfra.yaml import (
     ErrorContext,
-    SecretLiteralWarning,
+    SecretStr,
     deep_merge,
     load,
     load_file,
@@ -1153,170 +1153,179 @@ logging:
 
 
 # =============================================================================
-# Secret Tag Tests
+# SecretStr wrapper tests
 # =============================================================================
 
 
 @pytest.mark.unit
-class TestSecretTag:
-    """Test !secret tag functionality for sensitive value validation."""
+class TestSecretStr:
+    """SecretStr must mask itself in every string form and only expose via reveal()."""
 
-    def test_secret_tag_accepts_env_var_syntax(self):
-        """Test that !secret accepts proper ${VAR_NAME} syntax without warning."""
+    def test_str_returns_mask(self):
+        assert str(SecretStr("hunter2")) == "***"
+
+    def test_repr_returns_mask(self):
+        assert repr(SecretStr("hunter2")) == "SecretStr('***')"
+
+    def test_format_returns_mask(self):
+        assert f"{SecretStr('hunter2')}" == "***"
+        assert f"{SecretStr('hunter2'):>10}" == "***"
+
+    def test_reveal_returns_plaintext(self):
+        assert SecretStr("hunter2").reveal() == "hunter2"
+
+    def test_equality_compares_underlying(self):
+        assert SecretStr("a") == SecretStr("a")
+        assert SecretStr("a") != SecretStr("b")
+
+    def test_not_a_str(self):
+        # Type boundary: consumers cannot pass SecretStr where str is required
+        # without going through .reveal() first.
+        assert not isinstance(SecretStr("x"), str)
+
+    def test_unhashable(self):
+        with pytest.raises(TypeError):
+            {SecretStr("x")}
+
+    def test_rejects_non_str_value(self):
+        with pytest.raises(TypeError):
+            SecretStr(123)  # type: ignore[arg-type]
+
+
+# =============================================================================
+# Solo !secret rejection
+# =============================================================================
+
+
+@pytest.mark.unit
+class TestSecretRejection:
+    """Solo !secret is not supported — chain with !env is the only form."""
+
+    def test_solo_secret_raises(self):
         yaml_content = """
-database:
-  password: !secret ${DB_PASSWORD}
+password: !secret ${DB_PASSWORD}
 """
-        import warnings
-
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            data = load(StringIO(yaml_content))
-
-            assert data["database"]["password"] == "${DB_PASSWORD}"
-            # No SecretLiteralWarning should be emitted
-            secret_warnings = [
-                x for x in w if issubclass(x.category, SecretLiteralWarning)
-            ]
-            assert len(secret_warnings) == 0
-
-    def test_secret_tag_warns_on_literal_value(self):
-        """Test that !secret emits SecretLiteralWarning for literal values."""
-        yaml_content = """
-database:
-  password: !secret my_actual_password
-"""
-        import warnings
-
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            data = load(StringIO(yaml_content))
-
-            assert data["database"]["password"] == "my_actual_password"
-            # Should emit SecretLiteralWarning
-            secret_warnings = [
-                x for x in w if issubclass(x.category, SecretLiteralWarning)
-            ]
-            assert len(secret_warnings) == 1
-            assert "literal" in str(secret_warnings[0].message).lower()
-
-    def test_secret_tag_returns_value_regardless(self):
-        """Test that !secret returns the value whether valid or not."""
-        yaml_content = """
-valid: !secret ${API_KEY}
-invalid: !secret plaintext_secret
-"""
-        import warnings
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            data = load(StringIO(yaml_content))
-
-            assert data["valid"] == "${API_KEY}"
-            assert data["invalid"] == "plaintext_secret"
-
-    @pytest.mark.parametrize(
-        "env_var",
-        [
-            "${A}",
-            "${VAR}",
-            "${MY_VAR}",
-            "${VAR_123}",
-            "${_PRIVATE}",
-            "${_}",
-        ],
-    )
-    def test_secret_tag_various_env_var_formats(self, env_var):
-        """Test !secret accepts various valid env var formats."""
-        yaml_content = f"""
-secret: !secret {env_var}
-"""
-        import warnings
-
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            data = load(StringIO(yaml_content))
-
-            assert data["secret"] == env_var
-            secret_warnings = [
-                x for x in w if issubclass(x.category, SecretLiteralWarning)
-            ]
-            assert len(secret_warnings) == 0
-
-    @pytest.mark.parametrize(
-        "invalid_format",
-        [
-            "$VAR",  # Missing braces
-            "${123VAR}",  # Starts with number
-            "${}",  # Empty
-            "${VAR-NAME}",  # Contains hyphen
-            "VAR",  # No $ at all
-            "${VAR} extra",  # Extra content
-            "prefix ${VAR}",  # Prefix content
-        ],
-    )
-    def test_secret_tag_warns_on_invalid_formats(self, invalid_format):
-        """Test !secret warns on invalid env var formats."""
-        yaml_content = f"""
-secret: !secret "{invalid_format}"
-"""
-        import warnings
-
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            data = load(StringIO(yaml_content))
-
-            assert data["secret"] == invalid_format
-            secret_warnings = [
-                x for x in w if issubclass(x.category, SecretLiteralWarning)
-            ]
-            assert len(secret_warnings) == 1
-
-    def test_secret_tag_truncates_long_values_in_warning(self):
-        """Test that long literal values are truncated in warning message."""
-        long_value = "a" * 50
-        yaml_content = f"""
-secret: !secret {long_value}
-"""
-        import warnings
-
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
+        with pytest.raises(yaml.YAMLError, match="Solo `!secret`"):
             load(StringIO(yaml_content))
 
-            secret_warnings = [
-                x for x in w if issubclass(x.category, SecretLiteralWarning)
-            ]
-            assert len(secret_warnings) == 1
-            warning_message = str(secret_warnings[0].message)
-            # Should contain truncated value with "..."
-            assert "..." in warning_message
-            # Should NOT contain the full 50-char value
-            assert long_value not in warning_message
-
-    def test_secret_tag_multiple_secrets(self):
-        """Test multiple !secret tags in same document."""
+    def test_solo_secret_literal_also_raises(self):
         yaml_content = """
-database:
-  password: !secret ${DB_PASSWORD}
-  api_key: !secret literal_key
-  token: !secret ${AUTH_TOKEN}
+key: !secret plaintext
 """
-        import warnings
+        with pytest.raises(yaml.YAMLError, match="Solo `!secret`"):
+            load(StringIO(yaml_content))
 
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            data = load(StringIO(yaml_content))
+    def test_error_points_to_chain_syntax(self):
+        yaml_content = "k: !secret ${VAR}\n"
+        with pytest.raises(yaml.YAMLError) as exc_info:
+            load(StringIO(yaml_content))
+        assert "!env VAR !secret" in str(exc_info.value)
 
-            assert data["database"]["password"] == "${DB_PASSWORD}"
-            assert data["database"]["api_key"] == "literal_key"
-            assert data["database"]["token"] == "${AUTH_TOKEN}"
 
-            # Should have exactly one warning (for literal_key)
-            secret_warnings = [
-                x for x in w if issubclass(x.category, SecretLiteralWarning)
-            ]
-            assert len(secret_warnings) == 1
+# =============================================================================
+# !env override map + !env !secret chain
+# =============================================================================
+
+
+@pytest.mark.unit
+class TestEnvOverrides:
+    """!env must consult env_overrides before os.environ."""
+
+    def test_env_reads_override_before_ambient(self, monkeypatch):
+        monkeypatch.setenv("FOO", "from_ambient")
+        data = load(
+            StringIO("value: !env FOO\n"),
+            env_overrides={"FOO": "from_override"},
+        )
+        assert data["value"] == "from_override"
+
+    def test_env_falls_through_to_ambient_when_missing_in_overrides(self, monkeypatch):
+        monkeypatch.setenv("FOO", "from_ambient")
+        data = load(
+            StringIO("value: !env FOO\n"),
+            env_overrides={"OTHER": "x"},
+        )
+        assert data["value"] == "from_ambient"
+
+    def test_env_optional_returns_none_when_missing_everywhere(self, monkeypatch):
+        monkeypatch.delenv("MISSING_VAR", raising=False)
+        data = load(
+            StringIO("value: !env? MISSING_VAR\n"),
+            env_overrides={},
+        )
+        assert data["value"] is None
+
+    def test_env_default_applies_when_missing(self, monkeypatch):
+        monkeypatch.delenv("MISSING_VAR", raising=False)
+        data = load(
+            StringIO("value: !env MISSING_VAR:fallback\n"),
+            env_overrides={},
+        )
+        assert data["value"] == "fallback"
+
+
+@pytest.mark.unit
+class TestSecretEnvChain:
+    """!env !secret / !secret !env returns a SecretStr wrapping the resolved value."""
+
+    def test_prefix_form_returns_secret_str(self):
+        data = load(
+            StringIO("password: !secret !env DB_PASSWORD\n"),
+            env_overrides={"DB_PASSWORD": "hunter2"},
+        )
+        assert isinstance(data["password"], SecretStr)
+        assert data["password"].reveal() == "hunter2"
+
+    def test_postfix_form_returns_secret_str(self):
+        data = load(
+            StringIO("password: !env DB_PASSWORD !secret\n"),
+            env_overrides={"DB_PASSWORD": "hunter2"},
+        )
+        assert isinstance(data["password"], SecretStr)
+        assert data["password"].reveal() == "hunter2"
+
+    def test_both_orderings_equivalent(self):
+        prefix = load(
+            StringIO("k: !secret !env X\n"),
+            env_overrides={"X": "v"},
+        )
+        postfix = load(
+            StringIO("k: !env X !secret\n"),
+            env_overrides={"X": "v"},
+        )
+        assert prefix["k"] == postfix["k"]
+
+    def test_chain_masks_in_repr(self):
+        data = load(
+            StringIO("k: !env X !secret\n"),
+            env_overrides={"X": "sensitive"},
+        )
+        assert "sensitive" not in repr(data)
+        assert "sensitive" not in str(data)
+
+    def test_optional_env_secret_returns_none_when_missing(self, monkeypatch):
+        monkeypatch.delenv("MISSING", raising=False)
+        data = load(
+            StringIO("k: !env? MISSING !secret\n"),
+            env_overrides={},
+        )
+        assert data["k"] is None
+
+    def test_optional_env_secret_wraps_when_present(self):
+        data = load(
+            StringIO("k: !env? X !secret\n"),
+            env_overrides={"X": "v"},
+        )
+        assert isinstance(data["k"], SecretStr)
+        assert data["k"].reveal() == "v"
+
+    def test_missing_required_env_raises(self, monkeypatch):
+        monkeypatch.delenv("MISSING", raising=False)
+        with pytest.raises(yaml.YAMLError, match="not set"):
+            load(
+                StringIO("k: !env MISSING !secret\n"),
+                env_overrides={},
+            )
 
 
 # =============================================================================

@@ -4,7 +4,6 @@ formatter and the multiprocessing queue handler.
 
 Covers:
 
-- ``coerce_leaf`` recognizes the ``__masked_str__`` opt-in convention.
 - ``coerce_leaf`` coerces ``sqlalchemy.engine.url.URL`` via ``str()``.
 - ``coerce_tree`` recurses through dict/list/tuple containers.
 - ``JSONFormatter._sanitize_extra_fields`` emits the coerced form.
@@ -15,7 +14,7 @@ import pytest
 
 from appinfra.log.builder.json import JSONFormatter
 from appinfra.log.mp.queue_handler import MPQueueHandler
-from appinfra.log.serialize import HasMaskedStr, coerce_leaf, coerce_tree
+from appinfra.log.serialize import coerce_leaf, coerce_tree
 
 try:
     from sqlalchemy.engine.url import URL as SAURL
@@ -26,14 +25,16 @@ except ImportError:
     _HAVE_SA = False
 
 
-class _Masked:
-    """Test helper implementing the opt-in masking protocol."""
-
-    def __init__(self, payload: str) -> None:
-        self.payload = payload
-
-    def __masked_str__(self) -> str:
-        return f"masked({self.payload[:2]}...)"
+def _make_url(password: str = "secret"):
+    """Build a sqlalchemy URL for coercion tests. Callers must guard with _HAVE_SA."""
+    return SAURL.create(
+        "postgresql",
+        username="u",
+        password=password,
+        host="h",
+        port=5432,
+        database="db",
+    )
 
 
 # =============================================================================
@@ -55,25 +56,9 @@ class TestCoerceLeaf:
         assert coerce_leaf(lst) is lst
         assert coerce_leaf(tup) is tup
 
-    def test_calls_masked_str(self):
-        m = _Masked("secret123")
-        assert coerce_leaf(m) == "masked(se...)"
-
-    def test_masked_str_protocol_runtime_check(self):
-        assert isinstance(_Masked("x"), HasMaskedStr)
-        assert not isinstance("plain", HasMaskedStr)
-
     @pytest.mark.skipif(not _HAVE_SA, reason="sqlalchemy not installed")
     def test_coerces_sqlalchemy_url(self):
-        url = SAURL.create(
-            "postgresql",
-            username="u",
-            password="secret",
-            host="h",
-            port=5432,
-            database="db",
-        )
-        coerced = coerce_leaf(url)
+        coerced = coerce_leaf(_make_url())
         assert isinstance(coerced, str)
         assert "u" in coerced and "h" in coerced and "5432" in coerced
         assert "secret" not in coerced
@@ -86,25 +71,33 @@ class TestCoerceLeaf:
 
 @pytest.mark.unit
 class TestCoerceTree:
+    @pytest.mark.skipif(not _HAVE_SA, reason="sqlalchemy not installed")
     def test_recurses_into_dict(self):
-        out = coerce_tree({"k": _Masked("abcdef")})
-        assert out == {"k": "masked(ab...)"}
+        url = _make_url()
+        out = coerce_tree({"k": url})
+        assert isinstance(out["k"], str)
+        assert "secret" not in out["k"]
 
+    @pytest.mark.skipif(not _HAVE_SA, reason="sqlalchemy not installed")
     def test_recurses_into_list(self):
-        out = coerce_tree([_Masked("abcdef"), 1, "x"])
-        assert out == ["masked(ab...)", 1, "x"]
+        url = _make_url()
+        out = coerce_tree([url, 1, "x"])
+        assert isinstance(out[0], str)
+        assert out[1:] == [1, "x"]
 
+    @pytest.mark.skipif(not _HAVE_SA, reason="sqlalchemy not installed")
     def test_recurses_into_tuple(self):
-        out = coerce_tree((_Masked("abcdef"), 1))
-        assert out == ("masked(ab...)", 1)
+        url = _make_url()
+        out = coerce_tree((url, 1))
+        assert isinstance(out[0], str)
+        assert out[1] == 1
 
+    @pytest.mark.skipif(not _HAVE_SA, reason="sqlalchemy not installed")
     def test_nested(self):
-        out = coerce_tree({"a": [{"b": _Masked("xyz999")}]})
-        assert out == {"a": [{"b": "masked(xy...)"}]}
-
-    def test_recurses_into_set(self):
-        out = coerce_tree({_Masked("abcdef"), "plain"})
-        assert out == {"masked(ab...)", "plain"}
+        url = _make_url()
+        out = coerce_tree({"a": [{"b": url}]})
+        assert isinstance(out["a"][0]["b"], str)
+        assert "secret" not in out["a"][0]["b"]
 
     def test_cyclic_dict_returns_marker(self):
         d: dict = {"key": "value"}
@@ -131,15 +124,7 @@ class TestCoerceTree:
 
     @pytest.mark.skipif(not _HAVE_SA, reason="sqlalchemy not installed")
     def test_url_in_dict(self):
-        url = SAURL.create(
-            "postgresql",
-            username="u",
-            password="secret",
-            host="h",
-            port=5432,
-            database="db",
-        )
-        out = coerce_tree({"url": url})
+        out = coerce_tree({"url": _make_url()})
         assert isinstance(out["url"], str)
         assert "secret" not in out["url"]
 
@@ -154,43 +139,29 @@ class TestJSONFormatterSanitize:
     @pytest.mark.skipif(not _HAVE_SA, reason="sqlalchemy not installed")
     def test_url_rendered_as_string(self):
         formatter = JSONFormatter()
-        url = SAURL.create(
-            "postgresql",
-            username="u",
-            password="secret",
-            host="h",
-            port=5432,
-            database="db",
-        )
-        out = formatter._sanitize_extra_fields({"url": url})
+        out = formatter._sanitize_extra_fields({"url": _make_url()})
         assert isinstance(out["url"], str)
         assert "secret" not in out["url"]
 
     @pytest.mark.skipif(not _HAVE_SA, reason="sqlalchemy not installed")
     def test_url_nested_in_dict(self):
         formatter = JSONFormatter()
-        url = SAURL.create(
-            "postgresql",
-            username="u",
-            password="secret",
-            host="h",
-            port=5432,
-            database="db",
-        )
-        out = formatter._sanitize_extra_fields({"cfg": {"url": url}})
+        out = formatter._sanitize_extra_fields({"cfg": {"url": _make_url()}})
         assert isinstance(out["cfg"]["url"], str)
         assert "secret" not in out["cfg"]["url"]
-
-    def test_masked_str_object(self):
-        formatter = JSONFormatter()
-        out = formatter._sanitize_extra_fields({"k": _Masked("abcdef")})
-        assert out["k"] == "masked(ab...)"
 
     def test_plain_values_unchanged(self):
         formatter = JSONFormatter()
         extra = {"s": "x", "n": 1, "lst": [1, 2], "d": {"a": 1}}
         out = formatter._sanitize_extra_fields(extra)
         assert out == extra
+
+    def test_secret_str_masked_in_extra(self):
+        from appinfra.yaml import SecretStr
+
+        formatter = JSONFormatter()
+        out = formatter._sanitize_extra_fields({"pwd": SecretStr("hunter2")})
+        assert "hunter2" not in str(out)
 
     @pytest.mark.skipif(not _HAVE_SA, reason="sqlalchemy not installed")
     def test_format_end_to_end_url_not_destructured(self):
@@ -199,14 +170,7 @@ class TestJSONFormatterSanitize:
         import logging
 
         formatter = JSONFormatter()
-        url = SAURL.create(
-            "postgresql",
-            username="u",
-            password="topsecret",
-            host="h",
-            port=5432,
-            database="db",
-        )
+        url = _make_url(password="topsecret")
         record = logging.LogRecord(
             name="t",
             level=logging.INFO,
@@ -239,28 +203,6 @@ class TestQueueHandlerSanitize:
         import multiprocessing
 
         handler = MPQueueHandler(multiprocessing.Queue())
-        url = SAURL.create(
-            "postgresql",
-            username="u",
-            password="secret",
-            host="h",
-            port=5432,
-            database="db",
-        )
-        out = handler._sanitize_for_pickle({"url": url}, set())
+        out = handler._sanitize_for_pickle({"url": _make_url()}, set())
         assert isinstance(out["url"], str)
         assert "secret" not in out["url"]
-
-    def test_masked_str_object(self):
-        import multiprocessing
-
-        handler = MPQueueHandler(multiprocessing.Queue())
-        out = handler._sanitize_for_pickle({"k": _Masked("abcdef")}, set())
-        assert out["k"] == "masked(ab...)"
-
-    def test_plain_tuple_still_walked(self):
-        import multiprocessing
-
-        handler = MPQueueHandler(multiprocessing.Queue())
-        out = handler._sanitize_for_pickle((1, _Masked("abcdef"), 3), set())
-        assert out == (1, "masked(ab...)", 3)
