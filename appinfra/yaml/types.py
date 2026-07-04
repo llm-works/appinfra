@@ -67,6 +67,12 @@ class SecretStr:
     f-strings, ``%``-formatting, or ``print``. The plaintext is only
     available via ``.reveal()``.
 
+    The constructor accepts ``str`` only; passing an already-wrapped
+    ``SecretStr`` raises ``TypeError`` so accidental double-wraps surface
+    loudly. Boundary code that must accept a mixed ``str | SecretStr | None``
+    input should call ``SecretStr.ensure(...)`` instead of re-implementing
+    the coerce shim.
+
     Equality compares underlying values so config round-trips work in tests.
     Hashing is deliberately omitted; secrets should not be dict keys or set
     members.
@@ -79,6 +85,19 @@ class SecretStr:
         if not isinstance(value, str):
             raise TypeError(f"SecretStr requires a str, got {type(value).__name__}")
         self._value = value
+
+    @staticmethod
+    def ensure(value: "str | SecretStr | None") -> "SecretStr | None":
+        """Normalize a boundary value to ``SecretStr`` (or ``None``).
+
+        Intended for library boundaries that historically accepted a plain
+        ``str`` and now accept ``SecretStr`` too. Preserves identity for
+        already-wrapped inputs and passes ``None`` through untouched. Any
+        other type raises ``TypeError`` via the constructor.
+        """
+        if value is None or isinstance(value, SecretStr):
+            return value
+        return SecretStr(value)
 
     def reveal(self) -> str:
         """Return the underlying plaintext. The only path to the raw value."""
