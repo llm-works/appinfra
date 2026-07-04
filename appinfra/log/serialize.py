@@ -19,6 +19,8 @@ def coerce_leaf(value: Any) -> Any:
     The result is ``value`` (unchanged) when no coercion applies, so callers
     can use identity (``coerced is not value``) to detect a transformation.
     """
+    if _is_secret_str(value):
+        return str(value)
     if _is_sqlalchemy_url(value):
         return str(value)
     return value
@@ -53,6 +55,12 @@ def coerce_tree(value: Any, _seen: set[int] | None = None) -> Any:
     if isinstance(value, set):
         return {coerce_tree(v, _seen) for v in value}
     return value
+
+
+def _is_secret_str(value: Any) -> bool:
+    """Duck-type check: avoid importing appinfra.yaml as a hard dependency."""
+    cls = type(value)
+    return cls.__module__ == "appinfra.yaml.types" and cls.__name__ == "SecretStr"
 
 
 def _is_sqlalchemy_url(value: Any) -> bool:

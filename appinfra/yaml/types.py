@@ -7,6 +7,7 @@ This module contains:
 - SecretStr wrapper for masked-by-default secret values
 """
 
+import hmac
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -94,7 +95,7 @@ class SecretStr:
 
     def __eq__(self, other: object) -> bool:
         if isinstance(other, SecretStr):
-            return self._value == other._value
+            return hmac.compare_digest(self._value, other._value)
         return NotImplemented
 
     __hash__ = None  # type: ignore[assignment]

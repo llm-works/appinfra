@@ -57,8 +57,8 @@ For API stability guarantees and deprecation policy, see
   `/var/lib/postgresql/data`); older postgres versions remain supported.
 - `pg.server.clean` removes volumes for any `pgserver.name`, not only the default.
   The filter previously hardcoded `infra-pg` and leaked volumes for renamed consumers.
-- JSON log extras now render `sqlalchemy.engine.url.URL` (and objects exposing
-  `__masked_str__()`) via `str()` instead of destructuring them as a positional list.
+- JSON log extras now render `sqlalchemy.engine.url.URL` via `str()` instead of
+  destructuring it as a positional list.
 
 ## [0.8.0] - 2026-06-04
 
