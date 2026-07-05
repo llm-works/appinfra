@@ -254,6 +254,7 @@ class Loader(yaml.SafeLoader):
         # under a token and emits a !__literal__ ScalarNode; literal_constructor
         # resolves the token back to the original instance.
         self._literal_values: dict[str, Any] = {}
+        self._literal_node_ids: set[int] = set()
 
     # Note: PyYAML's type stubs incorrectly define anchor as dict[Any, Node],
     # but at runtime it's str | None. We override with correct types.
@@ -1375,13 +1376,12 @@ class Loader(yaml.SafeLoader):
         elif value is None:
             return yaml.ScalarNode(tag="tag:yaml.org,2002:null", value="null")
         elif isinstance(value, SecretStr):
-            # str(SecretStr) is "***" — reconstructing via a str-tagged
-            # ScalarNode would bake the mask into the final config. Park the
-            # instance in the intern table and emit a placeholder tag that
-            # literal_constructor resolves back to the original object.
+            # Intern SecretStr (str() masks to "***") and emit !__literal__ placeholder.
             token = f"lit-{len(self._literal_values)}"
             self._literal_values[token] = value
-            return yaml.ScalarNode(tag="!__literal__", value=token)
+            node = yaml.ScalarNode(tag="!__literal__", value=token)
+            self._literal_node_ids.add(id(node))
+            return node
         else:
             return yaml.ScalarNode(tag="tag:yaml.org,2002:str", value=str(value))
 
@@ -1393,13 +1393,13 @@ class Loader(yaml.SafeLoader):
         ``str()`` is not a lossless representation (SecretStr today). The tag
         is internal — it is never written by users and never leaves the loader.
         """
-        token: str = self.construct_scalar(node)
-        if token not in self._literal_values:
+        if id(node) not in self._literal_node_ids:
             ctx = self._create_error_context(node)
             raise yaml.YAMLError(
-                f"Invalid !__literal__ token '{token}'. This is an internal tag "
-                f"and should not be written directly ({ctx.format_location()})"
+                f"!__literal__ is an internal tag and should not be written "
+                f"directly ({ctx.format_location()})"
             )
+        token: str = self.construct_scalar(node)
         return self._literal_values[token]
 
 
