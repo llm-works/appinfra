@@ -1394,6 +1394,12 @@ class Loader(yaml.SafeLoader):
         is internal — it is never written by users and never leaves the loader.
         """
         token: str = self.construct_scalar(node)
+        if token not in self._literal_values:
+            ctx = self._create_error_context(node)
+            raise yaml.YAMLError(
+                f"Invalid !__literal__ token '{token}'. This is an internal tag "
+                f"and should not be written directly ({ctx.format_location()})"
+            )
         return self._literal_values[token]
 
 
