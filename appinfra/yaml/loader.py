@@ -249,6 +249,11 @@ class Loader(yaml.SafeLoader):
             int, dict[str, Path | None]
         ] = {}  # Temp storage for include source maps
         self._anchor_nodes: dict[str, yaml.Node] = {}  # Track anchors for !deep lookup
+        # Intern table for Python values whose str() is not a round-trippable
+        # form (SecretStr masks to "***"). _value_to_node parks the object here
+        # under a token and emits a !__literal__ ScalarNode; literal_constructor
+        # resolves the token back to the original instance.
+        self._literal_values: dict[str, Any] = {}
 
     # Note: PyYAML's type stubs incorrectly define anchor as dict[Any, Node],
     # but at runtime it's str | None. We override with correct types.
@@ -1369,8 +1374,27 @@ class Loader(yaml.SafeLoader):
             return yaml.ScalarNode(tag="tag:yaml.org,2002:float", value=str(value))
         elif value is None:
             return yaml.ScalarNode(tag="tag:yaml.org,2002:null", value="null")
+        elif isinstance(value, SecretStr):
+            # str(SecretStr) is "***" — reconstructing via a str-tagged
+            # ScalarNode would bake the mask into the final config. Park the
+            # instance in the intern table and emit a placeholder tag that
+            # literal_constructor resolves back to the original object.
+            token = f"lit-{len(self._literal_values)}"
+            self._literal_values[token] = value
+            return yaml.ScalarNode(tag="!__literal__", value=token)
         else:
             return yaml.ScalarNode(tag="tag:yaml.org,2002:str", value=str(value))
+
+    def literal_constructor(self, node: Any) -> Any:
+        """
+        Resolve a ``!__literal__`` placeholder back to the interned Python value.
+
+        Placeholders are emitted by ``_value_to_node`` for Python objects whose
+        ``str()`` is not a lossless representation (SecretStr today). The tag
+        is internal — it is never written by users and never leaves the loader.
+        """
+        token: str = self.construct_scalar(node)
+        return self._literal_values[token]
 
 
 # Register tag constructors with the Loader class
@@ -1382,6 +1406,7 @@ Loader.add_constructor("!reset", Loader.reset_constructor)
 Loader.add_constructor("!deep", Loader.deep_constructor)
 Loader.add_constructor("!env", Loader.env_constructor)
 Loader.add_constructor("!env?", Loader.env_optional_constructor)
+Loader.add_constructor("!__literal__", Loader.literal_constructor)
 Loader.add_multi_constructor("!chain:", Loader.chain_constructor)
 
 

@@ -2876,6 +2876,65 @@ config:
         result2 = preprocess_deep_tags(content2)
         assert result2 == "<<: !chain:include+deep './base.yaml'"
 
+    def test_secretstr_in_deep_included_file_survives_merge(self, tmp_path):
+        """A SecretStr in a !deep !include? child must round-trip as SecretStr, not '***'.
+
+        Regression: flatten_mapping reconstructed the merged mapping via
+        _value_to_node, whose else branch stringified any non-primitive value.
+        str(SecretStr) is "***", so credentials from the child file were
+        silently masked before reaching consumers.
+        """
+        child = tmp_path / "deep_secret_child.yaml"
+        child.write_text(
+            "web_search:\n"
+            "  backend:\n"
+            "    config:\n"
+            "      api_key: !secret !env SERPER_API_KEY\n"
+        )
+        parent = tmp_path / "deep_secret_parent.yaml"
+        parent.write_text(
+            "web_search:\n"
+            "  backend:\n"
+            "    kind: serper\n"
+            "\n"
+            f'<<: !deep !include? "{child.name}"\n'
+        )
+
+        with open(parent) as f:
+            data = load(
+                f,
+                current_file=parent,
+                env_overrides={"SERPER_API_KEY": "hunter2"},
+            )
+
+        api_key = data["web_search"]["backend"]["config"]["api_key"]
+        assert isinstance(api_key, SecretStr)
+        assert api_key.reveal() == "hunter2"
+        # Document-side value merged around it, not overwritten
+        assert data["web_search"]["backend"]["kind"] == "serper"
+
+    def test_secretstr_in_bare_included_file_survives_merge(self, tmp_path):
+        """Companion: bare `<<: !include?` (DeepMergeDict path) must also
+        preserve SecretStr — the same _value_to_node path handles merge_base
+        and override_base.
+        """
+        child = tmp_path / "bare_secret_child.yaml"
+        child.write_text("creds:\n  token: !secret !env API_TOKEN\n")
+        parent = tmp_path / "bare_secret_parent.yaml"
+        parent.write_text(f'creds:\n  user: alice\n\n<<: !include? "{child.name}"\n')
+
+        with open(parent) as f:
+            data = load(
+                f,
+                current_file=parent,
+                env_overrides={"API_TOKEN": "s3cret"},
+            )
+
+        token = data["creds"]["token"]
+        assert isinstance(token, SecretStr)
+        assert token.reveal() == "s3cret"
+        assert data["creds"]["user"] == "alice"
+
 
 # =============================================================================
 # Reset Tag Tests
