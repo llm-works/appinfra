@@ -354,6 +354,107 @@ dbs:
 
 **Extensions needing only database-level (examples):** `vector`, `pg_trgm`, `postgis`, `uuid-ossp`
 
+## First-Touch DDL Helpers
+
+Concurrent workers that lazily create the same database object (embedding tables, per-tenant
+partitions, materialized views, cache tables, application-managed indexes) hit a first-touch
+race:
+
+1. Two workers observe the target as missing (via `SELECT` or reflection).
+2. Both fire `CREATE ...`.
+3. The loser raises `duplicate_table` / `duplicate_object` / `unique_violation` on
+   `pg_type_typname_nsp_index`, and the outer transaction ends up in
+   `InFailedSqlTransaction` — not recoverable via naive `try/except`.
+
+`appinfra.db.pg.ensure_object` closes this race with a Postgres transaction-scoped advisory
+lock keyed on a stable string:
+
+```python
+from appinfra.db.pg import ensure_object, table_exists
+
+with pg.session() as session:
+    conn = session.connection()
+    ensure_object(
+        session,
+        key=f"ensure:public.{table_name}",
+        exists_fn=lambda: table_exists(conn, table_name, schema="public"),
+        create_fn=lambda: MyTable.__table__.create(conn),
+    )
+```
+
+The advisory lock is cluster-scoped, so it serializes across every worker and node sharing
+one PG cluster — not just within a single process. It auto-releases at commit/rollback, so
+there is no explicit release path to get wrong. Contention is limited to the first-touch
+path; once the object exists, callers typically short-circuit before entering the block, so
+steady-state cost is zero.
+
+### Why not simpler patterns
+
+| Pattern | Why it fails |
+|---------|--------------|
+| `CREATE ... IF NOT EXISTS` | Doesn't close the race in Postgres; concurrent `CREATE`s still collide on catalog inserts. |
+| `Table.create(checkfirst=True)` | Reflection is racy, and SAVEPOINT rollback does not reliably clear the aborted state under every session config. |
+| `try/except IntegrityError/ProgrammingError` | Must savepoint-scope AND pgcode-filter (`23505`, `42P07`, `42710`) to avoid swallowing real errors (permission denied, missing extension, invalid DDL). |
+
+### API
+
+```python
+from appinfra.db.pg import (
+    with_object_lock,
+    ensure_object,
+    table_exists,
+    index_exists,
+)
+
+# Context manager form — for custom check/create shapes:
+with with_object_lock(session, key):
+    # ... arbitrary DDL, serialized cluster-wide on this key ...
+    ...
+
+# Folded form — the common check-and-create shape:
+ensure_object(session, key, exists_fn, create_fn)
+
+# Schema-aware existence checks (filter by n.nspname, not pg_table_is_visible):
+table_exists(conn, name, schema=None)   # None -> current_schemas(true) fallback
+index_exists(conn, name, schema=None)   # None -> any schema
+```
+
+`table_exists` and `index_exists` filter by `pg_namespace.nspname` explicitly rather than
+relying on `pg_table_is_visible(oid)`, which resolves against `search_path` at query time and
+has produced false negatives for callers that manage `search_path` per statement rather than
+per session.
+
+### Requirements and caveats
+
+- **Transactional session required.** The lock is transaction-scoped; in AUTOCOMMIT each
+  statement is its own transaction, so the lock releases immediately and provides no
+  serialization. Do not pair with `pg.session(autocommit=True)`.
+- **Thread ownership.** SQLAlchemy `Session` objects are not thread-safe; give each thread
+  its own session. Advisory locks then serialize between distinct sessions the same way they
+  serialize between processes.
+- **Key hashing.** `pg_advisory_xact_lock(hashtext(:k))` reduces the key to an int4;
+  unrelated keys can hash-collide and needlessly serialize. This is a performance wart,
+  never a correctness issue.
+- **Deadlocks.** Keep the block tight (check + create). Nesting locks on multiple keys in
+  inconsistent order across workers can deadlock; Postgres detects and aborts one side.
+
+### Composing with ScopedPG
+
+The advisory lock is cluster-scoped, independent of `search_path`. When two `ScopedPG`
+instances might create objects with the same unqualified name in different schemas, include
+the schema in the key so the lock is per-schema:
+
+```python
+with scoped.session() as session:
+    conn = session.connection()
+    ensure_object(
+        session,
+        key=f"ensure:{scoped.schema}.{table_name}",
+        exists_fn=lambda: table_exists(conn, table_name, schema=scoped.schema),
+        create_fn=lambda: Model.__table__.create(conn),
+    )
+```
+
 ## PostgreSQL Server Configuration (pg.yaml)
 
 Defines the Docker-based PostgreSQL server for local development.

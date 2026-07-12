@@ -11,6 +11,10 @@ For API stability guarantees and deprecation policy, see
 ## [Unreleased]
 
 ### Added
+- `appinfra.db.pg.ensure_object` / `with_object_lock`: race-safe first-touch DDL via
+  transaction-scoped Postgres advisory lock. Companion `table_exists` / `index_exists`
+  filter by `pg_namespace.nspname` so `search_path`-per-statement callers don't hit the
+  `pg_table_is_visible` false-negative path.
 - Generic tag chain composition for YAML loader: `!policy !source ARG` or `!source ARG !policy`
   syntax normalizes to a canonical `!chain:source+policy` form with registry-gated dispatch.
   Initial chains: `!deep !include` and `!deep !include?` (backward-compatible).
