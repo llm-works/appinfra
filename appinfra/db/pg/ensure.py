@@ -52,6 +52,7 @@ from contextlib import contextmanager
 from typing import Any
 
 from sqlalchemy import text
+from sqlalchemy.engine import Connection
 from sqlalchemy.orm import Session
 
 
@@ -88,8 +89,18 @@ def with_object_lock(session: Session, key: str) -> Iterator[None]:
         with with_object_lock(session, f"ensure:{table_name}"):
             if not table_exists(session.connection(), table_name):
                 MyTable.__table__.create(session.connection())
+
+    Raises:
+        ValueError: If the session is configured with AUTOCOMMIT isolation.
     """
-    session.connection().execute(
+    conn = session.connection()
+    iso = conn.get_execution_options().get("isolation_level")
+    if iso == "AUTOCOMMIT":
+        raise ValueError(
+            "with_object_lock requires a transactional session; "
+            "AUTOCOMMIT releases the lock immediately and provides no serialization"
+        )
+    conn.execute(
         text("SELECT pg_advisory_xact_lock(hashtext(:k))"),
         {"k": key},
     )
@@ -137,7 +148,7 @@ def ensure_object(
             create_fn()
 
 
-def table_exists(conn: Any, name: str, schema: str | None = None) -> bool:
+def table_exists(conn: Connection, name: str, schema: str | None = None) -> bool:
     """Return ``True`` if a table named ``name`` exists.
 
     When ``schema`` is provided, the check filters
@@ -163,7 +174,8 @@ def table_exists(conn: Any, name: str, schema: str | None = None) -> bool:
         sql = text(
             "SELECT 1 FROM pg_catalog.pg_class c "
             "JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace "
-            "WHERE c.relname = :name AND n.nspname = :schema"
+            "WHERE c.relname = :name AND n.nspname = :schema "
+            "AND c.relkind IN ('r', 'p')"
         )
         params: dict[str, Any] = {"name": name, "schema": schema}
     else:
@@ -171,25 +183,29 @@ def table_exists(conn: Any, name: str, schema: str | None = None) -> bool:
             "SELECT 1 FROM pg_catalog.pg_class c "
             "JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace "
             "WHERE c.relname = :name "
-            "AND n.nspname = ANY(current_schemas(true))"
+            "AND n.nspname = ANY(current_schemas(true)) "
+            "AND c.relkind IN ('r', 'p')"
         )
         params = {"name": name}
     return conn.execute(sql, params).scalar() is not None
 
 
-def index_exists(conn: Any, name: str, schema: str | None = None) -> bool:
+def index_exists(conn: Connection, name: str, schema: str | None = None) -> bool:
     """Return ``True`` if an index named ``name`` exists.
 
     When ``schema`` is provided, the check filters ``pg_indexes.schemaname``
-    explicitly. When ``schema`` is ``None``, the check matches any schema.
+    explicitly. When ``schema`` is ``None``, the check falls back to
+    ``schemaname = ANY(current_schemas(true))`` (respects the session's
+    ``search_path``, matching ``table_exists`` behavior).
 
     Args:
         conn: SQLAlchemy connection (or ``session.connection()``).
         name: Index name.
-        schema: Namespace to scope the check to, or ``None`` for any schema.
+        schema: Namespace to scope the check to, or ``None`` to use the
+            session's ``search_path``.
 
     Returns:
-        ``True`` if the index exists.
+        ``True`` if the index exists in the given (or visible) schema.
     """
     if schema is not None:
         sql = text(
@@ -197,6 +213,9 @@ def index_exists(conn: Any, name: str, schema: str | None = None) -> bool:
         )
         params: dict[str, Any] = {"name": name, "schema": schema}
     else:
-        sql = text("SELECT 1 FROM pg_indexes WHERE indexname = :name")
+        sql = text(
+            "SELECT 1 FROM pg_indexes WHERE indexname = :name "
+            "AND schemaname = ANY(current_schemas(true))"
+        )
         params = {"name": name}
     return conn.execute(sql, params).scalar() is not None

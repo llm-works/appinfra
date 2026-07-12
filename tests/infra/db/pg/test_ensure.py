@@ -68,11 +68,22 @@ class TestWithObjectLock:
         """The advisory lock must be held before the caller's body executes."""
         session = MagicMock()
         conn = session.connection.return_value
+        conn.get_execution_options.return_value = {}
 
         with with_object_lock(session, "k"):
             # By the time the body runs, exactly one execute must have fired
             # — the advisory lock itself.
             assert conn.execute.call_count == 1
+
+    def test_rejects_autocommit_session(self):
+        """AUTOCOMMIT sessions are rejected with a clear error."""
+        session = MagicMock()
+        conn = session.connection.return_value
+        conn.get_execution_options.return_value = {"isolation_level": "AUTOCOMMIT"}
+
+        with pytest.raises(ValueError, match="AUTOCOMMIT"):
+            with with_object_lock(session, "k"):
+                pass
 
 
 @pytest.mark.unit
@@ -150,6 +161,16 @@ class TestTableExists:
         assert "n.nspname = :schema" in sql
         assert _executed_params(conn) == {"name": "my_table", "schema": "my_schema"}
 
+    def test_filters_by_relkind_to_exclude_views_and_sequences(self):
+        """Exclude views, sequences, indexes, etc. — only match real tables."""
+        conn = MagicMock()
+        conn.execute.return_value.scalar.return_value = 1
+
+        table_exists(conn, "my_table", schema="public")
+
+        sql = _executed_sql(conn)
+        assert "relkind IN ('r', 'p')" in sql
+
     def test_fallback_uses_current_schemas_when_no_schema(self):
         conn = MagicMock()
         conn.execute.return_value.scalar.return_value = None
@@ -189,7 +210,8 @@ class TestIndexExists:
         assert "schemaname = :schema" in sql
         assert _executed_params(conn) == {"name": "idx_foo", "schema": "my_schema"}
 
-    def test_global_query_when_no_schema(self):
+    def test_fallback_uses_current_schemas_when_no_schema(self):
+        """schema=None scopes to search_path, matching table_exists behavior."""
         conn = MagicMock()
         conn.execute.return_value.scalar.return_value = None
 
@@ -197,5 +219,5 @@ class TestIndexExists:
 
         sql = _executed_sql(conn)
         assert "pg_indexes" in sql
-        assert "schemaname" not in sql
+        assert "current_schemas(true)" in sql
         assert _executed_params(conn) == {"name": "idx_foo"}
