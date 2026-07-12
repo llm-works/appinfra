@@ -382,8 +382,8 @@ with pg.session() as session:
     )
 ```
 
-The advisory lock is cluster-scoped, so it serializes across every worker and node sharing
-one PG cluster — not just within a single process. It auto-releases at commit/rollback, so
+The advisory lock is database-scoped, so it serializes across every worker and node sharing
+the same database — not just within a single process. It auto-releases at commit/rollback, so
 there is no explicit release path to get wrong. Contention is limited to the first-touch
 path; once the object exists, callers typically short-circuit before entering the block, so
 steady-state cost is zero.
@@ -408,7 +408,7 @@ from appinfra.db.pg import (
 
 # Context manager form — for custom check/create shapes:
 with with_object_lock(session, key):
-    # ... arbitrary DDL, serialized cluster-wide on this key ...
+    # ... arbitrary DDL, serialized database-wide on this key ...
     ...
 
 # Folded form — the common check-and-create shape:
@@ -440,7 +440,7 @@ per session.
 
 ### Composing with ScopedPG
 
-The advisory lock is cluster-scoped, independent of `search_path`. When two `ScopedPG`
+The advisory lock is database-scoped, independent of `search_path`. When two `ScopedPG`
 instances might create objects with the same unqualified name in different schemas, include
 the schema in the key so the lock is per-schema:
 

@@ -16,7 +16,7 @@ Run with:
 from __future__ import annotations
 
 import threading
-import time
+import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import pytest
@@ -30,7 +30,7 @@ pytestmark = pytest.mark.require_pg
 
 def _random_suffix() -> str:
     """Return a unique suffix for a per-test object name."""
-    return f"{int(time.time() * 1000)}_{threading.get_ident() % 10000}"
+    return uuid.uuid4().hex[:12]
 
 
 @pytest.fixture
@@ -132,6 +132,44 @@ class TestExistenceChecks:
             assert index_exists(conn, idx_name, schema="public") is True
             assert index_exists(conn, f"{idx_name}_missing", schema="public") is False
 
+    def test_table_exists_schema_none_uses_search_path(
+        self, pg_connection, ephemeral_table_name, cleanup_public_object
+    ):
+        """schema=None falls back to current_schemas(true)."""
+        cleanup_public_object(ephemeral_table_name)
+        with pg_connection.session() as session:
+            session.execute(
+                text(f'CREATE TABLE public."{ephemeral_table_name}" (id int)')
+            )
+            session.commit()
+        with pg_connection.session() as session:
+            conn = session.connection()
+            # Default search_path includes public, so schema=None should find it.
+            assert table_exists(conn, ephemeral_table_name) is True
+            assert table_exists(conn, f"{ephemeral_table_name}_missing") is False
+
+    def test_index_exists_schema_none_uses_search_path(
+        self, pg_connection, ephemeral_table_name, cleanup_public_object
+    ):
+        """schema=None falls back to current_schemas(true)."""
+        cleanup_public_object(ephemeral_table_name)
+        idx_name = f"idx_{ephemeral_table_name}_id"
+        with pg_connection.session() as session:
+            session.execute(
+                text(f'CREATE TABLE public."{ephemeral_table_name}" (id int)')
+            )
+            session.execute(
+                text(
+                    f'CREATE INDEX "{idx_name}" ON public."{ephemeral_table_name}" (id)'
+                )
+            )
+            session.commit()
+        with pg_connection.session() as session:
+            conn = session.connection()
+            # Default search_path includes public, so schema=None should find it.
+            assert index_exists(conn, idx_name) is True
+            assert index_exists(conn, f"{idx_name}_missing") is False
+
 
 @pytest.mark.integration
 class TestEnsureObjectIdempotent:
@@ -185,7 +223,11 @@ class TestEnsureObjectConcurrent:
         cleanup_public_object(ephemeral_table_name)
         key = f"ensure:public.{ephemeral_table_name}"
         n_workers = 8
-        barrier = threading.Barrier(n_workers)
+        start_barrier = threading.Barrier(n_workers)
+        # Second barrier inside create_fn forces workers to overlap while the
+        # object is absent. Without it, one fast worker could finish before
+        # others even acquire the lock, causing a false pass.
+        create_barrier = threading.Barrier(n_workers, timeout=5)
         create_calls = 0
         create_lock = threading.Lock()
 
@@ -193,12 +235,18 @@ class TestEnsureObjectConcurrent:
             # Each worker gets its own PG + connection pool → distinct sessions,
             # which is the actual production shape.
             pg = PG(pg_logger, pg_config)
-            barrier.wait()  # release all workers at once
+            start_barrier.wait()  # release all workers at once
             with pg.session() as session:
                 conn = session.connection()
 
                 def create_fn():
                     nonlocal create_calls
+                    # Wait for all workers to reach create_fn before any
+                    # proceeds — ensures contention on the advisory lock.
+                    try:
+                        create_barrier.wait()
+                    except threading.BrokenBarrierError:
+                        pass  # Other workers already proceeded; fine.
                     with create_lock:
                         create_calls += 1
                     session.execute(
@@ -225,5 +273,11 @@ class TestEnsureObjectConcurrent:
 
         # No worker may see duplicate_table / InFailedSqlTransaction bubble up.
         assert errors == [], f"workers raised: {errors!r}"
-        # Exactly one create_fn invocation, cluster-wide.
+        # Exactly one create_fn invocation, database-wide.
         assert create_calls == 1
+        # Verify the table actually exists (DDL committed).
+        pg = PG(pg_logger, pg_config)
+        with pg.session() as session:
+            assert table_exists(
+                session.connection(), ephemeral_table_name, schema="public"
+            )

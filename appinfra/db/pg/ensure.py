@@ -25,7 +25,7 @@ Naive fixes fail in specific ways:
 
 The right primitive is a Postgres transaction-scoped advisory lock keyed on
 the object name (see :func:`with_object_lock`). It serializes concurrent
-first-touches across every worker connected to the same cluster, auto-
+first-touches across every worker connected to the same database, auto-
 releases at commit/rollback, and needs no exception juggling.
 
 Existence checks in this module explicitly filter by ``pg_namespace.nspname``
@@ -63,8 +63,8 @@ def with_object_lock(session: Session, key: str) -> Iterator[None]:
     Acquires a Postgres transaction-scoped advisory lock derived from ``key``
     on the session's current connection. The lock is auto-released when the
     surrounding transaction commits or rolls back, so no explicit release is
-    needed. The lock is cluster-scoped, so it serializes across every worker
-    and node sharing one PG cluster — not just within a single process.
+    needed. The lock is database-scoped, so it serializes across every worker
+    and node sharing the same database — not just within a single process.
 
     Contention is limited to the first-touch path; once the target object
     exists, callers typically short-circuit before entering this block, so
@@ -122,7 +122,10 @@ def ensure_object(
     once it holds the lock and does nothing.
 
     The session must be transactional. See :func:`with_object_lock` for the
-    reason.
+    reason. Use READ COMMITTED isolation (the default); under REPEATABLE READ
+    or SERIALIZABLE, the snapshot is fixed at transaction start, so
+    ``exists_fn()`` may not see objects committed by other transactions after
+    the snapshot was taken.
 
     Args:
         session: Transactional SQLAlchemy session (not AUTOCOMMIT).
