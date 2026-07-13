@@ -69,6 +69,10 @@ services:
     entrypoint: >
       bash -c "
         pgdata=\"$${PGDATA:-/var/lib/postgresql/data}\"
+        # pg18+ PGDATA is /var/lib/postgresql/<MAJOR>/docker; the <MAJOR>/ layer
+        # is created root:root 0700 (from the image or by pg_basebackup) and would
+        # block traversal by the postgres user. Pre-create the parent as postgres.
+        install -d -o postgres -g postgres -m 755 \"$$(dirname \"$$pgdata\")\"
         rm -rf \"$$pgdata\"/*
         until pg_isready -h postgres-primary -p ${PORT} -U postgres; do
           echo 'Waiting for primary to be ready...'

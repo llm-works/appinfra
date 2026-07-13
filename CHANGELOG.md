@@ -59,6 +59,9 @@ For API stability guarantees and deprecation policy, see
   `make pg.server.clean` remains the explicit destructive verb.
 - pgserver volume mounts are pg18-compatible (mount `/var/lib/postgresql`, not
   `/var/lib/postgresql/data`); older postgres versions remain supported.
+- `make pg.server.up.repl` standby starts on pg18+ images. The custom entrypoint
+  pre-creates the parent of `PGDATA` as `postgres:postgres 0755`; previously the
+  intermediate `<MAJOR>/` layer blocked traversal and the standby restart-looped.
 - `pg.server.clean` removes volumes for any `pgserver.name`, not only the default.
   The filter previously hardcoded `infra-pg` and leaked volumes for renamed consumers.
 - JSON log extras now render `sqlalchemy.engine.url.URL` via `str()` instead of
