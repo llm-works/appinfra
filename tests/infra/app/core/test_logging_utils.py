@@ -400,6 +400,7 @@ class TestEdgeCases:
 
 
 @pytest.mark.e2e
+@pytest.mark.usefixtures("clean_env")
 class TestLocationColorE2E:
     """End-to-end tests for location_color config propagation.
 
@@ -548,6 +549,7 @@ logging:
 
 
 @pytest.mark.e2e
+@pytest.mark.usefixtures("clean_env")
 class TestAppBuilderLoggingConfigE2E:
     """E2E tests for AppBuilder logging config propagation.
 

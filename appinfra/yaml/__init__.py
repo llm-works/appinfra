@@ -11,7 +11,7 @@ Public API:
     deep_merge: Deep merge two dictionaries
     ErrorContext: Context for YAML error reporting
     IncludeContext: Extended context for !include processing
-    SecretLiteralWarning: Warning for literal secrets
+    SecretStr: Masked-by-default wrapper for secret values
 """
 
 from dataclasses import dataclass, replace
@@ -33,7 +33,7 @@ from .types import (
     ErrorContext,
     IncludeContext,
     ResetValue,
-    SecretLiteralWarning,
+    SecretStr,
 )
 
 
@@ -66,7 +66,7 @@ __all__ = [
     "ResetValue",
     "ErrorContext",
     "IncludeContext",
-    "SecretLiteralWarning",
+    "SecretStr",
 ]
 
 

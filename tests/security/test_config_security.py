@@ -137,7 +137,9 @@ var_b: "${var_a}"
 @pytest.mark.security
 @pytest.mark.integration
 @pytest.mark.parametrize("payload", ENV_VAR_INJECTION)
-def test_environment_variable_injection(payload: str, secure_temp_project: Path):
+def test_environment_variable_injection(
+    payload: str, secure_temp_project: Path, clean_env
+):
     """
     Verify environment variable values are safely type-converted.
 
@@ -216,6 +218,7 @@ def test_environment_variable_type_confusion(
     expected_type: type,
     expected_value: object,
     secure_temp_project: Path,
+    clean_env,
 ):
     """
     Verify safe type conversion for environment variable values.
@@ -416,7 +419,7 @@ normal_key: "normal_value"
 # Positive test: Verify legitimate config operations work
 @pytest.mark.security
 @pytest.mark.integration
-def test_legitimate_config_operations(secure_temp_project: Path):
+def test_legitimate_config_operations(secure_temp_project: Path, clean_env):
     """
     Verify legitimate config operations are not blocked by security measures.
 

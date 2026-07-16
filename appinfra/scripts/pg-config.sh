@@ -5,30 +5,34 @@
 #
 # If config_file is empty, uses default_config_file
 # All filenames are resolved from etc_dir
+#
+# pgserver.postgres_conf is a curated whitelist of postgres knobs. Each one
+# becomes a Make var PG_<UPPER>; values flow into compose-substituted slots in
+# docker-compose.{single,repl}.yaml of the form
+# `${PG_<UPPER>:-<key>=<postgres-default>}`. Unknown keys error out.
 
 CONFIG_FILE="$1"
 CONFIG_KEY="$2"
 ETC_DIR="$3"
 DEFAULT_CONFIG_FILE="$4"
 
-# Use default if config file not specified
 if [ -z "$CONFIG_FILE" ]; then
     CONFIG_FILE="$DEFAULT_CONFIG_FILE"
 fi
 
-# Resolve full path
 FULL_PATH="$ETC_DIR/$CONFIG_FILE"
 
-# Check if file exists
+# Empty postgres_conf vars on missing file — recipes that need PG_* will fail
+# at recipe time, but parse-time completes.
 if [ ! -f "$FULL_PATH" ]; then
-    echo "PG_CONTAINER_NAME:=|PG_VERSION:=|PG_PORT:=|PG_IMAGE:=|PG_REPLICA_ENABLED:=false|PG_PORT_R:=|PG_COMMAND:=postgres"
+    echo "PG_CONTAINER_NAME:=|PG_VERSION:=|PG_PORT:=|PG_IMAGE:=|PG_REPLICA_ENABLED:=false|PG_PORT_R:=|PG_MAX_CONNECTIONS:=|PG_SHARED_PRELOAD_LIBRARIES:=|PG_WORK_MEM:=|PG_AUTOVACUUM:="
     exit 0
 fi
 
 python3 -c "
+import sys
 import yaml
 
-# SafeLoader that ignores unknown tags (e.g., !include)
 class SafeLoaderIgnoreUnknown(yaml.SafeLoader):
     pass
 SafeLoaderIgnoreUnknown.add_constructor(None, lambda loader, node: None)
@@ -40,35 +44,37 @@ replica = cfg.get('replica', {})
 replica_enabled = str(replica.get('enabled', False)).lower()
 replica_port = replica.get('port', '')
 
-# Build postgres command from config
-postgres_conf = cfg.get('postgres_conf', {})
+# Curated postgres_conf whitelist. Each entry becomes -c key=value at start.
+# Adding a new knob: one entry here + one slot in both compose YAMLs.
+SUPPORTED = {'max_connections', 'shared_preload_libraries', 'work_mem', 'autovacuum'}
 
-cmd_parts = ['postgres']
-
-# Add config params as -c key=value arguments
-# PostgreSQL quoting rules (per docs):
-# - Booleans (on/off/true/false): no quotes
-# - Numbers (int/float): no quotes
-# - Strings: single quotes required
-for key, value in postgres_conf.items():
+def render(key, value):
     if isinstance(value, bool):
-        # Boolean -> on/off (no quotes needed)
-        value = 'on' if value else 'off'
-        cmd_parts.extend(['-c', f'{key}={value}'])
-    elif isinstance(value, (int, float)):
-        # Numbers don't need quotes
-        cmd_parts.extend(['-c', f'{key}={value}'])
-    elif isinstance(value, list):
-        # Lists become comma-separated strings (single quotes)
-        value = ','.join(str(v) for v in value)
-        cmd_parts.extend(['-c', f\"{key}='{value}'\"])
-    else:
-        # String values need single quotes
-        cmd_parts.extend(['-c', f\"{key}='{value}'\"])
+        return f'{key}=' + ('on' if value else 'off')
+    if isinstance(value, list):
+        return f'{key}=' + ','.join(str(v) for v in value)
+    return f'{key}={value}'
 
-pg_command = ' '.join(cmd_parts)
+postgres_conf = cfg.get('postgres_conf', {}) or {}
+if not isinstance(postgres_conf, dict):
+    sys.stderr.write(f'pg-config: postgres_conf must be a mapping, got {type(postgres_conf).__name__}\n')
+    sys.exit(1)
+unknown = sorted(set(postgres_conf) - SUPPORTED)
+if unknown:
+    sys.stderr.write(
+        f'pg-config: pgserver.postgres_conf has unsupported key(s) {unknown}. '
+        f'Supported: {sorted(SUPPORTED)}\n'
+    )
+    sys.exit(1)
 
-# Output Make variable assignments (pipe-separated, converted to newlines by Makefile)
+# Check for null values (e.g., "max_connections:" with no value in YAML)
+for k, v in postgres_conf.items():
+    if v is None:
+        sys.stderr.write(f'pg-config: postgres_conf.{k} is null; provide a value or remove the key\n')
+        sys.exit(1)
+
+knobs = {k.upper(): render(k, postgres_conf[k]) for k in postgres_conf}
+
 parts = [
     f'PG_CONTAINER_NAME:={cfg.get(\"name\", \"\")}',
     f'PG_VERSION:={cfg.get(\"version\", \"\")}',
@@ -76,7 +82,10 @@ parts = [
     f'PG_IMAGE:={cfg.get(\"image\", \"\")}',
     f'PG_REPLICA_ENABLED:={replica_enabled}',
     f'PG_PORT_R:={replica_port}',
-    f'PG_COMMAND:={pg_command}',
+    f'PG_MAX_CONNECTIONS:={knobs.get(\"MAX_CONNECTIONS\", \"\")}',
+    f'PG_SHARED_PRELOAD_LIBRARIES:={knobs.get(\"SHARED_PRELOAD_LIBRARIES\", \"\")}',
+    f'PG_WORK_MEM:={knobs.get(\"WORK_MEM\", \"\")}',
+    f'PG_AUTOVACUUM:={knobs.get(\"AUTOVACUUM\", \"\")}',
 ]
 print('|'.join(parts))
 "

@@ -13,7 +13,7 @@ import yaml
 
 from appinfra.yaml import (
     ErrorContext,
-    SecretLiteralWarning,
+    SecretStr,
     deep_merge,
     load,
     load_file,
@@ -1153,170 +1153,201 @@ logging:
 
 
 # =============================================================================
-# Secret Tag Tests
+# SecretStr wrapper tests
 # =============================================================================
 
 
 @pytest.mark.unit
-class TestSecretTag:
-    """Test !secret tag functionality for sensitive value validation."""
+class TestSecretStr:
+    """SecretStr must mask itself in every string form and only expose via reveal()."""
 
-    def test_secret_tag_accepts_env_var_syntax(self):
-        """Test that !secret accepts proper ${VAR_NAME} syntax without warning."""
+    def test_str_returns_mask(self):
+        assert str(SecretStr("hunter2")) == "***"
+
+    def test_repr_returns_mask(self):
+        assert repr(SecretStr("hunter2")) == "SecretStr('***')"
+
+    def test_format_returns_mask(self):
+        assert f"{SecretStr('hunter2')}" == "***"
+        assert f"{SecretStr('hunter2'):>10}" == "***"
+
+    def test_reveal_returns_plaintext(self):
+        assert SecretStr("hunter2").reveal() == "hunter2"
+
+    def test_equality_compares_underlying(self):
+        assert SecretStr("a") == SecretStr("a")
+        assert SecretStr("a") != SecretStr("b")
+
+    def test_not_a_str(self):
+        # Type boundary: consumers cannot pass SecretStr where str is required
+        # without going through .reveal() first.
+        assert not isinstance(SecretStr("x"), str)
+
+    def test_unhashable(self):
+        with pytest.raises(TypeError):
+            {SecretStr("x")}
+
+    def test_rejects_non_str_value(self):
+        with pytest.raises(TypeError):
+            SecretStr(123)  # type: ignore[arg-type]
+
+    def test_rejects_secret_str_value(self):
+        # Constructor is strict: only str accepted. Boundary code that wants
+        # to accept SecretStr too must go through SecretStr.ensure().
+        with pytest.raises(TypeError):
+            SecretStr(SecretStr("x"))  # type: ignore[arg-type]
+
+    def test_ensure_none_passes_through(self):
+        assert SecretStr.ensure(None) is None
+
+    def test_ensure_str_wraps(self):
+        result = SecretStr.ensure("hunter2")
+        assert isinstance(result, SecretStr)
+        assert result.reveal() == "hunter2"
+
+    def test_ensure_secret_preserves_identity(self):
+        existing = SecretStr("hunter2")
+        assert SecretStr.ensure(existing) is existing
+
+    def test_ensure_rejects_other_types(self):
+        with pytest.raises(TypeError):
+            SecretStr.ensure(123)  # type: ignore[arg-type]
+
+
+# =============================================================================
+# Solo !secret rejection
+# =============================================================================
+
+
+@pytest.mark.unit
+class TestSecretRejection:
+    """Solo !secret is not supported — chain with !env is the only form."""
+
+    def test_solo_secret_raises(self):
         yaml_content = """
-database:
-  password: !secret ${DB_PASSWORD}
+password: !secret ${DB_PASSWORD}
 """
-        import warnings
-
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            data = load(StringIO(yaml_content))
-
-            assert data["database"]["password"] == "${DB_PASSWORD}"
-            # No SecretLiteralWarning should be emitted
-            secret_warnings = [
-                x for x in w if issubclass(x.category, SecretLiteralWarning)
-            ]
-            assert len(secret_warnings) == 0
-
-    def test_secret_tag_warns_on_literal_value(self):
-        """Test that !secret emits SecretLiteralWarning for literal values."""
-        yaml_content = """
-database:
-  password: !secret my_actual_password
-"""
-        import warnings
-
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            data = load(StringIO(yaml_content))
-
-            assert data["database"]["password"] == "my_actual_password"
-            # Should emit SecretLiteralWarning
-            secret_warnings = [
-                x for x in w if issubclass(x.category, SecretLiteralWarning)
-            ]
-            assert len(secret_warnings) == 1
-            assert "literal" in str(secret_warnings[0].message).lower()
-
-    def test_secret_tag_returns_value_regardless(self):
-        """Test that !secret returns the value whether valid or not."""
-        yaml_content = """
-valid: !secret ${API_KEY}
-invalid: !secret plaintext_secret
-"""
-        import warnings
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            data = load(StringIO(yaml_content))
-
-            assert data["valid"] == "${API_KEY}"
-            assert data["invalid"] == "plaintext_secret"
-
-    @pytest.mark.parametrize(
-        "env_var",
-        [
-            "${A}",
-            "${VAR}",
-            "${MY_VAR}",
-            "${VAR_123}",
-            "${_PRIVATE}",
-            "${_}",
-        ],
-    )
-    def test_secret_tag_various_env_var_formats(self, env_var):
-        """Test !secret accepts various valid env var formats."""
-        yaml_content = f"""
-secret: !secret {env_var}
-"""
-        import warnings
-
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            data = load(StringIO(yaml_content))
-
-            assert data["secret"] == env_var
-            secret_warnings = [
-                x for x in w if issubclass(x.category, SecretLiteralWarning)
-            ]
-            assert len(secret_warnings) == 0
-
-    @pytest.mark.parametrize(
-        "invalid_format",
-        [
-            "$VAR",  # Missing braces
-            "${123VAR}",  # Starts with number
-            "${}",  # Empty
-            "${VAR-NAME}",  # Contains hyphen
-            "VAR",  # No $ at all
-            "${VAR} extra",  # Extra content
-            "prefix ${VAR}",  # Prefix content
-        ],
-    )
-    def test_secret_tag_warns_on_invalid_formats(self, invalid_format):
-        """Test !secret warns on invalid env var formats."""
-        yaml_content = f"""
-secret: !secret "{invalid_format}"
-"""
-        import warnings
-
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            data = load(StringIO(yaml_content))
-
-            assert data["secret"] == invalid_format
-            secret_warnings = [
-                x for x in w if issubclass(x.category, SecretLiteralWarning)
-            ]
-            assert len(secret_warnings) == 1
-
-    def test_secret_tag_truncates_long_values_in_warning(self):
-        """Test that long literal values are truncated in warning message."""
-        long_value = "a" * 50
-        yaml_content = f"""
-secret: !secret {long_value}
-"""
-        import warnings
-
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
+        with pytest.raises(yaml.YAMLError, match="Solo `!secret`"):
             load(StringIO(yaml_content))
 
-            secret_warnings = [
-                x for x in w if issubclass(x.category, SecretLiteralWarning)
-            ]
-            assert len(secret_warnings) == 1
-            warning_message = str(secret_warnings[0].message)
-            # Should contain truncated value with "..."
-            assert "..." in warning_message
-            # Should NOT contain the full 50-char value
-            assert long_value not in warning_message
-
-    def test_secret_tag_multiple_secrets(self):
-        """Test multiple !secret tags in same document."""
+    def test_solo_secret_literal_also_raises(self):
         yaml_content = """
-database:
-  password: !secret ${DB_PASSWORD}
-  api_key: !secret literal_key
-  token: !secret ${AUTH_TOKEN}
+key: !secret plaintext
 """
-        import warnings
+        with pytest.raises(yaml.YAMLError, match="Solo `!secret`"):
+            load(StringIO(yaml_content))
 
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            data = load(StringIO(yaml_content))
+    def test_error_points_to_chain_syntax(self):
+        yaml_content = "k: !secret ${VAR}\n"
+        with pytest.raises(yaml.YAMLError) as exc_info:
+            load(StringIO(yaml_content))
+        assert "!env VAR !secret" in str(exc_info.value)
 
-            assert data["database"]["password"] == "${DB_PASSWORD}"
-            assert data["database"]["api_key"] == "literal_key"
-            assert data["database"]["token"] == "${AUTH_TOKEN}"
 
-            # Should have exactly one warning (for literal_key)
-            secret_warnings = [
-                x for x in w if issubclass(x.category, SecretLiteralWarning)
-            ]
-            assert len(secret_warnings) == 1
+# =============================================================================
+# !env override map + !env !secret chain
+# =============================================================================
+
+
+@pytest.mark.unit
+class TestEnvOverrides:
+    """!env must consult env_overrides before os.environ."""
+
+    def test_env_reads_override_before_ambient(self, monkeypatch):
+        monkeypatch.setenv("FOO", "from_ambient")
+        data = load(
+            StringIO("value: !env FOO\n"),
+            env_overrides={"FOO": "from_override"},
+        )
+        assert data["value"] == "from_override"
+
+    def test_env_falls_through_to_ambient_when_missing_in_overrides(self, monkeypatch):
+        monkeypatch.setenv("FOO", "from_ambient")
+        data = load(
+            StringIO("value: !env FOO\n"),
+            env_overrides={"OTHER": "x"},
+        )
+        assert data["value"] == "from_ambient"
+
+    def test_env_optional_returns_none_when_missing_everywhere(self, monkeypatch):
+        monkeypatch.delenv("MISSING_VAR", raising=False)
+        data = load(
+            StringIO("value: !env? MISSING_VAR\n"),
+            env_overrides={},
+        )
+        assert data["value"] is None
+
+    def test_env_default_applies_when_missing(self, monkeypatch):
+        monkeypatch.delenv("MISSING_VAR", raising=False)
+        data = load(
+            StringIO("value: !env MISSING_VAR:fallback\n"),
+            env_overrides={},
+        )
+        assert data["value"] == "fallback"
+
+
+@pytest.mark.unit
+class TestSecretEnvChain:
+    """!env !secret / !secret !env returns a SecretStr wrapping the resolved value."""
+
+    def test_prefix_form_returns_secret_str(self):
+        data = load(
+            StringIO("password: !secret !env DB_PASSWORD\n"),
+            env_overrides={"DB_PASSWORD": "hunter2"},
+        )
+        assert isinstance(data["password"], SecretStr)
+        assert data["password"].reveal() == "hunter2"
+
+    def test_postfix_form_returns_secret_str(self):
+        data = load(
+            StringIO("password: !env DB_PASSWORD !secret\n"),
+            env_overrides={"DB_PASSWORD": "hunter2"},
+        )
+        assert isinstance(data["password"], SecretStr)
+        assert data["password"].reveal() == "hunter2"
+
+    def test_both_orderings_equivalent(self):
+        prefix = load(
+            StringIO("k: !secret !env X\n"),
+            env_overrides={"X": "v"},
+        )
+        postfix = load(
+            StringIO("k: !env X !secret\n"),
+            env_overrides={"X": "v"},
+        )
+        assert prefix["k"] == postfix["k"]
+
+    def test_chain_masks_in_repr(self):
+        data = load(
+            StringIO("k: !env X !secret\n"),
+            env_overrides={"X": "sensitive"},
+        )
+        assert "sensitive" not in repr(data)
+        assert "sensitive" not in str(data)
+
+    def test_optional_env_secret_returns_none_when_missing(self, monkeypatch):
+        monkeypatch.delenv("MISSING", raising=False)
+        data = load(
+            StringIO("k: !env? MISSING !secret\n"),
+            env_overrides={},
+        )
+        assert data["k"] is None
+
+    def test_optional_env_secret_wraps_when_present(self):
+        data = load(
+            StringIO("k: !env? X !secret\n"),
+            env_overrides={"X": "v"},
+        )
+        assert isinstance(data["k"], SecretStr)
+        assert data["k"].reveal() == "v"
+
+    def test_missing_required_env_raises(self, monkeypatch):
+        monkeypatch.delenv("MISSING", raising=False)
+        with pytest.raises(yaml.YAMLError, match="not set"):
+            load(
+                StringIO("k: !env MISSING !secret\n"),
+                env_overrides={},
+            )
 
 
 # =============================================================================
@@ -2834,16 +2865,75 @@ config:
         assert result["config"]["options"]["cache"] is True
 
     def test_preprocessing_transforms_syntax(self):
-        """Test that !deep !include is correctly preprocessed."""
+        """Test that !deep !include is correctly preprocessed to the canonical chain form."""
         from appinfra.yaml.loader import preprocess_deep_tags
 
         content = '<<: !deep !include? "./overlay.yaml"'
         result = preprocess_deep_tags(content)
-        assert result == '<<: !deep-include? "./overlay.yaml"'
+        assert result == '<<: !chain:include?+deep "./overlay.yaml"'
 
         content2 = "<<: !deep !include './base.yaml'"
         result2 = preprocess_deep_tags(content2)
-        assert result2 == "<<: !deep-include './base.yaml'"
+        assert result2 == "<<: !chain:include+deep './base.yaml'"
+
+    def test_secretstr_in_deep_included_file_survives_merge(self, tmp_path):
+        """A SecretStr in a !deep !include? child must round-trip as SecretStr, not '***'.
+
+        Regression: flatten_mapping reconstructed the merged mapping via
+        _value_to_node, whose else branch stringified any non-primitive value.
+        str(SecretStr) is "***", so credentials from the child file were
+        silently masked before reaching consumers.
+        """
+        child = tmp_path / "deep_secret_child.yaml"
+        child.write_text(
+            "web_search:\n"
+            "  backend:\n"
+            "    config:\n"
+            "      api_key: !secret !env SERPER_API_KEY\n"
+        )
+        parent = tmp_path / "deep_secret_parent.yaml"
+        parent.write_text(
+            "web_search:\n"
+            "  backend:\n"
+            "    kind: serper\n"
+            "\n"
+            f'<<: !deep !include? "{child.name}"\n'
+        )
+
+        with open(parent) as f:
+            data = load(
+                f,
+                current_file=parent,
+                env_overrides={"SERPER_API_KEY": "hunter2"},
+            )
+
+        api_key = data["web_search"]["backend"]["config"]["api_key"]
+        assert isinstance(api_key, SecretStr)
+        assert api_key.reveal() == "hunter2"
+        # Document-side value merged around it, not overwritten
+        assert data["web_search"]["backend"]["kind"] == "serper"
+
+    def test_secretstr_in_bare_included_file_survives_merge(self, tmp_path):
+        """Companion: bare `<<: !include?` (DeepMergeDict path) must also
+        preserve SecretStr — the same _value_to_node path handles merge_base
+        and override_base.
+        """
+        child = tmp_path / "bare_secret_child.yaml"
+        child.write_text("creds:\n  token: !secret !env API_TOKEN\n")
+        parent = tmp_path / "bare_secret_parent.yaml"
+        parent.write_text(f'creds:\n  user: alice\n\n<<: !include? "{child.name}"\n')
+
+        with open(parent) as f:
+            data = load(
+                f,
+                current_file=parent,
+                env_overrides={"API_TOKEN": "s3cret"},
+            )
+
+        token = data["creds"]["token"]
+        assert isinstance(token, SecretStr)
+        assert token.reveal() == "s3cret"
+        assert data["creds"]["user"] == "alice"
 
 
 # =============================================================================
@@ -3346,3 +3436,178 @@ extracted: !include './config.yaml#level1.level2.level3'
             data = load(f, current_file=main_file)
 
         assert data["extracted"]["data"] == "root_value"
+
+
+# =============================================================================
+# Tag Chain Mechanism Tests
+# =============================================================================
+
+
+@pytest.mark.unit
+class TestTagChainPreprocessing:
+    """Tests for the generic tag chain preprocessor."""
+
+    def test_prefix_and_postfix_produce_identical_canonical_form(self):
+        """Both orderings normalize to the same synthetic !chain: tag."""
+        from appinfra.yaml.loader import preprocess_tag_chains
+
+        prefix = preprocess_tag_chains('a: !deep !include "x.yaml"')
+        postfix = preprocess_tag_chains('a: !include "x.yaml" !deep')
+        assert prefix == postfix == 'a: !chain:include+deep "x.yaml"'
+
+    def test_arbitrary_length_chain(self):
+        """Chains of 3+ tags are supported with policies sorted alphabetically."""
+        from appinfra.yaml.loader import preprocess_tag_chains
+
+        prefix = preprocess_tag_chains("a: !audit !secret !env FOO")
+        postfix = preprocess_tag_chains("a: !env FOO !secret !audit")
+        assert prefix == postfix == "a: !chain:env+audit+secret FOO"
+
+    def test_policies_sorted_for_stable_canonical_form(self):
+        """Policy order in source syntax does not affect the canonical form."""
+        from appinfra.yaml.loader import preprocess_tag_chains
+
+        a = preprocess_tag_chains("k: !audit !secret !env X")
+        b = preprocess_tag_chains("k: !secret !audit !env X")
+        assert a == b
+
+    def test_single_tag_untouched(self):
+        """A lone tag is not a chain and passes through unchanged."""
+        from appinfra.yaml.loader import preprocess_tag_chains
+
+        assert preprocess_tag_chains("a: !env FOO") == "a: !env FOO"
+        assert preprocess_tag_chains("a: !secret X") == "a: !secret X"
+
+    def test_optional_variant_preserved(self):
+        """The ? marker on !include? / !env? survives the rewrite."""
+        from appinfra.yaml.loader import preprocess_tag_chains
+
+        assert (
+            preprocess_tag_chains('a: !deep !include? "x.yaml"')
+            == 'a: !chain:include?+deep "x.yaml"'
+        )
+
+    def test_adjacent_include_lines_not_treated_as_chain(self):
+        """Document-level !include on consecutive lines must not merge into a chain.
+
+        Regression test — the chain regex must be single-line-scoped so a following
+        !include on the next line is a separate document-level tag, not a policy.
+        """
+        from appinfra.yaml.loader import preprocess_tag_chains
+
+        content = '!include "./base1.yaml"\n!include "./base2.yaml"\nname: app\n'
+        assert preprocess_tag_chains(content) == content
+
+    def test_quoted_arg_with_spaces(self):
+        """Quoted args containing whitespace are preserved intact."""
+        from appinfra.yaml.loader import preprocess_tag_chains
+
+        content = 'x: !deep !include "path with space.yaml"'
+        result = preprocess_tag_chains(content)
+        assert result == 'x: !chain:include+deep "path with space.yaml"'
+
+    def test_reapplying_preprocessor_is_idempotent(self):
+        """The synthetic !chain: tag is excluded from further matching."""
+        from appinfra.yaml.loader import preprocess_tag_chains
+
+        once = preprocess_tag_chains("a: !secret !env FOO")
+        twice = preprocess_tag_chains(once)
+        assert once == twice
+
+    def test_tag_like_patterns_inside_quoted_values_not_rewritten(self):
+        """Quoted scalar values containing tag-like patterns are left unchanged.
+
+        Regression test for CodeRabbit finding: the chain preprocessor was
+        matching tag patterns anywhere in the file, including inside quoted
+        strings where they are literal text, not YAML tags.
+        """
+        from appinfra.yaml.loader import preprocess_tag_chains
+
+        double_quoted = 'msg: "literal !deep !include x.yaml"'
+        assert preprocess_tag_chains(double_quoted) == double_quoted
+
+        single_quoted = "msg: 'literal !secret !env FOO'"
+        assert preprocess_tag_chains(single_quoted) == single_quoted
+
+    def test_quoted_values_with_tag_like_patterns_load_correctly(self):
+        """End-to-end: quoted strings with tag-like patterns load as literals."""
+        content = 'msg: "example !deep !include syntax"'
+        data = load(StringIO(content))
+        assert data["msg"] == "example !deep !include syntax"
+
+
+@pytest.mark.unit
+class TestTagChainRegistry:
+    """Tests for the composer registration and dispatch machinery."""
+
+    def test_duplicate_registration_raises(self):
+        """register_chain refuses to overwrite an existing composer."""
+        from appinfra.yaml.loader import register_chain
+
+        with pytest.raises(ValueError, match="already registered"):
+
+            @register_chain("include", "deep")
+            def _dup(loader, node):
+                return None
+
+    def test_unknown_chain_raises_with_supported_listing(self):
+        """Chains not in the registry fail at parse time with a helpful message."""
+        content = "a: !nosuch !env FOO"
+        with pytest.raises(yaml.YAMLError) as exc:
+            load(StringIO(content))
+        msg = str(exc.value)
+        assert "Unsupported tag chain" in msg
+        assert "Supported chains" in msg
+        # The one registered chain should be listed
+        assert "!include" in msg and "!deep" in msg
+
+
+@pytest.mark.integration
+class TestDeepIncludeChainSyntax:
+    """End-to-end tests for !deep !include via the chain mechanism.
+
+    !deep !include uses override semantics — the included file wins over
+    document values on conflict. Both prefix and postfix orderings share
+    the same composer, so they must produce identical results.
+    """
+
+    def _write_overlay(self, tmp_path):
+        overlay = tmp_path / "overlay.yaml"
+        overlay.write_text("db:\n  host: overlay-host\n  port: 6543\n")
+        return overlay
+
+    def test_prefix_deep_include(self, tmp_path):
+        """!deep !include (prefix form) — overlay wins, document contributes non-conflict keys."""
+        self._write_overlay(tmp_path)
+        main_content = (
+            "db:\n  host: doc-host\n  timeout: 30\n\n"
+            '<<: !deep !include "./overlay.yaml"\n'
+        )
+        data = load(StringIO(main_content), current_file=tmp_path / "main.yaml")
+        assert data["db"] == {"host": "overlay-host", "port": 6543, "timeout": 30}
+
+    def test_postfix_deep_include(self, tmp_path):
+        """!include ... !deep (postfix form) — identical semantics."""
+        self._write_overlay(tmp_path)
+        main_content = (
+            "db:\n  host: doc-host\n  timeout: 30\n\n"
+            '<<: !include "./overlay.yaml" !deep\n'
+        )
+        data = load(StringIO(main_content), current_file=tmp_path / "main.yaml")
+        assert data["db"] == {"host": "overlay-host", "port": 6543, "timeout": 30}
+
+    def test_prefix_and_postfix_yield_same_result(self, tmp_path):
+        """The two syntaxes produce byte-identical loaded output."""
+        self._write_overlay(tmp_path)
+        doc = "db:\n  host: doc-host\n  timeout: 30\n\n"
+        prefix_content = doc + '<<: !deep !include "./overlay.yaml"\n'
+        postfix_content = doc + '<<: !include "./overlay.yaml" !deep\n'
+        p = load(StringIO(prefix_content), current_file=tmp_path / "main.yaml")
+        q = load(StringIO(postfix_content), current_file=tmp_path / "main.yaml")
+        assert p == q
+
+    def test_postfix_optional_deep_include(self, tmp_path):
+        """!include? ... !deep — optional deep include, tolerates missing file."""
+        main_content = 'db:\n  host: only-me\n\n<<: !include? "./absent.yaml" !deep\n'
+        data = load(StringIO(main_content), current_file=tmp_path / "main.yaml")
+        assert data["db"] == {"host": "only-me"}

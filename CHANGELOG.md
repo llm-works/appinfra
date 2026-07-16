@@ -10,6 +10,38 @@ For API stability guarantees and deprecation policy, see
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-07-16
+
+### Added
+- `appinfra.db.pg.ensure_object` / `with_object_lock`: race-safe first-touch DDL via
+  transaction-scoped Postgres advisory lock.
+- Generic tag chain composition for YAML loader: `!policy !source ARG` or `!source ARG !policy`
+  syntax normalizes to `!chain:source+policy`. Initial chains: `!deep !include(?)`.
+- `SecretStr` wrapper in `appinfra.yaml` for masked-by-default secret values; plaintext via
+  `.reveal()`. `SecretStr.ensure(v)` coerces `str | SecretStr` to `SecretStr` at boundaries.
+- `!env VAR !secret` chain: resolves `VAR` via `env_overrides` / `os.environ`, returns `SecretStr`.
+- `!env` now consults the loader's `env_overrides` map before `os.environ`.
+
+### Changed
+- **Breaking:** Solo `!secret ${VAR}` is rejected at parse time. Use `!env VAR !secret`.
+- **Breaking:** Removed `HasMaskedStr` protocol from `appinfra.log.serialize`. Use `SecretStr`.
+- **Breaking:** Removed `SecretLiteralWarning` from `appinfra.yaml` public API (dead code).
+- **Breaking:** `pgserver.postgres_conf` is now a curated whitelist (`max_connections`,
+  `shared_preload_libraries`, `work_mem`, `autovacuum`). Unknown keys error with supported set.
+- **Breaking:** `INFRA_*` env overrides on undeclared yaml paths raise `UndeclaredConfigPathError`.
+  Declare defaults in yaml first.
+
+### Fixed
+- `INFRA_*` env overrides on declared list fields preserve list type for single-value overrides.
+- `make pg.server.up` with `postgres_conf` now works under podman-compose.
+- Replication primary now applies whitelisted `postgres_conf` entries.
+- pgserver persists `PGDATA` on a named volume; `pg.server.down` no longer destroys data.
+- pgserver volume mounts are pg18-compatible (`/var/lib/postgresql`).
+- `make pg.server.up.repl` standby starts on pg18+ (PGDATA parent now traversable).
+- `pg.server.clean` removes volumes for any `pgserver.name`, not only the default.
+- JSON log extras render opaque types (e.g., `sqlalchemy.engine.url.URL`) via `str()`.
+- `SecretStr` values survive `!deep !include` merge without coercing to plain `str`.
+
 ## [0.8.0] - 2026-06-04
 
 ### Added
@@ -682,7 +714,8 @@ as config. Affected: `ConfigValidator`, `PG.readonly`, `PG.migrate()`,
 ### Changed
 - Package renamed to `appinfra` (install and import both use `appinfra`)
 
-[Unreleased]: https://github.com/llm-works/appinfra/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/llm-works/appinfra/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/llm-works/appinfra/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/llm-works/appinfra/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/llm-works/appinfra/compare/v0.6.1...v0.7.0
 [0.6.1]: https://github.com/llm-works/appinfra/compare/v0.6.0...v0.6.1

@@ -15,8 +15,7 @@ from __future__ import annotations
 import datetime
 import os
 import re
-import warnings
-from collections.abc import Hashable
+from collections.abc import Callable, Hashable
 from io import StringIO
 from pathlib import Path
 from typing import Any
@@ -26,38 +25,155 @@ import yaml  # type: ignore[import-untyped]
 from ._include import _extract_section_data
 from ._utils import _file_exists
 from .types import (
-    ENV_VAR_PATTERN,
     DeepMergeDict,
     DeepMergeWrapper,
     ErrorContext,
     IncludeContext,
     ResetValue,
-    SecretLiteralWarning,
+    SecretStr,
 )
 
 # Pattern to match !deep *anchor and transform to !deep anchor
 # YAML anchors allow alphanumeric, underscore, and hyphen (e.g., &my-defaults)
 _DEEP_ANCHOR_PATTERN = re.compile(r"!deep\s+\*([a-zA-Z0-9_-]+)")
 
-# Pattern to match !deep !include and !deep !include? and transform to combined tags
-# Captures: (1) optional '?' marker, (2) the path (quoted or unquoted)
-_DEEP_INCLUDE_PATTERN = re.compile(
-    r"!deep\s+!include(\??)\s+"
-    r'("(?:[^"\\]|\\.)*"|\'(?:[^\'\\]|\\.)*\'|\S+)'
+# --- Tag chain preprocessing ---
+#
+# YAML doesn't allow chaining tags on the same node (!secret !env FOO is a
+# syntax error). We work around that by rewriting recognized chains to a
+# synthetic !chain:source+policy1+policy2 tag before YAML parsing, then
+# dispatching via a registry of composer functions.
+#
+# Both orderings are equivalent — the source is always the tag adjacent to
+# the scalar arg, regardless of whether it's written prefix or postfix:
+#
+#   !secret !env FOO    (prefix)  ─┐
+#                                  ├─► !chain:env+secret FOO
+#   !env FOO !secret    (postfix) ─┘
+#
+# Policies are sorted alphabetically in the canonical form for stability.
+
+# Bare tag token, excluding the synthetic !chain: tag itself so that mixed
+# ordering (partial re-preprocessing) doesn't nest.
+_TAG_TOKEN = r"!(?!chain:)[A-Za-z_][A-Za-z0-9_?-]*"
+_QUOTED_OR_BARE = r'(?:"(?:[^"\\]|\\.)*"|\'(?:[^\'\\]|\\.)*\'|\S+)'
+
+# Chains are single-line — [ \t] avoids gobbling across line boundaries where
+# a following ``!include`` on the next line is a separate document-level tag,
+# not a chain policy.
+_HWS = r"[ \t]"
+
+# Prefix form: 2+ tags, then scalar arg.
+_CHAIN_PREFIX_PATTERN = re.compile(
+    rf"({_TAG_TOKEN}(?:{_HWS}+{_TAG_TOKEN})+){_HWS}+({_QUOTED_OR_BARE})"
 )
+# Postfix form: 1 tag, scalar arg, 1+ trailing tags.
+_CHAIN_POSTFIX_PATTERN = re.compile(
+    rf"({_TAG_TOKEN}){_HWS}+({_QUOTED_OR_BARE})((?:{_HWS}+{_TAG_TOKEN})+)"
+)
+_TAG_TOKEN_RE = re.compile(_TAG_TOKEN)
+
+
+TagChainComposer = Callable[["Loader", yaml.Node], Any]
+_TAG_CHAINS: dict[tuple[str, frozenset[str]], TagChainComposer] = {}
+
+
+def register_chain(
+    source: str, *policies: str
+) -> Callable[[TagChainComposer], TagChainComposer]:
+    """Register a composer for a specific (source, policies) tag chain.
+
+    Only registered chains are legal; unknown chains raise at parse time with
+    a listing of supported chains.
+    """
+
+    def decorator(fn: TagChainComposer) -> TagChainComposer:
+        key = (source, frozenset(policies))
+        if key in _TAG_CHAINS:
+            raise ValueError(f"Tag chain already registered: {key}")
+        _TAG_CHAINS[key] = fn
+        return fn
+
+    return decorator
+
+
+def _canonical_chain_suffix(source: str, policies: list[str]) -> str:
+    """Encode (source, policies) as the canonical !chain: suffix."""
+    return "+".join([source] + sorted(policies))
+
+
+def _sub_prefix(m: re.Match) -> str:
+    """Substitution callback for prefix-form chains."""
+    tags = [t[1:] for t in _TAG_TOKEN_RE.findall(m.group(1))]
+    arg = m.group(2)
+    source, policies = tags[-1], tags[:-1]
+    return f"!chain:{_canonical_chain_suffix(source, policies)} {arg}"
+
+
+def _sub_postfix(m: re.Match) -> str:
+    """Substitution callback for postfix-form chains."""
+    source = m.group(1)[1:]
+    arg = m.group(2)
+    policies = [t[1:] for t in _TAG_TOKEN_RE.findall(m.group(3))]
+    return f"!chain:{_canonical_chain_suffix(source, policies)} {arg}"
+
+
+# Pattern to detect a YAML value that starts with a quote (scalar value is quoted).
+# Matches: colon, optional space, then opening quote. The entire value is literal.
+_QUOTED_VALUE_LINE = re.compile(r'^([^:]*:[ \t]*)(["\'])(.*)$')
+
+
+def _rewrite_line(line: str) -> str:
+    """Rewrite tag chains in a single line, protecting fully-quoted values."""
+    m = _QUOTED_VALUE_LINE.match(line)
+    if m:
+        prefix, quote, rest = m.groups()
+        close_idx = _find_closing_quote(rest, quote)
+        if close_idx is not None:
+            return line
+    line = _CHAIN_PREFIX_PATTERN.sub(_sub_prefix, line)
+    line = _CHAIN_POSTFIX_PATTERN.sub(_sub_postfix, line)
+    return line
+
+
+def _find_closing_quote(s: str, quote: str) -> int | None:
+    """Find the index of the closing quote, handling escapes."""
+    i = 0
+    while i < len(s):
+        if s[i] == "\\":
+            i += 2
+        elif s[i] == quote:
+            return i
+        else:
+            i += 1
+    return None
+
+
+def preprocess_tag_chains(content: str) -> str:
+    """Rewrite prefix- and postfix-form tag chains to canonical !chain: form.
+
+    Prefix runs first so that ``!P !SOURCE ARG`` isn't mis-parsed by the
+    postfix regex when adjacent to unrelated content. The ``!chain:`` synthetic
+    tag is excluded from ``_TAG_TOKEN``, so a second pass over already-rewritten
+    input is a no-op.
+
+    Lines where the YAML value starts with a quote are protected — the entire
+    scalar is literal, so any tag-like patterns inside are not rewritten.
+    """
+    lines = content.split("\n")
+    return "\n".join(_rewrite_line(line) for line in lines)
 
 
 def preprocess_deep_tags(content: str) -> str:
     """
-    Preprocess !deep syntax to valid YAML.
+    Preprocess !deep syntax and tag chains to valid YAML.
 
     Transforms:
     - !deep *anchor -> !deep anchor  (tag before alias not valid YAML)
-    - !deep !include "path" -> !deep-include "path"  (chained tags not valid YAML)
-    - !deep !include? "path" -> !deep-include? "path"
+    - Tag chains (!P !SOURCE ARG or !SOURCE ARG !P) -> !chain:source+policies ARG
     """
     content = _DEEP_ANCHOR_PATTERN.sub(r"!deep \1", content)
-    content = _DEEP_INCLUDE_PATTERN.sub(r"!deep-include\1 \2", content)
+    content = preprocess_tag_chains(content)
     return content
 
 
@@ -133,6 +249,12 @@ class Loader(yaml.SafeLoader):
             int, dict[str, Path | None]
         ] = {}  # Temp storage for include source maps
         self._anchor_nodes: dict[str, yaml.Node] = {}  # Track anchors for !deep lookup
+        # Intern table for Python values whose str() is not a round-trippable
+        # form (SecretStr masks to "***"). _value_to_node parks the object here
+        # under a token and emits a !__literal__ ScalarNode; literal_constructor
+        # resolves the token back to the original instance.
+        self._literal_values: dict[str, Any] = {}
+        self._literal_node_ids: set[int] = set()
 
     # Note: PyYAML's type stubs incorrectly define anchor as dict[Any, Node],
     # but at runtime it's str | None. We override with correct types.
@@ -632,45 +754,44 @@ class Loader(yaml.SafeLoader):
             )
         return DeepMergeWrapper(data, override=True)
 
-    def deep_include_constructor(self, node: Any) -> DeepMergeWrapper:
-        """Construct from !deep-include tag (preprocessed from !deep !include)."""
-        return self._construct_deep_include(node, optional=False)
+    def chain_constructor(self, tag_suffix: str, node: Any) -> Any:
+        """Dispatch a !chain: tag to the composer registered for its (source, policies).
 
-    def deep_include_optional_constructor(self, node: Any) -> DeepMergeWrapper:
-        """Construct from !deep-include? tag (preprocessed from !deep !include?)."""
-        return self._construct_deep_include(node, optional=True)
+        The ``tag_suffix`` is ``source+policy1+policy2...`` with policies sorted
+        alphabetically, matching the canonical form emitted by preprocessing.
+        """
+        parts = tag_suffix.split("+")
+        source, policies = parts[0], frozenset(parts[1:])
+        composer = _TAG_CHAINS.get((source, policies))
+        if composer is None:
+            ctx = self._create_error_context(node)
+            supported = sorted(
+                "!" + s + "".join(f" !{p}" for p in sorted(ps)) for s, ps in _TAG_CHAINS
+            )
+            raise yaml.YAMLError(
+                f"Unsupported tag chain: source=!{source}, "
+                f"policies={{{', '.join(f'!{p}' for p in sorted(policies))}}} "
+                f"({ctx.format_location()}). "
+                f"Supported chains: {supported}"
+            )
+        return composer(self, node)
 
     def secret_constructor(self, node: Any) -> str:
         """
-        Construct value from !secret tag with validation.
+        Reject solo ``!secret`` — always raises.
 
-        Validates that secret values use environment variable syntax ${VAR_NAME}.
-        Emits SecurityWarning if a literal value is detected.
-
-        Args:
-            node: YAML node containing the secret value
-
-        Returns:
-            The secret value string (env var reference or literal)
-
-        Example:
-            password: !secret ${DB_PASSWORD}    # Valid - env var syntax
-            api_key: !secret my_actual_key      # Warning - literal value
+        ``!secret`` only carries meaning inside a chain: ``!env VAR !secret``
+        (or the reversed ``!secret !env VAR``) resolves the variable and
+        returns a ``SecretStr`` that stays masked in logs. Solo ``!secret X``
+        would silently return a plain ``str`` that leaks unmasked, so it's
+        rejected at parse time.
         """
-        value: str = self.construct_scalar(node)
-
-        if not ENV_VAR_PATTERN.match(value):
-            ctx = self._create_error_context(node)
-            # Truncate for security - don't log full secret in warning
-            display_value = value[:20] + "..." if len(value) > 20 else value
-            warnings.warn(
-                f"Secret value appears to be a literal instead of env var reference "
-                f"({ctx.format_location()}). Use ${{VAR_NAME}} syntax. Found: {display_value}",
-                SecretLiteralWarning,
-                stacklevel=6,  # Point to YAML load call site
-            )
-
-        return value
+        ctx = self._create_error_context(node)
+        raise yaml.YAMLError(
+            f"Solo `!secret` is not supported ({ctx.format_location()}). "
+            "Use `!env VAR !secret` (or `!secret !env VAR`) to resolve VAR "
+            "and wrap the result in a SecretStr."
+        )
 
     def path_constructor(self, node: Any) -> str:
         """
@@ -1132,11 +1253,23 @@ class Loader(yaml.SafeLoader):
             # Shallow merge: later values override
             target.update(merge_value)
 
+    def _lookup_env(self, name: str) -> str | None:
+        """Resolve ``name`` via ``env_overrides`` first, then ``os.environ``.
+
+        The overrides map is checked before the process environment so callers
+        that construct a ``Loader`` with an explicit ``env_overrides={...}``
+        get deterministic values regardless of ambient env.
+        """
+        if self.env_overrides is not None and name in self.env_overrides:
+            return self.env_overrides[name]
+        return os.environ.get(name)
+
     def _construct_env(self, node: Any, optional: bool = False) -> str | None:
         """
         Core logic for !env and !env? constructors.
 
         Resolves environment variable references with optional default values.
+        Consults ``self.env_overrides`` before ``os.environ``.
 
         Args:
             node: YAML node containing the env var spec
@@ -1157,9 +1290,10 @@ class Loader(yaml.SafeLoader):
                 raise yaml.YAMLError(
                     f"Empty environment variable name ({ctx.format_location()})"
                 )
-            return os.environ.get(var_name, default)
+            resolved = self._lookup_env(var_name)
+            return resolved if resolved is not None else default
 
-        result = os.environ.get(value)
+        result = self._lookup_env(value)
         if result is None and not optional:
             ctx = self._create_error_context(node)
             raise yaml.YAMLError(
@@ -1241,18 +1375,73 @@ class Loader(yaml.SafeLoader):
             return yaml.ScalarNode(tag="tag:yaml.org,2002:float", value=str(value))
         elif value is None:
             return yaml.ScalarNode(tag="tag:yaml.org,2002:null", value="null")
+        elif isinstance(value, SecretStr):
+            # Intern SecretStr (str() masks to "***") and emit !__literal__ placeholder.
+            token = f"lit-{len(self._literal_values)}"
+            self._literal_values[token] = value
+            node = yaml.ScalarNode(tag="!__literal__", value=token)
+            self._literal_node_ids.add(id(node))
+            return node
         else:
             return yaml.ScalarNode(tag="tag:yaml.org,2002:str", value=str(value))
+
+    def literal_constructor(self, node: Any) -> Any:
+        """
+        Resolve a ``!__literal__`` placeholder back to the interned Python value.
+
+        Placeholders are emitted by ``_value_to_node`` for Python objects whose
+        ``str()`` is not a lossless representation (SecretStr today). The tag
+        is internal — it is never written by users and never leaves the loader.
+        """
+        if id(node) not in self._literal_node_ids:
+            ctx = self._create_error_context(node)
+            raise yaml.YAMLError(
+                f"!__literal__ is an internal tag and should not be written "
+                f"directly ({ctx.format_location()})"
+            )
+        token: str = self.construct_scalar(node)
+        return self._literal_values[token]
 
 
 # Register tag constructors with the Loader class
 Loader.add_constructor("!include", Loader.include_constructor)
 Loader.add_constructor("!include?", Loader.include_optional_constructor)
-Loader.add_constructor("!deep-include", Loader.deep_include_constructor)
-Loader.add_constructor("!deep-include?", Loader.deep_include_optional_constructor)
 Loader.add_constructor("!secret", Loader.secret_constructor)
 Loader.add_constructor("!path", Loader.path_constructor)
 Loader.add_constructor("!reset", Loader.reset_constructor)
 Loader.add_constructor("!deep", Loader.deep_constructor)
 Loader.add_constructor("!env", Loader.env_constructor)
 Loader.add_constructor("!env?", Loader.env_optional_constructor)
+Loader.add_constructor("!__literal__", Loader.literal_constructor)
+Loader.add_multi_constructor("!chain:", Loader.chain_constructor)
+
+
+# Chain composers — the registry that declares which tag chains are legal.
+# Adding a new chain is a single decorator registration here.
+
+
+@register_chain("include", "deep")
+def _compose_include_deep(loader: Loader, node: yaml.Node) -> DeepMergeWrapper:
+    """!deep !include "x.yaml" or !include "x.yaml" !deep — deep-merged include."""
+    return loader._construct_deep_include(node, optional=False)
+
+
+@register_chain("include?", "deep")
+def _compose_include_optional_deep(loader: Loader, node: yaml.Node) -> DeepMergeWrapper:
+    """!deep !include? "x.yaml" or !include? "x.yaml" !deep — optional deep include."""
+    return loader._construct_deep_include(node, optional=True)
+
+
+@register_chain("env", "secret")
+def _compose_env_secret(loader: Loader, node: yaml.Node) -> SecretStr:
+    """!secret !env VAR or !env VAR !secret — resolve VAR, wrap masked."""
+    value = loader._construct_env(node, optional=False)
+    assert value is not None  # non-optional path raises otherwise
+    return SecretStr(value)
+
+
+@register_chain("env?", "secret")
+def _compose_env_optional_secret(loader: Loader, node: yaml.Node) -> SecretStr | None:
+    """!secret !env? VAR or !env? VAR !secret — resolve VAR, wrap masked, None if missing."""
+    value = loader._construct_env(node, optional=True)
+    return SecretStr(value) if value is not None else None

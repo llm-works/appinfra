@@ -107,7 +107,7 @@ malicious_include: !include {malicious_yaml}
 @pytest.mark.security
 @pytest.mark.e2e
 def test_env_override_to_command_injection_chain(
-    secure_temp_project: Path, monkeypatch
+    secure_temp_project: Path, monkeypatch, clean_env
 ):
     """
     Verify validation prevents env var override -> tool registration -> command injection.

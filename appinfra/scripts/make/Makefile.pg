@@ -52,7 +52,7 @@ define _pg_newline
 
 
 endef
-# Extract all PG config values in one call (sets PG_CONTAINER_NAME, PG_VERSION, PG_PORT, PG_IMAGE, PG_REPLICA_ENABLED, PG_PORT_R, PG_COMMAND)
+# Extract all PG config values in one call (sets PG_CONTAINER_NAME, PG_VERSION, PG_PORT, PG_IMAGE, PG_REPLICA_ENABLED, PG_PORT_R, PG_MAX_CONNECTIONS, PG_SHARED_PRELOAD_LIBRARIES, PG_WORK_MEM, PG_AUTOVACUUM)
 # pg-config.sh outputs pipe-separated values; $(subst) converts pipes to newlines for $(eval)
 # Args: config_file, config_key, etc_dir, default_config_file
 # Gated on PyYAML availability so `make setup` can run from a fresh venv (see Makefile.config).
@@ -89,10 +89,14 @@ endif
 # ${IMAGE:?} produces a clean "IMAGE: required variable not set" error.
 PG_RESOLVED_IMAGE := $(if $(PG_IMAGE),$(PG_IMAGE),$(if $(PG_VERSION),docker.io/postgres:$(PG_VERSION)))
 
+# Curated postgres_conf knobs; each fills a slot in the compose YAMLs. Empty
+# values let the YAML default to postgres's built-in (see :- in each slot).
+PG_CONF_ENV := PG_MAX_CONNECTIONS='$(PG_MAX_CONNECTIONS)' PG_SHARED_PRELOAD_LIBRARIES='$(PG_SHARED_PRELOAD_LIBRARIES)' PG_WORK_MEM='$(PG_WORK_MEM)' PG_AUTOVACUUM='$(PG_AUTOVACUUM)'
+
 # Compose commands (runtime selected by INFRA_COMPOSE_CMD / INFRA_CONTAINER_CMD)
-PG_COMPOSE_CMD_SINGLE := NAME=$(PG_CONTAINER_NAME) PORT=$(PG_PORT) IMAGE=$(PG_RESOLVED_IMAGE) COMMAND='$(PG_COMMAND)' $(INFRA_COMPOSE_CMD) -p $(PG_CONTAINER_NAME) -f $(PG_COMPOSE_YAML_SINGLE)
+PG_COMPOSE_CMD_SINGLE := NAME=$(PG_CONTAINER_NAME) PORT=$(PG_PORT) IMAGE=$(PG_RESOLVED_IMAGE) $(PG_CONF_ENV) $(INFRA_COMPOSE_CMD) -p $(PG_CONTAINER_NAME) -f $(PG_COMPOSE_YAML_SINGLE)
 ifeq ($(PG_REPLICA_ENABLED),true)
-PG_COMPOSE_CMD_REPL := NAME=$(PG_CONTAINER_NAME) PORT=$(PG_PORT) PORT_R=$(PG_PORT_R) IMAGE=$(PG_RESOLVED_IMAGE) COMMAND='$(PG_COMMAND)' $(INFRA_COMPOSE_CMD) -p $(PG_CONTAINER_NAME) -f $(PG_COMPOSE_YAML_REPL)
+PG_COMPOSE_CMD_REPL := NAME=$(PG_CONTAINER_NAME) PORT=$(PG_PORT) PORT_R=$(PG_PORT_R) IMAGE=$(PG_RESOLVED_IMAGE) $(PG_CONF_ENV) $(INFRA_COMPOSE_CMD) -p $(PG_CONTAINER_NAME) -f $(PG_COMPOSE_YAML_REPL)
 endif
 
 ##@ Postgres
@@ -200,7 +204,7 @@ pg.server.clean.internal:: # Internal: cleanup without confirmation (used by cle
 	@$(INFRA_CONTAINER_CMD) ps -a --filter "name=$(PG_CONTAINER_NAME)" --format "{{.Names}}" | xargs -r $(INFRA_CONTAINER_CMD) stop 2>/dev/null || true
 	@$(INFRA_CONTAINER_CMD) ps -a --filter "name=$(PG_CONTAINER_NAME)" --format "{{.Names}}" | xargs -r $(INFRA_CONTAINER_CMD) rm 2>/dev/null || true
 	@echo "Removing PostgreSQL volumes..."
-	@$(INFRA_CONTAINER_CMD) volume ls --filter "name=infra-pg" --format "{{.Name}}" | xargs -r $(INFRA_CONTAINER_CMD) volume rm 2>/dev/null || true
+	@$(INFRA_CONTAINER_CMD) volume ls --filter "name=$(PG_CONTAINER_NAME)" --format "{{.Name}}" | xargs -r $(INFRA_CONTAINER_CMD) volume rm 2>/dev/null || true
 	@echo "Removing PostgreSQL networks..."
 	@$(INFRA_CONTAINER_CMD) network ls --filter "name=$(PG_CONTAINER_NAME)" --format "{{.Name}}" | xargs -r $(INFRA_CONTAINER_CMD) network rm 2>/dev/null || true
 	@echo "Removing PostgreSQL images (force)..."
