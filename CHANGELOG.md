@@ -10,62 +10,37 @@ For API stability guarantees and deprecation policy, see
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-07-16
+
 ### Added
 - `appinfra.db.pg.ensure_object` / `with_object_lock`: race-safe first-touch DDL via
-  transaction-scoped Postgres advisory lock. Companion `table_exists` / `index_exists`
-  filter by `pg_namespace.nspname` so `search_path`-per-statement callers don't hit the
-  `pg_table_is_visible` false-negative path.
+  transaction-scoped Postgres advisory lock.
 - Generic tag chain composition for YAML loader: `!policy !source ARG` or `!source ARG !policy`
-  syntax normalizes to a canonical `!chain:source+policy` form with registry-gated dispatch.
-  Initial chains: `!deep !include` and `!deep !include?` (backward-compatible).
-- `SecretStr` wrapper in `appinfra.yaml` for masked-by-default secret values. Not a `str`
-  subclass — `str()`, `repr()`, and `format()` all return `'***'`; plaintext access requires
-  an explicit `.reveal()` call.
-- `!env VAR !secret` (and its reversal `!secret !env VAR`) chain: resolves `VAR` through
-  `env_overrides` then `os.environ` and returns a `SecretStr`. Optional variant with `!env?`.
-- `!env` now consults the loader's `env_overrides` map before falling back to `os.environ`.
+  syntax normalizes to `!chain:source+policy`. Initial chains: `!deep !include(?)`.
+- `SecretStr` wrapper in `appinfra.yaml` for masked-by-default secret values; plaintext via
+  `.reveal()`. `SecretStr.ensure(v)` coerces `str | SecretStr` to `SecretStr` at boundaries.
+- `!env VAR !secret` chain: resolves `VAR` via `env_overrides` / `os.environ`, returns `SecretStr`.
+- `!env` now consults the loader's `env_overrides` map before `os.environ`.
 
 ### Changed
-- **Breaking:** Solo `!secret ${VAR}` is rejected at parse time. Use `!env VAR !secret`
-  which resolves the variable and returns a `SecretStr`. The old form returned a plain
-  string that logged unmasked.
-- **Breaking:** Removed `HasMaskedStr` protocol and its `__masked_str__` opt-in from
-  `appinfra.log.serialize`. Types wanting masked logging should use `SecretStr` (or
-  override `__str__` directly).
-- **Breaking:** Removed `SecretLiteralWarning` from `appinfra.yaml` public API (dead
-  code — solo `!secret` no longer reaches a validation path).
+- **Breaking:** Solo `!secret ${VAR}` is rejected at parse time. Use `!env VAR !secret`.
+- **Breaking:** Removed `HasMaskedStr` protocol from `appinfra.log.serialize`. Use `SecretStr`.
+- **Breaking:** Removed `SecretLiteralWarning` from `appinfra.yaml` public API (dead code).
 - **Breaking:** `pgserver.postgres_conf` is now a curated whitelist (`max_connections`,
-  `shared_preload_libraries`, `work_mem`, `autovacuum`) rather than an open-ended dict.
-  Unknown keys produce an error listing the supported set. The compose YAMLs use a
-  static argv list with `${PG_<KEY>:-<key>=<default>}` slots, sidestepping the
-  Compose string-vs-list `command:` ambiguity between docker-compose and podman-compose.
-- **Breaking:** `INFRA_*` env overrides on undeclared yaml paths now raise
-  `UndeclaredConfigPathError` instead of silently creating fields. Declare a default
-  in yaml first (`field: ''` for scalar, `field: []` for list). Shell-script and
-  Makefile env vars are registered in `APPINFRA_TOOLING_ENV_VARS` and skipped.
+  `shared_preload_libraries`, `work_mem`, `autovacuum`). Unknown keys error with supported set.
+- **Breaking:** `INFRA_*` env overrides on undeclared yaml paths raise `UndeclaredConfigPathError`.
+  Declare defaults in yaml first.
 
 ### Fixed
-- `INFRA_*` env overrides on declared list fields preserve list type for single-value
-  overrides (previously a value with no comma became a string, breaking list-typed
-  consumers). Null clears the field; comma-separated overrides unchanged.
-- `make pg.server.up` with non-empty `pgserver.postgres_conf` now works under both
-  docker-compose and podman-compose. The previous form (string `command:` with
-  `${COMMAND}` substitution) failed under podman-compose because it does not shlex-split
-  string-form commands per the Compose spec.
-- Replication primary now applies the whitelisted `postgres_conf` entries. Previously its
-  hardcoded command list ignored user-supplied settings entirely.
-- pgserver now persists `PGDATA` on a named volume in both single and replication modes;
-  `make pg.server.down` no longer destroys database contents.
-  `make pg.server.clean` remains the explicit destructive verb.
-- pgserver volume mounts are pg18-compatible (mount `/var/lib/postgresql`, not
-  `/var/lib/postgresql/data`); older postgres versions remain supported.
-- `make pg.server.up.repl` standby starts on pg18+ images. The custom entrypoint
-  pre-creates the parent of `PGDATA` as `postgres:postgres 0755`; previously the
-  intermediate `<MAJOR>/` layer blocked traversal and the standby restart-looped.
+- `INFRA_*` env overrides on declared list fields preserve list type for single-value overrides.
+- `make pg.server.up` with `postgres_conf` now works under podman-compose.
+- Replication primary now applies whitelisted `postgres_conf` entries.
+- pgserver persists `PGDATA` on a named volume; `pg.server.down` no longer destroys data.
+- pgserver volume mounts are pg18-compatible (`/var/lib/postgresql`).
+- `make pg.server.up.repl` standby starts on pg18+ (PGDATA parent now traversable).
 - `pg.server.clean` removes volumes for any `pgserver.name`, not only the default.
-  The filter previously hardcoded `infra-pg` and leaked volumes for renamed consumers.
-- JSON log extras now render `sqlalchemy.engine.url.URL` via `str()` instead of
-  destructuring it as a positional list.
+- JSON log extras render opaque types (e.g., `sqlalchemy.engine.url.URL`) via `str()`.
+- `SecretStr` values survive `!deep !include` merge without coercing to plain `str`.
 
 ## [0.8.0] - 2026-06-04
 
@@ -739,7 +714,8 @@ as config. Affected: `ConfigValidator`, `PG.readonly`, `PG.migrate()`,
 ### Changed
 - Package renamed to `appinfra` (install and import both use `appinfra`)
 
-[Unreleased]: https://github.com/llm-works/appinfra/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/llm-works/appinfra/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/llm-works/appinfra/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/llm-works/appinfra/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/llm-works/appinfra/compare/v0.6.1...v0.7.0
 [0.6.1]: https://github.com/llm-works/appinfra/compare/v0.6.0...v0.6.1
