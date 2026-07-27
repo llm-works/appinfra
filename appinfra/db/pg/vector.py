@@ -26,7 +26,12 @@ Example:
         ))
 """
 
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
+
+__all__ = ["Vector", "enable_pgvector", "create_vector_index"]
+
+if TYPE_CHECKING:
+    from pgvector.sqlalchemy import Vector as Vector
 
 
 def __getattr__(name: str) -> object:
@@ -35,10 +40,12 @@ def __getattr__(name: str) -> object:
     installed, matching the previous eager-import fallback."""
     if name == "Vector":
         try:
-            from pgvector.sqlalchemy import Vector as _Vector
+            from pgvector.sqlalchemy import Vector
         except ImportError:
+            globals()["Vector"] = None
             return None
-        return _Vector
+        globals()["Vector"] = Vector
+        return Vector
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 

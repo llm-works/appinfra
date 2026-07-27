@@ -27,5 +27,6 @@ def __getattr__(name: str) -> object:
     if name == "Vector":
         from .vector import Vector
 
+        globals()["Vector"] = Vector
         return Vector
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
