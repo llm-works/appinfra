@@ -30,16 +30,18 @@ import os
 import sys
 import pytest
 
+
 @pytest.mark.expected_skip
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows-only test")
 def test_windows_registry():
     """Test Windows registry access."""
     ...
 
+
 @pytest.mark.expected_skip
 @pytest.mark.skipif(
     os.environ.get("PYTEST_XDIST_WORKER") is not None,
-    reason="Only runs on master process"
+    reason="Only runs on master process",
 )
 def test_cleanup_at_session_start(pg_session):
     """Test that runs only on master, not xdist workers."""

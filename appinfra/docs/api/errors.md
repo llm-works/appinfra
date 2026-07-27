@@ -77,8 +77,7 @@ except DatabaseError as e:
 from appinfra.errors import ValidationError
 
 raise ValidationError(
-    "Invalid configuration",
-    context={"field": "database.port", "value": "invalid"}
+    "Invalid configuration", context={"field": "database.port", "value": "invalid"}
 )
 ```
 
@@ -91,8 +90,7 @@ try:
     connect_to_database()
 except Exception as e:
     raise DatabaseError(
-        f"Failed to connect: {e}",
-        context={"original_error": str(e)}
+        f"Failed to connect: {e}", context={"original_error": str(e)}
     ) from e
 ```
 

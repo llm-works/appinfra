@@ -15,7 +15,7 @@ class Config(DotDict):
         fname: str,
         enable_env_overrides: bool = True,
         env_prefix: str = "INFRA_",
-        merge_strategy: str = "replace"
+        merge_strategy: str = "replace",
     ): ...
 
     def reload(self) -> Config: ...
@@ -172,7 +172,7 @@ class ConfigWatcher:
         self,
         config_file: str,
         debounce_ms: int = 500,
-        on_change: Callable[[dict], None] | None = None
+        on_change: Callable[[dict], None] | None = None,
     ) -> ConfigWatcher: ...
 
     def start(self) -> None: ...
@@ -217,13 +217,16 @@ Register callbacks for specific config sections:
 watcher = ConfigWatcher(lg=logger, etc_dir="./etc")
 watcher.configure("config.yaml")
 
+
 def on_features_changed(features_config):
     logger.info("Features updated")
     apply_feature_flags(features_config)
 
+
 def on_plugins_changed(plugins_config):
     logger.info("Plugins updated")
     reload_plugins(plugins_config)
+
 
 watcher.add_section_callback("features", on_features_changed)
 watcher.add_section_callback("proxy.plugins", on_plugins_changed)
@@ -286,22 +289,22 @@ pip install appinfra[validation]
 
 ```python
 from appinfra.config import (
-    get_project_root,      # Find project root (contains etc/)
-    get_etc_dir,           # Get etc directory path (project root only)
-    resolve_etc_dir,       # Resolve etc dir with four-tier fallback
+    get_project_root,  # Find project root (contains etc/)
+    get_etc_dir,  # Get etc directory path (project root only)
+    resolve_etc_dir,  # Resolve etc dir with four-tier fallback
     get_config_file_path,  # Get path to config file
-    get_default_config,    # Lazy-load default config
+    get_default_config,  # Lazy-load default config
 )
 
 # Get paths
-root = get_project_root()           # /path/to/project
-etc = get_etc_dir()                 # /path/to/project/etc
+root = get_project_root()  # /path/to/project
+etc = get_etc_dir()  # /path/to/project/etc
 config_path = get_config_file_path()  # /path/to/project/etc/infra.yaml
 config_path = get_config_file_path("app.yaml")  # /path/to/project/etc/app.yaml
 
 # Resolve etc dir the way the framework does (custom path → ./etc → project root → package etc)
-etc = resolve_etc_dir()             # auto-detect
-etc = resolve_etc_dir("/srv/etc")   # explicit, validated strictly
+etc = resolve_etc_dir()  # auto-detect
+etc = resolve_etc_dir("/srv/etc")  # explicit, validated strictly
 
 # Lazy-load default config (for scripts/examples)
 config = get_default_config()
@@ -352,10 +355,10 @@ using `with_config_file()`.
 
 ```python
 from appinfra.config import (
-    PROJECT_ROOT,          # Resolved project root or None
-    ETC_DIR,               # Resolved etc dir or None
-    DEFAULT_CONFIG_FILE,   # Resolved default config path or None
-    MAX_CONFIG_SIZE_BYTES, # Maximum config file size (security limit)
+    PROJECT_ROOT,  # Resolved project root or None
+    ETC_DIR,  # Resolved etc dir or None
+    DEFAULT_CONFIG_FILE,  # Resolved default config path or None
+    MAX_CONFIG_SIZE_BYTES,  # Maximum config file size (security limit)
 )
 ```
 
@@ -367,9 +370,8 @@ from appinfra.app import AppBuilder
 app = (
     AppBuilder("myapp")
     .with_config_file("config.yaml")  # Resolved from --etc-dir
-    .logging
-        .with_hot_reload(True)        # Enable config hot-reload for logging
-        .done()
+    .logging.with_hot_reload(True)  # Enable config hot-reload for logging
+    .done()
     .build()
 )
 ```

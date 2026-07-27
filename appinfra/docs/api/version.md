@@ -49,22 +49,20 @@ from appinfra.app.builder import AppBuilder
 
 app = (
     AppBuilder("myapp")
-    .version
-        .with_semver("1.0.0")
-        .with_build_info()           # Include commit from _build_info.py
-        .with_package("mylib")       # Track dependency
-        .done()                      # Startup logging enabled by default
+    .version.with_semver("1.0.0")
+    .with_build_info()  # Include commit from _build_info.py
+    .with_package("mylib")  # Track dependency
+    .done()  # Startup logging enabled by default
     .build()
 )
 
 # To disable startup logging:
 app = (
     AppBuilder("myapp")
-    .version
-        .with_semver("1.0.0")
-        .with_build_info()
-        .without_startup_log()       # Disable version logging at startup
-        .done()
+    .version.with_semver("1.0.0")
+    .with_build_info()
+    .without_startup_log()  # Disable version logging at startup
+    .done()
     .build()
 )
 ```
@@ -139,12 +137,12 @@ Dataclass containing version information for a package.
 ```python
 @dataclass
 class PackageVersionInfo:
-    name: str                    # Package name
-    version: str                 # Semantic version (e.g., "1.0.0")
-    commit: str | None           # Short commit hash (e.g., "abc123f")
-    commit_full: str | None      # Full commit hash
-    source_url: str | None       # Git URL if available
-    source_type: str             # "build-info" | "pip-git" | "editable-git" | "pip"
+    name: str  # Package name
+    version: str  # Semantic version (e.g., "1.0.0")
+    commit: str | None  # Short commit hash (e.g., "abc123f")
+    commit_full: str | None  # Full commit hash
+    source_url: str | None  # Git URL if available
+    source_type: str  # "build-info" | "pip-git" | "editable-git" | "pip"
 ```
 
 ### BuildInfo
@@ -154,11 +152,11 @@ Dataclass for build-time information.
 ```python
 @dataclass
 class BuildInfo:
-    commit: str | None           # Short commit hash
-    commit_full: str | None      # Full commit hash
-    message: str | None          # Commit message
-    time: str | None             # Build timestamp (ISO 8601)
-    modified: bool | None        # True if working directory was dirty
+    commit: str | None  # Short commit hash
+    commit_full: str | None  # Full commit hash
+    message: str | None  # Commit message
+    time: str | None  # Build timestamp (ISO 8601)
+    modified: bool | None  # True if working directory was dirty
 ```
 
 ## Downstream Project Setup

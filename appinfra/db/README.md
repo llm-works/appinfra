@@ -100,13 +100,13 @@ config = {
             "max_overflow": 10,
             "pool_timeout": 30,
             "pool_recycle": 3600,
-            "pool_pre_ping": True
+            "pool_pre_ping": True,
         },
         "readonly": {
             "url": "postgresql://user:pass@localhost/db",
             "readonly": True,
-            "pool_size": 3
-        }
+            "pool_size": 3,
+        },
     }
 }
 ```
@@ -155,11 +155,7 @@ config = LogConfig.from_params("info")
 logger = LoggerFactory.create_root(config)
 
 # Database configuration
-db_config = {
-    "dbs": {
-        "primary": {"url": "postgresql://localhost/mydb"}
-    }
-}
+db_config = {"dbs": {"primary": {"url": "postgresql://localhost/mydb"}}}
 
 # Initialize manager
 manager = Manager(logger, db_config)
@@ -178,15 +174,12 @@ conn.close()
 # Setup multiple databases
 config = {
     "dbs": {
-        "primary": {
-            "url": "postgresql://localhost/primary",
-            "pool_size": 10
-        },
+        "primary": {"url": "postgresql://localhost/primary", "pool_size": 10},
         "readonly": {
             "url": "postgresql://localhost/readonly",
             "readonly": True,
-            "pool_size": 5
-        }
+            "pool_size": 5,
+        },
     }
 }
 
@@ -282,11 +275,17 @@ class MySQL(Interface):
     def __init__(self, lg, cfg, query_lg_level=None):
         # Implementation
         pass
-    
+
     # Implement all abstract methods
-    def connect(self): pass
-    def session(self): pass
-    def migrate(self): pass
+    def connect(self):
+        pass
+
+    def session(self):
+        pass
+
+    def migrate(self):
+        pass
+
     # ... etc
 ```
 

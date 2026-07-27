@@ -37,10 +37,9 @@ from appinfra.app.builder import AppBuilder
 app = (
     AppBuilder("my-service")
     .with_config_file("config.yaml")
-    .logging
-        .with_level("info")
-        .with_hot_reload(True)  # Enable hot-reload using config path
-        .done()
+    .logging.with_level("info")
+    .with_hot_reload(True)  # Enable hot-reload using config path
+    .done()
     .build()
 )
 ```
@@ -91,9 +90,8 @@ logging:
 app = (
     AppBuilder("my-service")
     .with_config_file("config.yaml")  # Must set config path first
-    .logging
-        .with_hot_reload(True, debounce_ms=1000)
-        .done()
+    .logging.with_hot_reload(True, debounce_ms=1000)
+    .done()
     .build()
 )
 ```
@@ -199,9 +197,11 @@ def on_plugins_changed(plugins_config):
     """Called when proxy.plugins section changes."""
     print(f"Plugins updated: {plugins_config}")
 
+
 def on_cache_changed(cache_config):
     """Called when cache section changes."""
     print(f"Cache TTL: {cache_config.ttl}")
+
 
 watcher = app.config_watcher
 if watcher:
@@ -231,6 +231,7 @@ wires up config watching automatically:
 ```python
 import multiprocessing
 
+
 def worker_process(app):
     """Worker that runs in a subprocess with hot-reload support."""
     with app.subprocess_context() as ctx:
@@ -238,6 +239,7 @@ def worker_process(app):
             # Do work...
             # Config changes are automatically applied
             pass
+
 
 # Spawn the worker (app is available via fork)
 process = multiprocessing.Process(target=worker_process, args=(app,))
@@ -258,6 +260,7 @@ from appinfra.subprocess import SubprocessContext
 from appinfra.log import LoggerFactory
 from appinfra.log.config import LogConfig
 
+
 def worker_process(etc_dir: str, config_file: str):
     """Worker with manual subprocess setup."""
     # Create logger for this subprocess
@@ -269,9 +272,10 @@ def worker_process(etc_dir: str, config_file: str):
             # Do work...
             pass
 
+
 # Pass etc_dir and config_file from app
-etc_dir = getattr(app, '_etc_dir', None)
-config_file = getattr(app, '_config_file', None)
+etc_dir = getattr(app, "_etc_dir", None)
+config_file = getattr(app, "_config_file", None)
 process = multiprocessing.Process(target=worker_process, args=(etc_dir, config_file))
 ```
 
@@ -283,7 +287,9 @@ process = multiprocessing.Process(target=worker_process, args=(etc_dir, config_f
 For blocking frameworks like uvicorn that handle their own signals:
 
 ```python
-with SubprocessContext(lg=lg, etc_dir=etc_dir, config_file=config_file, handle_signals=False):
+with SubprocessContext(
+    lg=lg, etc_dir=etc_dir, config_file=config_file, handle_signals=False
+):
     uvicorn.run(app)  # uvicorn handles SIGTERM/SIGINT
 ```
 
@@ -293,6 +299,7 @@ For subprocesses that run periodic tasks, combine `subprocess_context()` with `T
 
 ```python
 from appinfra.time import Ticker
+
 
 def worker_process(app):
     """Worker that syncs data every 30 seconds."""
@@ -341,9 +348,8 @@ from appinfra.app.builder import AppBuilder
 app = (
     AppBuilder("my-service")
     .with_config_file("config.yaml")
-    .logging
-        .with_hot_reload(True)
-        .done()
+    .logging.with_hot_reload(True)
+    .done()
     .build()
 )
 
@@ -407,7 +413,7 @@ watcher = ConfigWatcher(lg=logger, etc_dir="/etc/myapp")
 watcher.configure(
     config_file="config.yaml",  # Filename only, relative to etc_dir
     debounce_ms=500,
-    on_change=callback,         # Called with full config dict on change
+    on_change=callback,  # Called with full config dict on change
 )
 watcher.start()
 # ...
@@ -432,16 +438,16 @@ watcher.configure("config.yaml", on_change=reloader)
 from appinfra.subprocess import SubprocessContext
 
 # Get etc_dir and config_file from app
-etc_dir = getattr(app, '_etc_dir', None)
-config_file = getattr(app, '_config_file', None)
+etc_dir = getattr(app, "_etc_dir", None)
+config_file = getattr(app, "_config_file", None)
 
 with SubprocessContext(
-    lg=logger,                # Logger for subprocess
-    etc_dir=etc_dir,          # Config directory (optional)
+    lg=logger,  # Logger for subprocess
+    etc_dir=etc_dir,  # Config directory (optional)
     config_file=config_file,  # Config filename (optional)
-    handle_signals=True,      # Install SIGTERM/SIGINT handlers (default: True)
+    handle_signals=True,  # Install SIGTERM/SIGINT handlers (default: True)
 ) as ctx:
-    while ctx.running:        # False after signal received
+    while ctx.running:  # False after signal received
         # Do work...
         pass
 ```

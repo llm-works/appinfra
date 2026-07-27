@@ -11,21 +11,23 @@ iterator, iterator with context manager, and non-blocking manual control.
 class Ticker:
     def __init__(
         self,
-        lg: Logger,                                    # Logger instance
+        lg: Logger,  # Logger instance
         handler: TickerHandler | Callable | None = None,  # Optional for iterator mode
-        secs: float | None = None,                     # Seconds between ticks
-        initial: bool = True,                          # Run initial tick immediately
-        mode: TickerMode = TickerMode.FLEX             # Timing mode (FLEX, STRICT, or SPACED)
+        secs: float | None = None,  # Seconds between ticks
+        initial: bool = True,  # Run initial tick immediately
+        mode: TickerMode = TickerMode.FLEX,  # Timing mode (FLEX, STRICT, or SPACED)
     ): ...
 
     # Callback mode
-    def run(self) -> None: ...       # Start ticker (blocking, requires handler)
-    def stop(self) -> None: ...      # Stop ticker gracefully
+    def run(self) -> None: ...  # Start ticker (blocking, requires handler)
+    def stop(self) -> None: ...  # Stop ticker gracefully
     def is_running(self) -> bool: ...
 
     # Non-blocking API (for mixed event sources)
-    def time_until_next_tick(self, now: float | None = None) -> float: ...  # Seconds until next tick
-    def try_tick(self, now: float | None = None) -> bool: ...               # Execute if ready
+    def time_until_next_tick(
+        self, now: float | None = None
+    ) -> float: ...  # Seconds until next tick
+    def try_tick(self, now: float | None = None) -> bool: ...  # Execute if ready
 
     # Context manager (installs signal handlers)
     def __enter__(self) -> Ticker: ...
@@ -40,9 +42,9 @@ class Ticker:
 ```python
 from appinfra.time import TickerMode
 
-TickerMode.FLEX     # Flexible timing: fixed-rate from tick start, no catch-up (default)
-TickerMode.STRICT   # Strict timing: maintains average rate, catches up if tasks slow
-TickerMode.SPACED   # Spaced timing: waits full interval from completion
+TickerMode.FLEX  # Flexible timing: fixed-rate from tick start, no catch-up (default)
+TickerMode.STRICT  # Strict timing: maintains average rate, catches up if tasks slow
+TickerMode.SPACED  # Spaced timing: waits full interval from completion
 ```
 
 - **FLEX** (default): Flexible timing - maintains interval from tick start but prevents catch-up if
@@ -87,6 +89,7 @@ for tick in ticker:
 ```python
 from appinfra.time import Ticker
 
+
 def worker_process(app):
     with app.subprocess_context() as ctx:
         with Ticker(ctx.lg, secs=30) as ticker:
@@ -100,8 +103,10 @@ def worker_process(app):
 ```python
 from appinfra.time import Ticker
 
+
 def my_task():
     print("Task executed!")
+
 
 ticker = Ticker(lg, my_task, secs=5.0)
 ticker.run()  # Blocks, executes my_task every 5 seconds
@@ -112,6 +117,7 @@ ticker.run()  # Blocks, executes my_task every 5 seconds
 ```python
 from appinfra.time import Ticker, TickerHandler
 
+
 class MyHandler(TickerHandler):
     def ticker_start(self, *args, **kwargs):
         print("Ticker starting...")
@@ -121,6 +127,7 @@ class MyHandler(TickerHandler):
 
     def ticker_stop(self):
         print("Ticker stopping...")
+
 
 handler = MyHandler()
 ticker = Ticker(lg, handler, secs=2.0)
@@ -206,11 +213,11 @@ Scheduled task execution at specific times (daily, weekly, monthly, hourly, minu
 class Sched:
     def __init__(
         self,
-        lg: Logger,               # Logger instance
-        period: str | Period,     # DAILY, WEEKLY, MONTHLY, HOURLY, MINUTELY
-        when: str,                # Time spec: "HH:MM" or offset for hourly/minutely
+        lg: Logger,  # Logger instance
+        period: str | Period,  # DAILY, WEEKLY, MONTHLY, HOURLY, MINUTELY
+        when: str,  # Time spec: "HH:MM" or offset for hourly/minutely
         weekday: int | None = None,  # For WEEKLY (0=Monday, 6=Sunday)
-        sleep_interval: int = 10  # Seconds between checks
+        sleep_interval: int = 10,  # Seconds between checks
     ): ...
 
     def run(self, msg_intvl_secs=3600, instant=False) -> Generator[float]: ...
@@ -219,9 +226,9 @@ class Sched:
     def get_status(self) -> dict: ...
 
     # Properties
-    next_t: float | None     # Next execution timestamp
-    period: Period           # Scheduling period
-    is_running: bool         # Whether scheduler is running
+    next_t: float | None  # Next execution timestamp
+    period: Period  # Scheduling period
+    is_running: bool  # Whether scheduler is running
 ```
 
 **Daily Execution:**
@@ -293,14 +300,16 @@ Estimated time to completion using EWMA-smoothed rate calculation.
 class ETA:
     def __init__(
         self,
-        total: float = 100.0,   # Total units (default 100 for percentage)
-        age: float = 30.0       # EWMA smoothing parameter
+        total: float = 100.0,  # Total units (default 100 for percentage)
+        age: float = 30.0,  # EWMA smoothing parameter
     ): ...
 
-    def update(self, completed: float) -> None: ...   # Update progress (absolute, not delta)
-    def remaining_secs(self) -> float | None: ...     # Estimated seconds remaining
-    def rate(self) -> float: ...                      # Current rate (units/sec)
-    def percent(self) -> float: ...                   # Completion percentage (0-100)
+    def update(
+        self, completed: float
+    ) -> None: ...  # Update progress (absolute, not delta)
+    def remaining_secs(self) -> float | None: ...  # Estimated seconds remaining
+    def rate(self) -> float: ...  # Current rate (units/sec)
+    def percent(self) -> float: ...  # Completion percentage (0-100)
 ```
 
 **Basic Usage (Item Count):**
@@ -354,20 +363,20 @@ eta = ETA(total=1000, age=60.0)
 from appinfra.time import delta_str, delta_to_secs
 
 # Format seconds to string
-print(delta_str(3661))          # "1h1m1s"
-print(delta_str(90.123))        # "1m30s"
-print(delta_str(9.123))         # "9.123s"
+print(delta_str(3661))  # "1h1m1s"
+print(delta_str(90.123))  # "1m30s"
+print(delta_str(9.123))  # "9.123s"
 
 # Full precision mode
 print(delta_str(3661.5, precise=True))  # "1h01m01.500s"
 
 # Different formats
 print(delta_str(3661, format="short"))  # "1h1m1s"
-print(delta_str(3661, format="long"))   # "1 hour 1 minute 1 second"
+print(delta_str(3661, format="long"))  # "1 hour 1 minute 1 second"
 
 # Parse duration string to seconds
 seconds = delta_to_secs("1h 30m")  # 5400
-seconds = delta_to_secs("2d")      # 172800
+seconds = delta_to_secs("2d")  # 172800
 ```
 
 ## Date Iteration
@@ -399,10 +408,10 @@ except InvalidDurationError as e:
 from appinfra.time import Period
 
 Period.MINUTELY  # Every minute
-Period.HOURLY    # Every hour
-Period.DAILY     # Every day
-Period.WEEKLY    # Every week
-Period.MONTHLY   # Every month
+Period.HOURLY  # Every hour
+Period.DAILY  # Every day
+Period.WEEKLY  # Every week
+Period.MONTHLY  # Every month
 ```
 
 ## See Also

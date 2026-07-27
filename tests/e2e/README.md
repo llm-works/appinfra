@@ -18,6 +18,7 @@ All E2E tests should inherit from `E2ETestCase`:
 ```python
 from appinfra.test_utils import E2ETestCase
 
+
 class TestCompleteWorkflow(E2ETestCase):
     def test_cli_to_database_workflow(self):
         # Test complete user journey
@@ -85,32 +86,33 @@ This test validates [specific workflow] by [test approach].
 import unittest
 from appinfra.test_utils import E2ETestCase
 
+
 class Test[WorkflowName](E2ETestCase):
     """E2E tests for [workflow description]."""
-    
+
     def setUp(self):
         """Set up E2E test environment."""
         super().setUp()
         # Add workflow-specific setup
         self.add_workflow_step("setup", {"description": "Test initialization"})
-    
+
     def test_[workflow_description](self):
         """Test [specific workflow scenario]."""
         # Step 1: Initial setup
         self.add_workflow_step("step_1", {"action": "initial_setup"})
-        
+
         # Step 2: Main workflow
         self.add_workflow_step("step_2", {"action": "main_workflow"})
-        
+
         # Step 3: Validation
         self.add_workflow_step("step_3", {"action": "validation"})
-        
+
         # Add cleanup if needed
         self.add_system_cleanup(cleanup_function)
-        
+
         # Assertions
         self.assertTrue(workflow_successful)
-    
+
     def tearDown(self):
         """Clean up after E2E test."""
         super().tearDown()

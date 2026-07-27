@@ -11,12 +11,13 @@ Configuration dataclass for tools.
 ```python
 from dataclasses import dataclass, field
 
+
 @dataclass
 class ToolConfig:
-    name: str                              # Required: tool name (lowercase, hyphens/underscores)
+    name: str  # Required: tool name (lowercase, hyphens/underscores)
     aliases: list[str] = field(default_factory=list)  # Optional: command aliases
-    help_text: str = ""                    # Optional: short help shown in --help
-    description: str = ""                  # Optional: detailed description
+    help_text: str = ""  # Optional: short help shown in --help
+    description: str = ""  # Optional: detailed description
 ```
 
 ### Tool
@@ -26,11 +27,8 @@ Base class for command-line tools.
 ```python
 class Tool(Traceable, ToolProtocol):
     def __init__(
-        self,
-        parent: Traceable | None = None,
-        config: ToolConfig | None = None
-    ):
-        ...
+        self, parent: Traceable | None = None, config: ToolConfig | None = None
+    ): ...
 ```
 
 **Key Properties:**
@@ -53,12 +51,11 @@ class Tool(Traceable, ToolProtocol):
 ```python
 from appinfra.app.tools import Tool, ToolConfig
 
+
 class MyTool(Tool):
     def __init__(self, parent=None):
         config = ToolConfig(
-            name="my-tool",
-            aliases=["mt"],
-            help_text="Does something useful"
+            name="my-tool", aliases=["mt"], help_text="Does something useful"
         )
         super().__init__(parent, config)
 
@@ -109,13 +106,7 @@ Manages a group of related tools/subcommands within a parent tool.
 
 ```python
 class ToolGroup:
-    def __init__(
-        self,
-        parent: Tool,
-        cmd_var: str,
-        default: str | None = None
-    ):
-        ...
+    def __init__(self, parent: Tool, cmd_var: str, default: str | None = None): ...
 ```
 
 **Key Methods:**
@@ -128,6 +119,7 @@ class ToolGroup:
 ```python
 from appinfra.app.tools import Tool, ToolConfig
 
+
 class SubTool1(Tool):
     def __init__(self, parent=None):
         super().__init__(parent, ToolConfig(name="sub1", help_text="First subtool"))
@@ -136,6 +128,7 @@ class SubTool1(Tool):
         self.lg.info("Running sub1")
         return 0
 
+
 class SubTool2(Tool):
     def __init__(self, parent=None):
         super().__init__(parent, ToolConfig(name="sub2", help_text="Second subtool"))
@@ -143,6 +136,7 @@ class SubTool2(Tool):
     def run(self, **kwargs):
         self.lg.info("Running sub2")
         return 0
+
 
 class MainTool(Tool):
     def __init__(self, parent=None):
@@ -158,6 +152,7 @@ When multiple subtools need common arguments (e.g., `--input`, `--output`), use 
 ```python
 from appinfra.app.tools import Tool, ToolConfig
 
+
 class BaseProcessTool(Tool):
     """Base class with shared processing arguments."""
 
@@ -167,9 +162,12 @@ class BaseProcessTool(Tool):
         parser.add_argument("--output", "-o", help="Output file")
         super().add_args(parser)
 
+
 class ValidateTool(BaseProcessTool):
     def __init__(self, parent=None):
-        super().__init__(parent, ToolConfig(name="validate", help_text="Validate input"))
+        super().__init__(
+            parent, ToolConfig(name="validate", help_text="Validate input")
+        )
 
     def add_args(self, parser):
         super().add_args(parser)  # Inherit common args
@@ -179,9 +177,12 @@ class ValidateTool(BaseProcessTool):
         self.lg.info(f"Validating {self.args.input}")
         return 0
 
+
 class TransformTool(BaseProcessTool):
     def __init__(self, parent=None):
-        super().__init__(parent, ToolConfig(name="transform", help_text="Transform data"))
+        super().__init__(
+            parent, ToolConfig(name="transform", help_text="Transform data")
+        )
 
     def add_args(self, parser):
         super().add_args(parser)  # Inherit common args
@@ -201,6 +202,7 @@ class CommonArgsMixin:
     def add_common_args(self, parser):
         parser.add_argument("--verbose", "-v", action="store_true")
         parser.add_argument("--dry-run", action="store_true")
+
 
 class MyTool(CommonArgsMixin, Tool):
     def add_args(self, parser):
@@ -236,6 +238,7 @@ The recommended way to build CLI applications:
 from appinfra.app.builder import AppBuilder
 from appinfra.app.tools import Tool, ToolConfig
 
+
 class DemoTool(Tool):
     def __init__(self, parent=None):
         super().__init__(parent, ToolConfig(name="demo", aliases=["d"]))
@@ -244,11 +247,14 @@ class DemoTool(Tool):
         self.lg.info("Running demo")
         return 0
 
+
 app = (
     AppBuilder("myapp")
     .with_description("My CLI application")
-    .logging.with_level("info").done()
-    .tools.with_tool(DemoTool()).done()
+    .logging.with_level("info")
+    .done()
+    .tools.with_tool(DemoTool())
+    .done()
     .build()
 )
 

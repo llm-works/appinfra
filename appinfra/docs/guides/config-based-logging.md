@@ -21,6 +21,7 @@ test:
 import unittest
 from appinfra.test_helpers import create_test_logger
 
+
 class TestExample(unittest.TestCase):
     def setUp(self):
         self.logger = create_test_logger("test_logger")
@@ -34,7 +35,9 @@ class TestExample(unittest.TestCase):
 ```python
 from appinfra.test_helpers import create_test_logger_with_fallback
 
-self.logger = create_test_logger_with_fallback("test_logger")  # Falls back to INFO if no config
+self.logger = create_test_logger_with_fallback(
+    "test_logger"
+)  # Falls back to INFO if no config
 ```
 
 ### Different Config Sections

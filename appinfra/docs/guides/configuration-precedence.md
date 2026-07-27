@@ -171,11 +171,10 @@ loading:
 ```python
 app = (
     AppBuilder("myapp")
-    .with_config_file("app.yaml")      # Load YAML
-    .logging
-        .with_level("debug")           # Overrides YAML logging.level
-        .with_topic_level("/db/*", "trace")  # Priority=10, highest
-        .done()
+    .with_config_file("app.yaml")  # Load YAML
+    .logging.with_level("debug")  # Overrides YAML logging.level
+    .with_topic_level("/db/*", "trace")  # Priority=10, highest
+    .done()
     .build()
 )
 ```

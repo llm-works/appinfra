@@ -10,6 +10,11 @@ For API stability guarantees and deprecation policy, see
 
 ## [Unreleased]
 
+### Fixed
+- `appinfra.db.pg.vector`: `Vector` is now resolved lazily via PEP 562 `__getattr__`.
+  Consumers of `appinfra.db` that don't use vector features avoid the pgvector/numpy
+  import chain. Import paths are unchanged.
+
 ## [0.9.0] - 2026-07-16
 
 ### Added

@@ -12,7 +12,9 @@ class ObservabilityHooks:
     def __init__(self): ...
 
     # Registration
-    def register(self, event: HookEvent, callback: Callable[[HookContext], None]) -> None: ...
+    def register(
+        self, event: HookEvent, callback: Callable[[HookContext], None]
+    ) -> None: ...
     def on(self, event: HookEvent) -> Callable: ...  # Decorator
     def register_global(self, callback: Callable[[HookContext], None]) -> None: ...
     def unregister(self, event: HookEvent, callback: Callable) -> bool: ...
@@ -41,10 +43,12 @@ from appinfra.observability import ObservabilityHooks, HookEvent, HookContext
 lg = logging.getLogger(__name__)
 hooks = ObservabilityHooks()
 
+
 # Register with decorator
 @hooks.on(HookEvent.QUERY_START)
 def log_query_start(context: HookContext):
     lg.info(f"Query started: {context.query}")
+
 
 # Or register directly
 hooks.register(HookEvent.QUERY_END, lambda ctx: lg.info(f"Query took {ctx.duration}s"))
@@ -88,8 +92,8 @@ Context information passed to callbacks.
 @dataclass
 class HookContext:
     event: HookEvent
-    timestamp: float           # time.time() when created
-    data: dict[str, Any]       # Event-specific data
+    timestamp: float  # time.time() when created
+    data: dict[str, Any]  # Event-specific data
 
     # Optional event-specific fields
     query: str | None = None
@@ -125,19 +129,21 @@ from appinfra.observability import ObservabilityHooks, HookEvent, HookContext
 
 hooks = ObservabilityHooks()
 
+
 # Track query latency
 @hooks.on(HookEvent.QUERY_END)
 def track_query_latency(ctx: HookContext):
     if ctx.duration:
         metrics.histogram("db.query.duration", ctx.duration)
 
+
 # Track request counts
 @hooks.on(HookEvent.REQUEST_END)
 def track_requests(ctx: HookContext):
-    metrics.counter("http.requests.total", tags={
-        "path": ctx.request_path,
-        "status": ctx.response_code
-    })
+    metrics.counter(
+        "http.requests.total",
+        tags={"path": ctx.request_path, "status": ctx.response_code},
+    )
 ```
 
 ## Tracing Integration Example
@@ -150,12 +156,14 @@ from appinfra.observability import ObservabilityHooks, HookEvent, HookContext
 hooks = ObservabilityHooks()
 active_spans = {}
 
+
 @hooks.on(HookEvent.QUERY_START)
 def start_db_span(ctx: HookContext):
     span = tracer.start_span("db.query")
     span.set_attribute("db.statement", ctx.query)
     # Use query as correlation key (or add correlation_id to ctx.data)
     active_spans[ctx.query] = span
+
 
 @hooks.on(HookEvent.QUERY_END)
 def end_db_span(ctx: HookContext):
@@ -225,6 +233,7 @@ interrupting framework operations:
 @hooks.on(HookEvent.QUERY_START)
 def buggy_callback(ctx: HookContext):
     raise ValueError("Oops!")
+
 
 # This still works - error is logged but doesn't propagate
 hooks.trigger(HookEvent.QUERY_START, query="SELECT 1")

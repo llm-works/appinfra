@@ -15,7 +15,16 @@ This package consists of five main modules:
 ## Quick Start
 
 ```python
-from appinfra.time import start, since, since_str, Ticker, TickerHandler, Sched, Period, delta_str
+from appinfra.time import (
+    start,
+    since,
+    since_str,
+    Ticker,
+    TickerHandler,
+    Sched,
+    Period,
+    delta_str,
+)
 
 # Basic timing
 start_time = start()
@@ -23,10 +32,12 @@ start_time = start()
 elapsed = since(start_time)
 print(f"Operation took {since_str(start_time)}")
 
+
 # Periodic task execution
 class MyHandler(TickerHandler):
     def ticker_tick(self):
         print("Periodic task executed")
+
 
 ticker = Ticker(MyHandler(), secs=5)
 ticker.run()
@@ -79,15 +90,17 @@ Provides a flexible system for periodic task execution with both scheduled and c
 ```python
 from appinfra.time import Ticker, TickerHandler
 
+
 class HealthChecker(TickerHandler):
     def ticker_start(self, *args, **kwargs):
         print("Health checking started")
-        
+
     def ticker_tick(self):
         print("Checking system health...")
-        
+
     def ticker_stop(self):
         print("Health checking stopped")
+
 
 # Scheduled execution (every 10 seconds)
 ticker = Ticker(HealthChecker(), secs=10)
@@ -152,8 +165,8 @@ from appinfra.time import delta_str, DurationFormat
 # Basic formatting (precise=False, simplified formatting)
 print(delta_str(3661.5))  # "1h1m1s" (no fractional, no zero-padding)
 print(delta_str(90.123))  # "1m30s" (no fractional when >= 60s)
-print(delta_str(9.123))   # "9.123s" (fractional shown for seconds)
-print(delta_str(0.009))   # "9ms" (< 10ms shows fractional)
+print(delta_str(9.123))  # "9.123s" (fractional shown for seconds)
+print(delta_str(0.009))  # "9ms" (< 10ms shows fractional)
 
 # Full precision mode (precise=True, legacy behavior)
 print(delta_str(3661.5, precise=True))  # "1h01m01.500s"

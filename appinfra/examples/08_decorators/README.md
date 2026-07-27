@@ -89,9 +89,10 @@ from appinfra.app import App
 
 app = App(config=...)
 
+
 @app.tool(name="mytool", help="Short help text")
-@app.argument('--file', required=True)
-@app.argument('--verbose', action='store_true')
+@app.argument("--file", required=True)
+@app.argument("--verbose", action="store_true")
 def mytool(self):
     """
     Detailed description of the tool.
@@ -106,7 +107,8 @@ def mytool(self):
 
     return 0  # Exit code
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     app.main()
 ```
 
@@ -129,11 +131,13 @@ def server(self):
     # Use state set up in hooks
     return self.start_server()
 
+
 @server.on_setup
 def setup_server(self, **kwargs):
     """Called during tool setup"""
     self.routes = load_routes()
     self.middleware = []
+
 
 @server.on_configure
 def configure_server(self):
@@ -149,16 +153,19 @@ def parent_tool(self):
     """Parent tool with subcommands"""
     pass
 
+
 @parent_tool.subtool(name="sub1", help="First subcommand")
-@app.argument('--option')
+@app.argument("--option")
 def sub1(self):
     # Access parent if needed
     parent_config = self.parent.config
     return 0
 
+
 @parent_tool.subtool(name="sub2", help="Second subcommand")
 def sub2(self):
     return 0
+
 
 # Usage: app.py parent sub1 --option value
 ```
@@ -174,16 +181,19 @@ from appinfra.app import AppBuilder
 app = (
     AppBuilder()
     .with_name("myapp")
-    .with_config_file("myapp.yaml")       # deferred: resolved from --etc-dir at runtime
-    .logging.with_level("info").done()
+    .with_config_file("myapp.yaml")  # deferred: resolved from --etc-dir at runtime
+    .logging.with_level("info")
+    .done()
     .build()
 )
 
+
 @app.tool(name="tool1")
-@app.argument('--file')
+@app.argument("--file")
 def tool1(self):
     backend = self.app.config.get("backend", "default")  # from YAML + env overrides
     return 0
+
 
 if __name__ == "__main__":
     app.main()
@@ -198,6 +208,7 @@ For full IDE autocomplete, use the type hint:
 
 ```python
 from appinfra.app.decorators import ToolContextProtocol
+
 
 @app.tool()
 def mytool(self: ToolContextProtocol):
@@ -217,11 +228,12 @@ class AnalyzeTool(Tool):
         return ToolConfig(name="analyze", help_text="Analyze data")
 
     def add_args(self, parser):
-        parser.add_argument('--file', required=True)
+        parser.add_argument("--file", required=True)
 
     def run(self, **kwargs):
         self.lg.info(f"Analyzing {self.args.file}")
         return 0
+
 
 app.add_tool(AnalyzeTool())
 ```
@@ -229,7 +241,7 @@ app.add_tool(AnalyzeTool())
 **After:**
 ```python
 @app.tool(name="analyze", help="Analyze data")
-@app.argument('--file', required=True)
+@app.argument("--file", required=True)
 def analyze(self):
     self.lg.info(f"Analyzing {self.args.file}")
     return 0
@@ -251,14 +263,17 @@ def analyze(self):
 ### `@argument` applied to wrong object
 ```python
 # Wrong - @argument before @tool
-@app.argument('--file')
+@app.argument("--file")
 @app.tool()
-def tool(self): pass
+def tool(self):
+    pass
+
 
 # Right - @tool first, then @argument
 @app.tool()
-@app.argument('--file')
-def tool(self): pass
+@app.argument("--file")
+def tool(self):
+    pass
 ```
 
 ### Accessing self attributes before setup
@@ -283,6 +298,7 @@ def tool(self):
 def tool(self):
     self.lg.info("Done")
     # Implicitly returns None -> 0
+
 
 # Explicitly return exit code
 @app.tool()

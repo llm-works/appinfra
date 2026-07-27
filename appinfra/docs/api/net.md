@@ -24,7 +24,7 @@ class TCPServer:
         lg: Logger,
         port: int,
         handler: HTTPRequestHandler,
-        ticker: Ticker | None = None
+        ticker: Ticker | None = None,
     ): ...
 
     def run(self) -> int: ...
@@ -69,12 +69,14 @@ The `instance` parameter is the actual request handler with access to:
 from appinfra.net import TCPServer, HTTPRequestHandler
 from appinfra.log import LoggingBuilder
 
+
 class MyHandler(HTTPRequestHandler):
     def do_GET(self, instance):
         instance.send_response(200)
         instance.send_header("Content-type", "text/html")
         instance.end_headers()
         instance.wfile.write(b"Hello, World!")
+
 
 logger = LoggingBuilder("server").with_level("info").console_handler().build()
 server = TCPServer(logger, 8080, MyHandler())
@@ -89,6 +91,7 @@ Combine HTTP serving with periodic background tasks:
 from appinfra.net import TCPServer, HTTPRequestHandler
 from appinfra.time import Ticker, TickerHandler
 import json
+
 
 class MyTickerHandler(Ticker, TickerHandler, HTTPRequestHandler):
     def __init__(self, lg):
@@ -107,6 +110,7 @@ class MyTickerHandler(Ticker, TickerHandler, HTTPRequestHandler):
         else:
             # Single-process mode - use threading
             import threading
+
             self._lock = threading.Lock()
             self._state = {"ticks": 0}
 
@@ -124,10 +128,8 @@ class MyTickerHandler(Ticker, TickerHandler, HTTPRequestHandler):
         instance.send_response(200)
         instance.send_header("Content-type", "application/json")
         instance.end_headers()
-        instance.wfile.write(json.dumps({
-            "status": "ok",
-            "ticks": ticks
-        }).encode())
+        instance.wfile.write(json.dumps({"status": "ok", "ticks": ticks}).encode())
+
 
 # Create and run server with ticker
 handler = MyTickerHandler(logger)
@@ -147,6 +149,7 @@ server.run()  # Runs in multiprocessing mode
 
 ```python
 import json
+
 
 class ApiHandler(HTTPRequestHandler):
     def do_GET(self, instance):
@@ -179,10 +182,10 @@ class ApiHandler(HTTPRequestHandler):
 
 ```python
 from appinfra.net import (
-    ServerError,          # Base exception for server errors
-    ServerStartupError,   # Server failed to start
+    ServerError,  # Base exception for server errors
+    ServerStartupError,  # Server failed to start
     ServerShutdownError,  # Server failed to shutdown gracefully
-    HandlerError,         # Request handler error
+    HandlerError,  # Request handler error
 )
 ```
 
@@ -222,12 +225,7 @@ For FastAPI-style applications, use the FastAPI integration instead:
 ```python
 from appinfra.app.fastapi import FastAPIBuilder
 
-server = (
-    FastAPIBuilder("api")
-    .with_config(config)
-    .with_port(8000)
-    .build()
-)
+server = FastAPIBuilder("api").with_config(config).with_port(8000).build()
 ```
 
 See [FastAPI Integration](fastapi.md) for subprocess-based FastAPI servers.

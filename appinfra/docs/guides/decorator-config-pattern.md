@@ -28,12 +28,8 @@ Build the app with `AppBuilder`, then define tools via decorators on the built a
 from appinfra.app.builder import AppBuilder
 
 # 1. Build app (config file resolved from --etc-dir at runtime)
-app = (
-    AppBuilder()
-    .with_name("myapp")
-    .with_config_file("myapp.yaml")
-    .build()
-)
+app = AppBuilder().with_name("myapp").with_config_file("myapp.yaml").build()
+
 
 # 2. Define tools on the built app
 @app.tool(name="serve", help="Start the server")
@@ -42,6 +38,7 @@ def serve(self):
     port = self.app.config.get("server", {}).get("port", self.args.port)
     self.lg.info(f"Starting on port {port}")
     return 0
+
 
 # 3. Run
 if __name__ == "__main__":
@@ -91,8 +88,10 @@ Use decorators for simple tools, classes for complex ones — both on the same a
 from appinfra.app.builder import AppBuilder
 from appinfra.app.tools import Tool, ToolConfig
 
+
 class ServerTool(Tool):
     """Complex tool with state, lifecycle hooks, multiple methods."""
+
     def _create_config(self):
         return ToolConfig(name="serve", help_text="Run the server")
 
@@ -100,20 +99,25 @@ class ServerTool(Tool):
         parser.add_argument("--port", type=int, default=8080)
 
     def configure(self):
-        self.port = self.args.port or self.app.config.get("server", {}).get("port", 8080)
+        self.port = self.args.port or self.app.config.get("server", {}).get(
+            "port", 8080
+        )
 
     def run(self, **kwargs):
         self.lg.info(f"Server on port {self.port}")
         return 0
+
 
 # Class-based tools go through the builder
 app = (
     AppBuilder()
     .with_name("hybrid")
     .with_config_file("hybrid.yaml")
-    .tools.with_tool(ServerTool()).done()
+    .tools.with_tool(ServerTool())
+    .done()
     .build()
 )
+
 
 # Simple tools use decorators on the built app
 @app.tool(name="status", help="Show status")

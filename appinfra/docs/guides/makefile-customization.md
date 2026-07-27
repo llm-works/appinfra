@@ -982,11 +982,16 @@ If you start with a standalone Makefile and want to upgrade:
    ```python
    # Old (unittest)
    import unittest
+
+
    class TestExample(unittest.TestCase):
        pass
 
+
    # New (pytest, optional)
    import pytest
+
+
    def test_example():
        pass
    ```
