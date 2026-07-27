@@ -90,6 +90,7 @@ Fluent builder for configuring FastAPI servers.
 
 ```python
 from appinfra.app.fastapi import ServerBuilder
+from appinfra.app.fastapi.config import ApiConfig
 from appinfra.log import Logger
 
 lg = Logger("myapi")
@@ -144,6 +145,8 @@ server = (
 Access via `.subprocess`:
 
 ```python
+from appinfra.app.fastapi.config import IPCConfig
+
 server = (
     ServerBuilder(lg, "myapi")
     .subprocess
