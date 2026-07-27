@@ -28,11 +28,18 @@ Example:
 
 from typing import Literal
 
-# Re-export Vector from pgvector if available
-try:
-    from pgvector.sqlalchemy import Vector
-except ImportError:
-    Vector = None  # type: ignore[misc, assignment]
+
+def __getattr__(name: str) -> object:
+    """Lazily resolve `Vector` so importing this module does not pull in
+    pgvector (and its numpy dependency). Returns None if pgvector is not
+    installed, matching the previous eager-import fallback."""
+    if name == "Vector":
+        try:
+            from pgvector.sqlalchemy import Vector as _Vector
+        except ImportError:
+            return None
+        return _Vector
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def enable_pgvector() -> str:
