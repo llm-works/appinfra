@@ -43,7 +43,9 @@ class LoggingBuilder:
     def __init__(self, name: str): ...
 
     def with_level(self, level: str | bool) -> LoggingBuilder: ...
-    def with_location(self, level: int) -> LoggingBuilder: ...  # 0=none, 1=file:line, 2=full
+    def with_location(
+        self, level: int
+    ) -> LoggingBuilder: ...  # 0=none, 1=file:line, 2=full
     def with_micros(self, enabled: bool = True) -> LoggingBuilder: ...
     def console_handler(self, **kwargs) -> LoggingBuilder: ...
     def file_handler(self, path: str, **kwargs) -> LoggingBuilder: ...
@@ -55,12 +57,7 @@ class LoggingBuilder:
 ```python
 from appinfra.log import LoggingBuilder
 
-logger = (
-    LoggingBuilder("my_app")
-    .with_level("info")
-    .console_handler()
-    .build()
-)
+logger = LoggingBuilder("my_app").with_level("info").console_handler().build()
 
 logger.info("Application started")
 logger.debug("Debug message")  # Won't show (level is info)
@@ -73,14 +70,14 @@ Configuration dataclass for logging.
 ```python
 @dataclass
 class LogConfig:
-    level: str | bool = "info"     # Log level or False to disable
-    location: int = 0              # File location in output (0, 1, 2)
-    micros: bool = False           # Microsecond timestamps
-    topic: str | None = None       # Topic filter
-    console: bool = True           # Enable console output
-    file: str | None = None        # Log file path
-    max_bytes: int = 10_485_760    # Max file size (10MB)
-    backup_count: int = 5          # Number of backup files
+    level: str | bool = "info"  # Log level or False to disable
+    location: int = 0  # File location in output (0, 1, 2)
+    micros: bool = False  # Microsecond timestamps
+    topic: str | None = None  # Topic filter
+    console: bool = True  # Enable console output
+    file: str | None = None  # Log file path
+    max_bytes: int = 10_485_760  # Max file size (10MB)
+    backup_count: int = 5  # Number of backup files
 ```
 
 ## LoggerFactory
@@ -107,8 +104,8 @@ logger = (
     .console_handler()
     .file_handler(
         "logs/app.log",
-        max_bytes=10*1024*1024,  # 10MB
-        backup_count=5
+        max_bytes=10 * 1024 * 1024,  # 10MB
+        backup_count=5,
     )
     .build()
 )
@@ -119,17 +116,9 @@ logger = (
 ```python
 from appinfra.log.builder import JSONLoggingBuilder
 
-logger = (
-    JSONLoggingBuilder("my_app")
-    .with_level("info")
-    .console_handler()
-    .build()
-)
+logger = JSONLoggingBuilder("my_app").with_level("info").console_handler().build()
 
-logger.info("User logged in", extra={
-    "user_id": "123",
-    "ip_address": "192.168.1.1"
-})
+logger.info("User logged in", extra={"user_id": "123", "ip_address": "192.168.1.1"})
 ```
 
 ## Quick Setup Functions
@@ -167,11 +156,11 @@ import requests  # Its logs will now use appinfra formatting
 
 ```python
 capture_all_loggers(
-    level="info",           # Log level (or False to disable all logging)
-    clear_handlers=True,    # Remove existing handlers from all loggers
-    colors=True,            # Enable colored console output
-    location=False,         # Show file locations in log messages
-    micros=False,           # Microsecond precision in timestamps
+    level="info",  # Log level (or False to disable all logging)
+    clear_handlers=True,  # Remove existing handlers from all loggers
+    colors=True,  # Enable colored console output
+    location=False,  # Show file locations in log messages
+    micros=False,  # Microsecond precision in timestamps
 )
 ```
 
@@ -235,10 +224,12 @@ Register callbacks for log events:
 ```python
 from appinfra.log import CallbackRegistry, listens_for
 
+
 @listens_for("error")
 def on_error(record):
     # Handle error log events
     send_alert(record.getMessage())
+
 
 # Or manually
 CallbackRegistry.register("error", my_callback)
@@ -274,9 +265,8 @@ from appinfra.app.builder import AppBuilder
 app = (
     AppBuilder("my-service")
     .with_config_file("config.yaml")
-    .logging
-        .with_hot_reload(True)  # Enable hot-reload
-        .done()
+    .logging.with_hot_reload(True)  # Enable hot-reload
+    .done()
     .build()
 )
 ```
@@ -331,6 +321,7 @@ listener.start()
 # Create config for workers (captures queue, level, and LogLevelManager rules)
 worker_config = logger.queue_config(queue)
 
+
 def worker(config, worker_id):
     # Subprocess: create logger from config
     lg = Logger.from_queue_config(config, name=f"worker-{worker_id}")
@@ -339,6 +330,7 @@ def worker(config, worker_id):
         raise ValueError("Something failed")
     except Exception as e:
         lg.warning("Operation failed", extra={"exception": e})
+
 
 # Spawn subprocesses
 processes = [Process(target=worker, args=(worker_config, i)) for i in range(4)]
@@ -374,11 +366,13 @@ level_manager.add_rule("/worker/verbose/*", "debug", source="config", priority=2
 # Create config (includes the rules)
 worker_config = logger.queue_config(queue)
 
+
 def worker(config):
     # Gets WARNING level from /worker/* pattern
     lg = Logger.from_queue_config(config, name="/worker/task")
     lg.debug("Won't be logged")
     lg.warning("Will be logged")
+
 
 def verbose_worker(config):
     # Gets DEBUG level from /worker/verbose/* pattern (higher priority)
@@ -403,10 +397,12 @@ builder = (
 )
 config_dict = builder.to_dict()  # Picklable dict
 
+
 def worker(log_config, worker_id):
     # Subprocess: reconstruct logger from config
     logger = LoggingBuilder.from_dict(log_config, name=f"worker-{worker_id}").build()
     logger.info("Worker started independently")
+
 
 # Spawn subprocess with config
 p = Process(target=worker, args=(config_dict, 1))

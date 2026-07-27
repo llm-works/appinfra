@@ -35,10 +35,9 @@ Accessed via `AppBuilder().tools`:
 ```python
 app = (
     AppBuilder("myapp")
-    .tools
-        .with_tool(MyTool())      # Add a Tool instance
-        .with_plugin(MyPlugin())  # Add a Plugin
-        .done()                   # Return to AppBuilder
+    .tools.with_tool(MyTool())  # Add a Tool instance
+    .with_plugin(MyPlugin())  # Add a Plugin
+    .done()  # Return to AppBuilder
     .build()
 )
 ```
@@ -50,14 +49,13 @@ Accessed via `AppBuilder().logging`:
 ```python
 app = (
     AppBuilder("myapp")
-    .logging
-        .with_level("info")       # Set log level
-        .with_location(1)         # Show file/line (0=none, 1=file:line, 2=full path)
-        .with_micros(True)        # Microsecond timestamps
-        .with_colors(True)        # Enable colored output
-        .with_format("%(msg)s")   # Custom format string
-        .with_hot_reload(True)    # Enable config hot-reload (requires watchdog)
-        .done()
+    .logging.with_level("info")  # Set log level
+    .with_location(1)  # Show file/line (0=none, 1=file:line, 2=full path)
+    .with_micros(True)  # Microsecond timestamps
+    .with_colors(True)  # Enable colored output
+    .with_format("%(msg)s")  # Custom format string
+    .with_hot_reload(True)  # Enable config hot-reload (requires watchdog)
+    .done()
     .build()
 )
 ```
@@ -67,14 +65,7 @@ app = (
 Accessed via `AppBuilder().server`:
 
 ```python
-app = (
-    AppBuilder("myapp")
-    .server
-        .with_port(8080)
-        .with_host("0.0.0.0")
-        .done()
-    .build()
-)
+app = AppBuilder("myapp").server.with_port(8080).with_host("0.0.0.0").done().build()
 ```
 
 ## AdvancedConfigurer
@@ -85,12 +76,12 @@ Accessed via `AppBuilder().advanced`:
 def on_startup(ctx):
     ctx.app.lg.info("Starting...")
 
+
 app = (
     AppBuilder("myapp")
-    .advanced
-        .with_hook("startup", on_startup)
-        .with_argument("-v", "--verbose", action="store_true")
-        .done()
+    .advanced.with_hook("startup", on_startup)
+    .with_argument("-v", "--verbose", action="store_true")
+    .done()
     .build()
 )
 ```
@@ -101,13 +92,12 @@ app = (
 from appinfra.app.builder import AppBuilder
 from appinfra.app.tools import Tool, ToolConfig
 
+
 class GreetTool(Tool):
     def __init__(self, parent=None):
-        super().__init__(parent, ToolConfig(
-            name="greet",
-            aliases=["g"],
-            help_text="Greet someone"
-        ))
+        super().__init__(
+            parent, ToolConfig(name="greet", aliases=["g"], help_text="Greet someone")
+        )
 
     def add_args(self, parser):
         parser.add_argument("--name", required=True, help="Name to greet")
@@ -116,17 +106,16 @@ class GreetTool(Tool):
         self.lg.info(f"Hello, {self.args.name}!")
         return 0
 
+
 app = (
     AppBuilder("myapp")
     .with_description("My CLI application")
     .with_version("1.0.0")
-    .logging
-        .with_level("info")
-        .with_location(1)
-        .done()
-    .tools
-        .with_tool(GreetTool())
-        .done()
+    .logging.with_level("info")
+    .with_location(1)
+    .done()
+    .tools.with_tool(GreetTool())
+    .done()
     .build()
 )
 
@@ -154,24 +143,16 @@ app = (
 )
 
 # Load from absolute path (immediately, not deferred)
-app = (
-    AppBuilder("myapp")
-    .with_config_file("/path/to/config.yaml")
-    .build()
-)
+app = AppBuilder("myapp").with_config_file("/path/to/config.yaml").build()
 
 # Load relative to current directory (not etc-dir)
-app = (
-    AppBuilder("myapp")
-    .with_config_file("config.yaml", from_etc_dir=False)
-    .build()
-)
+app = AppBuilder("myapp").with_config_file("config.yaml", from_etc_dir=False).build()
 
 # Layered config: base + optional environment overlay (both from etc-dir)
 app = (
     AppBuilder("myapp")
-    .with_config_file("config.yaml")                        # Required base from etc-dir
-    .with_config_file(".env.yaml", optional=True)           # Optional overlay from etc-dir
+    .with_config_file("config.yaml")  # Required base from etc-dir
+    .with_config_file(".env.yaml", optional=True)  # Optional overlay from etc-dir
     .build()
 )
 ```
@@ -247,10 +228,9 @@ keys are changed.
 
 ```python
 # Quieter default log level for a background service
-AppBuilder("myapp") \
-    .with_standard_args(log_level=True) \
-    .with_standard_arg("log_level", default="warning") \
-    .build()
+AppBuilder("myapp").with_standard_args(log_level=True).with_standard_arg(
+    "log_level", default="warning"
+).build()
 ```
 
 > The framework already resolves the etc directory when `etc_dir` is opted in
@@ -301,7 +281,7 @@ app = AppBuilder("myapp").with_standard_args(config_file=True).build()
 # With etc-dir (both --etc-dir and -c available)
 app = (
     AppBuilder("myapp")
-    .with_config_file("default.yaml")      # auto-enables etc_dir
+    .with_config_file("default.yaml")  # auto-enables etc_dir
     .with_standard_args(config_file=True)  # enables -c to override filename
     .build()
 )
@@ -313,6 +293,7 @@ For single-purpose apps, use `with_main_tool()` to run a tool without requiring 
 
 ```python
 app = AppBuilder("proxy").with_main_tool("run").build()
+
 
 @app.tool(name="run")
 def run_proxy(self):
@@ -328,8 +309,8 @@ Now the app can be invoked without the subcommand:
 
 Accepts either a tool name (string) or Tool object:
 ```python
-AppBuilder("proxy").with_main_tool("run")      # by name
-AppBuilder("proxy").with_main_tool(my_tool)    # by object
+AppBuilder("proxy").with_main_tool("run")  # by name
+AppBuilder("proxy").with_main_tool(my_tool)  # by object
 ```
 
 ## Hot-Reload Logging
@@ -341,9 +322,8 @@ appinfra[hotreload]`):
 app = (
     AppBuilder("my-service")
     .with_config_file("config.yaml")
-    .logging
-        .with_hot_reload(True)  # Enable watching
-        .done()
+    .logging.with_hot_reload(True)  # Enable watching
+    .done()
     .build()
 )
 ```

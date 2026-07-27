@@ -51,12 +51,14 @@ The package is designed for applications that need to serve HTTP requests while 
 from appinfra.net import TCPServer, HTTPRequestHandler
 from appinfra.log import LoggerFactory, LogConfig
 
+
 class MyHandler(HTTPRequestHandler):
     def do_GET(self, instance):
         instance.send_response(200)
         instance.send_header("Content-type", "text/html")
         instance.end_headers()
         instance.wfile.write(b"Hello, World!")
+
 
 # Create and run server
 config = LogConfig.from_params("info")
@@ -72,12 +74,13 @@ from appinfra.net import TCPServer, HTTPRequestHandler
 from appinfra.time import Ticker, TickerHandler
 from appinfra.log import LoggerFactory, LogConfig
 
+
 class MyTickerHandler(Ticker, TickerHandler, HTTPRequestHandler):
     def __init__(self, lg):
         self._lg = lg
         self._ticks = 0
         super().__init__(self, secs=5)  # Tick every 5 seconds
-        
+
     def ticker_start(self, manager=None):
         """Initialize shared state."""
         if manager is not None:
@@ -85,23 +88,24 @@ class MyTickerHandler(Ticker, TickerHandler, HTTPRequestHandler):
             self._msg = manager.dict()
         else:
             import threading
+
             self._lock = threading.Lock()
             self._msg = {"started": True}
-            
+
     def ticker_tick(self):
         """Handle periodic tasks."""
         self._ticks += 1
         self._lg.info(f"Background task executed (tick {self._ticks})")
-        
+
     def do_GET(self, instance):
         """Handle HTTP requests."""
         instance.send_response(200)
         instance.send_header("Content-type", "application/json")
         instance.end_headers()
-        instance.wfile.write(json.dumps({
-            "status": "ok", 
-            "ticks": self._ticks
-        }).encode())
+        instance.wfile.write(
+            json.dumps({"status": "ok", "ticks": self._ticks}).encode()
+        )
+
 
 # Create and run server with ticker
 config = LogConfig.from_params("info")
@@ -121,14 +125,14 @@ class ApiHandler(HTTPRequestHandler):
         instance.send_header("Content-type", "application/json")
         instance.end_headers()
         instance.wfile.write(b'{"message": "Hello, World!"}')
-        
+
     def do_POST(self, instance):
         """Handle POST requests."""
-        content_length = int(instance.headers['Content-Length'])
+        content_length = int(instance.headers["Content-Length"])
         post_data = instance.rfile.read(content_length)
-        
+
         # Process post_data...
-        
+
         instance.send_response(200)
         instance.send_header("Content-type", "application/json")
         instance.end_headers()
@@ -184,11 +188,14 @@ class RequestHandler(http.server.SimpleHTTPRequestHandler):
 class ServerError(Exception):
     """Base exception for server-related errors."""
 
+
 class ServerStartupError(ServerError):
     """Raised when server fails to start."""
 
+
 class ServerShutdownError(ServerError):
     """Raised when server fails to shutdown gracefully."""
+
 
 class HandlerError(ServerError):
     """Raised when request handler encounters an error."""

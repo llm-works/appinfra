@@ -27,6 +27,7 @@ Three-layer architecture separates concerns:
 from appinfra.log import Logger
 from appinfra.service import Service, ThreadRunner, Manager
 
+
 class MyService(Service):
     def __init__(self, lg: Logger):
         self._lg = lg
@@ -45,6 +46,7 @@ class MyService(Service):
 
     def is_healthy(self) -> bool:
         return True
+
 
 # Run with ThreadRunner
 lg = Logger(name="app")
@@ -121,6 +123,7 @@ Register callbacks for state changes:
 def on_change(name: str, old: State, new: State) -> None:
     print(f"{name}: {old.value} -> {new.value}")
 
+
 runner.on_state_change(on_change)
 ```
 
@@ -188,10 +191,10 @@ Configure automatic restart on failure:
 from appinfra.service import RestartPolicy, ThreadRunner
 
 policy = RestartPolicy(
-    max_retries=5,       # Max restart attempts
-    backoff=1.0,         # Initial backoff in seconds
+    max_retries=5,  # Max restart attempts
+    backoff=1.0,  # Initial backoff in seconds
     backoff_multiplier=2.0,  # Exponential backoff
-    max_backoff=60.0,    # Maximum backoff cap
+    max_backoff=60.0,  # Maximum backoff cap
     restart_on_failure=True,
 )
 
@@ -309,7 +312,7 @@ from appinfra.service import AsyncProcessQueueChannelFactory
 
 pair = AsyncProcessQueueChannelFactory().create_pair()
 await pair.parent.send(request)  # Parent uses async
-pair.child.recv()                 # Child uses sync in subprocess
+pair.child.recv()  # Child uses sync in subprocess
 ```
 
 ### Custom Channels and Transports
@@ -320,8 +323,10 @@ the `Channel` protocol directly:
 ```python
 from appinfra.service import Channel
 
+
 class ZMQChannel:
     """Implements Channel protocol directly — no BufferedChannel needed."""
+
     def send(self, message): ...
     def recv(self, timeout=None): ...
     def submit(self, request, timeout=None): ...
@@ -336,13 +341,16 @@ to get request/response correlation and redelivery:
 ```python
 from appinfra.service import BufferedChannel, Transport
 
+
 class SharedMemTransport:
     """Any object satisfying the Transport protocol."""
+
     def send(self, message): ...
     def recv(self, timeout=None): ...
     def close(self): ...
     @property
     def is_closed(self) -> bool: ...
+
 
 channel = BufferedChannel(SharedMemTransport(shm_region))
 ```
@@ -362,7 +370,8 @@ Centralized creation of service components:
 
 ```python
 from appinfra.service import (
-    QueueChannelFactory, ChannelConfig,
+    QueueChannelFactory,
+    ChannelConfig,
     RunnerFactory,
     ServiceFactory,
 )

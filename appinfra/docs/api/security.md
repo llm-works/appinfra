@@ -15,8 +15,8 @@ class SecretMasker:
         self,
         *,
         patterns: list[str] | None = None,  # Default: DEFAULT_PATTERNS
-        mask: str = DEFAULT_MASK,            # Replacement string
-        enabled: bool = True                 # Enable/disable masking
+        mask: str = DEFAULT_MASK,  # Replacement string
+        enabled: bool = True,  # Enable/disable masking
     ): ...
 
     def mask(self, text: str) -> str: ...
@@ -53,10 +53,7 @@ safe = masker.mask(text)
 from appinfra.security import SecretMasker
 
 # Create with custom settings
-masker = SecretMasker(
-    mask="<REDACTED>",
-    enabled=True
-)
+masker = SecretMasker(mask="<REDACTED>", enabled=True)
 
 # Add custom patterns
 masker.add_pattern(r"MY_TOKEN_[A-Z0-9]+")
@@ -151,10 +148,10 @@ Additional patterns available for specific services:
 from appinfra.security.patterns import SERVICE_PATTERNS
 
 # Available services: google, azure, sendgrid, twilio
-SERVICE_PATTERNS["google"]    # Google API keys, OAuth client IDs
-SERVICE_PATTERNS["azure"]     # Azure storage keys
+SERVICE_PATTERNS["google"]  # Google API keys, OAuth client IDs
+SERVICE_PATTERNS["azure"]  # Azure storage keys
 SERVICE_PATTERNS["sendgrid"]  # SendGrid API keys
-SERVICE_PATTERNS["twilio"]    # Twilio API keys
+SERVICE_PATTERNS["twilio"]  # Twilio API keys
 ```
 
 ## Aggressive Patterns
@@ -177,12 +174,7 @@ The security module integrates automatically with appinfra's logging system. Whe
 ```python
 from appinfra.log import LoggingBuilder
 
-logger = (
-    LoggingBuilder("myapp")
-    .with_level("info")
-    .console_handler()
-    .build()
-)
+logger = LoggingBuilder("myapp").with_level("info").console_handler().build()
 
 # Secrets automatically masked in log output
 logger.info("User authenticated with api_key=sk-live-xxxxxxxxxxxx")
@@ -201,6 +193,7 @@ masker.enabled = False  # Disable masking
 
 # Or create disabled instance
 from appinfra.security import SecretMasker
+
 masker = SecretMasker(enabled=False)
 ```
 

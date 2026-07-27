@@ -79,12 +79,7 @@ The logging system provides structured output with custom levels and multiple ha
 ```python
 from appinfra.log import LoggingBuilder
 
-logger = (
-    LoggingBuilder("my_app")
-    .with_level("info")
-    .console_handler()
-    .build()
-)
+logger = LoggingBuilder("my_app").with_level("info").console_handler().build()
 
 logger.info("Application started")
 logger.debug("Debug message", extra={"user_id": "123"})
@@ -99,7 +94,7 @@ logger = (
     LoggingBuilder("my_app")
     .with_level("info")
     .console_handler()
-    .file_handler("logs/app.log", max_bytes=10*1024*1024, backup_count=5)
+    .file_handler("logs/app.log", max_bytes=10 * 1024 * 1024, backup_count=5)
     .build()
 )
 ```
@@ -109,12 +104,7 @@ logger = (
 ```python
 from appinfra.log.builder import JSONLoggingBuilder
 
-logger = (
-    JSONLoggingBuilder("my_app")
-    .with_level("info")
-    .console_handler()
-    .build()
-)
+logger = JSONLoggingBuilder("my_app").with_level("info").console_handler().build()
 
 logger.info("User action", extra={"user_id": "123", "action": "login"})
 ```
@@ -164,6 +154,7 @@ When building CLI applications with the Tool framework, access the YAML config v
 ```python
 from appinfra.app.tools.base import Tool
 
+
 class ServeTool(Tool):
     def configure(self) -> None:
         # Access YAML config via self.app.config
@@ -189,25 +180,25 @@ Build CLI applications with the fluent AppBuilder API.
 from appinfra.app.builder import AppBuilder
 from appinfra.app.tools import Tool
 
+
 class MyTool(Tool):
     def add_args(self):
-        self.arg_prs.add_argument('--name', required=True, help='Your name')
+        self.arg_prs.add_argument("--name", required=True, help="Your name")
 
     def run(self):
         self.lg.info(f"Hello, {self.args.name}!")
         return 0
+
 
 # Build and run
 app = (
     AppBuilder("myapp")
     .with_description("My awesome application")
     .with_version("1.0.0")
-    .tools
-        .with_tool(MyTool())
-        .done()
-    .logging
-        .with_level("info")
-        .done()
+    .tools.with_tool(MyTool())
+    .done()
+    .logging.with_level("info")
+    .done()
     .build()
 )
 
@@ -222,11 +213,13 @@ from appinfra.app.builder import AppBuilder
 
 app = AppBuilder("myapp").build()
 
+
 @app.tool(name="greet", help="Greet someone")
-@app.argument('--name', required=True)
+@app.argument("--name", required=True)
 def greet(self):
     self.lg.info(f"Hello, {self.args.name}!")
     return 0
+
 
 if __name__ == "__main__":
     app.run()
@@ -276,8 +269,10 @@ Execute tasks periodically or on a schedule.
 ```python
 from appinfra.time import Ticker
 
+
 def my_task():
     print("Task executed!")
+
 
 # Run every 5 seconds
 ticker = Ticker(interval=5.0, handler=my_task)
@@ -292,8 +287,10 @@ ticker.stop()
 ```python
 from appinfra.time import Sched, Period
 
+
 def daily_task():
     print("Daily task executed!")
+
 
 # Run daily at 3 AM
 sched = Sched(period=Period.DAILY, hour=3, handler=daily_task)
@@ -464,12 +461,7 @@ See the [Virtual Environment Guide](guides/virtual-environment.md) for more opti
 ```python
 from appinfra.dot_dict import DotDict
 
-config = DotDict({
-    "database": {
-        "host": "localhost",
-        "port": 5432
-    }
-})
+config = DotDict({"database": {"host": "localhost", "port": 5432}})
 
 # Access with dot notation
 print(config.database.host)  # localhost

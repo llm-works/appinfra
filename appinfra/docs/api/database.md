@@ -48,10 +48,10 @@ Main PostgreSQL database interface.
 class PG:
     def __init__(
         self,
-        lg: Logger,                      # Logger instance
-        cfg: Any,                        # Database config (dict or object with url, etc.)
+        lg: Logger,  # Logger instance
+        cfg: Any,  # Database config (dict or object with url, etc.)
         query_lg_level: Any | None = None,  # Log level for queries
-        schema: str | None = None        # Schema for isolation
+        schema: str | None = None,  # Schema for isolation
     ): ...
 
     def session(self, autocommit: bool = False) -> ContextManager[Session]: ...
@@ -159,7 +159,7 @@ from appinfra.db.pg import PG
 # Create PG with schema isolation
 pg = PG(logger, config, schema="tenant_a")
 pg.create_schema()  # Create schema if it doesn't exist
-pg.migrate(Base)    # Tables created in tenant_a schema
+pg.migrate(Base)  # Tables created in tenant_a schema
 
 # All queries now use tenant_a schema
 with pg.session() as session:
@@ -188,6 +188,7 @@ The `appinfra.db.pg.testing` module provides fixtures for parallel test executio
 ```python
 # conftest.py - Minimal setup (one line)
 pytest_plugins = ["appinfra.db.pg.testing"]
+
 
 # Override config fixture to use your database
 @pytest.fixture(scope="session")
@@ -226,10 +227,12 @@ from myapp.models import Base
 
 pytest_plugins = ["appinfra.db.pg.testing"]
 
+
 @pytest.fixture(scope="session")
 def pg_with_tables(pg_migrate_factory):
     with pg_migrate_factory(Base, extensions=["vector"]) as pg:
         yield pg
+
 
 # In tests
 def test_with_tables(pg_with_tables):
@@ -415,8 +418,8 @@ with with_object_lock(session, key):
 ensure_object(session, key, exists_fn, create_fn)
 
 # Schema-aware existence checks (filter by n.nspname, not pg_table_is_visible):
-table_exists(conn, name, schema=None)   # None -> current_schemas(true) fallback
-index_exists(conn, name, schema=None)   # None -> any schema
+table_exists(conn, name, schema=None)  # None -> current_schemas(true) fallback
+index_exists(conn, name, schema=None)  # None -> any schema
 ```
 
 `table_exists` and `index_exists` filter by `pg_namespace.nspname` explicitly rather than
@@ -569,19 +572,22 @@ from appinfra.cfg import get_config_file_path
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy import Column, Integer, String
 
+
 class Base(DeclarativeBase):
     pass
 
+
 class User(Base):
-    __tablename__ = 'users'
+    __tablename__ = "users"
     id = Column(Integer, primary_key=True)
     name = Column(String)
     email = Column(String)
 
+
 pg = PG(get_config_file_path(), "production")
 
 with pg.session() as session:
-    users = session.query(User).filter(User.name == 'John').all()
+    users = session.query(User).filter(User.name == "John").all()
 ```
 
 ## See Also

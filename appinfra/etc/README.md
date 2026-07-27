@@ -707,11 +707,11 @@ etc/
 from appinfra.config import Config
 
 # Load configuration with includes automatically resolved
-config = Config('etc/infra.yaml')
+config = Config("etc/infra.yaml")
 
 # Access configuration normally
-db_host = config.get('database.host')
-log_level = config.get('logging.level')
+db_host = config.get("database.host")
+log_level = config.get("logging.level")
 ```
 
 ## Environment Variable Overrides
@@ -890,7 +890,7 @@ To debug configuration loading:
 ```python
 from appinfra import Config
 
-config = Config('etc/infra.yaml')
+config = Config("etc/infra.yaml")
 print("Configuration loaded:")
 print(config)
 

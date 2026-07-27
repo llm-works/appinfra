@@ -68,6 +68,7 @@ To create a custom plugin, extend the `Plugin` base class:
 from appinfra.app.builder.plugin import Plugin
 from appinfra.app.builder.tool import ToolBuilder
 
+
 class MyPlugin(Plugin):
     def __init__(self):
         super().__init__("my-plugin")

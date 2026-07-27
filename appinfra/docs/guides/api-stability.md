@@ -93,6 +93,7 @@ When an API needs to be changed or removed:
 ```python
 from appinfra.deprecation import deprecated
 
+
 @deprecated(version="1.2.0", replacement="new_function")
 def old_function():
     """Use new_function instead."""
@@ -111,6 +112,7 @@ DeprecationWarning: old_function is deprecated since version 1.2.0, use new_func
 
 ```python
 import warnings
+
 warnings.filterwarnings("default", category=DeprecationWarning, module="appinfra")
 ```
 
@@ -118,6 +120,7 @@ warnings.filterwarnings("default", category=DeprecationWarning, module="appinfra
 
 ```python
 import warnings
+
 warnings.filterwarnings("error", category=DeprecationWarning, module="appinfra")
 ```
 
@@ -125,6 +128,7 @@ warnings.filterwarnings("error", category=DeprecationWarning, module="appinfra")
 
 ```python
 import warnings
+
 warnings.filterwarnings("ignore", category=DeprecationWarning, module="appinfra")
 ```
 

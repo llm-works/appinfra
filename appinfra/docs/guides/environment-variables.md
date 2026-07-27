@@ -102,7 +102,7 @@ INFRA_TEST_VALUE=  # empty string
 from appinfra.cfg import Config
 
 # Load config with environment overrides (default behavior)
-config = Config('etc/infra.yaml')
+config = Config("etc/infra.yaml")
 
 # Access overridden values
 print(config.logging.level)  # Will be 'debug' if INFRA_LOGGING_LEVEL=debug
@@ -115,7 +115,7 @@ print(config.pgserver.port)  # Will be 5432 if INFRA_PGSERVER_PORT=5432
 from appinfra.cfg import Config
 
 # Load config without environment overrides
-config = Config('etc/infra.yaml', enable_env_overrides=False)
+config = Config("etc/infra.yaml", enable_env_overrides=False)
 ```
 
 ### Custom Environment Prefix
@@ -124,7 +124,7 @@ config = Config('etc/infra.yaml', enable_env_overrides=False)
 from appinfra.cfg import Config
 
 # Use custom prefix for environment variables
-config = Config('etc/infra.yaml', env_prefix='MYAPP_')
+config = Config("etc/infra.yaml", env_prefix="MYAPP_")
 
 # Now looks for MYAPP_* environment variables
 # MYAPP_LOGGING_LEVEL=debug
@@ -135,7 +135,7 @@ config = Config('etc/infra.yaml', env_prefix='MYAPP_')
 ```python
 from appinfra.cfg import Config
 
-config = Config('etc/infra.yaml')
+config = Config("etc/infra.yaml")
 overrides = config.get_env_overrides()
 
 print("Applied overrides:")
@@ -198,8 +198,8 @@ export INFRA_TEST_LOGGING_COLORS_ENABLED=false
 from appinfra.test_helpers import create_test_logger
 
 # Logger will use environment variable overrides
-logger = create_test_logger('my_test')
-logger.info('This will respect INFRA_TEST_LOGGING_LEVEL')
+logger = create_test_logger("my_test")
+logger.info("This will respect INFRA_TEST_LOGGING_LEVEL")
 ```
 
 ## Configuration File Structure
@@ -419,7 +419,7 @@ app = AppBuilder("myapp").with_config_file().build()
 
 ### Check Applied Overrides
 ```python
-config = Config('etc/infra.yaml')
+config = Config("etc/infra.yaml")
 print("Environment overrides:", config.get_env_overrides())
 ```
 
@@ -431,7 +431,7 @@ env | grep INFRA_
 
 ### Debug Configuration Loading
 ```python
-config = Config('etc/infra.yaml')
+config = Config("etc/infra.yaml")
 print("Final configuration:", config.dict())
 ```
 

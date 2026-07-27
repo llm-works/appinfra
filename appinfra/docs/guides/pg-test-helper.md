@@ -25,18 +25,29 @@ cleans up on success.
 from tests.helpers.pg.helper import PGTestCaseHelper
 import sqlalchemy
 
+
 class TestMyFeature(PGTestCaseHelper):
     def test_my_feature(self):
-        session, table_name, cleanup_needed = self.test_helper.create_debug_table("my_test")
+        session, table_name, cleanup_needed = self.test_helper.create_debug_table(
+            "my_test"
+        )
 
         try:
             # Create table and test
-            session.execute(sqlalchemy.text(f"CREATE TABLE {table_name} (id SERIAL, name VARCHAR(50))"))
-            session.execute(sqlalchemy.text(f"INSERT INTO {table_name} (name) VALUES ('test')"))
+            session.execute(
+                sqlalchemy.text(
+                    f"CREATE TABLE {table_name} (id SERIAL, name VARCHAR(50))"
+                )
+            )
+            session.execute(
+                sqlalchemy.text(f"INSERT INTO {table_name} (name) VALUES ('test')")
+            )
             session.commit()
 
             # Assertions
-            result = session.execute(sqlalchemy.text(f"SELECT COUNT(*) FROM {table_name}"))
+            result = session.execute(
+                sqlalchemy.text(f"SELECT COUNT(*) FROM {table_name}")
+            )
             self.assertEqual(result.fetchone()[0], 1)
 
             cleanup_needed = True  # Success - cleanup table
@@ -76,7 +87,9 @@ schema = """
         timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
 """
-session, table_name, cleanup_needed = self.test_helper.create_debug_table_with_schema("users", schema)
+session, table_name, cleanup_needed = self.test_helper.create_debug_table_with_schema(
+    "users", schema
+)
 ```
 
 ### Custom Config

@@ -94,10 +94,12 @@ class MyHandler(BaseHTTPRequestHandler):
         # Handle HTTP requests
         pass
 
+
 class TickerHandler:
     def handle(self):
         # Background task
         pass
+
 
 # Server handles requests, ticker does background work
 server = TCPServer(("localhost", 8000), MyHandler)
@@ -166,6 +168,7 @@ class CleanupHandler:
     def handle(self):
         cleanup_old_files()
         purge_expired_sessions()
+
 
 ticker = Ticker(interval=3600.0, handler=CleanupHandler())  # Every hour
 ticker.start()

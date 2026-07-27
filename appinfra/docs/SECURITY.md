@@ -64,11 +64,13 @@ The framework includes multiple layers of security protection:
 ```python
 # ✅ SAFE - Uses SafeLoader
 from appinfra import Config
-config = Config('etc/config.yaml')
+
+config = Config("etc/config.yaml")
 
 # ❌ UNSAFE - Never do this
 import yaml
-with open('config.yaml') as f:
+
+with open("config.yaml") as f:
     yaml.load(f, Loader=yaml.Loader)  # DANGEROUS!
 ```
 
@@ -85,7 +87,7 @@ from pathlib import Path
 loader = Loader(
     stream,
     current_file=config_file,
-    project_root=Path.cwd()  # Restricts includes to current directory and below
+    project_root=Path.cwd(),  # Restricts includes to current directory and below
 )
 ```
 
@@ -146,13 +148,13 @@ patterns.
 from appinfra import PG
 import sqlalchemy as sa
 
-pg = PG('etc/config.yaml', 'production')
+pg = PG("etc/config.yaml", "production")
 
 # ✅ SAFE - Parameterized query
 with pg.session() as session:
     result = session.execute(
         sa.text("SELECT * FROM users WHERE id = :user_id"),
-        {"user_id": user_input}  # Safe parameter binding
+        {"user_id": user_input},  # Safe parameter binding
     )
 
 # ❌ UNSAFE - String concatenation
@@ -239,6 +241,7 @@ from appinfra.log import Logger
 lg = Logger("my_app")
 limiter = RateLimiter(lg, per_minute=10)  # 10 calls per minute
 
+
 def expensive_operation():
     limiter.next()  # blocks until next slot is available
     # Protected operation
@@ -283,11 +286,15 @@ from pathlib import Path
 from appinfra.yaml import load
 
 # ✅ GOOD - Restricts includes to /app/config and below
-with open('/app/config/config.yaml') as f:
-    config = load(f, current_file=Path('/app/config/config.yaml'), project_root=Path('/app/config'))
+with open("/app/config/config.yaml") as f:
+    config = load(
+        f,
+        current_file=Path("/app/config/config.yaml"),
+        project_root=Path("/app/config"),
+    )
 
 # ❌ RISKY - No path restrictions (and relative !include/!path won't resolve)
-with open('config.yaml') as f:
+with open("config.yaml") as f:
     config = load(f)  # Allows any file system access
 ```
 
@@ -297,6 +304,7 @@ with open('config.yaml') as f:
 
 ```python
 from appinfra.time.delta import delta_to_secs, InvalidDurationError
+
 
 def set_timeout(user_input: str):
     try:
@@ -313,6 +321,7 @@ def set_timeout(user_input: str):
 
 ```python
 from appinfra import safe_compile
+
 
 def add_filter(user_pattern: str):
     try:
@@ -331,10 +340,11 @@ import logging
 
 lg = logging.getLogger(__name__)
 
+
 def process_request(user_id: str):
     # ⚠️ Be careful logging user input - could leak sensitive data
     # or inject log formatting characters
-    safe_user_id = user_id.replace('\n', '').replace('\r', '')
+    safe_user_id = user_id.replace("\n", "").replace("\r", "")
     lg.info(f"Processing request for user: {safe_user_id}")
 ```
 
@@ -351,10 +361,13 @@ logger = (
 )
 
 # User input is properly escaped in JSON
-logger.info("Login attempt", extra={
-    "user": user_input,  # Safely escaped
-    "ip": request.ip
-})
+logger.info(
+    "Login attempt",
+    extra={
+        "user": user_input,  # Safely escaped
+        "ip": request.ip,
+    },
+)
 ```
 
 ### Database Security
@@ -364,7 +377,7 @@ logger.info("Login attempt", extra={
 ```python
 from appinfra import PG
 
-pg = PG('etc/config.yaml', 'production')
+pg = PG("etc/config.yaml", "production")
 
 # Read-only connection for queries
 with pg.session_ro() as session:
@@ -376,7 +389,7 @@ with pg.session_ro() as session:
 ```python
 # Connection pooling is enabled by default
 # Prevents resource exhaustion and connection leak attacks
-pg = PG('etc/config.yaml', 'production')
+pg = PG("etc/config.yaml", "production")
 # Automatic pooling with sensible defaults
 ```
 
@@ -517,11 +530,15 @@ logger.info(f"User login: {user_input}")  # Can inject newlines
 from pathlib import Path
 from appinfra.yaml import load
 
-with open('/app/config/config.yaml') as f:
-    config = load(f, current_file=Path('/app/config/config.yaml'), project_root=Path('/app/config'))
+with open("/app/config/config.yaml") as f:
+    config = load(
+        f,
+        current_file=Path("/app/config/config.yaml"),
+        project_root=Path("/app/config"),
+    )
 
 # ❌ RISKY - No restrictions (and relative !include/!path won't resolve)
-with open('config.yaml') as f:
+with open("config.yaml") as f:
     config = load(f)
 ```
 
@@ -532,10 +549,7 @@ with open('config.yaml') as f:
 **Mitigation:**
 ```python
 # ✅ GOOD - Parameter binding
-session.execute(
-    sa.text("SELECT * FROM users WHERE name = :name"),
-    {"name": user_input}
-)
+session.execute(sa.text("SELECT * FROM users WHERE name = :name"), {"name": user_input})
 
 # ❌ BAD - String formatting
 session.execute(sa.text(f"SELECT * FROM users WHERE name = '{user_input}'"))
@@ -549,10 +563,12 @@ session.execute(sa.text(f"SELECT * FROM users WHERE name = '{user_input}'"))
 ```python
 # ✅ GOOD - Use safe_compile for user input
 from appinfra import safe_compile
+
 pattern = safe_compile(user_pattern, timeout=1.0)
 
 # ❌ BAD - Direct compilation
 import re
+
 pattern = re.compile(user_pattern)  # Vulnerable to ReDoS
 ```
 

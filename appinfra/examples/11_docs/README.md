@@ -65,9 +65,9 @@ generator.generate_to_file(app, Path("docs/cli.md"))
 
 ```python
 generator = DocsGenerator(
-    title="My Commands",       # Documentation title
-    include_examples=True,     # Include usage examples from docstrings
-    include_aliases=True,      # Include command aliases
+    title="My Commands",  # Documentation title
+    include_examples=True,  # Include usage examples from docstrings
+    include_aliases=True,  # Include command aliases
 )
 ```
 
@@ -97,7 +97,8 @@ class DeployTool(Tool):
 
     def add_args(self, parser):
         parser.add_argument(
-            "--env", "-e",
+            "--env",
+            "-e",
             required=True,
             choices=["dev", "staging", "prod"],
             help="Target environment",

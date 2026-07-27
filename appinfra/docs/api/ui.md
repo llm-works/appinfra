@@ -75,8 +75,8 @@ with ProgressLogger(lg, "Processing...", total=100, expand=True) as pl:
 ```python
 # Start with spinner, switch to progress bar when total is known
 with ProgressLogger(lg, "Scanning...") as pl:
-    items = scan_directory()       # Spinner while scanning
-    pl.set_total(len(items))       # Switch to progress bar
+    items = scan_directory()  # Spinner while scanning
+    pl.set_total(len(items))  # Switch to progress bar
     for item in items:
         process(item)
         pl.update()
@@ -224,20 +224,17 @@ if selected:
 from appinfra.ui import (
     # Console
     Console,
-    console,          # Default console instance
+    console,  # Default console instance
     get_console,
-
     # Rich components (with fallbacks)
     Panel,
     Progress,
     ProgressLogger,
     Table,
     RICH_AVAILABLE,
-
     # Help formatting
     RichHelpFormatter,
     get_help_formatter,
-
     # Prompts
     prompts,
     confirm,
@@ -245,9 +242,9 @@ from appinfra.ui import (
     password,
     select,
     select_scrollable,  # Arrow-key scrollable selection
-    select_table,       # Table-style scrollable selection
+    select_table,  # Table-style scrollable selection
     multiselect,
     NonInteractiveError,
-    INQUIRER_AVAILABLE, # True if InquirerPy is installed
+    INQUIRER_AVAILABLE,  # True if InquirerPy is installed
 )
 ```

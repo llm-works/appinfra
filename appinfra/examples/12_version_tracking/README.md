@@ -62,22 +62,18 @@ The framework detects commit hashes from three sources (in order):
 from appinfra.app import AppBuilder
 
 # Track this repo's build info + external packages
-app = (AppBuilder("myapp")
-    .version
-        .with_semver("1.0.0")
-        .with_build_info()                # reads _build_info.py from CWD
-        .with_package("mylib")            # track specific external packages
-        .with_package("otherlib")
-        .done()
-    .build())
+app = (
+    AppBuilder("myapp")
+    .version.with_semver("1.0.0")
+    .with_build_info()  # reads _build_info.py from CWD
+    .with_package("mylib")  # track specific external packages
+    .with_package("otherlib")
+    .done()
+    .build()
+)
 
 # Just build info for this repo (no external packages)
-app = (AppBuilder("myapp")
-    .version
-        .with_semver("1.0.0")
-        .with_build_info()
-        .done()
-    .build())
+app = AppBuilder("myapp").version.with_semver("1.0.0").with_build_info().done().build()
 ```
 
 ## Standalone Usage

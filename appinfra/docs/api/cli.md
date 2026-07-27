@@ -34,6 +34,7 @@ out.write("Hello world")
 
 # Custom stream for testing
 import io
+
 buffer = io.StringIO()
 out = ConsoleOutput(buffer)
 out.write("Hello")
@@ -170,6 +171,7 @@ Example of testing a CLI tool with BufferedOutput:
 
 ```python
 from appinfra.cli import BufferedOutput
+
 
 def test_my_tool_output():
     out = BufferedOutput()

@@ -73,10 +73,15 @@ from appinfra.app import AppBuilder
 app = (
     AppBuilder("myapp")
     .with_description("Data processing tool")
-    .with_config_file("config.yaml")              # Resolved from --etc-dir
-    .logging.with_level("info").with_location(1).done()
-    .tools.with_tool(ProcessorTool()).with_main(MainTool()).done()
-    .advanced.with_hook("startup", init_database).done()
+    .with_config_file("config.yaml")  # Resolved from --etc-dir
+    .logging.with_level("info")
+    .with_location(1)
+    .done()
+    .tools.with_tool(ProcessorTool())
+    .with_main(MainTool())
+    .done()
+    .advanced.with_hook("startup", init_database)
+    .done()
     .build()
 )
 
@@ -107,6 +112,7 @@ from appinfra.app import AppBuilder
 
 app = AppBuilder("mytool").build()
 
+
 @app.tool(name="sync", help="Synchronize data")
 @app.argument("--force", action="store_true", help="Force sync")
 @app.argument("--limit", type=int, default=100)
@@ -123,18 +129,22 @@ def sync_tool(self):
 ```python
 app = AppBuilder("myapp").build()
 
+
 @app.tool(name="db", help="Database operations")
 def db_tool(self):
     return self.run_subtool()
+
 
 @db_tool.subtool(name="migrate", help="Run migrations")
 @app.argument("--step", type=int, default=1)
 def db_migrate(self):
     self.lg.info(f"Migrating {self.args.step} steps...")
 
+
 @db_tool.subtool(name="status")
 def db_status(self):
     self.lg.info("Database is healthy")
+
 
 # Usage: myapp db migrate --step 3
 #        myapp db status
@@ -147,11 +157,10 @@ startup logging:
 ```python
 app = (
     AppBuilder("myapp")
-    .version
-        .with_semver("1.0.0")
-        .with_build_info()              # App's own commit from _build_info.py
-        .with_package("appinfra")       # Track framework version
-        .done()
+    .version.with_semver("1.0.0")
+    .with_build_info()  # App's own commit from _build_info.py
+    .with_package("appinfra")  # Track framework version
+    .done()
     .build()
 )
 # --version shows: myapp 1.0.0 (abc123f) + tracked packages
@@ -184,14 +193,13 @@ Automatic conversion of nested dicts, with safe traversal methods:
 ```python
 from appinfra.dot_dict import DotDict
 
-config = DotDict({
-    "database": {"host": "localhost", "port": 5432},
-    "features": {"beta": True}
-})
+config = DotDict(
+    {"database": {"host": "localhost", "port": 5432}, "features": {"beta": True}}
+)
 
 # Attribute-style access
-print(config.database.host)               # "localhost"
-print(config.features.beta)               # True
+print(config.database.host)  # "localhost"
+print(config.features.beta)  # True
 
 # Dot-notation path queries
 if config.has("database.ssl.enabled"):
@@ -204,9 +212,11 @@ restarting your application. Uses content-based change detection to avoid spurio
 ```python
 from appinfra.config import ConfigWatcher
 
+
 def on_config_change(new_config):
     logger.info("Config updated, applying changes...")
     apply_feature_flags(new_config.features)
+
 
 watcher = ConfigWatcher(lg=logger, etc_dir="./etc")
 watcher.configure("config.yaml", debounce_ms=500)
@@ -224,10 +234,10 @@ code:
 from appinfra.log import LogLevelManager
 
 manager = LogLevelManager.get_instance()
-manager.add_rule("/app/db/*", "debug")      # All database loggers
-manager.add_rule("/app/db/queries", "trace") # Even more detail for queries
-manager.add_rule("/app/net/**", "warning")   # Network and all children
-manager.add_rule("/app/cache", "error")      # Only errors from cache
+manager.add_rule("/app/db/*", "debug")  # All database loggers
+manager.add_rule("/app/db/queries", "trace")  # Even more detail for queries
+manager.add_rule("/app/net/**", "warning")  # Network and all children
+manager.add_rule("/app/cache", "error")  # Only errors from cache
 ```
 
 **Automatic secret masking** - Protect sensitive data in logs with pattern-based detection. Covers
@@ -240,8 +250,8 @@ masker = SecretMasker()
 masker.add_known_secret(os.environ["API_KEY"])  # Track known secrets
 
 # Patterns auto-detect common formats
-text = masker.mask("token=ghp_abc123secret")    # "token=[MASKED]"
-text = masker.mask("aws_secret=AKIA...")        # "aws_secret=[MASKED]"
+text = masker.mask("token=ghp_abc123secret")  # "token=[MASKED]"
+text = masker.mask("aws_secret=AKIA...")  # "aws_secret=[MASKED]"
 
 # Integrate with logging
 handler.addFilter(SecretMaskingFilter(masker))
@@ -255,13 +265,16 @@ from appinfra.observability import ObservabilityHooks, HookEvent, HookContext
 
 hooks = ObservabilityHooks()
 
+
 @hooks.on(HookEvent.QUERY_START)
 def on_query(ctx: HookContext):
     logger.debug(f"Query: {ctx.data.get('sql')}")
 
+
 @hooks.on(HookEvent.QUERY_END)
 def on_complete(ctx: HookContext):
     logger.info(f"Completed in {ctx.duration:.3f}s")
+
 
 # Trigger events with arbitrary data
 hooks.trigger(HookEvent.QUERY_START, sql="SELECT * FROM users")
@@ -277,13 +290,13 @@ from appinfra.time import Ticker
 
 # Scheduled mode: run every 30 seconds
 with Ticker(logger, secs=30) as ticker:
-    for tick_count in ticker:           # Stops on SIGTERM/SIGINT
+    for tick_count in ticker:  # Stops on SIGTERM/SIGINT
         run_health_check()
         if tick_count >= 100:
             break
 
 # Continuous mode: run as fast as possible
-for tick in Ticker(logger):              # No secs = continuous
+for tick in Ticker(logger):  # No secs = continuous
     process_queue_item()
 ```
 
@@ -294,14 +307,14 @@ microseconds to days, with precise mode for sub-millisecond accuracy:
 from appinfra.time import delta_str, delta_to_secs
 
 # Formatting
-delta_str(3661.5)                # "1h1m1s"
-delta_str(0.000042)              # "42μs"
-delta_str(90061)                 # "1d1h1m1s"
+delta_str(3661.5)  # "1h1m1s"
+delta_str(0.000042)  # "42μs"
+delta_str(90061)  # "1d1h1m1s"
 
 # Parsing
-delta_to_secs("2h30m")           # 9000.0
-delta_to_secs("1d12h")           # 129600.0
-delta_to_secs("500ms")           # 0.5
+delta_to_secs("2h30m")  # 9000.0
+delta_to_secs("1d12h")  # 129600.0
+delta_to_secs("500ms")  # 0.5
 ```
 
 **Time-based task scheduler** - Execute tasks at specific times with daily, weekly, monthly, or
@@ -316,7 +329,7 @@ sched = Sched(logger, Period.DAILY, "14:30")
 # Weekly on Monday at 09:00
 sched = Sched(logger, Period.WEEKLY, "09:00", weekday=0)
 
-for timestamp in sched.run():       # Yields after each scheduled time
+for timestamp in sched.run():  # Yields after each scheduled time
     generate_report()
 ```
 
@@ -343,7 +356,7 @@ import datetime
 
 start = datetime.date(2025, 12, 1)
 for date in iter_dates(start, skip_weekends=True):
-    process_business_day(date)              # Mon-Fri only, up to today
+    process_business_day(date)  # Mon-Fri only, up to today
 ```
 
 ### CLI & UI
@@ -354,10 +367,12 @@ implementations for production, testing, or silent operation:
 ```python
 from appinfra.cli.output import ConsoleOutput, BufferedOutput, NullOutput
 
+
 def run_command(output=None):
     output = output or ConsoleOutput()
     output.write("Processing...")
     output.write("Done!")
+
 
 # In tests: capture output
 buf = BufferedOutput()
@@ -388,7 +403,7 @@ from appinfra.ui import ProgressLogger
 with ProgressLogger(lg, "Processing...", total=100) as pl:
     for item in items:
         result = process(item)
-        pl.log(f"Processed {item.name}")     # Pauses spinner, logs, resumes
+        pl.log(f"Processed {item.name}")  # Pauses spinner, logs, resumes
         pl.update(advance=1)
 ```
 
@@ -429,9 +444,7 @@ server = (
     .with_config(config)
     .with_port(8000)
     .with_subprocess_mode(
-        request_queue=request_q,
-        response_queue=response_q,
-        auto_restart=True
+        request_queue=request_q, response_queue=response_q, auto_restart=True
     )
     .build()
 )
