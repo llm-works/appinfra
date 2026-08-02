@@ -10,6 +10,11 @@ For API stability guarantees and deprecation policy, see
 
 ## [Unreleased]
 
+### Added
+- `LifecycleManager.start_t`: public read-only property exposing the monotonic timestamp
+  captured in `initialize()`. App-wide cold-start anchor for elapsed measurement via
+  `time.since(application.lifecycle.start_t)`. `None` before `initialize()` runs.
+
 ### Fixed
 - `appinfra.db.pg.vector`: `Vector` is now resolved lazily via PEP 562 `__getattr__`.
   Consumers of `appinfra.db` that don't use vector features avoid the pgvector/numpy
