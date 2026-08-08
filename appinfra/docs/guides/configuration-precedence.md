@@ -18,6 +18,11 @@ aliases:
 
 This guide explains the order of precedence when configuration values come from multiple sources.
 
+> **CLI flags are opt-in.** The `--log-level`, `--log-json`, `-q`, `--etc-dir`, etc. shown
+> throughout this guide require enabling standard args on the builder — e.g.
+> `AppBuilder("myapp").with_standard_args(log=True, etc_dir=True).build()`. See
+> [Standard CLI Arguments](#standard-cli-arguments) below.
+
 ## General Configuration Values
 
 For most configuration values (log level, colors, location, etc.), the precedence is:
@@ -133,7 +138,12 @@ this default handler as well:
 
 ## Standard CLI Arguments
 
-These arguments are available by default (can be disabled via `without_standard_args()`):
+Standard CLI arguments are **opt-in** — only `-h/--help` is registered by default. Enable the ones
+needed via `AppBuilder.with_standard_args(...)` (all logging flags with `log=True`, or per-arg
+kwargs). See [AppBuilder — Standard Arguments](../api/app-builder.md#standard-arguments) for the
+full opt-in surface and per-arg override options.
+
+Once opted in, these arguments override YAML/env values per the precedence table above:
 
 | Argument | Overrides | Default |
 |----------|-----------|---------|
@@ -145,6 +155,14 @@ These arguments are available by default (can be disabled via `without_standard_
 | `--log-topic PATTERN LEVEL` | `logging.topics` | none |
 | `-q, --quiet` | Disables logging | `false` |
 | `--etc-dir DIR` | Config directory | auto-detect |
+
+```python
+# Enable all logging flags plus --etc-dir
+AppBuilder("myapp").with_standard_args(log=True, etc_dir=True).build()
+```
+
+Passing a standard flag without opting in causes argparse to reject it as an unknown argument
+(the flag never reaches the override chain, so the YAML/env value is used unchanged).
 
 ## Environment Variable Format
 

@@ -473,6 +473,20 @@ All configuration variables follow the `INFRA_<MODULE>_<VAR>` naming convention.
 |----------|---------|-------------|
 | `INFRA_CICD_PYTHON_VERSION` | `3.12` | Default Python version |
 
+**Container Runtime (cross-cutting: PG + CICD):**
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `INFRA_CONTAINER_CMD` | `docker` | Runtime used by `pg.*` / `cicd.*` targets (`ps`, `exec`, `volume`, ...). Also exported to helper shell scripts (`pg-info.sh`, `cicd-test.sh`). |
+| `INFRA_COMPOSE_CMD` | `docker compose` | Compose orchestrator paired with `INFRA_CONTAINER_CMD`. |
+
+Set both together in `Makefile.local` to run the local-dev container layer under Podman:
+
+```make
+INFRA_CONTAINER_CMD := podman
+INFRA_COMPOSE_CMD   := podman compose
+```
+
 **Cleanup (CLEAN):**
 
 | Variable | Default | Description |

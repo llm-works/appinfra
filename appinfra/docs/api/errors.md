@@ -61,10 +61,14 @@ except InfraError as e:
 ```python
 from appinfra.errors import DatabaseError
 from appinfra.db import PG
-from appinfra.cfg import get_config_file_path
+from appinfra.config import Config
+from appinfra.log import LoggingBuilder
+
+lg = LoggingBuilder("myapp").build()
+cfg = Config("etc/config.yaml")
 
 try:
-    pg = PG(get_config_file_path(), "production")
+    pg = PG(lg, cfg.dbs.production)
     with pg.session() as session:
         result = session.execute("INVALID SQL")
 except DatabaseError as e:

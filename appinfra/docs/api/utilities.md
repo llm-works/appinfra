@@ -548,6 +548,31 @@ config["password"].reveal()  # 'hunter2'  ← only path to plaintext
 Solo `!secret ${VAR}` raises `yaml.YAMLError` at parse time — the plain-string
 result of the old form leaked in logs. Migrate to `!env VAR !secret`.
 
+`SecretStr` values survive `!deep !include` merges without coercing back to
+plain `str`, so masked secrets loaded from an included file remain masked in
+the merged config.
+
+**`SecretStr.ensure(value)` — boundary coercion.** Library code that
+historically accepted a plain `str` and now accepts `SecretStr` too should
+call `SecretStr.ensure(...)` at the boundary rather than reimplementing the
+coerce shim:
+
+```python
+from appinfra.yaml import SecretStr
+
+
+def connect(dsn: str | SecretStr | None) -> None:
+    dsn = SecretStr.ensure(dsn)  # None → None, SecretStr → same, str → wrapped
+    if dsn is not None:
+        raw_dsn = dsn.reveal()
+        ...
+```
+
+`ensure` preserves identity for already-wrapped inputs, passes `None` through,
+and raises `TypeError` for any other type (via the `SecretStr` constructor,
+which itself rejects non-`str` and double-wraps). `SecretStr` is not a `str`
+subclass and is unhashable — do not use as a dict key or set member.
+
 **`!path`** - Resolve paths relative to config file location with tilde expansion:
 
 ```yaml
