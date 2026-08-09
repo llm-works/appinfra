@@ -387,13 +387,14 @@ for query workloads:
 from appinfra.db import PG
 from appinfra.config import Config
 from appinfra.log import LoggingBuilder
+import sqlalchemy as sa
 
 lg = LoggingBuilder("myapp").build()
 cfg = Config("etc/config.yaml")
 pg_ro = PG(lg, cfg.dbs.reports)  # yaml: dbs.reports.readonly: true
 
 with pg_ro.session() as session:
-    results = session.execute(query)  # Cannot modify data
+    results = session.execute(sa.text("SELECT * FROM reports"))
 ```
 
 #### 2. Use Connection Pooling
