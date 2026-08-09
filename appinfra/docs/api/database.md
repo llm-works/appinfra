@@ -115,8 +115,8 @@ cfg = Config("etc/infra.yaml")
 manager = Manager(lg, cfg)
 manager.setup()  # creates all configured connections
 
-prod_db = manager.db("production")
-test_db = manager.db("test")
+main_db = manager.db("main")
+readonly_db = manager.db("readonly")
 ```
 
 ## Configuration

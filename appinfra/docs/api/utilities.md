@@ -569,9 +569,10 @@ def connect(dsn: str | SecretStr | None) -> None:
 ```
 
 `ensure` preserves identity for already-wrapped inputs, passes `None` through,
-and raises `TypeError` for any other type (via the `SecretStr` constructor,
-which itself rejects non-`str` and double-wraps). `SecretStr` is not a `str`
-subclass and is unhashable — do not use as a dict key or set member.
+and raises `TypeError` for any other type. The `SecretStr` constructor accepts
+only `str` — it rejects existing `SecretStr` instances so accidental
+double-wraps surface loudly. `SecretStr` is not a `str` subclass and is
+unhashable — do not use as a dict key or set member.
 
 **`!path`** - Resolve paths relative to config file location with tilde expansion:
 

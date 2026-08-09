@@ -276,8 +276,9 @@ measurement:
 ```python
 from appinfra.time import since
 
-# From any component that holds a reference to the app:
-elapsed = since(app.lifecycle.start_t)
+# From any component that holds a reference to the app (after initialization):
+if app.lifecycle.start_t is not None:
+    elapsed = since(app.lifecycle.start_t)
 ```
 
 `start_t` is the same value used internally to stamp shutdown-elapsed log

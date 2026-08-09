@@ -19,6 +19,9 @@ For API stability guarantees and deprecation policy, see
 - `appinfra.db.pg.vector`: `Vector` is now resolved lazily via PEP 562 `__getattr__`.
   Consumers of `appinfra.db` that don't use vector features avoid the pgvector/numpy
   import chain. Import paths are unchanged.
+- Documentation: code examples updated to match current API signatures (`PG`, `Manager`,
+  `Config` imports and constructor patterns). Added coverage for `SecretStr.ensure()`,
+  `LifecycleManager.start_t`, standard CLI opt-in, and container runtime env vars.
 
 ## [0.9.0] - 2026-07-16
 

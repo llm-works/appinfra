@@ -63,15 +63,13 @@ from appinfra.errors import DatabaseError
 from appinfra.db import PG
 from appinfra.config import Config
 from appinfra.log import LoggingBuilder
-import sqlalchemy as sa
 
 lg = LoggingBuilder("myapp").build()
 cfg = Config("etc/config.yaml")
 
 try:
     pg = PG(lg, cfg.dbs.production)
-    with pg.session() as session:
-        result = session.execute(sa.text("INVALID SQL"))
+    pg.health_check()  # raises DatabaseError if connection fails
 except DatabaseError as e:
     print(f"Database error: {e}")
 ```

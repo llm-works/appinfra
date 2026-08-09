@@ -408,9 +408,9 @@ lg = LoggingBuilder("myapp").build()
 cfg = Config("etc/config.yaml")
 
 # Connection pooling is enabled by default;
-# prevents resource exhaustion and connection leak attacks
+# limits connection growth and reduces exhaustion risk
 pg = PG(lg, cfg.dbs.production)
-# Automatic pooling with sensible defaults
+# Use with pg.session() context manager to ensure connections return to pool
 ```
 
 #### 3. Enable Query Logging in Development

@@ -162,7 +162,8 @@ AppBuilder("myapp").with_standard_args(log=True, etc_dir=True).build()
 ```
 
 Passing a standard flag without opting in causes argparse to reject it as an unknown argument
-(the flag never reaches the override chain, so the YAML/env value is used unchanged).
+and the command fails before configuration resolution. Omitting the flag entirely uses the
+YAML/env value unchanged.
 
 ## Environment Variable Format
 
