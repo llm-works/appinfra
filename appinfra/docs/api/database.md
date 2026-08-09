@@ -90,25 +90,33 @@ with pg.session(autocommit=True) as session:
 
 ## Manager
 
-Manages multiple database connections.
+Manages multiple database connections declared under `dbs` in YAML.
 
 ```python
 class Manager:
-    def __init__(self, config_path: str): ...
+    def __init__(self, lg: Logger, cfg: Any): ...
 
-    def get_db(self, name: str) -> PG: ...
+    def setup(self) -> None: ...
+    def db(self, name: str) -> Any: ...
+    def list_databases(self) -> list[str]: ...
+    def close_all(self) -> None: ...
 ```
 
 **Multiple Databases:**
 
 ```python
 from appinfra.db import Manager
-from appinfra.cfg import get_config_file_path
+from appinfra.config import Config
+from appinfra.log import LoggingBuilder
 
-manager = Manager(get_config_file_path())
+lg = LoggingBuilder("myapp").build()
+cfg = Config("etc/infra.yaml")
 
-prod_db = manager.get_db("production")
-test_db = manager.get_db("test")
+manager = Manager(lg, cfg)
+manager.setup()  # creates all configured connections
+
+main_db = manager.db("main")
+readonly_db = manager.db("readonly")
 ```
 
 ## Configuration
@@ -339,6 +347,10 @@ Some extensions require configuration at both levels:
 **Extensions requiring both levels (examples):** `timescaledb`, `pg_cron`, `pg_stat_statements`,
 `pgaudit`, `auto_explain`
 
+> **`pgserver.postgres_conf` accepts only** `max_connections`,
+> `shared_preload_libraries`, `work_mem`, and `autovacuum`. Unknown keys error
+> at `make pg.server.up` and list the supported set.
+
 ```yaml
 # Server config (pg.yaml)
 pgserver:
@@ -568,7 +580,8 @@ with pg.session() as session:
 
 ```python
 from appinfra.db import PG
-from appinfra.cfg import get_config_file_path
+from appinfra.config import Config
+from appinfra.log import LoggingBuilder
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy import Column, Integer, String
 
@@ -584,7 +597,9 @@ class User(Base):
     email = Column(String)
 
 
-pg = PG(get_config_file_path(), "production")
+lg = LoggingBuilder("myapp").build()
+cfg = Config("etc/infra.yaml")
+pg = PG(lg, cfg.dbs.production)
 
 with pg.session() as session:
     users = session.query(User).filter(User.name == "John").all()

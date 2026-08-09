@@ -262,6 +262,29 @@ if __name__ == "__main__":
     exit(app.main())
 ```
 
+## Lifecycle
+
+The `App.lifecycle` attribute exposes a `LifecycleManager` that owns
+initialization, tool execution, and shutdown for the running app.
+
+### `LifecycleManager.start_t`
+
+Monotonic timestamp captured in `LifecycleManager.initialize()`, or `None`
+before initialization runs. Read as the app-wide cold-start anchor for elapsed
+measurement:
+
+```python
+from appinfra.time import since
+
+# From any component that holds a reference to the app (after initialization):
+if app.lifecycle.start_t is not None:
+    elapsed = since(app.lifecycle.start_t)
+```
+
+`start_t` is the same value used internally to stamp shutdown-elapsed log
+entries, so downstream code and framework logs share a single cold-start
+origin.
+
 ## Known Limitations
 
 ### Argument Ordering: Positionals Must Come Before Options

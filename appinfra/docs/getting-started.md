@@ -118,7 +118,7 @@ Load configuration from YAML files with environment variable overrides.
 **Load configuration:**
 
 ```python
-from appinfra.cfg import Config, get_config_file_path
+from appinfra.config import Config, get_config_file_path
 
 # Recommended: Use get_config_file_path() for automatic etc/ resolution
 config = Config(get_config_file_path())  # Finds etc/infra.yaml automatically
@@ -225,6 +225,11 @@ if __name__ == "__main__":
     app.run()
 ```
 
+> **Standard CLI flags are opt-in.** Only `-h/--help` is registered by default.
+> For `--log-level`, `-q/--quiet`, `--etc-dir`, `--log-json`, etc., add
+> `.with_standard_args(log=True, etc_dir=True)` to the builder chain. See
+> [AppBuilder — Standard Arguments](api/app-builder.md#standard-arguments).
+
 See the [Application Framework API](api/app.md) for more details.
 
 ### 4. Database
@@ -237,11 +242,13 @@ Connect to PostgreSQL with connection pooling and query logging.
 
 ```python
 from appinfra.db import PG
-from appinfra.cfg import get_config_file_path
+from appinfra.config import Config
+from appinfra.log import LoggingBuilder
 import sqlalchemy
 
-# Initialize database connection (uses automatic etc/ resolution)
-pg = PG(get_config_file_path(), "production")
+lg = LoggingBuilder("myapp").build()
+cfg = Config("etc/config.yaml")
+pg = PG(lg, cfg.dbs.production)
 
 # Use with context manager
 with pg.session() as session:
@@ -251,12 +258,20 @@ with pg.session() as session:
 
 **Read-only connection:**
 
+Read-only mode is a per-`PG` config attribute (`dbs.<name>.readonly: true` in
+YAML) applied instance-wide via a `SET TRANSACTION READ ONLY` listener — there
+is no per-session toggle. Build a separate `PG` from a read-only section:
+
 ```python
-# Open read-only session
-with pg.session(readonly=True) as session:
+pg_ro = PG(lg, cfg.dbs.reports)  # yaml: dbs.reports.readonly: true
+
+with pg_ro.session() as session:
     result = session.execute(sqlalchemy.text("SELECT * FROM users"))
     users = result.fetchall()
 ```
+
+See [Database API — Configuration](api/database.md#configuration) for the full
+`readonly` semantics.
 
 See the [PostgreSQL Test Helper Guide](guides/pg-test-helper.md) for testing with databases.
 

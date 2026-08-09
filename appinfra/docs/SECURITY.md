@@ -145,10 +145,14 @@ patterns.
 - Connection pooling prevents resource exhaustion
 
 ```python
-from appinfra import PG
+from appinfra.db import PG
+from appinfra.config import Config
+from appinfra.log import LoggingBuilder
 import sqlalchemy as sa
 
-pg = PG("etc/config.yaml", "production")
+lg = LoggingBuilder("myapp").build()
+cfg = Config("etc/config.yaml")
+pg = PG(lg, cfg.dbs.production)
 
 # ✅ SAFE - Parameterized query
 with pg.session() as session:
@@ -374,23 +378,39 @@ logger.info(
 
 #### 1. Use Read-Only Connections Where Appropriate
 
+Read-only mode is set on the `PG` instance via `dbs.<name>.readonly: true` in
+YAML — a `SET TRANSACTION READ ONLY` listener applies it to every transaction.
+There is no per-session toggle; build a separate `PG` from a read-only section
+for query workloads:
+
 ```python
-from appinfra import PG
+from appinfra.db import PG
+from appinfra.config import Config
+from appinfra.log import LoggingBuilder
+import sqlalchemy as sa
 
-pg = PG("etc/config.yaml", "production")
+lg = LoggingBuilder("myapp").build()
+cfg = Config("etc/config.yaml")
+pg_ro = PG(lg, cfg.dbs.reports)  # yaml: dbs.reports.readonly: true
 
-# Read-only connection for queries
-with pg.session_ro() as session:
-    results = session.execute(query)  # Cannot modify data
+with pg_ro.session() as session:
+    results = session.execute(sa.text("SELECT * FROM reports"))
 ```
 
 #### 2. Use Connection Pooling
 
 ```python
-# Connection pooling is enabled by default
-# Prevents resource exhaustion and connection leak attacks
-pg = PG("etc/config.yaml", "production")
-# Automatic pooling with sensible defaults
+from appinfra.db import PG
+from appinfra.config import Config
+from appinfra.log import LoggingBuilder
+
+lg = LoggingBuilder("myapp").build()
+cfg = Config("etc/config.yaml")
+
+# Connection pooling is enabled by default;
+# limits connection growth and reduces exhaustion risk
+pg = PG(lg, cfg.dbs.production)
+# Use with pg.session() context manager to ensure connections return to pool
 ```
 
 #### 3. Enable Query Logging in Development

@@ -99,7 +99,7 @@ INFRA_TEST_VALUE=  # empty string
 ### Basic Usage
 
 ```python
-from appinfra.cfg import Config
+from appinfra.config import Config
 
 # Load config with environment overrides (default behavior)
 config = Config("etc/infra.yaml")
@@ -112,7 +112,7 @@ print(config.pgserver.port)  # Will be 5432 if INFRA_PGSERVER_PORT=5432
 ### Disable Environment Overrides
 
 ```python
-from appinfra.cfg import Config
+from appinfra.config import Config
 
 # Load config without environment overrides
 config = Config("etc/infra.yaml", enable_env_overrides=False)
@@ -121,7 +121,7 @@ config = Config("etc/infra.yaml", enable_env_overrides=False)
 ### Custom Environment Prefix
 
 ```python
-from appinfra.cfg import Config
+from appinfra.config import Config
 
 # Use custom prefix for environment variables
 config = Config("etc/infra.yaml", env_prefix="MYAPP_")
@@ -133,7 +133,7 @@ config = Config("etc/infra.yaml", env_prefix="MYAPP_")
 ### Check Applied Overrides
 
 ```python
-from appinfra.cfg import Config
+from appinfra.config import Config
 
 config = Config("etc/infra.yaml")
 overrides = config.get_env_overrides()
@@ -387,6 +387,8 @@ These environment variables control framework behavior (not config value overrid
 |----------|---------|-------------|
 | `INFRA_DEFAULT_CONFIG_FILE` | `infra.yaml` | Default config filename used by `with_config_file()` and `get_config_file_path()` |
 | `INFRA_NO_CONFIRM` | unset | When set to `1`, bypasses the `areyousure` confirmation prompt used by destructive Make targets (e.g., `pg.server.down`, `pg.server.clean`, `cicd.erase`, `uninstall`). Intended for CI and other non-interactive contexts. |
+| `INFRA_CONTAINER_CMD` | `docker` | Container runtime used by `pg.*` and `cicd.*` Make targets (`ps`, `exec`, `volume`, ...). Set to `podman` to run the local-dev container layer under Podman. Exported to helper shell scripts (`pg-info.sh`, `cicd-test.sh`). |
+| `INFRA_COMPOSE_CMD` | `docker compose` | Compose orchestrator paired with `INFRA_CONTAINER_CMD`. Set to `podman compose` alongside the container-cmd override. |
 
 **Note:** Because this env var starts with `INFRA_`, it can interfere with config keys named
 `default`. If your config has a `default` key, the env var will be interpreted as
