@@ -382,10 +382,6 @@ jobs:
   # (`make setup` + `make check`) with a real Postgres. Aggregated into
   # `test-summary`, so a failure blocks merge. No container runtime
   # (Colima/podman-machine is a separate cost surface).
-  #
-  # Deliberately no Makefile.local, no INFRA_ENV_PYTHON override: if `make
-  # setup` fails because Makefile.env cannot resolve `python`, that is a
-  # Makefile bug to fix, not a CI workaround to add.
   macos-latest:
     name: macOS (latest)
     runs-on: macos-latest
@@ -420,6 +416,10 @@ jobs:
         with:
           python-version: '3.12'
           cache: 'pip'
+
+      - name: Configure Python for Makefile
+        run: |
+          echo "INFRA_ENV_PYTHON := $(which python)" > Makefile.local
 
       - name: Install dependencies via make setup
         run: |
