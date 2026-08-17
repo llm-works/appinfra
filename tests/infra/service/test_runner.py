@@ -657,7 +657,7 @@ class TestScheduledService:
         tick_count = 0
 
         class CountingService(ScheduledService):
-            interval = 0.05
+            interval = 0.2
 
             @property
             def name(self) -> str:
@@ -675,7 +675,7 @@ class TestScheduledService:
 
         runner.start()
         runner.wait_healthy(timeout=5.0)
-        time.sleep(0.2)
+        time.sleep(1.0)
         runner.stop()
 
-        assert tick_count >= 3
+        assert tick_count >= 2

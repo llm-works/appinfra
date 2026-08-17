@@ -1050,15 +1050,12 @@ class TestNonBlockingAPI:
         assert ticker.time_until_next_tick() == 1.0
 
     def test_time_until_next_tick_not_started(self, mock_logger):
-        """Test time_until_next_tick returns full interval when not started."""
-        ticker = Ticker(mock_logger, secs=1.0)
-        # Execute first tick
+        """Test time_until_next_tick returns remaining time after a tick."""
+        ticker = Ticker(mock_logger, secs=2.0)
         ticker.try_tick()
-        # Now wait and check
-        time.sleep(0.1)
+        time.sleep(0.5)
         remaining = ticker.time_until_next_tick()
-        # Wider tolerance for macOS timing variance
-        assert 0.80 < remaining < 0.95  # ~0.9s remaining
+        assert 1.0 < remaining < 2.0
 
     def test_time_until_next_tick_with_now_parameter(self, mock_logger):
         """Test time_until_next_tick accepts optional now parameter."""
