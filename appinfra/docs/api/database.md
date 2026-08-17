@@ -521,7 +521,7 @@ pgserver:
 pgserver:
   name: geo-pg
   port: 5432
-  image: postgis/postgis:18-3.4
+  image: postgis/postgis:18-3.6
 ```
 
 **Important:** The custom image must be PostgreSQL-compatible (based on the official `postgres`
@@ -529,7 +529,7 @@ image). Images that extend the official postgres image work correctly:
 
 - `pgvector/pgvector:pg18` - Vector similarity search
 - `timescale/timescaledb:latest-pg18` - Time-series database
-- `postgis/postgis:18-3.4` - Geospatial database
+- `postgis/postgis:18-3.6` - Geospatial database
 
 Non-PostgreSQL databases or heavily modified images will fail to start because the framework passes
 PostgreSQL-specific CLI arguments to the container.

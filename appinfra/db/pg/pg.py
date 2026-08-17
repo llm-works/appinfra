@@ -152,6 +152,8 @@ class PG(Interface):
         sessionmaker and would not otherwise trigger create_db) succeeds on a
         fresh volume.
         """
+        if getattr(self._cfg, "readonly", False):
+            return  # readonly connections should not create databases
         if getattr(self._cfg, "create_db", False) is not True:
             return
         if sqlalchemy_utils.database_exists(self._engine.url):
