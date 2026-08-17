@@ -102,8 +102,8 @@ class TestETARateCalculation:
             eta.update(float(i * 5))  # 5 units every 20ms = 250 units/sec
 
         rate = eta.rate()
-        # Should be in ballpark of 250 (timing isn't precise)
-        assert 100.0 < rate < 500.0
+        # Should be in ballpark of 250 (timing isn't precise, especially on macOS)
+        assert 50.0 < rate < 500.0
 
 
 @pytest.mark.unit

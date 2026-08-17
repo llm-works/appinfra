@@ -11,6 +11,7 @@ Tests key functionality including:
 
 import argparse
 import logging
+import os
 import sys
 import tempfile
 from pathlib import Path
@@ -1042,7 +1043,8 @@ class TestDeferredConfigLoading:
             # Should return config info
             assert result is not None
             assert result["files"] == ["app.yaml"]
-            assert result["etc_dir"] == str(etc_dir)
+            # Use realpath for comparison (macOS /var is symlink to /private/var)
+            assert os.path.realpath(result["etc_dir"]) == os.path.realpath(str(etc_dir))
             # Config should be loaded
             assert hasattr(app.config, "test_key")
             assert app.config.test_key == "test_value"

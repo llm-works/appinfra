@@ -1057,7 +1057,8 @@ class TestNonBlockingAPI:
         # Now wait and check
         time.sleep(0.1)
         remaining = ticker.time_until_next_tick()
-        assert 0.85 < remaining < 0.95  # ~0.9s remaining
+        # Wider tolerance for macOS timing variance
+        assert 0.80 < remaining < 0.95  # ~0.9s remaining
 
     def test_time_until_next_tick_with_now_parameter(self, mock_logger):
         """Test time_until_next_tick accepts optional now parameter."""
