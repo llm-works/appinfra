@@ -44,6 +44,23 @@ class MPSimpleService(Service):
         return True
 
 
+class MPSetupFailService(Service):
+    """Service that fails during setup. Module-level for ProcessRunner (picklable)."""
+
+    def __init__(self, lg: Logger) -> None:
+        self._lg = lg
+
+    @property
+    def name(self) -> str:
+        return "fail-setup"
+
+    def setup(self) -> None:
+        raise SetupError(self.name, "setup failed")
+
+    def execute(self) -> None:
+        pass
+
+
 class SimpleService(Service):
     """Simple test service."""
 
@@ -411,22 +428,7 @@ class TestProcessRunner:
 
     def test_setup_error_transitions_to_failed(self, lg):
         """Setup error transitions to FAILED."""
-
-        class FailSetup(Service):
-            def __init__(self, lg: Logger):
-                self._lg = lg
-
-            @property
-            def name(self) -> str:
-                return "fail-setup"
-
-            def setup(self) -> None:
-                raise SetupError(self.name, "setup failed")
-
-            def execute(self) -> None:
-                pass
-
-        svc = FailSetup(lg)
+        svc = MPSetupFailService(lg)
         runner = ProcessRunner(svc)
 
         with pytest.raises(SetupError):
