@@ -139,10 +139,32 @@ class PG(Interface):
         self._initialize_schema_isolation(schema, cfg)
 
     def _create_engine_and_session(self, cfg: Any) -> None:
-        """Create SQLAlchemy engine and session maker."""
+        """Create SQLAlchemy engine and session maker, ensuring DB exists."""
         engine_kwargs = ConfigValidator.get_engine_kwargs(cfg)
         self._engine = sqlalchemy.create_engine(self._cfg.url, **engine_kwargs)
         self._SessionCls = sqlalchemy.orm.sessionmaker(bind=self._engine)
+        self._ensure_database_exists()
+
+    def _ensure_database_exists(self) -> None:
+        """Create the target database when create_db=True and it is missing.
+
+        Runs eagerly at construction so session() (which lazily connects via
+        sessionmaker and would not otherwise trigger create_db) succeeds on a
+        fresh volume.
+        """
+        if getattr(self._cfg, "readonly", False):
+            return  # readonly connections should not create databases
+        if getattr(self._cfg, "create_db", False) is not True:
+            return
+        if sqlalchemy_utils.database_exists(self._engine.url):
+            return
+        try:
+            sqlalchemy_utils.create_database(self._engine.url)
+            self._lg.info("created db", extra={"url": str(self._engine.url)})
+        except Exception:
+            # Race: another process created it between exists-check and create.
+            if not sqlalchemy_utils.database_exists(self._engine.url):
+                raise
 
     def _initialize_subsystems(self, query_lg_level: Any) -> None:
         """Initialize configuration and tracking subsystems."""
@@ -336,16 +358,10 @@ class PG(Interface):
             >>> pg = PG(logger, config)
             >>> pg.migrate(Base)  # Creates 'users' table if not exists
         """
-        # Ensure database exists if create_db is enabled
-        create_db = getattr(self._cfg, "create_db", False)
-        if create_db is True and not sqlalchemy_utils.database_exists(self._engine.url):
-            try:
-                sqlalchemy_utils.create_database(self._engine.url)
-                self._lg.info("created db", extra=self._lg_extra)
-            except Exception:  # pragma: no cover
-                # Race condition: another process created it. Verify it exists now.
-                if not sqlalchemy_utils.database_exists(self._engine.url):
-                    raise
+        # Ensure database exists if create_db is enabled (idempotent; may already
+        # have run during __init__ but harmless to re-check here for subclasses
+        # or direct migrate() calls).
+        self._ensure_database_exists()
 
         # Create configured extensions
         self._create_extensions()

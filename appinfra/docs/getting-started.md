@@ -24,7 +24,7 @@ This guide will help you get up and running with the Infra framework quickly.
 
 - Python 3.11 or higher
 - pip (Python package manager)
-- PostgreSQL 16 (optional, for database features)
+- PostgreSQL 18 (optional, for database features)
 
 ### Install the Framework
 

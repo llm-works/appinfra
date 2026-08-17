@@ -13,9 +13,9 @@
 # YAML config structure:
 #   pgserver:
 #     name: myapp-pg
-#     version: "16"          # Required unless image is specified
+#     version: "18"          # Required unless image is specified
 #     port: 5432
-#     image: pgvector/pgvector:pg16  # Optional: custom Docker image
+#     image: pgvector/pgvector:pg18  # Optional: custom Docker image
 #     postgres_conf:         # Optional: PostgreSQL -c parameters
 #       max_connections: 500
 #       shared_preload_libraries:

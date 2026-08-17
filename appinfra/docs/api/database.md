@@ -354,7 +354,7 @@ Some extensions require configuration at both levels:
 ```yaml
 # Server config (pg.yaml)
 pgserver:
-  image: timescale/timescaledb:latest-pg16
+  image: timescale/timescaledb:latest-pg18
   postgres_conf:
     shared_preload_libraries:
       - timescaledb              # Must be preloaded at server startup
@@ -476,12 +476,12 @@ Defines the Docker-based PostgreSQL server for local development.
 
 ```yaml
 pgserver:
-  version: 16                      # PostgreSQL version (required unless image is specified)
+  version: 18                      # PostgreSQL version (required unless image is specified)
   name: infra-pg                   # Server name/identifier
   port: 7432                       # PostgreSQL port
   user: postgres                   # Database user
   pass: ''                         # Database password
-  image: pgvector/pgvector:pg16   # Optional: custom Docker image
+  image: pgvector/pgvector:pg18   # Optional: custom Docker image
 ```
 
 ### Custom Docker Image (`image` field)
@@ -499,9 +499,9 @@ Use the `image` field to run PostgreSQL with extensions like pgvector, Timescale
 **Examples:**
 
 ```yaml
-# Standard PostgreSQL 16
+# Standard PostgreSQL 18
 pgserver:
-  version: 16
+  version: 18
   name: my-pg
   port: 5432
 
@@ -509,27 +509,27 @@ pgserver:
 pgserver:
   name: learn-pg
   port: 5432
-  image: pgvector/pgvector:pg16
+  image: pgvector/pgvector:pg18
 
 # TimescaleDB for time-series data
 pgserver:
   name: timeseries-pg
   port: 5432
-  image: timescale/timescaledb:latest-pg16
+  image: timescale/timescaledb:latest-pg18
 
 # PostGIS for geospatial data
 pgserver:
   name: geo-pg
   port: 5432
-  image: postgis/postgis:16-3.4
+  image: postgis/postgis:18-3.6
 ```
 
 **Important:** The custom image must be PostgreSQL-compatible (based on the official `postgres`
 image). Images that extend the official postgres image work correctly:
 
-- `pgvector/pgvector:pg16` - Vector similarity search
-- `timescale/timescaledb:latest-pg16` - Time-series database
-- `postgis/postgis:16-3.4` - Geospatial database
+- `pgvector/pgvector:pg18` - Vector similarity search
+- `timescale/timescaledb:latest-pg18` - Time-series database
+- `postgis/postgis:18-3.6` - Geospatial database
 
 Non-PostgreSQL databases or heavily modified images will fail to start because the framework passes
 PostgreSQL-specific CLI arguments to the container.

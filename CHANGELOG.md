@@ -15,7 +15,17 @@ For API stability guarantees and deprecation policy, see
   captured in `initialize()`. App-wide cold-start anchor for elapsed measurement via
   `time.since(application.lifecycle.start_t)`. `None` before `initialize()` runs.
 
+### Changed
+- Default PostgreSQL version bumped from 16 to 18. Affects `etc/pg.yaml` (`pgserver.version`)
+  and the CICD docker-compose image. Downstream projects pinning to 16 in their own
+  `pg.yaml` are unaffected; those relying on the shipped default get 18. Compatible with
+  psql clients v14+.
+
 ### Fixed
+- `appinfra.db.pg.PG`: `create_db=True` now takes effect at construction rather than
+  only on explicit `.connect()` or `.migrate()`. Fixes fresh-volume failures where a
+  subsequent `.session()` call would hit "database does not exist" because
+  sessionmaker connects lazily and bypassed the previous creation path.
 - `appinfra.db.pg.vector`: `Vector` is now resolved lazily via PEP 562 `__getattr__`.
   Consumers of `appinfra.db` that don't use vector features avoid the pgvector/numpy
   import chain. Import paths are unchanged.
