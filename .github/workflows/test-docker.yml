@@ -100,7 +100,7 @@ jobs:
   test-summary:
     name: Test
     runs-on: ubuntu-latest
-    needs: [test, podman, check-no-db, install]
+    needs: [test, podman, check-no-db, install, macos-latest]
     if: always()
     steps:
       - name: Check test results
@@ -119,6 +119,10 @@ jobs:
           fi
           if [[ "${{ needs.install.result }}" != "success" ]]; then
             echo "Install verification failed"
+            exit 1
+          fi
+          if [[ "${{ needs.macos-latest.result }}" != "success" ]]; then
+            echo "macOS smoke check failed"
             exit 1
           fi
           echo "All tests passed"
@@ -373,3 +377,58 @@ jobs:
           fi
           grep -q "does not exist" /tmp/install.log || { echo "ERROR: expected 'does not exist' in error output"; cat /tmp/install.log; exit 1; }
           echo "OK: install refused with expected error"
+
+  # macOS smoke lane: Darwin coverage of the fresh-contributor path
+  # (`make setup` + `make check`) with a real Postgres. Aggregated into
+  # `test-summary`, so a failure blocks merge. No container runtime
+  # (Colima/podman-machine is a separate cost surface).
+  #
+  # Deliberately no Makefile.local, no INFRA_ENV_PYTHON override: if `make
+  # setup` fails because Makefile.env cannot resolve `python`, that is a
+  # Makefile bug to fix, not a CI workaround to add.
+  macos-latest:
+    name: macOS (latest)
+    runs-on: macos-latest
+    needs: lint
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install PostgreSQL 18 via Homebrew
+        run: |
+          brew install postgresql@18
+          echo "$(brew --prefix postgresql@18)/bin" >> "$GITHUB_PATH"
+
+      - name: Initialize PostgreSQL cluster (trust auth, superuser postgres)
+        run: |
+          initdb -D "$RUNNER_TEMP/pgdata" -U postgres --auth=trust
+
+      - name: Start PostgreSQL on port 7432
+        run: |
+          pg_ctl -D "$RUNNER_TEMP/pgdata" -l "$RUNNER_TEMP/pg.log" \
+                 -o "-p 7432 -k /tmp" start
+
+      - name: Create test database
+        run: psql -h 127.0.0.1 -p 7432 -U postgres -c "CREATE DATABASE infra_test;"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install dependencies via make setup
+        run: |
+          python -m pip install --upgrade pip
+          make setup
+
+      - name: Run make check
+        run: make check
+
+      - name: Stop postgres
+        if: always()
+        run: pg_ctl -D "$RUNNER_TEMP/pgdata" stop || true
