@@ -356,16 +356,10 @@ class PG(Interface):
             >>> pg = PG(logger, config)
             >>> pg.migrate(Base)  # Creates 'users' table if not exists
         """
-        # Ensure database exists if create_db is enabled
-        create_db = getattr(self._cfg, "create_db", False)
-        if create_db is True and not sqlalchemy_utils.database_exists(self._engine.url):
-            try:
-                sqlalchemy_utils.create_database(self._engine.url)
-                self._lg.info("created db", extra=self._lg_extra)
-            except Exception:  # pragma: no cover
-                # Race condition: another process created it. Verify it exists now.
-                if not sqlalchemy_utils.database_exists(self._engine.url):
-                    raise
+        # Ensure database exists if create_db is enabled (idempotent; may already
+        # have run during __init__ but harmless to re-check here for subclasses
+        # or direct migrate() calls).
+        self._ensure_database_exists()
 
         # Create configured extensions
         self._create_extensions()

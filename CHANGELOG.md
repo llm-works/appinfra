@@ -18,7 +18,8 @@ For API stability guarantees and deprecation policy, see
 ### Changed
 - Default PostgreSQL version bumped from 16 to 18. Affects `etc/pg.yaml` (`pgserver.version`)
   and the CICD docker-compose image. Downstream projects pinning to 16 in their own
-  `pg.yaml` are unaffected; those relying on the shipped default get 18.
+  `pg.yaml` are unaffected; those relying on the shipped default get 18. Compatible with
+  psql clients v14+.
 
 ### Fixed
 - `appinfra.db.pg.PG`: `create_db=True` now takes effect at construction rather than
