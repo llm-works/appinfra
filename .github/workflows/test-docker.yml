@@ -394,9 +394,11 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Install PostgreSQL 18 via Homebrew
+      - name: Install dependencies via Homebrew
         run: |
-          brew install postgresql@18
+          brew install bash postgresql@18
+          # Modern bash first (macOS ships bash 3.2; scripts need 4+ for associative arrays)
+          echo "$(brew --prefix)/bin" >> "$GITHUB_PATH"
           echo "$(brew --prefix postgresql@18)/bin" >> "$GITHUB_PATH"
 
       - name: Initialize PostgreSQL cluster (trust auth, superuser postgres)
