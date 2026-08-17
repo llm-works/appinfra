@@ -220,8 +220,8 @@ class TestManagerLifecycle:
     def test_parallel_independent_services(self, lg):
         """Independent services can start in parallel."""
         mgr = Manager(lg)
-        svc_a = SimpleService("a", health_delay=0.1)
-        svc_b = SimpleService("b", health_delay=0.1)
+        svc_a = SimpleService("a", health_delay=1.0)
+        svc_b = SimpleService("b", health_delay=1.0)
         svc_c = SimpleService("c", depends_on=["a", "b"])
 
         mgr.add_service(svc_a).add_service(svc_b).add_service(svc_c)
@@ -230,8 +230,8 @@ class TestManagerLifecycle:
         with mgr:
             elapsed = time.monotonic() - start
 
-        # If parallel, should take ~0.1s (not 0.2s)
-        assert elapsed < 0.3
+        # If parallel: ~1s, if sequential: ~2s
+        assert elapsed < 1.5
 
     def test_setup_error_prevents_start(self, lg):
         """Setup error prevents service from starting."""
