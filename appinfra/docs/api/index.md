@@ -140,7 +140,7 @@ def get(self, path: str, default: Any = None) -> Any:
 ## Version Support
 
 - **Python**: 3.11+ (tested with 3.11, 3.12)
-- **PostgreSQL**: 16 (for database features)
+- **PostgreSQL**: 18 (for database features)
 - **SQLAlchemy**: 2.0+
 
 ## Browse by Category

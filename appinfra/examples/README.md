@@ -7,7 +7,7 @@ with a clear learning progression.
 
 - Python 3.11+
 - Virtual environment at `~/.venv` (see [Virtual Environment Setup](../docs/guides/virtual-environment.md))
-- PostgreSQL 16 (only for database examples)
+- PostgreSQL 18 (only for database examples)
 
 ## Quick Start
 

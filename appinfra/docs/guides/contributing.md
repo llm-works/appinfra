@@ -232,7 +232,7 @@ make pg.server.down     # Stop all (auto-detects mode)
 ## Tech Stack
 
 - **Language**: Python 3.11+ (tested with 3.12.3)
-- **Database**: PostgreSQL 16
+- **Database**: PostgreSQL 18
 - **Testing**: pytest, hypothesis, coverage
 - **Formatting**: ruff
 - **Type Checking**: mypy

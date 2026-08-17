@@ -30,7 +30,7 @@ See [docs/README.md](appinfra/docs/README.md) for full scope and philosophy.
 ## Requirements
 
 - Python 3.11+
-- PostgreSQL 16 (optional, for database features)
+- PostgreSQL 18 (optional, for database features)
 
 ## Installation
 

@@ -7,7 +7,7 @@
 # Defines the PostgreSQL server connection settings
 # Password should be set via environment variable: INFRA_PGSERVER_PASS=your_password
 pgserver:
-  version: 16                  # PostgreSQL major version (used for compatibility checks)
+  version: 18                  # PostgreSQL major version (used for compatibility checks)
   name: infra-pg               # Server identifier/name for logging and identification
   host: 127.0.0.1              # PostgreSQL host (default: 127.0.0.1, can be overridden with INFRA_PGSERVER_HOST)
   port: 7432                   # PostgreSQL port (default: 5432, can be overridden with INFRA_PGSERVER_PORT)

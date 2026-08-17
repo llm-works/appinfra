@@ -62,14 +62,14 @@ class TestPgConfigSh:
     def test_identity_and_replica_fields(self, tmp_path: Path) -> None:
         vars_ = _run(
             tmp_path,
-            'pgserver:\n  name: pg\n  version: "16"\n  port: 5432\n'
-            "  image: pgvector/pgvector:pg16\n"
+            'pgserver:\n  name: pg\n  version: "18"\n  port: 5432\n'
+            "  image: pgvector/pgvector:pg18\n"
             "  replica:\n    enabled: true\n    port: 5433\n",
         )
         assert vars_["PG_CONTAINER_NAME"] == "pg"
-        assert vars_["PG_VERSION"] == "16"
+        assert vars_["PG_VERSION"] == "18"
         assert vars_["PG_PORT"] == "5432"
-        assert vars_["PG_IMAGE"] == "pgvector/pgvector:pg16"
+        assert vars_["PG_IMAGE"] == "pgvector/pgvector:pg18"
         assert vars_["PG_REPLICA_ENABLED"] == "true"
         assert vars_["PG_PORT_R"] == "5433"
 

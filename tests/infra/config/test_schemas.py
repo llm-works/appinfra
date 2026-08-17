@@ -35,21 +35,21 @@ class TestPostgreSQLServerConfigValidation:
     def test_invalid_port_negative(self):
         """Test that negative port raises ValidationError."""
         with pytest.raises(ValidationError, match="greater than or equal to 1"):
-            PostgreSQLServerConfig(version=16, port=-1)
+            PostgreSQLServerConfig(version=18, port=-1)
 
     def test_invalid_port_too_high(self):
         """Test that port > 65535 raises ValidationError."""
         with pytest.raises(ValidationError, match="less than or equal to 65535"):
-            PostgreSQLServerConfig(version=16, port=70000)
+            PostgreSQLServerConfig(version=18, port=70000)
 
     def test_valid_port_boundary_values(self):
         """Test that boundary port values are accepted."""
         # Port 1 should be valid
-        config1 = PostgreSQLServerConfig(version=16, port=1)
+        config1 = PostgreSQLServerConfig(version=18, port=1)
         assert config1.port == 1
 
         # Port 65535 should be valid
-        config2 = PostgreSQLServerConfig(version=16, port=65535)
+        config2 = PostgreSQLServerConfig(version=18, port=65535)
         assert config2.port == 65535
 
     def test_version_or_image_required(self):
@@ -61,26 +61,26 @@ class TestPostgreSQLServerConfigValidation:
 
     def test_version_only_valid(self):
         """Test that config with only version is valid."""
-        config = PostgreSQLServerConfig(version=16)
-        assert config.version == 16
+        config = PostgreSQLServerConfig(version=18)
+        assert config.version == 18
         assert config.image is None
 
     def test_image_only_valid(self):
         """Test that config with only image is valid (version not required)."""
-        config = PostgreSQLServerConfig(image="pgvector/pgvector:pg16")
-        assert config.image == "pgvector/pgvector:pg16"
+        config = PostgreSQLServerConfig(image="pgvector/pgvector:pg18")
+        assert config.image == "pgvector/pgvector:pg18"
         assert config.version is None
 
     def test_both_version_and_image_valid(self):
         """Test that config with both version and image is valid."""
-        config = PostgreSQLServerConfig(version=16, image="pgvector/pgvector:pg16")
-        assert config.version == 16
-        assert config.image == "pgvector/pgvector:pg16"
+        config = PostgreSQLServerConfig(version=18, image="pgvector/pgvector:pg18")
+        assert config.version == 18
+        assert config.image == "pgvector/pgvector:pg18"
 
     def test_postgres_conf_dict(self):
         """Test that postgres_conf accepts dict with various types."""
         config = PostgreSQLServerConfig(
-            version=16,
+            version=18,
             postgres_conf={
                 "max_connections": 500,
                 "shared_preload_libraries": ["pg_stat_statements", "timescaledb"],

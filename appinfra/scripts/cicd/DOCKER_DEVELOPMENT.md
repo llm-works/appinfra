@@ -372,7 +372,7 @@ Edit `scripts/docker/deploy/docker-compose.yml`:
 
 ```yaml
 postgres:
-  image: postgres:15  # Change from postgres:16
+  image: postgres:17  # Change from postgres:18
 ```
 
 ### Adding Additional Services
