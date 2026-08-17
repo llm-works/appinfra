@@ -119,6 +119,11 @@ def _ipc_request_handler(
             break
 
 
+def _ping_handler() -> dict:
+    """Ping route handler. Module-level for picklability on macOS spawn."""
+    return {"status": "ok"}
+
+
 @pytest.mark.integration
 class TestFastAPIIPCWithLifecycleCallbacks:
     """Integration tests for IPC + lifecycle callback interaction."""
@@ -169,7 +174,7 @@ class TestFastAPIIPCWithLifecycleCallbacks:
             .with_host("127.0.0.1")
             .with_port(18765)  # Use non-standard port to avoid conflicts
             .with_on_startup(track_startup, name="track_startup")
-            .routes.with_route("/ping", lambda: {"status": "ok"}, methods=["GET"])
+            .routes.with_route("/ping", _ping_handler, methods=["GET"])
             .done()
             .subprocess.with_ipc(request_q, response_q)
             .done()
@@ -264,7 +269,7 @@ class TestFastAPIIPCWithLifecycleCallbacks:
             .with_host("127.0.0.1")
             .with_port(18766)
             .with_on_startup(startup_callback, name="startup")
-            .routes.with_route("/ping", lambda: {"status": "ok"}, methods=["GET"])
+            .routes.with_route("/ping", _ping_handler, methods=["GET"])
             .with_route("/echo/{data}", ipc_echo_handler, methods=["GET"])
             .done()
             .subprocess.with_ipc(request_q, response_q)
@@ -347,7 +352,7 @@ class TestFastAPIIPCWithLifecycleCallbacks:
             ServerBuilder(lg_server, "test-exc-handler")
             .with_host("127.0.0.1")
             .with_port(18767)
-            .routes.with_route("/ping", lambda: {"status": "ok"}, methods=["GET"])
+            .routes.with_route("/ping", _ping_handler, methods=["GET"])
             .with_route("/raise", raise_test_exception, methods=["GET"])
             .with_exception_handler(_TestSubprocessError, handler)
             .done()
