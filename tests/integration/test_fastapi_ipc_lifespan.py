@@ -20,6 +20,7 @@ from queue import Empty
 
 import pytest
 import requests
+from starlette.requests import Request
 
 
 def _get_real_fastapi():
@@ -140,12 +141,12 @@ async def _raise_test_exception() -> None:
     raise _TestSubprocessError("test error message")
 
 
-def _get_ipc(request):
+def _get_ipc(request: Request):
     """Dependency to get IPC channel from app state. Module-level for macOS spawn."""
     return request.app.state.ipc_channel
 
 
-async def _ipc_echo_handler(data: str, request):
+async def _ipc_echo_handler(data: str, request: Request):
     """Route handler that uses IPC. Module-level for macOS spawn."""
     import uuid
 
