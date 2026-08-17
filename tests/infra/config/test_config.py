@@ -1724,7 +1724,8 @@ class TestResolveEtcDir:
                 os.chdir(tmpdir)
                 result = resolve_etc_dir()
 
-                assert result == etc_dir
+                # Use resolve() for comparison (macOS /var is symlink to /private/var)
+                assert result.resolve() == etc_dir.resolve()
             finally:
                 os.chdir(original_cwd)
 

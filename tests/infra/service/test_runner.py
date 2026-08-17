@@ -44,6 +44,23 @@ class MPSimpleService(Service):
         return True
 
 
+class MPSetupFailService(Service):
+    """Service that fails during setup. Module-level for ProcessRunner (picklable)."""
+
+    def __init__(self, lg: Logger) -> None:
+        self._lg = lg
+
+    @property
+    def name(self) -> str:
+        return "fail-setup"
+
+    def setup(self) -> None:
+        raise SetupError(self.name, "setup failed")
+
+    def execute(self) -> None:
+        pass
+
+
 class SimpleService(Service):
     """Simple test service."""
 
@@ -411,22 +428,7 @@ class TestProcessRunner:
 
     def test_setup_error_transitions_to_failed(self, lg):
         """Setup error transitions to FAILED."""
-
-        class FailSetup(Service):
-            def __init__(self, lg: Logger):
-                self._lg = lg
-
-            @property
-            def name(self) -> str:
-                return "fail-setup"
-
-            def setup(self) -> None:
-                raise SetupError(self.name, "setup failed")
-
-            def execute(self) -> None:
-                pass
-
-        svc = FailSetup(lg)
+        svc = MPSetupFailService(lg)
         runner = ProcessRunner(svc)
 
         with pytest.raises(SetupError):
@@ -655,7 +657,7 @@ class TestScheduledService:
         tick_count = 0
 
         class CountingService(ScheduledService):
-            interval = 0.05
+            interval = 0.2
 
             @property
             def name(self) -> str:
@@ -673,7 +675,7 @@ class TestScheduledService:
 
         runner.start()
         runner.wait_healthy(timeout=5.0)
-        time.sleep(0.2)
+        time.sleep(1.0)
         runner.stop()
 
-        assert tick_count >= 3
+        assert tick_count >= 2

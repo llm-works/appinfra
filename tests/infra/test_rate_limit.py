@@ -605,14 +605,15 @@ class TestRateLimiterIntegration:
     def test_rate_limiter_with_variable_delays(self):
         """Test rate limiter with variable delays between calls."""
         mock_logger = Mock()
-        limiter = RateLimiter(mock_logger, per_minute=120)
+        # Use 60/min (1 per second) for more timing tolerance
+        limiter = RateLimiter(mock_logger, per_minute=60)
 
         limiter.next()
         time.sleep(0.3)  # Partial delay
 
         wait = limiter.next()
-        # Should wait for remaining time
-        assert 0 < wait < 0.5
+        # Should wait for remaining ~0.7s (with tolerance for timing variance)
+        assert 0.4 < wait < 1.0
 
     def test_multiple_operations_stay_within_rate(self):
         """Test multiple operations stay within rate limit."""
