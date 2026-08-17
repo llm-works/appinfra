@@ -484,3 +484,12 @@ class LifecycleManager:
     def infra_logger(self) -> Logger | None:
         """Get the infra framework logger (for framework components)."""
         return self._infra_logger
+
+    @property
+    def start_t(self) -> float | None:
+        """Monotonic timestamp captured in initialize(); None before then.
+
+        Read as the app-wide cold-start anchor: elapsed since app setup is
+        time.since(start_t). Same value used internally for shutdown-elapsed logs.
+        """
+        return self._start_time

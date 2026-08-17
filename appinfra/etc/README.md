@@ -128,12 +128,12 @@ Defines PostgreSQL server connection settings.
 
 ```yaml
 pgserver:
-  version: 16                   # PostgreSQL version (required unless image is specified)
+  version: 18                   # PostgreSQL version (required unless image is specified)
   name: infra-pg               # Server name/identifier
   port: 7432                   # PostgreSQL port
   user: postgres               # Database user
   pass: ''                     # Database password (use environment variable for security)
-  image: pgvector/pgvector:pg16  # Optional: custom Docker image (defaults to postgres:VERSION)
+  image: pgvector/pgvector:pg18  # Optional: custom Docker image (defaults to postgres:VERSION)
   postgres_conf:               # Optional: PostgreSQL -c parameters (see Recommended Settings below)
     max_connections: 500
     shared_preload_libraries:
@@ -156,9 +156,9 @@ Either `version` or `image` must be specified:
 **Examples:**
 
 ```yaml
-# Standard PostgreSQL 16
+# Standard PostgreSQL 18
 pgserver:
-  version: 16
+  version: 18
   name: my-pg
   port: 5432
 
@@ -166,13 +166,13 @@ pgserver:
 pgserver:
   name: learn-pg
   port: 5432
-  image: pgvector/pgvector:pg16
+  image: pgvector/pgvector:pg18
 
 # TimescaleDB for time-series data
 pgserver:
   name: timeseries-pg
   port: 5432
-  image: timescale/timescaledb:latest-pg16
+  image: timescale/timescaledb:latest-pg18
 ```
 
 **Important:** The custom image must be PostgreSQL-compatible (based on the official `postgres`
@@ -200,7 +200,7 @@ Booleans become `on`/`off`; lists are comma-joined.
 **Example:**
 ```yaml
 pgserver:
-  version: 16
+  version: 18
   name: my-pg
   port: 5432
   postgres_conf:
@@ -229,7 +229,7 @@ settings for production use:
 **Example with recommended settings:**
 ```yaml
 pgserver:
-  version: 16
+  version: 18
   name: my-pg
   port: 5432
   postgres_conf:
@@ -332,8 +332,8 @@ dbs:
 **Some extensions require both:**
 ```yaml
 pgserver:
-  version: 16
-  image: timescale/timescaledb:latest-pg16
+  version: 18
+  image: timescale/timescaledb:latest-pg18
   postgres_conf:
     shared_preload_libraries:
       - timescaledb  # Must be preloaded
@@ -707,11 +707,11 @@ etc/
 from appinfra.config import Config
 
 # Load configuration with includes automatically resolved
-config = Config('etc/infra.yaml')
+config = Config("etc/infra.yaml")
 
 # Access configuration normally
-db_host = config.get('database.host')
-log_level = config.get('logging.level')
+db_host = config.get("database.host")
+log_level = config.get("logging.level")
 ```
 
 ## Environment Variable Overrides
@@ -890,7 +890,7 @@ To debug configuration loading:
 ```python
 from appinfra import Config
 
-config = Config('etc/infra.yaml')
+config = Config("etc/infra.yaml")
 print("Configuration loaded:")
 print(config)
 

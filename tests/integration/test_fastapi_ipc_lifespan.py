@@ -15,10 +15,12 @@ import multiprocessing as mp
 import threading
 import time
 from dataclasses import dataclass
+from functools import partial
 from queue import Empty
 
 import pytest
 import requests
+from starlette.requests import Request
 
 
 def _get_real_fastapi():
@@ -119,6 +121,43 @@ def _ipc_request_handler(
             break
 
 
+def _ping_handler() -> dict:
+    """Ping route handler. Module-level for picklability on macOS spawn."""
+    return {"status": "ok"}
+
+
+async def _track_startup(app, startup_called) -> None:
+    """Startup callback that tracks execution. Module-level for macOS spawn."""
+    startup_called.value = True
+
+
+async def _startup_callback(app) -> None:
+    """Simple startup callback. Module-level for macOS spawn."""
+    app.state.startup_completed = True
+
+
+async def _raise_test_exception() -> None:
+    """Route that raises test exception. Module-level for macOS spawn."""
+    raise _TestSubprocessError("test error message")
+
+
+def _get_ipc(request: Request):
+    """Dependency to get IPC channel from app state. Module-level for macOS spawn."""
+    return request.app.state.ipc_channel
+
+
+async def _ipc_echo_handler(data: str, request: Request):
+    """Route handler that uses IPC. Module-level for macOS spawn."""
+    import uuid
+
+    from appinfra.app.fastapi.runtime.ipc import IPCChannel
+
+    ipc: IPCChannel = request.app.state.ipc_channel
+    ipc_request = IPCRequest(id=str(uuid.uuid4()), data=data)
+    response = await ipc.submit(ipc_request, timeout=5.0)
+    return {"result": response.result}
+
+
 @pytest.mark.integration
 class TestFastAPIIPCWithLifecycleCallbacks:
     """Integration tests for IPC + lifecycle callback interaction."""
@@ -155,10 +194,6 @@ class TestFastAPIIPCWithLifecycleCallbacks:
         # Track startup callback execution
         startup_called = mp.Value("b", False)
 
-        async def track_startup(app):
-            """Startup callback that tracks its execution."""
-            startup_called.value = True
-
         # Build server with startup callback AND IPC mode
         # This combination previously broke IPC polling
         from appinfra.log import Logger
@@ -168,8 +203,11 @@ class TestFastAPIIPCWithLifecycleCallbacks:
             ServerBuilder(lg, "test-ipc-lifespan")
             .with_host("127.0.0.1")
             .with_port(18765)  # Use non-standard port to avoid conflicts
-            .with_on_startup(track_startup, name="track_startup")
-            .routes.with_route("/ping", lambda: {"status": "ok"}, methods=["GET"])
+            .with_on_startup(
+                partial(_track_startup, startup_called=startup_called),
+                name="track_startup",
+            )
+            .routes.with_route("/ping", _ping_handler, methods=["GET"])
             .done()
             .subprocess.with_ipc(request_q, response_q)
             .done()
@@ -223,10 +261,8 @@ class TestFastAPIIPCWithLifecycleCallbacks:
         This test creates a route that uses IPC, makes an HTTP request,
         and verifies the response comes back through the IPC channel.
         """
-        import uuid
 
         from appinfra.app.fastapi.builder.server import ServerBuilder
-        from appinfra.app.fastapi.runtime.ipc import IPCChannel
 
         # Get real fastapi to avoid test package shadowing
         fastapi = _get_real_fastapi()
@@ -237,24 +273,6 @@ class TestFastAPIIPCWithLifecycleCallbacks:
         request_q: mp.Queue = mp.Queue()
         response_q: mp.Queue = mp.Queue()
 
-        # Dependency to get IPC channel from app state
-        def get_ipc(request: Request) -> IPCChannel:
-            return request.app.state.ipc_channel
-
-        # Route handler that uses IPC
-        async def ipc_echo_handler(data: str, ipc: IPCChannel = Depends(get_ipc)):
-            ipc_request = IPCRequest(id=str(uuid.uuid4()), data=data)
-
-            # This submit will:
-            # 1. Put request in request_q
-            # 2. Wait for response in response_q
-            response = await ipc.submit(ipc_request, timeout=5.0)
-            return {"result": response.result}
-
-        # Startup callback - this is what triggered the bug
-        async def startup_callback(app):
-            app.state.startup_completed = True
-
         # Build server
         from appinfra.log import Logger
 
@@ -263,9 +281,9 @@ class TestFastAPIIPCWithLifecycleCallbacks:
             ServerBuilder(lg, "test-ipc-full")
             .with_host("127.0.0.1")
             .with_port(18766)
-            .with_on_startup(startup_callback, name="startup")
-            .routes.with_route("/ping", lambda: {"status": "ok"}, methods=["GET"])
-            .with_route("/echo/{data}", ipc_echo_handler, methods=["GET"])
+            .with_on_startup(_startup_callback, name="startup")
+            .routes.with_route("/ping", _ping_handler, methods=["GET"])
+            .with_route("/echo/{data}", _ipc_echo_handler, methods=["GET"])
             .done()
             .subprocess.with_ipc(request_q, response_q)
             .done()
@@ -329,10 +347,6 @@ class TestFastAPIIPCWithLifecycleCallbacks:
         from appinfra.app.fastapi.builder.server import ServerBuilder
         from appinfra.log import Logger
 
-        # Route that raises the exception
-        async def raise_test_exception():
-            raise _TestSubprocessError("test error message")
-
         # Create logger for the handler
         lg = Logger("test-handler")
         handler = _TestSubprocessErrorHandler(lg)
@@ -347,8 +361,8 @@ class TestFastAPIIPCWithLifecycleCallbacks:
             ServerBuilder(lg_server, "test-exc-handler")
             .with_host("127.0.0.1")
             .with_port(18767)
-            .routes.with_route("/ping", lambda: {"status": "ok"}, methods=["GET"])
-            .with_route("/raise", raise_test_exception, methods=["GET"])
+            .routes.with_route("/ping", _ping_handler, methods=["GET"])
+            .with_route("/raise", _raise_test_exception, methods=["GET"])
             .with_exception_handler(_TestSubprocessError, handler)
             .done()
             .subprocess.with_ipc(request_q, response_q)

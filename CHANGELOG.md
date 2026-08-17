@@ -10,6 +10,29 @@ For API stability guarantees and deprecation policy, see
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-08-17
+
+### Added
+- `LifecycleManager.start_t`: read-only property exposing the monotonic timestamp from
+  `initialize()` for elapsed-time measurement.
+
+### Changed
+- Default PostgreSQL version bumped from 16 to 18. Affects `etc/pg.yaml` (`pgserver.version`)
+  and the CICD docker-compose image. Downstream projects pinning to 16 in their own
+  `pg.yaml` are unaffected; those relying on the shipped default get 18. Compatible with
+  psql clients v14+.
+- macOS: now validated in CI (full test suite passing on darwin).
+
+### Fixed
+- `appinfra.db.pg.PG`: `create_db=True` now takes effect at construction rather than
+  only on explicit `.connect()` or `.migrate()`.
+- `appinfra.db.pg.vector`: `Vector` is now resolved lazily via PEP 562 `__getattr__`.
+  Consumers of `appinfra.db` that don't use vector features avoid the pgvector/numpy
+  import chain. Import paths are unchanged.
+- Documentation: code examples updated to match current API signatures (`PG`, `Manager`,
+  `Config` imports and constructor patterns). Added coverage for `SecretStr.ensure()`,
+  `LifecycleManager.start_t`, standard CLI opt-in, and container runtime env vars.
+
 ## [0.9.0] - 2026-07-16
 
 ### Added
@@ -714,7 +737,8 @@ as config. Affected: `ConfigValidator`, `PG.readonly`, `PG.migrate()`,
 ### Changed
 - Package renamed to `appinfra` (install and import both use `appinfra`)
 
-[Unreleased]: https://github.com/llm-works/appinfra/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/llm-works/appinfra/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/llm-works/appinfra/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/llm-works/appinfra/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/llm-works/appinfra/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/llm-works/appinfra/compare/v0.6.1...v0.7.0

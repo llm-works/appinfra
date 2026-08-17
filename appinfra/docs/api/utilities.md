@@ -13,7 +13,7 @@ class Config(DotDict):
         fname: str,
         enable_env_overrides: bool = True,
         env_prefix: str = "INFRA_",
-        merge_strategy: str = "replace"
+        merge_strategy: str = "replace",
     ): ...
 
     def get(self, path: str, default=None) -> Any: ...
@@ -55,14 +55,16 @@ Since DotDict subclasses `dict`, `isinstance(dotdict, dict)` returns `True`.
 
 ```python
 class DotDict(dict[str, V]):
-    def __init__(self, *args, **kwargs): ...            # Accepts dict as positional arg or kwargs
+    def __init__(self, *args, **kwargs): ...  # Accepts dict as positional arg or kwargs
 
-    def get(self, path: str, default=None) -> Any: ...  # Dot-path access, returns None if not found
-    def require(self, path: str) -> Any: ...            # Like get(), but raises if path missing
-    def has(self, path: str) -> bool: ...               # Check if path exists
+    def get(
+        self, path: str, default=None
+    ) -> Any: ...  # Dot-path access, returns None if not found
+    def require(self, path: str) -> Any: ...  # Like get(), but raises if path missing
+    def has(self, path: str) -> bool: ...  # Check if path exists
     def set(self, **kwargs) -> Self: ...
     def dict(self) -> dict: ...
-    def to_dict(self) -> dict: ...                      # Recursive conversion to plain dicts
+    def to_dict(self) -> dict: ...  # Recursive conversion to plain dicts
 ```
 
 **Type Parameter:**
@@ -72,6 +74,7 @@ DotDict is generic over its value type. Use `DotDict[V]` for type-safe collectio
 ```python
 def get_metrics() -> DotDict[float]:
     return DotDict(latency=0.05, throughput=1000.0)
+
 
 metrics = get_metrics()
 x: float = metrics.latency  # Type checker knows this is float
@@ -85,9 +88,7 @@ Unparameterized `DotDict` is equivalent to `DotDict[Any]` for backward compatibi
 from appinfra.dot_dict import DotDict
 
 # Initialize with keyword arguments
-config = DotDict(
-    database={"host": "localhost", "port": 5432}
-)
+config = DotDict(database={"host": "localhost", "port": 5432})
 
 # Or from dict (positional argument - matches built-in dict() API)
 data = {"database": {"host": "localhost", "port": 5432}}
@@ -108,15 +109,16 @@ print(config["database"]["port"])  # 5432
 
 # Dot-path get (cleaner than chained .get() calls)
 # Instead of: config.get("database", {}).get("host", {}).get("port")
-value = config.get("database.host")           # "localhost"
-port = config.get("database.port", 5432)      # 5432
-missing = config.get("database.missing")      # None
+value = config.get("database.host")  # "localhost"
+port = config.get("database.port", 5432)  # 5432
+missing = config.get("database.missing")  # None
 
 # Require - raises DotDictPathNotFoundError if path missing
 from appinfra.dot_dict import DotDictPathNotFoundError
+
 try:
-    host = config.require("database.host")    # "localhost"
-    user = config.require("database.user")    # Raises!
+    host = config.require("database.host")  # "localhost"
+    user = config.require("database.user")  # Raises!
 except DotDictPathNotFoundError as e:
     print(f"Missing required config: {e.path}")
 
@@ -128,8 +130,8 @@ if config.has("database.password"):
 config.database.username = "postgres"
 
 # Convert to dict
-data = config.dict()       # One level conversion
-data = config.to_dict()    # Recursive conversion
+data = config.dict()  # One level conversion
+data = config.to_dict()  # Recursive conversion
 ```
 
 ## FieldDict
@@ -141,6 +143,7 @@ class FieldDict(DotDict):
     # Subclass with field annotations
     pass
 
+
 def field(*, default_factory: Callable[[], Any]) -> Any:
     """Declare field with mutable default (list, dict, set)."""
 ```
@@ -149,6 +152,7 @@ def field(*, default_factory: Callable[[], Any]) -> Any:
 
 ```python
 from appinfra import FieldDict, field
+
 
 class RunResult(FieldDict):
     # Required fields (no default)
@@ -167,17 +171,18 @@ class RunResult(FieldDict):
     def __post_init__(self):
         self.duration = (self.completed_at - self.started_at).total_seconds()
 
+
 # Create instance
 result = RunResult(status="completed", started_at=t0, completed_at=t1)
 
-result.status    # IDE autocomplete works
-result.method    # "sft" (default applied)
-result.metrics   # {} (fresh dict per instance)
+result.status  # IDE autocomplete works
+result.method  # "sft" (default applied)
+result.metrics  # {} (fresh dict per instance)
 
 # Still a dict - no serialization needed
-json.dumps(result)       # Just works
-yaml.safe_dump(result)   # Just works
-isinstance(result, dict) # True
+json.dumps(result)  # Just works
+yaml.safe_dump(result)  # Just works
+isinstance(result, dict)  # True
 ```
 
 **Strict Mode:**
@@ -187,8 +192,9 @@ class StrictConfig(FieldDict, strict=True):
     host: str
     port: int = 5432
 
-StrictConfig(host="localhost")                    # OK
-StrictConfig(host="localhost", extra="field")     # TypeError: unknown field
+
+StrictConfig(host="localhost")  # OK
+StrictConfig(host="localhost", extra="field")  # TypeError: unknown field
 ```
 
 **Key differences from dataclass:**
@@ -209,14 +215,18 @@ Control operation frequency with blocking or non-blocking modes.
 class RateLimiter:
     def __init__(
         self,
-        lg: Logger,               # Logger (required, first parameter)
-        per_minute: float,        # Operations per minute (e.g., 1/60 for hourly)
-        initial: bool = False,    # True = first call immediate, False = wait first interval
+        lg: Logger,  # Logger (required, first parameter)
+        per_minute: float,  # Operations per minute (e.g., 1/60 for hourly)
+        initial: bool = False,  # True = first call immediate, False = wait first interval
     ): ...
 
-    def next(self, respect_max_ticks: bool = True) -> float: ...  # Blocking: wait and return delay
-    def try_next(self) -> bool: ...                               # Non-blocking: return True if allowed
-    def time_until_next(self, now: float | None = None) -> float: ...  # Seconds until next slot
+    def next(
+        self, respect_max_ticks: bool = True
+    ) -> float: ...  # Blocking: wait and return delay
+    def try_next(self) -> bool: ...  # Non-blocking: return True if allowed
+    def time_until_next(
+        self, now: float | None = None
+    ) -> float: ...  # Seconds until next slot
 ```
 
 By default, the first call waits one full interval before proceeding. Set `initial=True` for
@@ -281,19 +291,19 @@ Exponential backoff for retry logic with configurable delays and jitter.
 class Backoff:
     def __init__(
         self,
-        lg: Logger,               # Logger (required, first parameter)
-        base: float = 1.0,        # Initial delay (seconds, must be > 0)
+        lg: Logger,  # Logger (required, first parameter)
+        base: float = 1.0,  # Initial delay (seconds, must be > 0)
         max_delay: float = 60.0,  # Maximum delay cap (must be > 0)
-        factor: float = 2.0,      # Multiplier per attempt (must be >= 1)
-        jitter: bool = True,      # Randomize to avoid thundering herd
+        factor: float = 2.0,  # Multiplier per attempt (must be >= 1)
+        jitter: bool = True,  # Randomize to avoid thundering herd
     ): ...
 
-    def wait(self) -> float: ...       # Blocking: sleep and return actual delay
-    def next_delay(self) -> float: ... # Non-blocking: return delay, increment attempt
-    def reset(self) -> None: ...       # Reset after success
+    def wait(self) -> float: ...  # Blocking: sleep and return actual delay
+    def next_delay(self) -> float: ...  # Non-blocking: return delay, increment attempt
+    def reset(self) -> None: ...  # Reset after success
 
     @property
-    def attempts(self) -> int: ...     # Current attempt count
+    def attempts(self) -> int: ...  # Current attempt count
 ```
 
 **Usage:**
@@ -327,7 +337,7 @@ backoff = Backoff(logger, base=1.0, max_delay=30.0)
 
 delay = backoff.next_delay()  # Get delay without sleeping
 # ... do something else ...
-time.sleep(delay)             # Sleep manually when ready
+time.sleep(delay)  # Sleep manually when ready
 ```
 
 **Custom Configuration:**
@@ -348,9 +358,9 @@ Exponentially Weighted Moving Average for streaming values.
 class EWMA:
     def __init__(self, age: float = 30.0): ...
 
-    def add(self, value: float) -> None: ...   # Add sample
-    def value(self) -> float: ...              # Get current average
-    def reset(self, value: float = 0.0): ...   # Reset state
+    def add(self, value: float) -> None: ...  # Add sample
+    def value(self) -> float: ...  # Get current average
+    def reset(self, value: float = 0.0): ...  # Reset state
 ```
 
 The `age` parameter controls smoothing:
@@ -388,21 +398,21 @@ Format byte sizes as human-readable strings.
 from appinfra.size import size_str, size_to_bytes
 
 # Format bytes to string
-size_str(1024)           # "1KB"
-size_str(1536)           # "1.5KB"
-size_str(1048576)        # "1MB"
-size_str(500)            # "500B"
+size_str(1024)  # "1KB"
+size_str(1536)  # "1.5KB"
+size_str(1048576)  # "1MB"
+size_str(500)  # "500B"
 
 # Precise mode (3 decimal places)
-size_str(1536, precise=True)   # "1.500KB"
+size_str(1536, precise=True)  # "1.500KB"
 
 # SI units (1000-based instead of 1024)
-size_str(1500, binary=False)   # "1.5KB"
+size_str(1500, binary=False)  # "1.5KB"
 
 # Parse size string back to bytes
-size_to_bytes("1.5MB")   # 1572864
-size_to_bytes("500B")    # 500
-size_to_bytes("1GiB")    # 1073741824 (IEC suffixes supported)
+size_to_bytes("1.5MB")  # 1572864
+size_to_bytes("500B")  # 500
+size_to_bytes("1GiB")  # 1073741824 (IEC suffixes supported)
 ```
 
 **Options:**
@@ -417,9 +427,9 @@ size_to_bytes("1GiB")    # 1073741824 (IEC suffixes supported)
 ```python
 from appinfra.size import validate_size, InvalidSizeError
 
-validate_size(1024)    # True
-validate_size(-1)      # False
-validate_size("1KB")   # False (not a number)
+validate_size(1024)  # True
+validate_size(-1)  # False
+validate_size("1KB")  # False (not a number)
 
 try:
     size_str(-1)
@@ -529,14 +539,40 @@ produce `'***'`). The plaintext is only reachable via `.reveal()`:
 from appinfra.yaml import SecretStr, load
 
 config = load(open("app.yaml"), env_overrides={"DB_PASSWORD": "hunter2"})
-config["password"]              # SecretStr('***')
-str(config["password"])         # '***'
-f"{config['password']}"         # '***'
-config["password"].reveal()     # 'hunter2'  ← only path to plaintext
+config["password"]  # SecretStr('***')
+str(config["password"])  # '***'
+f"{config['password']}"  # '***'
+config["password"].reveal()  # 'hunter2'  ← only path to plaintext
 ```
 
 Solo `!secret ${VAR}` raises `yaml.YAMLError` at parse time — the plain-string
 result of the old form leaked in logs. Migrate to `!env VAR !secret`.
+
+`SecretStr` values survive `!deep !include` merges without coercing back to
+plain `str`, so masked secrets loaded from an included file remain masked in
+the merged config.
+
+**`SecretStr.ensure(value)` — boundary coercion.** Library code that
+historically accepted a plain `str` and now accepts `SecretStr` too should
+call `SecretStr.ensure(...)` at the boundary rather than reimplementing the
+coerce shim:
+
+```python
+from appinfra.yaml import SecretStr
+
+
+def connect(dsn: str | SecretStr | None) -> None:
+    dsn = SecretStr.ensure(dsn)  # None → None, SecretStr → same, str → wrapped
+    if dsn is not None:
+        raw_dsn = dsn.reveal()
+        ...
+```
+
+`ensure` preserves identity for already-wrapped inputs, passes `None` through,
+and raises `TypeError` for any other type. The `SecretStr` constructor accepts
+only `str` — it rejects existing `SecretStr` instances so accidental
+double-wraps surface loudly. `SecretStr` is not a `str` subclass and is
+unhashable — do not use as a dict key or set member.
 
 **`!path`** - Resolve paths relative to config file location with tilde expansion:
 
@@ -658,7 +694,7 @@ cache:
 from appinfra.config import Config, get_config_file_path
 
 config = Config(get_config_file_path("config.yaml"))
-print(config.logging.file)      # "./logs/app.log" (literal)
+print(config.logging.file)  # "./logs/app.log" (literal)
 print(config.logging.resolved)  # "/app/etc/logs/app.log" (absolute)
 ```
 
@@ -677,7 +713,7 @@ data = {"name": "John", "nested": {"key": "value"}}
 print(pretty(data))
 
 # Check if value is integer-like
-is_int("123")   # True
+is_int("123")  # True
 is_int("12.3")  # False
 ```
 
@@ -686,9 +722,11 @@ is_int("12.3")  # False
 ```python
 from appinfra.deprecation import deprecated
 
+
 @deprecated(version="0.2.0", replacement="new_function")
 def old_function():
     return "old result"
+
 
 old_function()  # Warning: old_function is deprecated since 0.2.0
 ```

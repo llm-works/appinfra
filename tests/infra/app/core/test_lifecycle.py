@@ -77,6 +77,20 @@ class TestInitialize:
 
         assert manager._start_time is not None
 
+    def test_start_t_property_exposes_anchor(self):
+        """Test start_t property is None pre-initialize and matches _start_time after."""
+        app = Mock()
+        manager = LifecycleManager(app)
+        config = DotDict(logging=DotDict(level="info", location=0, micros=False))
+
+        assert manager.start_t is None
+
+        manager.initialize(config)
+
+        assert manager.start_t is not None
+        assert manager.start_t == manager._start_time
+        assert isinstance(manager.start_t, float)
+
     def test_initialize_creates_logger(self):
         """Test initialize creates logger."""
         app = Mock()

@@ -226,7 +226,7 @@ print(f"Valid: {result['valid']}, Type: {result['test_type']}")
 # Validate entire directory
 results = validator.validate_directory(Path("infra/"))
 for result in results:
-    if not result['valid']:
+    if not result["valid"]:
         print(f"❌ {result['file_path']}: {result['issues']}")
 ```
 
@@ -262,7 +262,7 @@ If you have existing tests that don't follow these conventions:
 # Determine if it's unit, integration, performance, or security
 
 # If it has mocked dependencies -> unit test
-# If it uses real database/network -> integration test  
+# If it uses real database/network -> integration test
 # If it measures performance -> performance test
 # If it tests security -> security test
 ```
@@ -299,8 +299,11 @@ class TestSomething(E2ETestCase):            # For E2E tests
 ```python
 # Add to existing imports
 from appinfra.test_utils import (
-    UnitTestCase, IntegrationTestCase, PerformanceTestCase,
-    SecurityTestCase, E2ETestCase
+    UnitTestCase,
+    IntegrationTestCase,
+    PerformanceTestCase,
+    SecurityTestCase,
+    E2ETestCase,
 )
 ```
 

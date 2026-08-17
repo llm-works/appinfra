@@ -215,7 +215,7 @@ class ScaffoldTool(Tool):
         return [
             "",
             "pgserver:",
-            "  version: 16",
+            "  version: 18",
             "  name: " + name + "-pg",
             "  port: 5432",
             "  user: postgres",

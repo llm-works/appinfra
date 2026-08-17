@@ -24,7 +24,7 @@ This guide will help you get up and running with the Infra framework quickly.
 
 - Python 3.11 or higher
 - pip (Python package manager)
-- PostgreSQL 16 (optional, for database features)
+- PostgreSQL 18 (optional, for database features)
 
 ### Install the Framework
 
@@ -79,12 +79,7 @@ The logging system provides structured output with custom levels and multiple ha
 ```python
 from appinfra.log import LoggingBuilder
 
-logger = (
-    LoggingBuilder("my_app")
-    .with_level("info")
-    .console_handler()
-    .build()
-)
+logger = LoggingBuilder("my_app").with_level("info").console_handler().build()
 
 logger.info("Application started")
 logger.debug("Debug message", extra={"user_id": "123"})
@@ -99,7 +94,7 @@ logger = (
     LoggingBuilder("my_app")
     .with_level("info")
     .console_handler()
-    .file_handler("logs/app.log", max_bytes=10*1024*1024, backup_count=5)
+    .file_handler("logs/app.log", max_bytes=10 * 1024 * 1024, backup_count=5)
     .build()
 )
 ```
@@ -109,12 +104,7 @@ logger = (
 ```python
 from appinfra.log.builder import JSONLoggingBuilder
 
-logger = (
-    JSONLoggingBuilder("my_app")
-    .with_level("info")
-    .console_handler()
-    .build()
-)
+logger = JSONLoggingBuilder("my_app").with_level("info").console_handler().build()
 
 logger.info("User action", extra={"user_id": "123", "action": "login"})
 ```
@@ -128,7 +118,7 @@ Load configuration from YAML files with environment variable overrides.
 **Load configuration:**
 
 ```python
-from appinfra.cfg import Config, get_config_file_path
+from appinfra.config import Config, get_config_file_path
 
 # Recommended: Use get_config_file_path() for automatic etc/ resolution
 config = Config(get_config_file_path())  # Finds etc/infra.yaml automatically
@@ -164,6 +154,7 @@ When building CLI applications with the Tool framework, access the YAML config v
 ```python
 from appinfra.app.tools.base import Tool
 
+
 class ServeTool(Tool):
     def configure(self) -> None:
         # Access YAML config via self.app.config
@@ -189,25 +180,25 @@ Build CLI applications with the fluent AppBuilder API.
 from appinfra.app.builder import AppBuilder
 from appinfra.app.tools import Tool
 
+
 class MyTool(Tool):
     def add_args(self):
-        self.arg_prs.add_argument('--name', required=True, help='Your name')
+        self.arg_prs.add_argument("--name", required=True, help="Your name")
 
     def run(self):
         self.lg.info(f"Hello, {self.args.name}!")
         return 0
+
 
 # Build and run
 app = (
     AppBuilder("myapp")
     .with_description("My awesome application")
     .with_version("1.0.0")
-    .tools
-        .with_tool(MyTool())
-        .done()
-    .logging
-        .with_level("info")
-        .done()
+    .tools.with_tool(MyTool())
+    .done()
+    .logging.with_level("info")
+    .done()
     .build()
 )
 
@@ -222,15 +213,22 @@ from appinfra.app.builder import AppBuilder
 
 app = AppBuilder("myapp").build()
 
+
 @app.tool(name="greet", help="Greet someone")
-@app.argument('--name', required=True)
+@app.argument("--name", required=True)
 def greet(self):
     self.lg.info(f"Hello, {self.args.name}!")
     return 0
 
+
 if __name__ == "__main__":
     app.run()
 ```
+
+> **Standard CLI flags are opt-in.** Only `-h/--help` is registered by default.
+> For `--log-level`, `-q/--quiet`, `--etc-dir`, `--log-json`, etc., add
+> `.with_standard_args(log=True, etc_dir=True)` to the builder chain. See
+> [AppBuilder — Standard Arguments](api/app-builder.md#standard-arguments).
 
 See the [Application Framework API](api/app.md) for more details.
 
@@ -244,11 +242,13 @@ Connect to PostgreSQL with connection pooling and query logging.
 
 ```python
 from appinfra.db import PG
-from appinfra.cfg import get_config_file_path
+from appinfra.config import Config
+from appinfra.log import LoggingBuilder
 import sqlalchemy
 
-# Initialize database connection (uses automatic etc/ resolution)
-pg = PG(get_config_file_path(), "production")
+lg = LoggingBuilder("myapp").build()
+cfg = Config("etc/config.yaml")
+pg = PG(lg, cfg.dbs.production)
 
 # Use with context manager
 with pg.session() as session:
@@ -258,12 +258,20 @@ with pg.session() as session:
 
 **Read-only connection:**
 
+Read-only mode is a per-`PG` config attribute (`dbs.<name>.readonly: true` in
+YAML) applied instance-wide via a `SET TRANSACTION READ ONLY` listener — there
+is no per-session toggle. Build a separate `PG` from a read-only section:
+
 ```python
-# Open read-only session
-with pg.session(readonly=True) as session:
+pg_ro = PG(lg, cfg.dbs.reports)  # yaml: dbs.reports.readonly: true
+
+with pg_ro.session() as session:
     result = session.execute(sqlalchemy.text("SELECT * FROM users"))
     users = result.fetchall()
 ```
+
+See [Database API — Configuration](api/database.md#configuration) for the full
+`readonly` semantics.
 
 See the [PostgreSQL Test Helper Guide](guides/pg-test-helper.md) for testing with databases.
 
@@ -276,8 +284,10 @@ Execute tasks periodically or on a schedule.
 ```python
 from appinfra.time import Ticker
 
+
 def my_task():
     print("Task executed!")
+
 
 # Run every 5 seconds
 ticker = Ticker(interval=5.0, handler=my_task)
@@ -292,8 +302,10 @@ ticker.stop()
 ```python
 from appinfra.time import Sched, Period
 
+
 def daily_task():
     print("Daily task executed!")
+
 
 # Run daily at 3 AM
 sched = Sched(period=Period.DAILY, hour=3, handler=daily_task)
@@ -464,12 +476,7 @@ See the [Virtual Environment Guide](guides/virtual-environment.md) for more opti
 ```python
 from appinfra.dot_dict import DotDict
 
-config = DotDict({
-    "database": {
-        "host": "localhost",
-        "port": 5432
-    }
-})
+config = DotDict({"database": {"host": "localhost", "port": 5432}})
 
 # Access with dot notation
 print(config.database.host)  # localhost

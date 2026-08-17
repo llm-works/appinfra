@@ -12,6 +12,7 @@ Tests cover:
 - Config changes are detected and applied
 """
 
+import os
 import sys
 import tempfile
 import time
@@ -237,8 +238,11 @@ class TestHotReloadWorkflow:
                         app.setup()
 
                         # Verify etc_dir was passed to constructor
+                        # Use realpath to normalize symlinks (macOS /var -> /private/var)
                         constructor_call = mock_watcher_class.call_args
-                        assert constructor_call.kwargs["etc_dir"] == str(etc_dir)
+                        assert os.path.realpath(
+                            constructor_call.kwargs["etc_dir"]
+                        ) == os.path.realpath(str(etc_dir))
 
                         # Verify config_file was passed to configure()
                         configure_call = mock_watcher.configure.call_args
@@ -277,9 +281,10 @@ class TestHotReloadWorkflow:
 
                         # For absolute paths, etc_dir is the parent directory
                         # and config_file is the filename
+                        # Use realpath to normalize symlinks (macOS /var -> /private/var)
                         constructor_call = mock_watcher_class.call_args
                         etc_dir_arg = constructor_call.kwargs["etc_dir"]
-                        assert etc_dir_arg == tmpdir
+                        assert os.path.realpath(etc_dir_arg) == os.path.realpath(tmpdir)
 
                         configure_call = mock_watcher.configure.call_args
                         config_file_arg = configure_call[0][0]

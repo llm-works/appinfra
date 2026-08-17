@@ -82,7 +82,7 @@ try:
         password: str = Field(default="", alias="pass", description="Password")
         image: str | None = Field(
             default=None,
-            description="Docker image (e.g., pgvector/pgvector:pg16). Defaults to postgres:VERSION",
+            description="Docker image (e.g., pgvector/pgvector:pg18). Defaults to postgres:VERSION",
         )
         postgres_conf: dict[str, str | int | bool | list[str]] = Field(
             default_factory=dict,

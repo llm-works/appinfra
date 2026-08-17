@@ -26,13 +26,27 @@ Example:
         ))
 """
 
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
-# Re-export Vector from pgvector if available
-try:
-    from pgvector.sqlalchemy import Vector
-except ImportError:
-    Vector = None  # type: ignore[misc, assignment]
+__all__ = ["Vector", "enable_pgvector", "create_vector_index"]
+
+if TYPE_CHECKING:
+    from pgvector.sqlalchemy import Vector as Vector
+
+
+def __getattr__(name: str) -> object:
+    """Lazily resolve `Vector` so importing this module does not pull in
+    pgvector (and its numpy dependency). Returns None if pgvector is not
+    installed, matching the previous eager-import fallback."""
+    if name == "Vector":
+        try:
+            from pgvector.sqlalchemy import Vector
+        except ImportError:
+            globals()["Vector"] = None
+            return None
+        globals()["Vector"] = Vector
+        return Vector
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def enable_pgvector() -> str:

@@ -123,19 +123,32 @@ class ProcessRunner(Runner):
 
     def _spawn_process(self, log_config: dict[str, Any]) -> None:
         """Spawn the subprocess."""
-        self._process = mp.Process(
-            target=_process_entry,
-            args=(
-                self.service,
-                self._shutdown_event,
-                self._healthy_event,
-                self._error_queue,
-                log_config,
-            ),
-            name=f"svc-{self.name}",
-            daemon=True,
-        )
-        self._process.start()
+        # Temporarily nullify logger to make service picklable on macOS.
+        # macOS uses spawn (not fork), requiring all subprocess args to be
+        # picklable. Loggers can't be pickled, but the subprocess creates
+        # its own from log_config anyway.
+        saved_lg = getattr(self.service, "_lg", None)
+        if saved_lg is not None:
+            setattr(self.service, "_lg", None)
+
+        try:
+            self._process = mp.Process(
+                target=_process_entry,
+                args=(
+                    self.service,
+                    self._shutdown_event,
+                    self._healthy_event,
+                    self._error_queue,
+                    log_config,
+                ),
+                name=f"svc-{self.name}",
+                daemon=True,
+            )
+            self._process.start()
+        finally:
+            # Restore logger in parent process
+            if saved_lg is not None:
+                setattr(self.service, "_lg", saved_lg)
 
     def stop(self, timeout: float | None = None) -> None:
         """Stop the subprocess."""

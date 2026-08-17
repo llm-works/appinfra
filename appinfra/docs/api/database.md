@@ -48,10 +48,10 @@ Main PostgreSQL database interface.
 class PG:
     def __init__(
         self,
-        lg: Logger,                      # Logger instance
-        cfg: Any,                        # Database config (dict or object with url, etc.)
+        lg: Logger,  # Logger instance
+        cfg: Any,  # Database config (dict or object with url, etc.)
         query_lg_level: Any | None = None,  # Log level for queries
-        schema: str | None = None        # Schema for isolation
+        schema: str | None = None,  # Schema for isolation
     ): ...
 
     def session(self, autocommit: bool = False) -> ContextManager[Session]: ...
@@ -90,25 +90,33 @@ with pg.session(autocommit=True) as session:
 
 ## Manager
 
-Manages multiple database connections.
+Manages multiple database connections declared under `dbs` in YAML.
 
 ```python
 class Manager:
-    def __init__(self, config_path: str): ...
+    def __init__(self, lg: Logger, cfg: Any): ...
 
-    def get_db(self, name: str) -> PG: ...
+    def setup(self) -> None: ...
+    def db(self, name: str) -> Any: ...
+    def list_databases(self) -> list[str]: ...
+    def close_all(self) -> None: ...
 ```
 
 **Multiple Databases:**
 
 ```python
 from appinfra.db import Manager
-from appinfra.cfg import get_config_file_path
+from appinfra.config import Config
+from appinfra.log import LoggingBuilder
 
-manager = Manager(get_config_file_path())
+lg = LoggingBuilder("myapp").build()
+cfg = Config("etc/infra.yaml")
 
-prod_db = manager.get_db("production")
-test_db = manager.get_db("test")
+manager = Manager(lg, cfg)
+manager.setup()  # creates all configured connections
+
+main_db = manager.db("main")
+readonly_db = manager.db("readonly")
 ```
 
 ## Configuration
@@ -159,7 +167,7 @@ from appinfra.db.pg import PG
 # Create PG with schema isolation
 pg = PG(logger, config, schema="tenant_a")
 pg.create_schema()  # Create schema if it doesn't exist
-pg.migrate(Base)    # Tables created in tenant_a schema
+pg.migrate(Base)  # Tables created in tenant_a schema
 
 # All queries now use tenant_a schema
 with pg.session() as session:
@@ -188,6 +196,7 @@ The `appinfra.db.pg.testing` module provides fixtures for parallel test executio
 ```python
 # conftest.py - Minimal setup (one line)
 pytest_plugins = ["appinfra.db.pg.testing"]
+
 
 # Override config fixture to use your database
 @pytest.fixture(scope="session")
@@ -226,10 +235,12 @@ from myapp.models import Base
 
 pytest_plugins = ["appinfra.db.pg.testing"]
 
+
 @pytest.fixture(scope="session")
 def pg_with_tables(pg_migrate_factory):
     with pg_migrate_factory(Base, extensions=["vector"]) as pg:
         yield pg
+
 
 # In tests
 def test_with_tables(pg_with_tables):
@@ -336,10 +347,14 @@ Some extensions require configuration at both levels:
 **Extensions requiring both levels (examples):** `timescaledb`, `pg_cron`, `pg_stat_statements`,
 `pgaudit`, `auto_explain`
 
+> **`pgserver.postgres_conf` accepts only** `max_connections`,
+> `shared_preload_libraries`, `work_mem`, and `autovacuum`. Unknown keys error
+> at `make pg.server.up` and list the supported set.
+
 ```yaml
 # Server config (pg.yaml)
 pgserver:
-  image: timescale/timescaledb:latest-pg16
+  image: timescale/timescaledb:latest-pg18
   postgres_conf:
     shared_preload_libraries:
       - timescaledb              # Must be preloaded at server startup
@@ -415,8 +430,8 @@ with with_object_lock(session, key):
 ensure_object(session, key, exists_fn, create_fn)
 
 # Schema-aware existence checks (filter by n.nspname, not pg_table_is_visible):
-table_exists(conn, name, schema=None)   # None -> current_schemas(true) fallback
-index_exists(conn, name, schema=None)   # None -> any schema
+table_exists(conn, name, schema=None)  # None -> current_schemas(true) fallback
+index_exists(conn, name, schema=None)  # None -> any schema
 ```
 
 `table_exists` and `index_exists` filter by `pg_namespace.nspname` explicitly rather than
@@ -461,12 +476,12 @@ Defines the Docker-based PostgreSQL server for local development.
 
 ```yaml
 pgserver:
-  version: 16                      # PostgreSQL version (required unless image is specified)
+  version: 18                      # PostgreSQL version (required unless image is specified)
   name: infra-pg                   # Server name/identifier
   port: 7432                       # PostgreSQL port
   user: postgres                   # Database user
   pass: ''                         # Database password
-  image: pgvector/pgvector:pg16   # Optional: custom Docker image
+  image: pgvector/pgvector:pg18   # Optional: custom Docker image
 ```
 
 ### Custom Docker Image (`image` field)
@@ -484,9 +499,9 @@ Use the `image` field to run PostgreSQL with extensions like pgvector, Timescale
 **Examples:**
 
 ```yaml
-# Standard PostgreSQL 16
+# Standard PostgreSQL 18
 pgserver:
-  version: 16
+  version: 18
   name: my-pg
   port: 5432
 
@@ -494,27 +509,27 @@ pgserver:
 pgserver:
   name: learn-pg
   port: 5432
-  image: pgvector/pgvector:pg16
+  image: pgvector/pgvector:pg18
 
 # TimescaleDB for time-series data
 pgserver:
   name: timeseries-pg
   port: 5432
-  image: timescale/timescaledb:latest-pg16
+  image: timescale/timescaledb:latest-pg18
 
 # PostGIS for geospatial data
 pgserver:
   name: geo-pg
   port: 5432
-  image: postgis/postgis:16-3.4
+  image: postgis/postgis:18-3.6
 ```
 
 **Important:** The custom image must be PostgreSQL-compatible (based on the official `postgres`
 image). Images that extend the official postgres image work correctly:
 
-- `pgvector/pgvector:pg16` - Vector similarity search
-- `timescale/timescaledb:latest-pg16` - Time-series database
-- `postgis/postgis:16-3.4` - Geospatial database
+- `pgvector/pgvector:pg18` - Vector similarity search
+- `timescale/timescaledb:latest-pg18` - Time-series database
+- `postgis/postgis:18-3.6` - Geospatial database
 
 Non-PostgreSQL databases or heavily modified images will fail to start because the framework passes
 PostgreSQL-specific CLI arguments to the container.
@@ -565,23 +580,29 @@ with pg.session() as session:
 
 ```python
 from appinfra.db import PG
-from appinfra.cfg import get_config_file_path
+from appinfra.config import Config
+from appinfra.log import LoggingBuilder
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy import Column, Integer, String
+
 
 class Base(DeclarativeBase):
     pass
 
+
 class User(Base):
-    __tablename__ = 'users'
+    __tablename__ = "users"
     id = Column(Integer, primary_key=True)
     name = Column(String)
     email = Column(String)
 
-pg = PG(get_config_file_path(), "production")
+
+lg = LoggingBuilder("myapp").build()
+cfg = Config("etc/infra.yaml")
+pg = PG(lg, cfg.dbs.production)
 
 with pg.session() as session:
-    users = session.query(User).filter(User.name == 'John').all()
+    users = session.query(User).filter(User.name == "John").all()
 ```
 
 ## See Also

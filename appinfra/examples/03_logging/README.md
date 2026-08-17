@@ -126,13 +126,14 @@ Fine-grained control over log levels using glob patterns:
 ```python
 app = (
     AppBuilder("myapp")
-    .logging
-        .with_topic_levels({
-            "/infra/db/*": "debug",      # DB layer → debug
-            "/infra/api/*": "warning",   # API layer → warning
-            "/myapp/**": "info"          # All app → info
-        })
-        .done()
+    .logging.with_topic_levels(
+        {
+            "/infra/db/*": "debug",  # DB layer → debug
+            "/infra/api/*": "warning",  # API layer → warning
+            "/myapp/**": "info",  # All app → info
+        }
+    )
+    .done()
     .build()
 )
 ```
@@ -145,10 +146,7 @@ app = (
 ### Structured Logging
 Always use `extra` dict for structured data:
 ```python
-logger.info("User login", extra={
-    "user_id": "123",
-    "ip_address": "192.168.1.1"
-})
+logger.info("User login", extra={"user_id": "123", "ip_address": "192.168.1.1"})
 ```
 
 ### Log Levels

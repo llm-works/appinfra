@@ -92,12 +92,7 @@ server = (
     .build()
 )
 
-app = (
-    AppBuilder("myapp")
-    .tools.with_plugin(ServerPlugin(server))
-    .done()
-    .build()
-)
+app = AppBuilder("myapp").tools.with_plugin(ServerPlugin(server)).done().build()
 
 # Now: myapp serve
 ```

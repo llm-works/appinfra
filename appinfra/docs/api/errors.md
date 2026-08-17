@@ -61,12 +61,15 @@ except InfraError as e:
 ```python
 from appinfra.errors import DatabaseError
 from appinfra.db import PG
-from appinfra.cfg import get_config_file_path
+from appinfra.config import Config
+from appinfra.log import LoggingBuilder
+
+lg = LoggingBuilder("myapp").build()
+cfg = Config("etc/config.yaml")
 
 try:
-    pg = PG(get_config_file_path(), "production")
-    with pg.session() as session:
-        result = session.execute("INVALID SQL")
+    pg = PG(lg, cfg.dbs.production)
+    pg.health_check()  # raises DatabaseError if connection fails
 except DatabaseError as e:
     print(f"Database error: {e}")
 ```
@@ -77,8 +80,7 @@ except DatabaseError as e:
 from appinfra.errors import ValidationError
 
 raise ValidationError(
-    "Invalid configuration",
-    context={"field": "database.port", "value": "invalid"}
+    "Invalid configuration", context={"field": "database.port", "value": "invalid"}
 )
 ```
 
@@ -91,8 +93,7 @@ try:
     connect_to_database()
 except Exception as e:
     raise DatabaseError(
-        f"Failed to connect: {e}",
-        context={"original_error": str(e)}
+        f"Failed to connect: {e}", context={"original_error": str(e)}
     ) from e
 ```
 
