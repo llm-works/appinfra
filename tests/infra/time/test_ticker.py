@@ -1665,8 +1665,12 @@ class TestBlockingAPITimingModes:
         thread = threading.Thread(target=ticker.run, daemon=True)
         thread.start()
 
-        # Wait for 3 ticks
+        # Wait for 3 ticks (with timeout to prevent hang on slow CI)
+        deadline = time.monotonic() + 10.0
         while len(tick_times) < 3:
+            if time.monotonic() > deadline:
+                ticker.stop()
+                pytest.fail("Timed out waiting for ticks")
             time.sleep(0.05)
 
         ticker.stop()
@@ -1701,8 +1705,12 @@ class TestBlockingAPITimingModes:
         thread = threading.Thread(target=ticker.run, daemon=True)
         thread.start()
 
-        # Wait for 5 ticks
+        # Wait for 5 ticks (with timeout to prevent hang on slow CI)
+        deadline = time.monotonic() + 10.0
         while len(tick_times) < 5:
+            if time.monotonic() > deadline:
+                ticker.stop()
+                pytest.fail("Timed out waiting for ticks")
             time.sleep(0.05)
 
         ticker.stop()
@@ -1740,8 +1748,12 @@ class TestBlockingAPITimingModes:
         thread = threading.Thread(target=ticker.run, daemon=True)
         thread.start()
 
-        # Wait for 4 ticks
+        # Wait for 4 ticks (with timeout to prevent hang on slow CI)
+        deadline = time.monotonic() + 10.0
         while len(tick_times) < 4:
+            if time.monotonic() > deadline:
+                ticker.stop()
+                pytest.fail("Timed out waiting for ticks")
             time.sleep(0.05)
 
         ticker.stop()

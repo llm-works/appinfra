@@ -141,19 +141,23 @@ class TestETARemaining:
         assert eta.remaining_secs() == 0.0
 
     def test_remaining_decreases_with_progress(self):
-        """Test remaining time decreases as progress increases."""
+        """Test remaining time decreases as progress increases.
+
+        Uses 2s sleeps because macOS CI runners have high timing jitter
+        that can cause sub-100ms sleeps to vary significantly.
+        """
         eta = ETA(total=100.0, age=2.0)
 
         eta.update(0.0)
-        time.sleep(0.02)
+        time.sleep(2.0)
         eta.update(25.0)
         remaining_25 = eta.remaining_secs()
 
-        time.sleep(0.02)
+        time.sleep(2.0)
         eta.update(50.0)
         remaining_50 = eta.remaining_secs()
 
-        time.sleep(0.02)
+        time.sleep(2.0)
         eta.update(75.0)
         remaining_75 = eta.remaining_secs()
 
