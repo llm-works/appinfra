@@ -7,7 +7,7 @@ to allow proper cleanup before shutdown.
 """
 
 import signal
-import threading
+import time
 from typing import Any
 
 
@@ -34,9 +34,6 @@ class ShutdownManager:
         self._shutting_down = False
         self._signal_return_code: int = 130  # Default to SIGINT
         self._original_handlers: dict[signal.Signals, Any] = {}
-        # Event set by the signal handler so worker threads can wait on it
-        # (KeyboardInterrupt only unwinds the main thread).
-        self._event = threading.Event()
 
     def register_signal_handlers(self) -> None:
         """Register signal handlers for SIGTERM and SIGINT."""
@@ -63,7 +60,6 @@ class ShutdownManager:
 
         self._shutting_down = True
         self._signal_return_code = 130 if signum == signal.SIGINT else 143
-        self._event.set()
         raise KeyboardInterrupt()
 
     def is_shutting_down(self) -> bool:
@@ -87,8 +83,9 @@ class ShutdownManager:
         worker code so SIGTERM does not stall shutdown for the full sleep
         duration (``KeyboardInterrupt`` only unwinds the main thread).
 
-        Return value matches ``threading.Event.wait``: True when the awaited
-        event happened, False when the timeout elapsed cleanly.
+        Uses polling (5ms interval) rather than ``threading.Event`` to avoid
+        deadlock risk: ``Event.set()`` acquires a lock, and calling it from a
+        signal handler can deadlock if the main thread holds that lock.
 
         Args:
             seconds: Maximum time to sleep.
@@ -97,4 +94,10 @@ class ShutdownManager:
             True if a shutdown signal fired during (or before) the sleep,
             False if the full time was slept.
         """
-        return self._event.wait(seconds)
+        deadline = time.monotonic() + seconds
+        while not self._shutting_down:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return False
+            time.sleep(min(remaining, 0.005))
+        return True
