@@ -301,10 +301,9 @@ while True:
         return  # exit cleanly
 ```
 
-Return value matches `threading.Event.wait`: `True` if a shutdown signal fired
-during (or before) the wait, `False` if the full time was slept. Safe to call
-from any thread. Requires `LifecycleManager.initialize()` to have run first —
-the shutdown event is created there.
+Returns `True` if a shutdown signal fired during (or before) the wait, `False`
+if the full time was slept. Safe to call from any thread. Requires
+`LifecycleManager.initialize()` to have run first.
 
 ## Known Limitations
 

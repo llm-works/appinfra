@@ -88,12 +88,17 @@ class ShutdownManager:
         signal handler can deadlock if the main thread holds that lock.
 
         Args:
-            seconds: Maximum time to sleep.
+            seconds: Maximum time to sleep (must be non-negative).
 
         Returns:
             True if a shutdown signal fired during (or before) the sleep,
             False if the full time was slept.
+
+        Raises:
+            ValueError: If seconds is negative.
         """
+        if seconds < 0:
+            raise ValueError("sleep length must be non-negative")
         deadline = time.monotonic() + seconds
         while not self._shutting_down:
             remaining = deadline - time.monotonic()

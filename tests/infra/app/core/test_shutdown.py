@@ -143,6 +143,13 @@ class TestIsShuttingDown:
 class TestSleep:
     """Test the shutdown-aware sleep primitive."""
 
+    def test_sleep_raises_on_negative_duration(self):
+        """sleep() raises ValueError for negative durations."""
+        manager = ShutdownManager()
+
+        with pytest.raises(ValueError, match="non-negative"):
+            manager.sleep(-1)
+
     def test_sleep_returns_false_when_full_time_slept(self):
         """sleep() returns False when the timeout elapses without shutdown."""
         manager = ShutdownManager()
@@ -184,16 +191,18 @@ class TestSleep:
         """
         manager = ShutdownManager()
         worker_result: dict[str, object] = {}
+        entered_sleep = threading.Event()
 
         def worker() -> None:
+            entered_sleep.set()
             start = time.monotonic()
             worker_result["returned"] = manager.sleep(5.0)
             worker_result["elapsed"] = time.monotonic() - start
 
         thread = threading.Thread(target=worker)
         thread.start()
-        # Give the worker time to enter sleep() before we signal.
-        time.sleep(0.01)
+        # Wait for worker to enter sleep() before firing signal.
+        assert entered_sleep.wait(timeout=1.0), "worker did not enter sleep"
 
         with pytest.raises(KeyboardInterrupt):
             manager._handle_signal(signal.SIGTERM, None)
