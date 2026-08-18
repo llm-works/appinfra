@@ -1135,20 +1135,20 @@ class TestNonBlockingAPI:
 
     def test_flex_mode_waits_full_interval(self, mock_logger):
         """Test FLEX mode maintains interval from tick start with no catch-up."""
-        ticker = Ticker(mock_logger, secs=0.5, mode=TickerMode.FLEX)
+        ticker = Ticker(mock_logger, secs=2.0, mode=TickerMode.FLEX)
 
         # First tick at t=0
         assert ticker.try_tick() is True
 
         # Wait partway through interval
-        time.sleep(0.25)
+        time.sleep(1.0)
 
-        # Should have ~0.25s remaining (next tick at t=0.5)
+        # Should have roughly 1.0s remaining (next tick at t=2.0)
         remaining = ticker.time_until_next_tick()
-        assert 0.15 < remaining < 0.35
+        assert 0.5 < remaining < 1.5
 
         # Wait until ready
-        time.sleep(remaining + 0.05)
+        time.sleep(remaining + 0.2)
 
         # Should be ready now
         assert ticker.try_tick() is True
@@ -1156,24 +1156,24 @@ class TestNonBlockingAPI:
         # Key test: After second tick, if we check immediately,
         # we should need full interval again (FLEX behavior)
         remaining_after = ticker.time_until_next_tick()
-        assert 0.4 < remaining_after <= 0.5  # ~0.5s (full interval)
+        assert 1.5 < remaining_after <= 2.2  # ~2.0s (full interval)
 
     def test_strict_mode_maintains_rate(self, mock_logger):
         """Test STRICT mode maintains average rate."""
-        ticker = Ticker(mock_logger, secs=0.5, mode=TickerMode.STRICT)
+        ticker = Ticker(mock_logger, secs=2.0, mode=TickerMode.STRICT)
 
         # First tick at t=0
         assert ticker.try_tick() is True
 
         # Wait less than interval
-        time.sleep(0.4)
+        time.sleep(1.0)
 
-        # Should need ~0.1s more
+        # Should need roughly 1.0s more
         remaining = ticker.time_until_next_tick()
-        assert 0.0 < remaining < 0.2
+        assert 0.5 < remaining < 1.5
 
         # Wait for it
-        time.sleep(0.15)
+        time.sleep(remaining + 0.2)
 
         # Should be ready
         assert ticker.try_tick() is True
@@ -1665,8 +1665,12 @@ class TestBlockingAPITimingModes:
         thread = threading.Thread(target=ticker.run, daemon=True)
         thread.start()
 
-        # Wait for 3 ticks
+        # Wait for 3 ticks (with timeout to prevent hang on slow CI)
+        deadline = time.monotonic() + 10.0
         while len(tick_times) < 3:
+            if time.monotonic() > deadline:
+                ticker.stop()
+                pytest.fail("Timed out waiting for ticks")
             time.sleep(0.05)
 
         ticker.stop()
@@ -1701,8 +1705,12 @@ class TestBlockingAPITimingModes:
         thread = threading.Thread(target=ticker.run, daemon=True)
         thread.start()
 
-        # Wait for 5 ticks
+        # Wait for 5 ticks (with timeout to prevent hang on slow CI)
+        deadline = time.monotonic() + 10.0
         while len(tick_times) < 5:
+            if time.monotonic() > deadline:
+                ticker.stop()
+                pytest.fail("Timed out waiting for ticks")
             time.sleep(0.05)
 
         ticker.stop()
@@ -1740,8 +1748,12 @@ class TestBlockingAPITimingModes:
         thread = threading.Thread(target=ticker.run, daemon=True)
         thread.start()
 
-        # Wait for 4 ticks
+        # Wait for 4 ticks (with timeout to prevent hang on slow CI)
+        deadline = time.monotonic() + 10.0
         while len(tick_times) < 4:
+            if time.monotonic() > deadline:
+                ticker.stop()
+                pytest.fail("Timed out waiting for ticks")
             time.sleep(0.05)
 
         ticker.stop()

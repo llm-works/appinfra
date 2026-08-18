@@ -28,17 +28,22 @@ class PerfTestHandler(TickerHandler):
 @pytest.mark.slow
 class TestTickerAccuracy:
     def test_interval_timing_accuracy(self):
-        """Measure ticker interval deviation from expected 0.1s."""
+        """Measure ticker interval deviation from expected interval.
+
+        Uses 0.4s intervals with generous tolerances because macOS CI runners
+        have high timing jitter - 0.1s intervals saw 2x+ variance.
+        """
         import logging
 
         lg = logging.getLogger(__name__)
         handler = PerfTestHandler()
-        ticker = Ticker(lg, handler, secs=0.1)
+        interval = 0.4
+        ticker = Ticker(lg, handler, secs=interval)
 
-        # Run ticker for ~1 second (expect ~10 ticks)
+        # Run ticker for ~2 seconds (expect ~5 ticks)
         thread = threading.Thread(target=ticker.run, daemon=True)
         thread.start()
-        time.sleep(1.0)
+        time.sleep(2.0)
         ticker.stop()
         thread.join(timeout=1.0)
 
@@ -49,17 +54,17 @@ class TestTickerAccuracy:
 
         intervals = [ticks[i + 1] - ticks[i] for i in range(len(ticks) - 1)]
         avg_interval = sum(intervals) / len(intervals)
-        max_deviation = max(abs(interval - 0.1) for interval in intervals)
+        max_deviation = max(abs(i - interval) for i in intervals)
 
-        # Assert: Average close to 0.1s, max deviation < 100ms
-        assert abs(avg_interval - 0.1) < 0.05, (
-            f"Interval average off: {avg_interval:.3f}s vs 0.1s expected"
+        # Assert: Average close to target, max deviation < 200ms
+        assert abs(avg_interval - interval) < 0.2, (
+            f"Interval average off: {avg_interval:.3f}s vs {interval}s expected"
         )
-        assert max_deviation < 0.1, (
-            f"Interval deviation too high: {max_deviation * 1000:.1f}ms > 100ms"
+        assert max_deviation < 0.4, (
+            f"Interval deviation too high: {max_deviation * 1000:.1f}ms > 400ms"
         )
 
         print(
-            f"\nTicker accuracy: avg={avg_interval:.3f}s, "
+            f"\nTicker accuracy (target={interval}s): avg={avg_interval:.3f}s, "
             f"max_dev={max_deviation * 1000:.1f}ms"
         )
