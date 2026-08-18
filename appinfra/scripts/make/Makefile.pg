@@ -138,7 +138,7 @@ pg.server.wait.up: ## waits for postgres to accept connections (30s timeout, aut
 	fi; \
 	echo "Waiting for $$target to accept connections..."; \
 	for i in $$(seq 1 30); do \
-		if $(INFRA_CONTAINER_CMD) exec $$target psql -U postgres -c "SELECT 1" >/dev/null 2>&1; then \
+		if $(INFRA_CONTAINER_CMD) exec $$target psql -U "$(PG_USER)" -c "SELECT 1" >/dev/null 2>&1; then \
 			echo "Server is UP ($$target on port $(PG_PORT))"; \
 			exit 0; \
 		fi; \
