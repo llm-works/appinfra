@@ -10,6 +10,11 @@ For API stability guarantees and deprecation policy, see
 
 ## [Unreleased]
 
+### Added
+- `App.sleep(seconds)`: shutdown-aware sleep for worker threads. Returns `True` if a shutdown
+  signal fired during the wait, `False` if the full time was slept. Drop-in for `time.sleep`
+  so SIGTERM does not stall worker shutdowns.
+
 ## [0.10.0] - 2026-08-17
 
 ### Added

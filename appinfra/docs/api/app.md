@@ -285,6 +285,27 @@ if app.lifecycle.start_t is not None:
 entries, so downstream code and framework logs share a single cold-start
 origin.
 
+### `App.sleep(seconds)`
+
+Cooperative replacement for `time.sleep` that returns early when a shutdown
+signal (SIGTERM/SIGINT) fires. Primarily useful inside worker threads:
+`KeyboardInterrupt` only unwinds the main thread on signal, so worker threads
+parked in `time.sleep` will otherwise stall shutdown for the full sleep
+duration.
+
+```python
+# Inside a worker thread spawned by a Tool:
+while True:
+    do_work()
+    if self.app.sleep(60):  # True if a shutdown signal fired
+        return  # exit cleanly
+```
+
+Return value matches `threading.Event.wait`: `True` if a shutdown signal fired
+during (or before) the wait, `False` if the full time was slept. Safe to call
+from any thread. Requires `LifecycleManager.initialize()` to have run first —
+the shutdown event is created there.
+
 ## Known Limitations
 
 ### Argument Ordering: Positionals Must Come Before Options

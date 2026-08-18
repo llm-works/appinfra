@@ -9,6 +9,8 @@ Tests shutdown manager functionality including:
 """
 
 import signal
+import threading
+import time
 from unittest.mock import Mock, patch
 
 import pytest
@@ -27,6 +29,7 @@ class TestShutdownManagerInit:
         assert manager._shutting_down is False
         assert manager._signal_return_code == 130  # Default
         assert manager._original_handlers == {}
+        assert manager._event.is_set() is False
 
 
 @pytest.mark.unit
@@ -135,3 +138,74 @@ class TestIsShuttingDown:
             manager._handle_signal(signal.SIGINT, None)
 
         assert manager.is_shutting_down() is True
+
+
+@pytest.mark.unit
+class TestSleep:
+    """Test the shutdown-aware sleep primitive."""
+
+    def test_signal_handler_sets_event(self):
+        """Signal handler sets the event so worker-thread waits wake up."""
+        manager = ShutdownManager()
+
+        assert manager._event.is_set() is False
+        with pytest.raises(KeyboardInterrupt):
+            manager._handle_signal(signal.SIGINT, None)
+        assert manager._event.is_set() is True
+
+    def test_sleep_returns_false_when_full_time_slept(self):
+        """sleep() returns False when the timeout elapses without shutdown."""
+        manager = ShutdownManager()
+
+        assert manager.sleep(0.01) is False
+
+    def test_sleep_returns_true_when_already_shutting_down(self):
+        """sleep() returns True immediately when shutdown was already signaled."""
+        manager = ShutdownManager()
+        manager._event.set()
+
+        # Would hang for 60s if the event were not honored.
+        assert manager.sleep(60) is True
+
+    def test_sleep_returns_true_when_shutdown_fires_during_wait(self):
+        """sleep() wakes early and returns True when shutdown fires mid-wait."""
+        manager = ShutdownManager()
+
+        def trigger_shutdown() -> None:
+            time.sleep(0.01)
+            manager._event.set()
+
+        threading.Thread(target=trigger_shutdown).start()
+        start = time.monotonic()
+        result = manager.sleep(5.0)
+        elapsed = time.monotonic() - start
+
+        assert result is True
+        assert elapsed < 1.0  # woke well before the 5s timeout
+
+    def test_worker_thread_sleep_wakes_when_main_thread_handles_signal(self):
+        """
+        Motivating scenario: worker thread parked in sleep() while the main
+        thread runs the signal handler. Worker must wake early rather than
+        stalling shutdown for the full sleep duration.
+        """
+        manager = ShutdownManager()
+        worker_result: dict[str, object] = {}
+
+        def worker() -> None:
+            start = time.monotonic()
+            worker_result["returned"] = manager.sleep(5.0)
+            worker_result["elapsed"] = time.monotonic() - start
+
+        thread = threading.Thread(target=worker)
+        thread.start()
+        # Give the worker time to enter sleep() before we signal.
+        time.sleep(0.01)
+
+        with pytest.raises(KeyboardInterrupt):
+            manager._handle_signal(signal.SIGTERM, None)
+
+        thread.join(timeout=1.0)
+        assert not thread.is_alive(), "worker did not wake within 1s"
+        assert worker_result["returned"] is True
+        assert worker_result["elapsed"] < 1.0

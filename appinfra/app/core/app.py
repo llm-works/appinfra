@@ -724,6 +724,26 @@ class App(Traceable):
         self.lg.error("no tool selected")
         return 1
 
+    def sleep(self, seconds: float) -> bool:
+        """
+        Cooperative sleep that returns early if a shutdown signal fires.
+
+        Drop-in replacement for ``time.sleep`` in worker code. Safe to call
+        from any thread; the underlying shutdown Event is set by the signal
+        handler, so SIGTERM does not stall shutdown for the sleep duration.
+
+        Args:
+            seconds: Maximum time to sleep.
+
+        Returns:
+            True if a shutdown signal fired during (or before) the sleep,
+            False if the full time was slept.
+        """
+        assert self.lifecycle._shutdown_manager is not None, (
+            "app.sleep() called before lifecycle.initialize()"
+        )
+        return self.lifecycle._shutdown_manager.sleep(seconds)
+
     def main(self) -> int:
         """
         Main application entry point.

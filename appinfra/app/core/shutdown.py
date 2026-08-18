@@ -7,6 +7,7 @@ to allow proper cleanup before shutdown.
 """
 
 import signal
+import threading
 from typing import Any
 
 
@@ -33,6 +34,9 @@ class ShutdownManager:
         self._shutting_down = False
         self._signal_return_code: int = 130  # Default to SIGINT
         self._original_handlers: dict[signal.Signals, Any] = {}
+        # Event set by the signal handler so worker threads can wait on it
+        # (KeyboardInterrupt only unwinds the main thread).
+        self._event = threading.Event()
 
     def register_signal_handlers(self) -> None:
         """Register signal handlers for SIGTERM and SIGINT."""
@@ -59,6 +63,7 @@ class ShutdownManager:
 
         self._shutting_down = True
         self._signal_return_code = 130 if signum == signal.SIGINT else 143
+        self._event.set()
         raise KeyboardInterrupt()
 
     def is_shutting_down(self) -> bool:
@@ -73,3 +78,23 @@ class ShutdownManager:
             130 for SIGINT (Ctrl+C), 143 for SIGTERM, or 130 as default.
         """
         return self._signal_return_code
+
+    def sleep(self, seconds: float) -> bool:
+        """
+        Sleep up to ``seconds``, waking early if a shutdown signal fires.
+
+        Safe to call from any thread. Use in place of ``time.sleep`` inside
+        worker code so SIGTERM does not stall shutdown for the full sleep
+        duration (``KeyboardInterrupt`` only unwinds the main thread).
+
+        Return value matches ``threading.Event.wait``: True when the awaited
+        event happened, False when the timeout elapsed cleanly.
+
+        Args:
+            seconds: Maximum time to sleep.
+
+        Returns:
+            True if a shutdown signal fired during (or before) the sleep,
+            False if the full time was slept.
+        """
+        return self._event.wait(seconds)
