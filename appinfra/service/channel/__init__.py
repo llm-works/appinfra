@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The appinfra Authors
+
 """Bidirectional channel abstraction for service communication.
 
 Provides both sync and async APIs for request/response patterns between

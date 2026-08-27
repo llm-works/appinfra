@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The appinfra Authors
+
 # Makefile.cicd - Docker-based CI/CD Targets
 #
 # Provides: cicd.test, cicd.shell, cicd.build, cicd.clean, cicd.erase

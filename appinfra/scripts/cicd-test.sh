@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The appinfra Authors
+
 # Convenience script for running tests in a container runtime
 # Matches CI environment exactly - great for debugging CI failures locally
 #

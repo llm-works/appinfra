@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The appinfra Authors
+
 from typing import TYPE_CHECKING
 
 from .ensure import ensure_object, index_exists, table_exists, with_object_lock

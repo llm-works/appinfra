@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The appinfra Authors
+
 """Custom setup.py to generate _build_info.py during build.
 
 Works alongside pyproject.toml - pyproject.toml provides the configuration,

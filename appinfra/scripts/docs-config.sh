@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The appinfra Authors
+
 # Returns path to mkdocs config file
 # Usage: docs-config.sh <config_file> <etc_dir> <default_config_file>
 #

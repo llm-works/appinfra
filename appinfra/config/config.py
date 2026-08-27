@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The appinfra Authors
+
 """
 Configuration management module for loading and resolving YAML configuration files.
 
@@ -34,6 +37,7 @@ APPINFRA_TOOLING_ENV_VARS: frozenset[str] = frozenset(
         "INFRA_DEFAULT_CONFIG_FILE",
         "INFRA_DEV_CHECK_SCRIPT",
         "INFRA_DEV_CQ_EXCLUDE",
+        "INFRA_DEV_CQ_SPDX",
         "INFRA_DEV_CQ_STRICT",
         "INFRA_DEV_DOCSTRING_THRESHOLD",
         "INFRA_DEV_INSTALL_EXTRAS",

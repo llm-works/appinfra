@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The appinfra Authors
+
 # Code quality check runner with progress indicators
 # Supports parallel execution, coverage checking, and fail-fast mode
 #
@@ -132,6 +136,14 @@ DOCSTRING_CMD="${PYTHON} -m interrogate -v ${PKG_NAME}/ --ignore-init-module --i
 CHECKS+=(
     "${CQ_LABEL}|${CQ_TARGET}|${CQ_CMD}|"
 )
+
+# Add SPDX header check only if opted in (INFRA_DEV_CQ_SPDX=true).
+# Off by default so closed-source repos that reuse this framework don't
+# fail on files without SPDX-License-Identifier headers.
+CQ_SPDX="${INFRA_DEV_CQ_SPDX:-false}"
+if [ "$CQ_SPDX" = "true" ]; then
+    CHECKS+=("SPDX header check|cq.spdx|${PYTHON} -m appinfra.cli.cli -l error cq spdx|")
+fi
 
 # Add docstring check only if threshold > 0
 if awk "BEGIN {exit !($DOCSTRING_THRESHOLD > 0)}" 2>/dev/null; then

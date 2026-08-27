@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The appinfra Authors
+
 """Rate string parsing.
 
 Parses human-readable rate strings like "60/min" or "1000/hour" into

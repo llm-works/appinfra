@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The appinfra Authors
+
 # Multi-stage Dockerfile for infra framework CI/CD
 # Supports Python 3.11, 3.12, 3.13 via build args
 

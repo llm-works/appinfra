@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The appinfra Authors
+
 """Security tests for database module (infra/db/pg/pg.py)."""
 
 from unittest.mock import MagicMock, Mock, patch

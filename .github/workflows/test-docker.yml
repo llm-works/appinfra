@@ -48,6 +48,9 @@ jobs:
       - name: Function size check
         run: python -m appinfra.cli.cli -l error cq cf --strict
 
+      - name: SPDX header check
+        run: python -m appinfra.cli.cli -l error cq spdx
+
   # Test matrix: run tests on all Python versions (depends on lint)
   test:
     name: Test ${{ matrix.python-version }}
