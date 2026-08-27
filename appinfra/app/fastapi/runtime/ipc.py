@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The appinfra Authors
+
 """Queue-based IPC channel using service package infrastructure.
 
 This module provides IPCChannel, a thin wrapper around AsyncChannel

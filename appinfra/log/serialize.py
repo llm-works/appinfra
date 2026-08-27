@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The appinfra Authors
+
 """
 Helpers for normalizing values placed in log ``extra={...}`` before they are
 JSON-encoded or pickled.

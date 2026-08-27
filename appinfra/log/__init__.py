@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The appinfra Authors
+
 """
 Advanced logging module with enhanced formatting, colored output, custom log levels, and fluent builder API.
 

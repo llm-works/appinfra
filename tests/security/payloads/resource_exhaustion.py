@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The appinfra Authors
+
 """Resource exhaustion attack payloads for DoS testing."""
 
 from pathlib import Path

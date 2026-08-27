@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The appinfra Authors
+
 """Time utilities including scheduling, periodic execution, and duration formatting."""
 
 # Date range utilities
