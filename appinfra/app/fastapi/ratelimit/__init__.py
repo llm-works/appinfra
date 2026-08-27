@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The appinfra Authors
+
 """HTTP rate limiting for FastAPI servers.
 
 Provides a rate limiter interface, built-in implementations, and ASGI

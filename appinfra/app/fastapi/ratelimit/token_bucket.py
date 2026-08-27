@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The appinfra Authors
+
 """Token bucket rate limiter.
 
 O(1) per-request rate limiting with configurable burst support.

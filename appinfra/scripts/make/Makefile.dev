@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The appinfra Authors
+
 # Makefile.dev - Development and Code Quality Targets
 #
 # Provides: setup, fmt, lint, type, cq, check targets
@@ -6,6 +9,9 @@
 # Configuration variables (set in Makefile before include, or in Makefile.local):
 #   INFRA_DEV_PKG_NAME      - Package name (default: appinfra)
 #   INFRA_DEV_CQ_STRICT     - Code quality strictness (default: false)
+#   INFRA_DEV_CQ_SPDX       - Enforce SPDX license headers on tracked source files
+#                             (Python, shell, Makefile, Dockerfile) in `make check`
+#                             (default: false; opt-in for open-source Apache-2.0 repos)
 #   INFRA_DEV_CQ_EXCLUDE    - Patterns to exclude from cq checks (e.g., "examples/*")
 #                             Note: patterns cannot contain spaces (Make limitation)
 #   INFRA_DEV_PROJECT_ROOT  - Project root path (default: $(CURDIR))
@@ -35,6 +41,7 @@ PYTHON_ENVS ?= $(PYTHON)
 # Export for subprocesses
 export INFRA_DEV_PKG_NAME
 export INFRA_DEV_CQ_STRICT
+export INFRA_DEV_CQ_SPDX
 export INFRA_DEV_CQ_EXCLUDE
 export INFRA_DEV_DOCSTRING_THRESHOLD
 export INFRA_DEV_PROJECT_ROOT
@@ -165,6 +172,14 @@ cq.strict:: ## Check function sizes (fails on violations)
 	@echo "* function size check passed"
 endif # skip cq.strict
 .PHONY: cq.strict
+
+ifeq ($(filter cq,$(INFRA_DEV_SKIP_TARGETS)),)
+cq.spdx:: ## Check SPDX license headers on tracked source files
+	@echo "* checking SPDX headers..."
+	@$(PYTHON) -m appinfra.cli.cli -l error cq spdx
+	@echo "* SPDX header check passed"
+endif # skip cq.spdx
+.PHONY: cq.spdx
 
 ifeq ($(filter cq,$(INFRA_DEV_SKIP_TARGETS)),)
 cq.docstring:: ## Check docstring coverage (reports only)

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The appinfra Authors
+
 from importlib.metadata import PackageNotFoundError, version
 from typing import TYPE_CHECKING
 

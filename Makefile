@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The appinfra Authors
+
 local := $(dir $(realpath $(lastword $(MAKEFILE_LIST))))
 
 # ============================================================================
@@ -7,6 +10,9 @@ local := $(dir $(realpath $(lastword $(MAKEFILE_LIST))))
 
 # Enable strict code quality checks (30-line function limit)
 INFRA_DEV_CQ_STRICT := true
+
+# Enforce SPDX license headers on tracked .py files (Apache-2.0 attribution)
+INFRA_DEV_CQ_SPDX := true
 
 # Include all tests in coverage (not just unit tests)
 INFRA_PYTEST_COVERAGE_MARKERS := unit or e2e

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The appinfra Authors
+
 # Makefile.help - Self-Documenting Help Target
 #
 # Provides: help target that displays all available make targets

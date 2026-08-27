@@ -75,6 +75,7 @@ nav:
       - Test Naming Standards: guides/test-naming-standards.md
       - Coverage Targets: guides/coverage-targets.md
       - Virtual Environment: guides/virtual-environment.md
+      - SPDX Header Check: guides/spdx-header-check.md
   - API Reference:
       - Overview: api/index.md
       - Application Framework: api/app.md

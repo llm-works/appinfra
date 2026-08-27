@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The appinfra Authors
+
 """Tests for ETA progress tracking."""
 
 import time
@@ -81,15 +84,19 @@ class TestETARateCalculation:
         assert eta.rate() == 0.0
 
     def test_rate_calculation(self):
-        """Test rate is calculated from progress deltas."""
+        """Test rate is calculated from progress deltas.
+
+        Uses 1s sleep because macOS CI runners have high timing jitter
+        that can cause sub-second sleeps to vary significantly.
+        """
         eta = ETA(total=100.0, age=1.0)  # Low age for fast response
         eta.update(0.0)
-        time.sleep(0.1)
-        eta.update(10.0)  # 10 units in ~0.1s = ~100 units/sec
+        time.sleep(1.0)
+        eta.update(10.0)  # 10 units in ~1s = ~10 units/sec
 
         rate = eta.rate()
-        # Should be roughly 100 units/sec (allow wide tolerance for timing)
-        assert 50.0 < rate < 200.0
+        # Should be roughly 10 units/sec (allow wide tolerance for timing)
+        assert 5.0 < rate < 20.0
 
     def test_rate_smoothing(self):
         """Test rate is smoothed over multiple updates."""
@@ -141,19 +148,23 @@ class TestETARemaining:
         assert eta.remaining_secs() == 0.0
 
     def test_remaining_decreases_with_progress(self):
-        """Test remaining time decreases as progress increases."""
+        """Test remaining time decreases as progress increases.
+
+        Uses 2s sleeps because macOS CI runners have high timing jitter
+        that can cause sub-100ms sleeps to vary significantly.
+        """
         eta = ETA(total=100.0, age=2.0)
 
         eta.update(0.0)
-        time.sleep(0.02)
+        time.sleep(2.0)
         eta.update(25.0)
         remaining_25 = eta.remaining_secs()
 
-        time.sleep(0.02)
+        time.sleep(2.0)
         eta.update(50.0)
         remaining_50 = eta.remaining_secs()
 
-        time.sleep(0.02)
+        time.sleep(2.0)
         eta.update(75.0)
         remaining_75 = eta.remaining_secs()
 

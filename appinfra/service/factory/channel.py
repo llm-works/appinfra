@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The appinfra Authors
+
 """Factory for creating channel pairs with consistent configuration."""
 
 from __future__ import annotations

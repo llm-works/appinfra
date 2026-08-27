@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The appinfra Authors
+
 """Deprecation utilities for marking deprecated APIs.
 
 This module provides decorators for marking functions and methods as deprecated,

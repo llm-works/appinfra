@@ -10,6 +10,20 @@ For API stability guarantees and deprecation policy, see
 
 ## [Unreleased]
 
+## [0.10.1] - 2026-08-27
+
+### Added
+- `App.sleep(seconds)`: shutdown-aware sleep for worker threads. Returns `True` if a shutdown
+  signal fired during the wait, `False` if the full time was slept. Drop-in for `time.sleep`
+  so SIGTERM does not stall worker shutdowns.
+- `cq spdx` subcommand: checks tracked source files (`*.py`, `*.pyi`, `*.sh`, Makefiles,
+  Dockerfile) for SPDX license markers. `--fix` prepends the header; package attribution
+  auto-derived from `pyproject.toml`. Reusable in downstream Apache-2.0 repos.
+- `INFRA_DEV_CQ_SPDX` Makefile variable (default `false`): when `true`, adds a `cq spdx`
+  step to `make check`. Enabled in appinfra's top-level Makefile.
+- DCO (Developer Certificate of Origin) sign-off section in the contributing guide.
+  Every commit must carry `Signed-off-by:`; enforcement via GitHub App at the org level.
+
 ## [0.10.0] - 2026-08-17
 
 ### Added
@@ -737,7 +751,8 @@ as config. Affected: `ConfigValidator`, `PG.readonly`, `PG.migrate()`,
 ### Changed
 - Package renamed to `appinfra` (install and import both use `appinfra`)
 
-[Unreleased]: https://github.com/llm-works/appinfra/compare/v0.10.0...HEAD
+[Unreleased]: https://github.com/llm-works/appinfra/compare/v0.10.1...HEAD
+[0.10.1]: https://github.com/llm-works/appinfra/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/llm-works/appinfra/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/llm-works/appinfra/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/llm-works/appinfra/compare/v0.7.0...v0.8.0
