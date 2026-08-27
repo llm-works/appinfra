@@ -108,11 +108,11 @@ def apply_headers(
             continue
         try:
             text = path.read_text(encoding="utf-8")
+            new_text = apply_header_to_text(text, header)
+            if not dry_run:
+                path.write_text(new_text, encoding="utf-8")
         except (OSError, UnicodeDecodeError):
             return modified, skipped, path
-        new_text = apply_header_to_text(text, header)
-        if not dry_run:
-            path.write_text(new_text, encoding="utf-8")
         modified += 1
     return modified, skipped, None
 
