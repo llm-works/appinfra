@@ -475,3 +475,5 @@ guidelines.
 ## License
 
 Apache License 2.0 - see [LICENSE](LICENSE) for details.
+
+Maintained by [LLM Works LLC](https://llm-works.ai) and contributors.

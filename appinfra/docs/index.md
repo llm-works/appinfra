@@ -62,3 +62,7 @@ appinfra docs find <text>        # Search documentation for text
 
 - [LICENSE](LICENSE) - Apache License 2.0
 - [SECURITY](SECURITY.md) - Security policy
+
+---
+
+Maintained by [LLM Works LLC](https://llm-works.ai) and contributors.
