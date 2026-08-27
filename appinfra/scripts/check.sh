@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The appinfra Authors
+
 # Code quality check runner with progress indicators
 # Supports parallel execution, coverage checking, and fail-fast mode
 #

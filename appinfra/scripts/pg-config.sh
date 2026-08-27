@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The appinfra Authors
+
 # Outputs Make variable assignments for PG config
 # Usage: pg-config.sh <config_file> <config_key> <etc_dir> <default_config_file>
 # Output: Pipe-separated Make assignments for $(eval $(subst |,$(newline),...))
