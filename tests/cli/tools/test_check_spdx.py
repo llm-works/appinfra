@@ -8,6 +8,8 @@ from pathlib import Path
 import pytest
 
 from appinfra.cli.tools.check_spdx import (
+    DEFAULT_PATTERNS,
+    EXCLUDE_PATTERNS,
     HEADER_SCAN_LINES,
     REQUIRED_MARKERS,
     apply_header_to_text,
@@ -150,3 +152,25 @@ class TestDerivePackageName:
         )
         with pytest.raises(KeyError):
             derive_package_name(cwd=tmp_path)
+
+
+@pytest.mark.unit
+class TestFilePatterns:
+    """Test DEFAULT_PATTERNS and EXCLUDE_PATTERNS coverage."""
+
+    def test_python_patterns(self):
+        assert "*.py" in DEFAULT_PATTERNS
+        assert "*.pyi" in DEFAULT_PATTERNS
+
+    def test_shell_patterns(self):
+        assert "*.sh" in DEFAULT_PATTERNS
+
+    def test_makefile_patterns(self):
+        assert "Makefile" in DEFAULT_PATTERNS
+        assert "Makefile.*" in DEFAULT_PATTERNS
+
+    def test_dockerfile_pattern(self):
+        assert "Dockerfile" in DEFAULT_PATTERNS
+
+    def test_in_templates_excluded(self):
+        assert "*.in" in EXCLUDE_PATTERNS

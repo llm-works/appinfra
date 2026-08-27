@@ -3,10 +3,10 @@
 
 """SPDX license header check and application.
 
-Verifies every git-tracked .py file carries required SPDX header markers
-in its first N lines. Runs cross-repo when appinfra is installed as a
-dependency — the check is repo-agnostic (asserts marker presence, not
-attribution string).
+Verifies every git-tracked source file (Python, shell, Makefile,
+Dockerfile) carries required SPDX header markers in its first N lines.
+All target file types share `#` line-comment syntax so a single header
+template works across them.
 
 Two modes:
 
@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as _dt
+import fnmatch
 import subprocess
 import sys
 import tomllib
@@ -40,16 +41,49 @@ REQUIRED_MARKERS: tuple[str, ...] = (
 )
 HEADER_SCAN_LINES = 5
 
+# Source file basenames the check covers. All target types share `#`
+# line-comment syntax so a single header template covers them all.
+DEFAULT_PATTERNS: tuple[str, ...] = (
+    "*.py",
+    "*.pyi",
+    "*.sh",
+    "*.bash",
+    "Makefile",
+    "Makefile.*",
+    "*.mk",
+    "Dockerfile",
+    "*.Dockerfile",
+    "*.dockerfile",
+)
 
-def tracked_py_files() -> list[Path]:
-    """Return git-tracked .py file paths (relative to repo root)."""
+# Basenames excluded even if they match DEFAULT_PATTERNS. `.in` files are
+# scaffolding templates — downstream projects generated from them supply
+# their own copyright.
+EXCLUDE_PATTERNS: tuple[str, ...] = ("*.in",)
+
+
+def tracked_source_files() -> list[Path]:
+    """Return git-tracked source file paths matching DEFAULT_PATTERNS.
+
+    Match is on basename via fnmatch so a pattern like `Makefile.*` picks
+    up fragments in any subdirectory, not just at the repo root.
+    """
     result = subprocess.run(
-        ["git", "ls-files", "*.py"],
+        ["git", "ls-files"],
         capture_output=True,
         text=True,
         check=True,
     )
-    return [Path(line) for line in result.stdout.splitlines() if line]
+    matched: list[Path] = []
+    for line in result.stdout.splitlines():
+        if not line:
+            continue
+        basename = Path(line).name
+        if any(fnmatch.fnmatch(basename, pat) for pat in EXCLUDE_PATTERNS):
+            continue
+        if any(fnmatch.fnmatch(basename, pat) for pat in DEFAULT_PATTERNS):
+            matched.append(Path(line))
+    return matched
 
 
 def missing_markers(path: Path) -> list[str]:
@@ -116,7 +150,7 @@ def derive_package_name(cwd: Path | None = None) -> str:
 def _print_offenders(offenders: list[tuple[Path, list[str]]]) -> None:
     """Print offender list + fix guidance to stderr."""
     print(
-        f"FAIL: {len(offenders)} .py file(s) missing SPDX header:",
+        f"FAIL: {len(offenders)} source file(s) missing SPDX header:",
         file=sys.stderr,
     )
     for path, missing in offenders:
@@ -133,16 +167,17 @@ def _print_offenders(offenders: list[tuple[Path, list[str]]]) -> None:
 
 
 class CheckSpdxTool(Tool):
-    """Tool for checking + applying SPDX license headers on tracked .py files."""
+    """Tool for checking + applying SPDX license headers on source files."""
 
     def __init__(self, parent: Any = None):
         """Initialize the SPDX check tool."""
         config = ToolConfig(
             name="check-spdx",
             aliases=["spdx"],
-            help_text="Check or apply SPDX license headers on tracked .py files",
+            help_text="Check or apply SPDX license headers on tracked source files",
             description=(
-                "Assert every git-tracked .py file carries the required "
+                "Assert every git-tracked source file (Python, shell, "
+                "Makefile, Dockerfile) carries the required "
                 "SPDX-License-Identifier and SPDX-FileCopyrightText markers "
                 f"in its first {HEADER_SCAN_LINES} lines. "
                 "Default: check-only, exits 1 on missing headers. "
@@ -179,7 +214,7 @@ class CheckSpdxTool(Tool):
     def run(self, **kwargs: Any) -> int:
         """Execute the SPDX header check or fix."""
         try:
-            files = tracked_py_files()
+            files = tracked_source_files()
         except subprocess.CalledProcessError as e:
             self.lg.warning("git ls-files failed", extra={"exception": e})  # type: ignore[union-attr]
             return 1
