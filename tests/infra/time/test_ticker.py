@@ -193,18 +193,24 @@ class TestTickerInitialization:
                 tick_times.append(time.time())
 
         start_time = time.time()
-        ticker = Ticker(mock_logger, TimingHandler(), secs=0.1, initial=False)
+        ticker = Ticker(mock_logger, TimingHandler(), secs=1, initial=False)
 
         thread = threading.Thread(target=ticker.run, daemon=True)
         thread.start()
-        time.sleep(0.15)  # Wait for first interval to pass
-        ticker.stop()
-        thread.join(timeout=1.0)
 
-        # Should have at least one tick after waiting
-        assert len(tick_times) >= 1
-        # First tick should be delayed by approximately secs interval
-        assert tick_times[0] - start_time >= 0.08  # Allow some tolerance
+        # Wait for first tick with timeout guard
+        deadline = time.monotonic() + 5.0
+        while len(tick_times) < 1:
+            if time.monotonic() > deadline:
+                ticker.stop()
+                pytest.fail("Timed out waiting for first tick")
+            time.sleep(0.1)
+
+        ticker.stop()
+        thread.join(timeout=2.0)
+
+        # First tick should be delayed by approximately secs interval (1s)
+        assert tick_times[0] - start_time >= 0.8  # Allow tolerance for slow CI
 
     def test_initial_true_fires_immediately(self, mock_logger):
         """Test initial=True (default) fires tick immediately on start."""
@@ -215,16 +221,22 @@ class TestTickerInitialization:
                 tick_times.append(time.time())
 
         start_time = time.time()
-        ticker = Ticker(mock_logger, TimingHandler(), secs=0.1, initial=True)
+        ticker = Ticker(mock_logger, TimingHandler(), secs=1, initial=True)
 
         thread = threading.Thread(target=ticker.run, daemon=True)
         thread.start()
-        time.sleep(0.05)  # Short wait - tick should already have fired
-        ticker.stop()
-        thread.join(timeout=1.0)
 
-        # Should have at least one tick immediately
-        assert len(tick_times) >= 1
+        # Wait for first tick with timeout guard
+        deadline = time.monotonic() + 5.0
+        while len(tick_times) < 1:
+            if time.monotonic() > deadline:
+                ticker.stop()
+                pytest.fail("Timed out waiting for first tick")
+            time.sleep(0.1)
+
+        ticker.stop()
+        thread.join(timeout=2.0)
+
         # First tick should be almost immediate (within 500ms of start)
         assert tick_times[0] - start_time < 0.5
 
