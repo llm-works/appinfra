@@ -62,20 +62,15 @@ DEFAULT_PATTERNS: tuple[str, ...] = (
 EXCLUDE_PATTERNS: tuple[str, ...] = ("*.in",)
 
 
-def tracked_source_files() -> list[Path]:
-    """Return git-tracked source file paths matching DEFAULT_PATTERNS.
+def _filter_source_files(paths: list[str]) -> list[Path]:
+    """Filter file paths to those matching DEFAULT_PATTERNS (basename fnmatch).
 
-    Match is on basename via fnmatch so a pattern like `Makefile.*` picks
-    up fragments in any subdirectory, not just at the repo root.
+    Match is on basename so a pattern like `Makefile.*` picks up fragments
+    in any subdirectory, not just at the repo root. EXCLUDE_PATTERNS takes
+    precedence over DEFAULT_PATTERNS.
     """
-    result = subprocess.run(
-        ["git", "ls-files"],
-        capture_output=True,
-        text=True,
-        check=True,
-    )
     matched: list[Path] = []
-    for line in result.stdout.splitlines():
+    for line in paths:
         if not line:
             continue
         basename = Path(line).name
@@ -84,6 +79,42 @@ def tracked_source_files() -> list[Path]:
         if any(fnmatch.fnmatch(basename, pat) for pat in DEFAULT_PATTERNS):
             matched.append(Path(line))
     return matched
+
+
+def tracked_source_files() -> list[Path]:
+    """Return git-tracked source file paths matching DEFAULT_PATTERNS."""
+    result = subprocess.run(
+        ["git", "ls-files"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return _filter_source_files(result.stdout.splitlines())
+
+
+def apply_headers(
+    files: list[Path], header: str, dry_run: bool
+) -> tuple[int, int, Path | None]:
+    """Apply header to files missing it.
+
+    Returns (modified, skipped, first_error_path). first_error_path is
+    None on success, or the path where the read failed.
+    """
+    modified = 0
+    skipped = 0
+    for path in files:
+        if not missing_markers(path):
+            skipped += 1
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            return modified, skipped, path
+        new_text = apply_header_to_text(text, header)
+        if not dry_run:
+            path.write_text(new_text, encoding="utf-8")
+        modified += 1
+    return modified, skipped, None
 
 
 def missing_markers(path: Path) -> list[str]:
@@ -135,16 +166,22 @@ def derive_package_name(cwd: Path | None = None) -> str:
     Raises:
         FileNotFoundError: pyproject.toml not present.
         KeyError: [project] name field missing.
+        TypeError: [project] name is present but not a string.
     """
     root = cwd or Path.cwd()
     with (root / "pyproject.toml").open("rb") as f:
         data = tomllib.load(f)
     try:
-        return data["project"]["name"]
+        name = data["project"]["name"]
     except KeyError as e:
         raise KeyError(
             "pyproject.toml has no [project] name; pass --package explicitly"
         ) from e
+    if not isinstance(name, str):
+        raise TypeError(
+            "pyproject.toml [project] name is not a string; pass --package explicitly"
+        )
+    return name
 
 
 def _print_offenders(offenders: list[tuple[Path, list[str]]]) -> None:
@@ -242,32 +279,17 @@ class CheckSpdxTool(Tool):
         """Fix mode: prepend headers to files missing them."""
         try:
             package = self.args.package or derive_package_name()
-        except (FileNotFoundError, KeyError) as e:
+        except (FileNotFoundError, KeyError, TypeError) as e:
             self.lg.warning(  # type: ignore[union-attr]
                 "could not derive package name", extra={"exception": e}
             )
             return 1
         year = self.args.year or _dt.datetime.now().year
         header = build_header(package, year)
-
-        modified = 0
-        skipped = 0
-        for path in files:
-            if not missing_markers(path):
-                skipped += 1
-                continue
-            try:
-                text = path.read_text(encoding="utf-8")
-            except (OSError, UnicodeDecodeError) as e:
-                self.lg.warning(  # type: ignore[union-attr]
-                    "read error", extra={"path": str(path), "exception": e}
-                )
-                return 1
-            new_text = apply_header_to_text(text, header)
-            if not self.args.dry_run:
-                path.write_text(new_text, encoding="utf-8")
-            modified += 1
-
+        counts = self._apply_headers_to_files(files, header)
+        if counts is None:
+            return 1
+        modified, skipped = counts
         self.lg.info(  # type: ignore[union-attr]
             "SPDX headers " + ("(dry-run)" if self.args.dry_run else "applied"),
             extra={
@@ -279,3 +301,15 @@ class CheckSpdxTool(Tool):
             },
         )
         return 0
+
+    def _apply_headers_to_files(
+        self, files: list[Path], header: str
+    ) -> tuple[int, int] | None:
+        """Thin wrapper around `apply_headers` that logs the first read error."""
+        modified, skipped, err = apply_headers(files, header, self.args.dry_run)
+        if err is not None:
+            self.lg.warning(  # type: ignore[union-attr]
+                "read error", extra={"path": str(err)}
+            )
+            return None
+        return modified, skipped
