@@ -18,6 +18,7 @@ class CodeQualityTool(Tool):
     This is a pure grouping command that requires a subcommand.
     Available subcommands:
     - check-funcs (cf): Check function sizes against guidelines
+    - check-spdx (spdx): Check SPDX license headers on tracked .py files
     """
 
     def __init__(self, parent: Traceable | None = None):
@@ -41,9 +42,11 @@ class CodeQualityTool(Tool):
 
         # Import here to avoid circular dependency
         from .check_functions import CheckFunctionsTool
+        from .check_spdx import CheckSpdxTool
 
-        # Add check-funcs as a subtool (no default - requires explicit subcommand)
+        # Add subtools (no default - requires explicit subcommand)
         self.add_tool(CheckFunctionsTool(self), default=None)
+        self.add_tool(CheckSpdxTool(self), default=None)
 
     def run(self, **kwargs: Any) -> int:
         """

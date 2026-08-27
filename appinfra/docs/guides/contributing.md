@@ -300,6 +300,24 @@ make test.security.v     # Verbose security test output
 
 See [SECURITY.md](../../SECURITY.md) for the full security policy and threat model.
 
+## Sign-off (DCO)
+
+We use the [Developer Certificate of Origin (DCO)](https://developercertificate.org). Every commit
+must be signed off, asserting you have the right to submit it under the project's Apache-2.0
+license.
+
+Add sign-off automatically:
+
+```bash
+git commit -s -m "your commit message"
+```
+
+This appends `Signed-off-by: Your Name <your@email>` to the commit message. Forgot? Amend:
+
+```bash
+git commit --amend -s
+```
+
 ## Pull Request Guidelines
 
 1. Ensure all tests pass: `make check`
@@ -307,6 +325,7 @@ See [SECURITY.md](../../SECURITY.md) for the full security policy and threat mod
 3. Follow existing code style (enforced by ruff)
 4. Add tests for new functionality
 5. Update documentation as needed
+6. Ensure every commit has `Signed-off-by:` (DCO check enforces this on all PRs)
 
 **Merge Policy:** All PRs are squash-merged to keep the git history clean (one commit per feature).
 
