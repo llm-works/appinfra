@@ -40,7 +40,8 @@ python -m appinfra.cli.cli cq spdx --fix
 
 Prepends the 2-line header (plus one trailing blank line) to every tracked
 source file that doesn't already carry it. Idempotent — files that already have
-`SPDX-License-Identifier` in their first 5 lines are skipped.
+both `SPDX-License-Identifier` and `SPDX-FileCopyrightText` in their first 5
+lines are skipped.
 
 Shebangs are preserved. Between the shebang and the SPDX header, one blank line
 is inserted so the OS-level directive stays visually separate from license
