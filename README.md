@@ -32,6 +32,17 @@ See [docs/README.md](appinfra/docs/README.md) for full scope and philosophy.
 - Python 3.11+
 - PostgreSQL 16+ (18 default; optional, for database features)
 
+## Supported Python versions
+
+CI tests every push against the full test suite:
+
+- **Linux (Ubuntu):** CPython 3.11, 3.12, 3.13, 3.14
+- **macOS:** CPython 3.12
+
+`requires-python = ">=3.11"` is declared in package metadata; newer Python
+versions are opt-in and validated against the full test suite before being
+added to the CI matrix.
+
 ## Installation
 
 ```bash
