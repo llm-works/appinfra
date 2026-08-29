@@ -84,14 +84,6 @@ class _PositionalFilteringGroup:
             return None
         return self._group.add_argument(*args, **kwargs)
 
-    def add_argument_group(
-        self, *args: Any, **kwargs: Any
-    ) -> _PositionalFilteringGroup:
-        """Wrap nested groups to maintain positional filtering."""
-        return _PositionalFilteringGroup(
-            self._group.add_argument_group(*args, **kwargs)
-        )
-
     def add_mutually_exclusive_group(
         self, *args: Any, **kwargs: Any
     ) -> _PositionalFilteringGroup:

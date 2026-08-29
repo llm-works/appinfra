@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: Copyright 2026 The appinfra Authors
 
 # Multi-stage Dockerfile for infra framework CI/CD
-# Supports Python 3.11, 3.12, 3.13 via build args
+# Supports Python 3.11, 3.12, 3.13, 3.14 via build args
 
 ARG PYTHON_VERSION=3.12
 FROM python:${PYTHON_VERSION}-slim-bookworm AS base

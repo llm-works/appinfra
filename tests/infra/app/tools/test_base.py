@@ -466,33 +466,6 @@ class TestPositionalFilteringGroup:
         # Access title attribute from underlying group
         assert wrapper.title == "TestGroup"
 
-    def test_nested_groups_also_filter_positionals(self):
-        """Test nested argument groups maintain positional filtering."""
-        import warnings
-
-        from appinfra.app.tools.base import _PositionalFilteringGroup
-
-        parser = argparse.ArgumentParser()
-        raw_group = parser.add_argument_group("Outer")
-        wrapper = _PositionalFilteringGroup(raw_group)
-
-        # Nested groups are deprecated but still allowed - suppress warning
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", DeprecationWarning)
-            nested = wrapper.add_argument_group("Nested")
-
-        # Nested group should also be wrapped
-        assert isinstance(nested, _PositionalFilteringGroup)
-
-        # Add args to nested group - positional should be skipped
-        result = nested.add_argument("positional", help="Should be skipped")
-        nested.add_argument("--opt", help="Should be added")
-
-        assert result is None  # Positional was skipped
-        ns = parser.parse_args(["--opt", "value"])
-        assert ns.opt == "value"
-        assert not hasattr(ns, "positional")
-
     def test_mutually_exclusive_group_filters_positionals(self):
         """Test mutually exclusive groups within argument groups filter positionals."""
         from appinfra.app.tools.base import _PositionalFilteringGroup

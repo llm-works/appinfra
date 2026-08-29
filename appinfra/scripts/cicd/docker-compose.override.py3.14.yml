@@ -1,0 +1,12 @@
+# Docker Compose override for Python 3.14
+# Usage: docker compose -f docker-compose.yml -f docker-compose.override.py3.14.yml up
+
+services:
+  cicd-test:
+    build:
+      args:
+        PYTHON_VERSION: "3.14"
+    image: infra-test:py3.14
+    environment:
+      - PYTHON_VERSION=3.14
+      - COVERAGE_FILE=/workspace/.deploy-coverage/.coverage.3.14
