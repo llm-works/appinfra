@@ -13,6 +13,11 @@ For API stability guarantees and deprecation policy, see
 ### Added
 - Python 3.14 support. CI matrix extended to include 3.14 alongside 3.11–3.13;
   `pyproject.toml` classifiers now declare the tested range.
+- `examples/quickstart.py`: minimal `AppBuilder` + `@app.tool` runnable example
+  mirroring the README, suitable as a first-user starting point.
+
+### Fixed
+- Minor logging cleanup at framework init.
 
 ### Removed
 - `_PositionalFilteringGroup.add_argument_group()` (private): argparse never
