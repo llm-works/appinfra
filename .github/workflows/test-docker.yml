@@ -165,8 +165,8 @@ jobs:
       - name: Extras metadata install
         if: matrix.python-version == '3.12'
         run: |
-          wheel=$(ls ./dist/*.whl | head -1)
-          /tmp/smoke/bin/pip install "${wheel}[sql,fastapi,validation,ui,hotreload]"
+          wheels=(./dist/*.whl)
+          /tmp/smoke/bin/pip install "${wheels[0]}[sql,fastapi,validation,ui,hotreload]"
 
   # Summary job: required `Test` check that aggregates repo-specific test lanes
   # not covered by the repo-wide branch-protection standard (Lint, Test, Coverage).
