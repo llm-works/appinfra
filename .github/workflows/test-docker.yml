@@ -7,6 +7,9 @@ on:
     branches: [main, develop]
   workflow_dispatch:  # Allow manual trigger
 
+permissions:
+  contents: read
+
 # Cancel previous runs if new commits are pushed
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -61,7 +64,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ['3.11', '3.12', '3.13']
+        python-version: ['3.11', '3.12', '3.13', '3.14']
 
     steps:
       - name: Checkout code
@@ -96,6 +99,75 @@ jobs:
         working-directory: appinfra/scripts/cicd
         run: docker compose down -v
 
+  # Smoke test the PyPI-user path: build the wheel with python -m build, install
+  # into a fresh venv OUTSIDE the source tree (so imports resolve from the wheel,
+  # not ./appinfra/), and exercise the surface a first-time user hits — top-level
+  # imports, console entry point, packaged docs tree, README quick-start, extras
+  # metadata. Complements `install` (which tests the `make install` shared-prefix
+  # publish contract); this tests the plain pip-install path across Python
+  # versions.
+  #
+  # Matrix: 3.12 (baseline, matches lint/coverage/install) + 3.14 (newest
+  # supported). Extras install is Python-version-invariant, gated on 3.12.
+  smoke-wheel:
+    name: Smoke (wheel install) ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    needs: lint
+    timeout-minutes: 6
+
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.12', '3.14']
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # setuptools-scm needs full history to derive version
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '${{ matrix.python-version }}'
+          cache: 'pip'
+
+      - name: Install build frontend
+        run: python -m pip install --upgrade pip build
+
+      - name: Build sdist + wheel
+        run: python -m build
+
+      - name: Install wheel into fresh venv (outside source tree)
+        run: |
+          python -m venv /tmp/smoke
+          /tmp/smoke/bin/pip install --upgrade pip
+          /tmp/smoke/bin/pip install ./dist/*.whl
+
+      - name: Import + version + top-level exports from installed wheel
+        run: |
+          /tmp/smoke/bin/python - <<'PY'
+          import appinfra
+          from appinfra.app import AppBuilder
+          from appinfra.log import Logger, create_lg
+          print("appinfra", appinfra.__version__)
+          lg = create_lg("smoke", "info")
+          lg.info("create_lg export OK")
+          PY
+
+      - name: Console entry + packaged docs tree
+        run: /tmp/smoke/bin/appinfra docs list
+
+      - name: README quick-start against installed wheel
+        run: /tmp/smoke/bin/python examples/quickstart.py --help
+
+      - name: Extras metadata install
+        if: matrix.python-version == '3.12'
+        run: |
+          wheels=(./dist/*.whl)
+          /tmp/smoke/bin/pip install "${wheels[0]}[sql,fastapi,validation,ui,hotreload]"
+
   # Summary job: required `Test` check that aggregates repo-specific test lanes
   # not covered by the repo-wide branch-protection standard (Lint, Test, Coverage).
   # Coverage is intentionally NOT listed here — it is required directly via branch
@@ -103,7 +175,7 @@ jobs:
   test-summary:
     name: Test
     runs-on: ubuntu-latest
-    needs: [test, podman, check-no-db, install, macos-latest]
+    needs: [test, podman, check-no-db, install, smoke-wheel, macos-latest]
     if: always()
     steps:
       - name: Check test results
@@ -122,6 +194,10 @@ jobs:
           fi
           if [[ "${{ needs.install.result }}" != "success" ]]; then
             echo "Install verification failed"
+            exit 1
+          fi
+          if [[ "${{ needs.smoke-wheel.result }}" != "success" ]]; then
+            echo "Wheel-install smoke check failed"
             exit 1
           fi
           if [[ "${{ needs.macos-latest.result }}" != "success" ]]; then

@@ -197,8 +197,6 @@ def _add_default_console_handler(
     global_level: int,
 ) -> None:
     """Add default console handler when no handlers are configured."""
-    logger.trace("no handlers configured - creating default console handler")  # type: ignore[attr-defined]
-
     # Build default handler config
     default_config = {
         "type": "console",
@@ -218,7 +216,6 @@ def _add_default_console_handler(
     default_handler_config = list(registry.iter_enabled_handlers())[-1]
     actual_handler = default_handler_config.create_handler(log_config, logger=logger)
     logger.addHandler(actual_handler)
-    logger.trace("added default console handler using global config values")  # type: ignore[attr-defined]
 
 
 def _extract_topics_dict(topics_attr: Any) -> dict:
