@@ -10,6 +10,15 @@ For API stability guarantees and deprecation policy, see
 
 ## [Unreleased]
 
+### Added
+- Python 3.14 support. CI matrix extended to include 3.14 alongside 3.11–3.13;
+  `pyproject.toml` classifiers now declare the tested range.
+
+### Removed
+- `_PositionalFilteringGroup.add_argument_group()` (private): argparse never
+  supported semantic nesting of argument groups and Python 3.14 hard-rejects the
+  call. Top-level `add_argument_group` on the parser wrapper is unchanged.
+
 ## [0.10.1] - 2026-08-27
 
 ### Added
