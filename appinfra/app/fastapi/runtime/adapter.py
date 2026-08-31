@@ -6,8 +6,8 @@
 Invariant for new *Definition* dataclasses that carry a callable field
 (handler, router, callback, middleware class, rate limiter, etc.):
 
-    1. The callable field's type MUST include ``| Lazy`` (see the ``Lazy``
-       class below).
+    1. The callable field's type MUST include ``| Lazy`` (imported from
+       ``appinfra.subprocess``).
     2. ``FastAPIAdapter._resolve_lazy`` MUST resolve that field in the same
        pass that walks the other definition lists.
 
@@ -20,12 +20,12 @@ The failure is only observable when a user actually wraps that field in
 
 from __future__ import annotations
 
-import importlib
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, cast
 
+from ....subprocess import Lazy
 from ..config.api import ApiConfig
 from ..ratelimit.interface import RateLimiter
 
@@ -48,55 +48,6 @@ except ImportError:
     FastAPI = Any  # type: ignore[assignment,misc]
     CORSMiddleware = Any  # type: ignore[assignment,misc]
     APIRouter = Any  # type: ignore[assignment,misc]
-
-
-@dataclass
-class Lazy:
-    """Deferred value resolved from a module qualname + config in the subprocess.
-
-    Wraps a route handler, router, middleware class, or lifecycle callback so
-    the callable itself never crosses the ``mp.Process`` pickle boundary. The
-    subprocess imports the factory module and calls the factory during
-    ``FastAPIAdapter.build()`` (via ``_resolve_lazy``).
-
-    Required on Python 3.14+ where the default multiprocessing start method
-    (``forkserver``) pickles the target's args. Optional on ``fork``.
-
-    Fields:
-        factory: Module qualname of a callable to import, in the form
-            ``"pkg.mod:build_health"``. Split on the final ``":"``.
-        config: Optional argument passed to the factory. Must be picklable
-            (a dataclass with plain fields is the intended shape).
-
-    Example:
-        # Module producing the handler (nested closure OK — never pickled)
-        def build_health(config: HealthConfig) -> Callable[[], dict]:
-            async def health() -> dict:
-                return {"ready": config.ready_flag.value}
-            return health
-
-        # Builder site
-        (builder.routes
-            .with_route("/health", Lazy("myapp.routes:build_health", HealthConfig(...)))
-            .done())
-
-    Unsupported: capturing parent-process state created after subprocess spawn
-    (e.g. an ``mp.Value`` shared post-spawn) cannot cross ``forkserver``. Such
-    consumers must stay on ``fork`` start method or Python <=3.13.
-    """
-
-    factory: str
-    config: Any = None
-
-    def resolve(self) -> Any:
-        """Import the factory and invoke it (with ``config`` if set)."""
-        module_name, _, attr = self.factory.rpartition(":")
-        if not module_name or not attr:
-            raise ValueError(
-                f"Lazy.factory must be 'module.path:attr', got {self.factory!r}"
-            )
-        fn = getattr(importlib.import_module(module_name), attr)
-        return fn(self.config) if self.config is not None else fn()
 
 
 def _resolve_field(obj: Any, field_name: str) -> None:

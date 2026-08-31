@@ -15,7 +15,6 @@ from appinfra.app.fastapi.runtime.adapter import (
     ExceptionCallbackDefinition,
     ExceptionHandlerDefinition,
     FastAPIAdapter,
-    Lazy,
     LifecycleCallbackDefinition,
     LifespanDefinition,
     MiddlewareDefinition,
@@ -25,6 +24,7 @@ from appinfra.app.fastapi.runtime.adapter import (
     RouteDefinition,
     RouterDefinition,
 )
+from appinfra.subprocess import Lazy
 
 # Module-level factories used by Lazy tests. Must be importable via qualname
 # so the tests exercise the real importlib resolution path.

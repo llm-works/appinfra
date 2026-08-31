@@ -20,6 +20,7 @@ if TYPE_CHECKING:
 
     from ....log import Logger
 
+from ....subprocess import Lazy
 from ..config.api import ApiConfig
 from ..config.ipc import IPCConfig
 from ..config.uvicorn import UvicornConfig
@@ -28,7 +29,6 @@ from ..runtime.adapter import (
     ExceptionCallbackDefinition,
     ExceptionHandlerDefinition,
     FastAPIAdapter,
-    Lazy,
     LifecycleCallbackDefinition,
     LifespanDefinition,
     MiddlewareDefinition,

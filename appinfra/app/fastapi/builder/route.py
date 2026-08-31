@@ -8,10 +8,10 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
+from ....subprocess import Lazy
 from ..runtime.adapter import (
     CORSDefinition,
     ExceptionHandlerDefinition,
-    Lazy,
     MiddlewareDefinition,
     RouteDefinition,
     RouterDefinition,

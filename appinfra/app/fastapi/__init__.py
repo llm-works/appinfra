@@ -63,6 +63,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+# ``Lazy`` lives in appinfra.subprocess (parent→child boundary helper);
+# re-exported here as a convenience for FastAPI users.
+from ...subprocess import Lazy
+
 # Config classes are always available (no FastAPI dependency)
 from .config.api import ApiConfig
 from .config.ipc import IPCConfig
@@ -71,9 +75,6 @@ from .config.uvicorn import UvicornConfig
 # Error classes are always available
 from .errors import CallbackError, ConfigError
 from .ratelimit import RateLimiter, RateLimitMiddleware, TokenBucketLimiter
-
-# Lazy is a pure dataclass with no FastAPI dependency
-from .runtime.adapter import Lazy
 
 _INSTALL_MSG = "FastAPI is not installed. Install with: pip install appinfra[fastapi]"
 

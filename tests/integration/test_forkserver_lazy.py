@@ -32,12 +32,12 @@ from typing import Any
 
 import pytest
 
-from appinfra.app.fastapi import Lazy
 from appinfra.app.fastapi.config.api import ApiConfig
 from appinfra.app.fastapi.runtime.adapter import (
     FastAPIAdapter,
     RouteDefinition,
 )
+from appinfra.subprocess import Lazy
 
 
 def _make_nested_closure_handler() -> Any:
