@@ -10,6 +10,12 @@ For API stability guarantees and deprecation policy, see
 
 ## [Unreleased]
 
+### Added
+- `appinfra.app.fastapi.Lazy`: factory wrapper for FastAPI route handlers,
+  routers, middleware, and lifecycle callbacks. Keeps closures out of the
+  `mp.Process` pickle boundary — needed on Python 3.14+ where the
+  `forkserver` start method pickles subprocess args.
+
 ## [0.10.2] - 2026-08-29
 
 ### Added

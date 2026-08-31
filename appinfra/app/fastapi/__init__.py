@@ -72,6 +72,9 @@ from .config.uvicorn import UvicornConfig
 from .errors import CallbackError, ConfigError
 from .ratelimit import RateLimiter, RateLimitMiddleware, TokenBucketLimiter
 
+# Lazy is a pure dataclass with no FastAPI dependency
+from .runtime.adapter import Lazy
+
 _INSTALL_MSG = "FastAPI is not installed. Install with: pip install appinfra[fastapi]"
 
 # Flag to track if real implementations are available
@@ -159,4 +162,6 @@ __all__ = [
     # Errors (always available)
     "CallbackError",
     "ConfigError",
+    # Subprocess factory wrapper (always available)
+    "Lazy",
 ]

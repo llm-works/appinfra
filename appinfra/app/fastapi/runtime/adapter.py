@@ -1,10 +1,26 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright 2026 The appinfra Authors
 
-"""FastAPI application adapter."""
+"""FastAPI application adapter.
+
+Invariant for new *Definition* dataclasses that carry a callable field
+(handler, router, callback, middleware class, rate limiter, etc.):
+
+    1. The callable field's type MUST include ``| Lazy`` (see the ``Lazy``
+       class below).
+    2. ``FastAPIAdapter._resolve_lazy`` MUST resolve that field in the same
+       pass that walks the other definition lists.
+
+Both sites are required. Missing either one silently regresses subprocess
+mode on Python 3.14+ (default start method ``forkserver`` pickles the
+target's args and rejects nested closures / non-module-level callables).
+The failure is only observable when a user actually wraps that field in
+``Lazy`` on 3.14 — no test on 3.13-and-earlier will catch it.
+"""
 
 from __future__ import annotations
 
+import importlib
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass, field
@@ -35,11 +51,67 @@ except ImportError:
 
 
 @dataclass
+class Lazy:
+    """Deferred value resolved from a module qualname + config in the subprocess.
+
+    Wraps a route handler, router, middleware class, or lifecycle callback so
+    the callable itself never crosses the ``mp.Process`` pickle boundary. The
+    subprocess imports the factory module and calls the factory during
+    ``FastAPIAdapter.build()`` (via ``_resolve_lazy``).
+
+    Required on Python 3.14+ where the default multiprocessing start method
+    (``forkserver``) pickles the target's args. Optional on ``fork``.
+
+    Fields:
+        factory: Module qualname of a callable to import, in the form
+            ``"pkg.mod:build_health"``. Split on the final ``":"``.
+        config: Optional argument passed to the factory. Must be picklable
+            (a dataclass with plain fields is the intended shape).
+
+    Example:
+        # Module producing the handler (nested closure OK — never pickled)
+        def build_health(config: HealthConfig) -> Callable[[], dict]:
+            async def health() -> dict:
+                return {"ready": config.ready_flag.value}
+            return health
+
+        # Builder site
+        (builder.routes
+            .with_route("/health", Lazy("myapp.routes:build_health", HealthConfig(...)))
+            .done())
+
+    Unsupported: capturing parent-process state created after subprocess spawn
+    (e.g. an ``mp.Value`` shared post-spawn) cannot cross ``forkserver``. Such
+    consumers must stay on ``fork`` start method or Python <=3.13.
+    """
+
+    factory: str
+    config: Any = None
+
+    def resolve(self) -> Any:
+        """Import the factory and invoke it (with ``config`` if set)."""
+        module_name, _, attr = self.factory.rpartition(":")
+        if not module_name or not attr:
+            raise ValueError(
+                f"Lazy.factory must be 'module.path:attr', got {self.factory!r}"
+            )
+        fn = getattr(importlib.import_module(module_name), attr)
+        return fn(self.config) if self.config is not None else fn()
+
+
+def _resolve_field(obj: Any, field_name: str) -> None:
+    """If ``obj.<field_name>`` is a ``Lazy``, replace it with its resolved value."""
+    value = getattr(obj, field_name)
+    if isinstance(value, Lazy):
+        setattr(obj, field_name, value.resolve())
+
+
+@dataclass
 class RouteDefinition:
     """Definition for a route to register."""
 
     path: str
-    handler: Callable[..., Any]
+    handler: Callable[..., Any] | Lazy
     methods: list[str] = field(default_factory=lambda: ["GET"])
     response_model: type[Any] | None = None
     tags: list[str] | None = None
@@ -50,7 +122,7 @@ class RouteDefinition:
 class RouterDefinition:
     """Definition for a router to include."""
 
-    router: Any  # APIRouter
+    router: Any | Lazy  # APIRouter or Lazy-wrapped factory returning one
     prefix: str = ""
     tags: list[str] | None = None
 
@@ -59,7 +131,7 @@ class RouterDefinition:
 class MiddlewareDefinition:
     """Definition for middleware to add."""
 
-    middleware_class: type[Any]
+    middleware_class: type[Any] | Lazy
     options: dict[str, Any] = field(default_factory=dict)
 
 
@@ -67,7 +139,7 @@ class MiddlewareDefinition:
 class RateLimitDefinition:
     """Definition for rate limiting configuration."""
 
-    limiter: RateLimiter
+    limiter: RateLimiter | Lazy
     exempt_paths: list[str] = field(default_factory=list)
     cleanup_interval: float = 60.0
 
@@ -87,7 +159,7 @@ class ExceptionHandlerDefinition:
     """Definition for exception handler."""
 
     exc_class: type[Exception]
-    handler: Callable[..., Any]
+    handler: Callable[..., Any] | Lazy
 
 
 @dataclass
@@ -99,7 +171,7 @@ class LifecycleCallbackDefinition:
     - False: runs BEFORE user lifespan enters (rare, for framework init)
     """
 
-    callback: Callable[[FastAPI], Awaitable[None]]
+    callback: Callable[[FastAPI], Awaitable[None]] | Lazy
     name: str | None = None  # Optional name for debugging
     after_lifespan: bool = True  # For startup: run after user lifespan enters
 
@@ -112,14 +184,14 @@ LifespanCallable = Callable[[FastAPI], AbstractAsyncContextManager[None]]
 class LifespanDefinition:
     """Definition for lifespan context manager."""
 
-    lifespan: LifespanCallable
+    lifespan: LifespanCallable | Lazy
 
 
 @dataclass
 class RequestCallbackDefinition:
     """Definition for request callback (runs before each request handler)."""
 
-    callback: Callable[[Request], Awaitable[None]]
+    callback: Callable[[Request], Awaitable[None]] | Lazy
     name: str | None = None
 
 
@@ -127,7 +199,7 @@ class RequestCallbackDefinition:
 class ResponseCallbackDefinition:
     """Definition for response callback (runs after each request handler)."""
 
-    callback: Callable[[Request, Response], Awaitable[Response]]
+    callback: Callable[[Request, Response], Awaitable[Response]] | Lazy
     name: str | None = None
 
 
@@ -135,7 +207,7 @@ class ResponseCallbackDefinition:
 class ExceptionCallbackDefinition:
     """Definition for exception callback (runs when unhandled exceptions occur)."""
 
-    callback: Callable[[Request, Exception], Awaitable[None]]
+    callback: Callable[[Request, Exception], Awaitable[None]] | Lazy
     name: str | None = None
 
 
@@ -148,10 +220,12 @@ async def _run_exception_callbacks(
     from ..errors import CallbackError
 
     for exc_cb in exception_callbacks:
+        # Post-``_resolve_lazy`` invariant: callback is a real callable.
+        fn = cast(Callable[..., Awaitable[None]], exc_cb.callback)
         try:
-            await exc_cb.callback(request, exc)
+            await fn(request, exc)
         except Exception as cb_exc:
-            name = exc_cb.name or exc_cb.callback.__name__
+            name = exc_cb.name or fn.__name__
             lg = getattr(request.state, "lg", None)
             if lg is not None:
                 lg.error(
@@ -169,11 +243,13 @@ async def _run_startup_callbacks(
     from ..errors import CallbackError
 
     for cb in callbacks:
-        name = cb.name or cb.callback.__name__
+        # Post-``_resolve_lazy`` invariant: callback is a real callable.
+        fn = cast(Callable[..., Awaitable[None]], cb.callback)
+        name = cb.name or fn.__name__
         if lg is not None:
             lg.trace("running startup callback...", extra={"callback": name})
         try:
-            await cb.callback(app)
+            await fn(app)
             if lg is not None:
                 lg.debug("startup callback completed", extra={"callback": name})
         except Exception as e:
@@ -189,11 +265,13 @@ async def _run_shutdown_callbacks(
     from ..errors import CallbackError
 
     for cb in callbacks:
-        name = cb.name or cb.callback.__name__
+        # Post-``_resolve_lazy`` invariant: callback is a real callable.
+        fn = cast(Callable[..., Awaitable[None]], cb.callback)
+        name = cb.name or fn.__name__
         if lg is not None:
             lg.trace("running shutdown callback...", extra={"callback": name})
         try:
-            await cb.callback(app)
+            await fn(app)
             if lg is not None:
                 lg.debug("shutdown callback completed", extra={"callback": name})
         except Exception as e:
@@ -203,6 +281,43 @@ async def _run_shutdown_callbacks(
                     extra={"callback": name, "exception": e},
                 )
             raise CallbackError(f"Shutdown callback '{name}' failed") from e
+
+
+async def _run_request_callbacks(
+    request_callbacks: list[RequestCallbackDefinition], request: Request
+) -> None:
+    """Run request callbacks; raise RuntimeError on failure with callback name."""
+    for req_cb in request_callbacks:
+        # Post-``_resolve_lazy`` invariant: callback is a real callable.
+        req_fn = cast(Callable[..., Awaitable[None]], req_cb.callback)
+        try:
+            await req_fn(request)
+        except Exception as e:
+            name = req_cb.name or req_fn.__name__
+            raise RuntimeError(f"Request callback '{name}' failed") from e
+
+
+async def _run_response_callbacks(
+    response_callbacks: list[ResponseCallbackDefinition],
+    request: Request,
+    response: Response,
+) -> Response:
+    """Run response callbacks, threading response through each; raise on failure."""
+    for resp_cb in response_callbacks:
+        # Post-``_resolve_lazy`` invariant: callback is a real callable.
+        # ``Any`` in the cast avoids a runtime reference to ``Response``
+        # (imported only under TYPE_CHECKING).
+        resp_fn = cast(Callable[..., Awaitable[Any]], resp_cb.callback)
+        name = resp_cb.name or resp_fn.__name__
+        try:
+            response = await resp_fn(request, response)
+        except Exception as e:
+            raise RuntimeError(f"Response callback '{name}' failed") from e
+        if response is None:
+            raise RuntimeError(
+                f"Response callback '{name}' returned None (must return Response)"
+            )
+    return response
 
 
 def _create_callback_middleware(
@@ -216,27 +331,15 @@ def _create_callback_middleware(
 
     class CallbackMiddleware(BaseHTTPMiddleware):
         async def dispatch(self, request: Request, call_next: Any) -> Response:
-            for req_cb in request_callbacks:
-                try:
-                    await req_cb.callback(request)
-                except Exception as e:
-                    name = req_cb.name or req_cb.callback.__name__
-                    raise RuntimeError(f"Request callback '{name}' failed") from e
+            await _run_request_callbacks(request_callbacks, request)
             try:
                 response = await call_next(request)
             except Exception as exc:
                 await _run_exception_callbacks(exception_callbacks, request, exc)
                 raise
-            for resp_cb in response_callbacks:
-                name = resp_cb.name or resp_cb.callback.__name__
-                try:
-                    response = await resp_cb.callback(request, response)
-                except Exception as e:
-                    raise RuntimeError(f"Response callback '{name}' failed") from e
-                if response is None:
-                    raise RuntimeError(
-                        f"Response callback '{name}' returned None (must return Response)"
-                    )
+            response = await _run_response_callbacks(
+                response_callbacks, request, response
+            )
             return cast(ResponseType, response)
 
     return CallbackMiddleware
@@ -348,6 +451,7 @@ class FastAPIAdapter:
         Returns:
             Configured FastAPI application
         """
+        self._resolve_lazy()
         lifespan = self._build_lifespan(ipc_channel)
         app = FastAPI(
             title=self._config.title,
@@ -413,10 +517,11 @@ class FastAPIAdapter:
         If ipc_channel is provided, wrap the result with IPC start/stop.
         Returns None if no lifecycle callbacks configured and no IPC channel.
         """
-        # Start with user-provided lifespan (may be None)
+        # Start with user-provided lifespan (may be None).
+        # Post-``_resolve_lazy`` invariant: ``.lifespan`` is a real callable.
         result: LifespanCallable | None = None
         if self._lifespan is not None:
-            result = self._lifespan.lifespan
+            result = cast(LifespanCallable, self._lifespan.lifespan)
 
         # Wrap with startup/shutdown callbacks if any
         if self._startup_callbacks or self._shutdown_callbacks:
@@ -520,7 +625,8 @@ class FastAPIAdapter:
 
         # Add other middleware
         for mw in self._middleware:
-            app.add_middleware(mw.middleware_class, **mw.options)  # type: ignore[arg-type]
+            # Post-``_resolve_lazy`` invariant: ``middleware_class`` is a real type.
+            app.add_middleware(cast(type, mw.middleware_class), **mw.options)  # type: ignore[arg-type]
 
     def _configure_rate_limiting(self, app: FastAPI) -> None:
         """Configure rate limiting middleware on the app.
@@ -535,9 +641,10 @@ class FastAPIAdapter:
         from ..ratelimit.middleware import RateLimitMiddleware
 
         for rl in self._rate_limiters:
+            # Post-``_resolve_lazy`` invariant: ``limiter`` is a real RateLimiter.
             app.add_middleware(
                 RateLimitMiddleware,
-                limiter=rl.limiter,
+                limiter=cast(RateLimiter, rl.limiter),
                 exempt_paths=rl.exempt_paths,
                 cleanup_interval=rl.cleanup_interval,
             )
@@ -545,14 +652,18 @@ class FastAPIAdapter:
     def _configure_exception_handlers(self, app: FastAPI) -> None:
         """Configure exception handlers on the app."""
         for handler in self._exception_handlers:
-            app.add_exception_handler(handler.exc_class, handler.handler)
+            # Post-``_resolve_lazy`` invariant: ``handler`` is a real callable.
+            app.add_exception_handler(
+                handler.exc_class, cast(Callable[..., Any], handler.handler)
+            )
 
     def _configure_routes(self, app: FastAPI) -> None:
         """Configure individual routes on the app."""
         for route in self._routes:
+            # Post-``_resolve_lazy`` invariant: ``handler`` is a real callable.
             app.add_api_route(
                 route.path,
-                route.handler,
+                cast(Callable[..., Any], route.handler),
                 methods=route.methods,
                 response_model=route.response_model,
                 tags=route.tags,  # type: ignore[arg-type]
@@ -562,8 +673,9 @@ class FastAPIAdapter:
     def _configure_routers(self, app: FastAPI) -> None:
         """Configure routers on the app."""
         for router_def in self._routers:
+            # Post-``_resolve_lazy`` invariant: ``router`` is a real APIRouter.
             app.include_router(
-                router_def.router,
+                cast(APIRouter, router_def.router),
                 prefix=router_def.prefix,
                 tags=router_def.tags,  # type: ignore[arg-type]
             )
@@ -589,6 +701,41 @@ class FastAPIAdapter:
             summary="Health check with IPC status",
         )
 
+    def _resolve_lazy(self) -> None:
+        """Swap ``Lazy`` wrappers on every definition for their resolved values.
+
+        Idempotent: after resolution the fields hold real callables/objects,
+        so a second pass does nothing. Called at the top of ``build()`` — in
+        subprocess mode that runs after unpickling, so factories execute in
+        the child and the closures they build never crossed the pickle
+        boundary. See :class:`Lazy`.
+
+        Adding a new callable-carrying definition type? Extend this walker.
+        See the module docstring's invariant.
+        """
+        for r in self._routes:
+            _resolve_field(r, "handler")
+        for rd in self._routers:
+            _resolve_field(rd, "router")
+        for mw in self._middleware:
+            _resolve_field(mw, "middleware_class")
+        for eh in self._exception_handlers:
+            _resolve_field(eh, "handler")
+        for su_cb in self._startup_callbacks:
+            _resolve_field(su_cb, "callback")
+        for sd_cb in self._shutdown_callbacks:
+            _resolve_field(sd_cb, "callback")
+        if self._lifespan is not None:
+            _resolve_field(self._lifespan, "lifespan")
+        for req_cb in self._request_callbacks:
+            _resolve_field(req_cb, "callback")
+        for resp_cb in self._response_callbacks:
+            _resolve_field(resp_cb, "callback")
+        for exc_cb in self._exception_callbacks:
+            _resolve_field(exc_cb, "callback")
+        for rl in self._rate_limiters:
+            _resolve_field(rl, "limiter")
+
     def inject_subprocess_logger(self, lg: Logger) -> None:
         """Inject subprocess logger into adapter and LoggerInjectable handlers.
 
@@ -599,9 +746,16 @@ class FastAPIAdapter:
         1. Stored for injection into request.state.lg via middleware
         2. Injected into LoggerInjectable exception handlers
 
+        Resolves any :class:`Lazy` wrappers first so the ``LoggerInjectable``
+        check below sees the real handler instances (a Lazy is not a
+        LoggerInjectable itself, so skipping the resolve would silently
+        miss logger injection on Lazy-wrapped handlers).
+
         Args:
             lg: The Logger instance created in the subprocess.
         """
+        self._resolve_lazy()
+
         # Store for request.state injection
         self._subprocess_lg = lg
 

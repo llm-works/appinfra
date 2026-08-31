@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any
 from ..runtime.adapter import (
     CORSDefinition,
     ExceptionHandlerDefinition,
+    Lazy,
     MiddlewareDefinition,
     RouteDefinition,
     RouterDefinition,
@@ -53,7 +54,7 @@ class RouteConfigurer:
     def with_route(
         self,
         path: str,
-        handler: Callable[..., Any],
+        handler: Callable[..., Any] | Lazy,
         methods: list[str] | None = None,
         response_model: type[Any] | None = None,
         tags: list[str] | None = None,
@@ -64,7 +65,11 @@ class RouteConfigurer:
 
         Args:
             path: URL path (e.g., "/users/{user_id}")
-            handler: Async function to handle requests
+            handler: Async function to handle requests, or a :class:`Lazy`
+                wrapping a module-level factory that returns one. Wrap in
+                ``Lazy`` when subprocess mode runs under Python 3.14+ (where
+                the ``forkserver`` start method cannot pickle nested
+                closures).
             methods: HTTP methods (default: ["GET"])
             response_model: Pydantic model for response serialization
             tags: OpenAPI tags for documentation grouping
@@ -87,7 +92,7 @@ class RouteConfigurer:
 
     def with_router(
         self,
-        router: Any,  # APIRouter
+        router: Any | Lazy,  # APIRouter, or Lazy returning one
         prefix: str = "",
         tags: list[str] | None = None,
     ) -> RouteConfigurer:
@@ -114,7 +119,7 @@ class RouteConfigurer:
     def with_exception_handler(
         self,
         exc_class: type[Exception],
-        handler: Callable[..., Any],
+        handler: Callable[..., Any] | Lazy,
     ) -> RouteConfigurer:
         """
         Add an exception handler.
@@ -136,7 +141,7 @@ class RouteConfigurer:
 
     def with_middleware(
         self,
-        middleware_class: type[Any],
+        middleware_class: type[Any] | Lazy,
         **options: Any,
     ) -> RouteConfigurer:
         """
