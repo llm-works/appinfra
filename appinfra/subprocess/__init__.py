@@ -8,5 +8,6 @@ including signal handling, config hot-reload, and graceful shutdown.
 """
 
 from .context import SubprocessContext
+from .lazy import Lazy
 
-__all__ = ["SubprocessContext"]
+__all__ = ["Lazy", "SubprocessContext"]

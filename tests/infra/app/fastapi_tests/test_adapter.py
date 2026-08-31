@@ -3,6 +3,8 @@
 
 """Tests for FastAPIAdapter."""
 
+import pickle
+from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -16,11 +18,61 @@ from appinfra.app.fastapi.runtime.adapter import (
     LifecycleCallbackDefinition,
     LifespanDefinition,
     MiddlewareDefinition,
+    RateLimitDefinition,
     RequestCallbackDefinition,
     ResponseCallbackDefinition,
     RouteDefinition,
     RouterDefinition,
 )
+from appinfra.subprocess import Lazy
+
+# Module-level factories used by Lazy tests. Must be importable via qualname
+# so the tests exercise the real importlib resolution path.
+
+
+def _factory_no_config():
+    return "resolved-no-config"
+
+
+def _factory_with_config(cfg):
+    return f"resolved:{cfg}"
+
+
+def _factory_accepts_none(cfg):
+    """Factory that distinguishes None from no-arg call."""
+    return f"config-is-none:{cfg is None}"
+
+
+def _factory_returns_router():
+    return MagicMock()
+
+
+def _factory_returns_middleware_class(_cfg):
+    class LazyMiddleware:
+        pass
+
+    return LazyMiddleware
+
+
+def _factory_returns_async_handler():
+    async def handler(app):
+        return None
+
+    return handler
+
+
+def _factory_returns_lifespan(_cfg):
+    @asynccontextmanager
+    async def lifespan(app):
+        yield
+
+    return lifespan
+
+
+def _factory_returns_rate_limiter():
+    limiter = MagicMock()
+    limiter.tag = "lazy-limiter"
+    return limiter
 
 
 @pytest.mark.unit
@@ -1404,3 +1456,208 @@ class TestIPCLifespanIntegration:
                 mock_ipc_channel.start_polling.assert_called_once()
 
             mock_ipc_channel.stop_polling.assert_called_once()
+
+
+@pytest.mark.unit
+class TestLazy:
+    """Tests for the Lazy factory wrapper."""
+
+    def test_resolve_no_config(self):
+        lazy = Lazy(f"{__name__}:_factory_no_config")
+        assert lazy.resolve() == "resolved-no-config"
+
+    def test_resolve_with_config(self):
+        lazy = Lazy(f"{__name__}:_factory_with_config", "abc")
+        assert lazy.resolve() == "resolved:abc"
+
+    def test_resolve_with_explicit_none(self):
+        """Explicit None must be passed through, not treated as omitted."""
+        lazy = Lazy(f"{__name__}:_factory_accepts_none", None)
+        assert lazy.resolve() == "config-is-none:True"
+
+    def test_pickle_roundtrip_explicit_none(self):
+        """Explicit None survives pickle and is still passed to factory."""
+        original = Lazy(f"{__name__}:_factory_accepts_none", None)
+        restored = pickle.loads(pickle.dumps(original))
+        assert restored.resolve() == "config-is-none:True"
+
+    def test_resolve_bad_factory_format_missing_colon(self):
+        with pytest.raises(ValueError, match="module.path:attr"):
+            Lazy("no_colon_here").resolve()
+
+    def test_resolve_module_not_found(self):
+        with pytest.raises(ModuleNotFoundError):
+            Lazy("does_not_exist_module:foo").resolve()
+
+    def test_resolve_attr_not_found(self):
+        with pytest.raises(AttributeError):
+            Lazy(f"{__name__}:not_a_real_attr").resolve()
+
+    def test_pickle_roundtrip(self):
+        """Lazy must survive the mp.Process pickle boundary intact."""
+        original = Lazy(f"{__name__}:_factory_with_config", "payload")
+        restored = pickle.loads(pickle.dumps(original))
+        assert restored.factory == original.factory
+        assert restored.config == original.config
+        assert restored.resolve() == "resolved:payload"
+
+    def test_unset_pickle_preserves_identity(self):
+        """UNSET sentinel must be the same object after pickle round-trip."""
+        from appinfra.subprocess.lazy import UNSET
+
+        restored = pickle.loads(pickle.dumps(UNSET))
+        assert restored is UNSET
+
+
+@pytest.mark.unit
+class TestResolveLazy:
+    """Tests for FastAPIAdapter._resolve_lazy — the walker over every
+    callable-carrying definition list."""
+
+    @pytest.fixture
+    def adapter(self):
+        with (
+            patch("appinfra.app.fastapi.runtime.adapter.FASTAPI_AVAILABLE", True),
+            patch("appinfra.app.fastapi.runtime.adapter.FastAPI"),
+            patch("appinfra.app.fastapi.runtime.adapter.CORSMiddleware"),
+        ):
+            yield FastAPIAdapter(ApiConfig())
+
+    def test_resolves_route_handler(self, adapter):
+        adapter.add_route(
+            RouteDefinition(path="/", handler=Lazy(f"{__name__}:_factory_no_config"))
+        )
+        adapter._resolve_lazy()
+        assert adapter._routes[0].handler == "resolved-no-config"
+
+    def test_resolves_router(self, adapter):
+        adapter.add_router(
+            RouterDefinition(router=Lazy(f"{__name__}:_factory_returns_router"))
+        )
+        adapter._resolve_lazy()
+        # `.name` is a MagicMock built-in; check the tag we set instead
+        assert isinstance(adapter._routers[0].router, MagicMock)
+
+    def test_resolves_middleware_class(self, adapter):
+        adapter.add_middleware(
+            MiddlewareDefinition(
+                middleware_class=Lazy(
+                    f"{__name__}:_factory_returns_middleware_class", "cfg"
+                )
+            )
+        )
+        adapter._resolve_lazy()
+        assert adapter._middleware[0].middleware_class.__name__ == "LazyMiddleware"
+
+    def test_resolves_exception_handler(self, adapter):
+        adapter.add_exception_handler(
+            ExceptionHandlerDefinition(
+                exc_class=ValueError,
+                handler=Lazy(f"{__name__}:_factory_no_config"),
+            )
+        )
+        adapter._resolve_lazy()
+        assert adapter._exception_handlers[0].handler == "resolved-no-config"
+
+    def test_resolves_startup_callback(self, adapter):
+        adapter.add_startup_callback(
+            LifecycleCallbackDefinition(
+                callback=Lazy(f"{__name__}:_factory_returns_async_handler")
+            )
+        )
+        adapter._resolve_lazy()
+        assert callable(adapter._startup_callbacks[0].callback)
+
+    def test_resolves_startup_callback_preserves_after_lifespan_false(self, adapter):
+        """Lazy-wrapped callback with after_lifespan=False partitions correctly."""
+        adapter.add_startup_callback(
+            LifecycleCallbackDefinition(
+                callback=Lazy(f"{__name__}:_factory_returns_async_handler"),
+                after_lifespan=False,
+            )
+        )
+        adapter._resolve_lazy()
+        assert callable(adapter._startup_callbacks[0].callback)
+        assert adapter._startup_callbacks[0].after_lifespan is False
+
+    def test_resolves_shutdown_callback(self, adapter):
+        adapter.add_shutdown_callback(
+            LifecycleCallbackDefinition(
+                callback=Lazy(f"{__name__}:_factory_returns_async_handler")
+            )
+        )
+        adapter._resolve_lazy()
+        assert callable(adapter._shutdown_callbacks[0].callback)
+
+    def test_resolves_lifespan(self, adapter):
+        adapter.set_lifespan(
+            LifespanDefinition(
+                lifespan=Lazy(f"{__name__}:_factory_returns_lifespan", "ctx")
+            )
+        )
+        adapter._resolve_lazy()
+        assert callable(adapter._lifespan.lifespan)
+
+    def test_resolves_request_callback(self, adapter):
+        adapter.add_request_callback(
+            RequestCallbackDefinition(
+                callback=Lazy(f"{__name__}:_factory_returns_async_handler")
+            )
+        )
+        adapter._resolve_lazy()
+        assert callable(adapter._request_callbacks[0].callback)
+
+    def test_resolves_response_callback(self, adapter):
+        adapter.add_response_callback(
+            ResponseCallbackDefinition(
+                callback=Lazy(f"{__name__}:_factory_returns_async_handler")
+            )
+        )
+        adapter._resolve_lazy()
+        assert callable(adapter._response_callbacks[0].callback)
+
+    def test_resolves_exception_callback(self, adapter):
+        adapter.add_exception_callback(
+            ExceptionCallbackDefinition(
+                callback=Lazy(f"{__name__}:_factory_returns_async_handler")
+            )
+        )
+        adapter._resolve_lazy()
+        assert callable(adapter._exception_callbacks[0].callback)
+
+    def test_resolves_rate_limiter(self, adapter):
+        adapter.add_rate_limiter(
+            RateLimitDefinition(
+                limiter=Lazy(f"{__name__}:_factory_returns_rate_limiter")
+            )
+        )
+        adapter._resolve_lazy()
+        assert adapter._rate_limiters[0].limiter.tag == "lazy-limiter"
+
+    def test_preserves_real_callables(self, adapter):
+        """Non-Lazy fields must be left untouched."""
+
+        def real_handler():
+            return "real"
+
+        adapter.add_route(RouteDefinition(path="/", handler=real_handler))
+        adapter._resolve_lazy()
+        assert adapter._routes[0].handler is real_handler
+
+    def test_idempotent(self, adapter):
+        """Second _resolve_lazy pass is a no-op — fields already hold real values."""
+        adapter.add_route(
+            RouteDefinition(path="/", handler=Lazy(f"{__name__}:_factory_no_config"))
+        )
+        adapter._resolve_lazy()
+        first = adapter._routes[0].handler
+        adapter._resolve_lazy()
+        assert adapter._routes[0].handler is first
+
+    def test_build_resolves_lazy(self, adapter):
+        """FastAPIAdapter.build must invoke _resolve_lazy before configuring the app."""
+        adapter.add_route(
+            RouteDefinition(path="/", handler=Lazy(f"{__name__}:_factory_no_config"))
+        )
+        adapter.build()
+        assert adapter._routes[0].handler == "resolved-no-config"

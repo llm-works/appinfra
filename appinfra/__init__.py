@@ -56,7 +56,7 @@ try:
     __version__ = version("appinfra")
 except PackageNotFoundError:
     # Package not installed, use fallback (development mode)
-    __version__ = "0.1.0-dev"
+    __version__ = "0.0.0.dev0"
 
 # Explicit public API
 __all__ = [

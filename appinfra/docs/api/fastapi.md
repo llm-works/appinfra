@@ -409,6 +409,47 @@ server = (
 For custom implementations, implement the `LoggerInjectable` protocol (`set_logger()` method) and
 handle `__getstate__`/`__setstate__` yourself.
 
+### Nested Closures in Subprocess Mode
+
+On Python 3.14+ the `forkserver` start method (now the default) pickles the target's args at
+spawn. Route handlers, routers, middleware, callbacks — anything constructed via a nested
+function or local class — cannot cross that boundary: the pickle protocol rejects any
+callable whose qualname contains `<locals>`.
+
+Wrap such values in [`Lazy`](subprocess.md#lazy) to defer construction to the child process:
+
+```python
+from appinfra.app.fastapi import ServerBuilder, Lazy
+
+
+# In myapp/routes.py (module-level, importable by qualname)
+def build_health(config):
+    async def health():
+        return {"ready": config.ready_flag.value}
+
+    return health
+
+
+# Wire site
+server = (
+    ServerBuilder(lg, "api")
+    .routes.with_route("/health", Lazy("myapp.routes:build_health", HealthConfig(...)))
+    .done()
+    .subprocess.with_ipc(request_q, response_q)
+    .done()
+    .build()
+)
+```
+
+Every FastAPI definition accepts `Callable | Lazy` (including `with_router`, `with_middleware`,
+`with_on_startup`, `with_on_shutdown`, `with_lifespan`, `with_on_request`, `with_on_response`,
+`with_on_exception`, `with_exception_handler`, and `with_rate_limiter`). The factory runs in the
+child during `FastAPIAdapter.build()`, so the closure never pickles.
+
+**Unsupported:** parent state created *after* subprocess spawn (e.g. an `mp.Value` shared
+post-spawn) cannot cross `forkserver` at all — `Lazy` is not a workaround for that. See
+[`appinfra.subprocess.Lazy`](subprocess.md#lazy) for the full contract.
+
 ### Uvicorn Configuration
 
 Access via `.uvicorn`:

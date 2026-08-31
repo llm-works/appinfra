@@ -63,6 +63,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+# ``Lazy`` lives in appinfra.subprocess (parent→child boundary helper);
+# re-exported here as a convenience for FastAPI users.
+from ...subprocess import Lazy
+
 # Config classes are always available (no FastAPI dependency)
 from .config.api import ApiConfig
 from .config.ipc import IPCConfig
@@ -159,4 +163,6 @@ __all__ = [
     # Errors (always available)
     "CallbackError",
     "ConfigError",
+    # Subprocess factory wrapper (always available)
+    "Lazy",
 ]
