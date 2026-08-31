@@ -157,6 +157,67 @@ with SubprocessContext(lg=logger, etc_dir=etc_dir, config_file=config_file) as c
     ctx.lg.info("Shutting down")
 ```
 
+## Lazy
+
+Defers construction of an unpicklable value until after the `mp.Process` pickle boundary.
+
+```python
+@dataclass
+class Lazy:
+    factory: str  # "pkg.mod:build_health"
+    config: Any = None  # must be picklable
+
+    def resolve(self) -> Any: ...
+```
+
+**Why it exists.** Python 3.14+ changed multiprocessing defaults: `forkserver` on POSIX
+(except macOS), `spawn` on Windows and macOS. Both pickle the target's args at
+`mp.Process.start()`. Nested closures and other locally-defined callables carry `<locals>`
+in their qualname and are rejected by the pickle protocol — any parent-process object
+holding one fails to cross the boundary.
+
+Wrapping the value as `Lazy("myapp.workers:build_x", config)` pickles as a plain dataclass;
+the child imports `myapp.workers` and calls `build_x(config)` after unpickling, so the
+closure is constructed in the child and never crosses pickle.
+
+**Example — worker that needs a nested callable:**
+
+```python
+import multiprocessing as mp
+from appinfra.subprocess import Lazy
+
+
+# Module-level factory (importable by qualname)
+def build_tick(config):
+    counter = {"n": 0}  # captured state — nested closure below is OK
+
+    def tick():
+        counter["n"] += 1
+        return counter["n"]
+
+    return tick
+
+
+def child(lazy: Lazy):
+    tick = lazy.resolve()
+    for _ in range(3):
+        print(tick())
+
+
+# Parent process
+lazy = Lazy("myapp.workers:build_tick", WorkerConfig(...))
+proc = mp.Process(target=child, args=(lazy,))
+proc.start()  # `lazy` pickles fine; a bare `build_tick(...)` result would not
+```
+
+**Where used inside appinfra.** `FastAPIAdapter` accepts `Lazy` on every route handler,
+router, middleware, exception handler, lifecycle callback, and rate limiter — see the
+[FastAPI Subprocess Mode](fastapi.md#nested-closures-in-subprocess-mode) section.
+
+**Unsupported.** Parent state created *after* subprocess spawn (e.g. an `mp.Value` shared
+post-spawn) cannot cross `forkserver` at all — `Lazy` is not a workaround for that. Such
+consumers must stay on the `fork` start method or Python ≤ 3.13.
+
 ## See Also
 
 - [Logging System](logging.md) - Logger configuration

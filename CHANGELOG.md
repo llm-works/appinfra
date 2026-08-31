@@ -10,6 +10,13 @@ For API stability guarantees and deprecation policy, see
 
 ## [Unreleased]
 
+### Added
+- `appinfra.subprocess.Lazy`: factory wrapper that defers value construction
+  until after the `mp.Process` pickle boundary — needed on Python 3.14+ where
+  `forkserver` (POSIX) and `spawn` (Windows, macOS) pickle subprocess args and
+  reject nested closures. All FastAPI definition types (`with_route`,
+  `with_router`, `with_on_startup`, ...) accept `Lazy` alongside plain callables.
+
 ## [0.10.2] - 2026-08-29
 
 ### Added

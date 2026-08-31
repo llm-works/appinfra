@@ -20,6 +20,7 @@ if TYPE_CHECKING:
 
     from ....log import Logger
 
+from ....subprocess import Lazy
 from ..config.api import ApiConfig
 from ..config.ipc import IPCConfig
 from ..config.uvicorn import UvicornConfig
@@ -198,7 +199,7 @@ class ServerBuilder:
 
     def with_on_startup(
         self,
-        callback: Callable[[FastAPI], Awaitable[None]],
+        callback: Callable[[FastAPI], Awaitable[None]] | Lazy,
         name: str | None = None,
         after_lifespan: bool = True,
     ) -> ServerBuilder:
@@ -229,7 +230,7 @@ class ServerBuilder:
 
     def with_on_shutdown(
         self,
-        callback: Callable[[FastAPI], Awaitable[None]],
+        callback: Callable[[FastAPI], Awaitable[None]] | Lazy,
         name: str | None = None,
     ) -> ServerBuilder:
         """
@@ -255,7 +256,7 @@ class ServerBuilder:
 
     def with_lifespan(
         self,
-        lifespan: Callable[[FastAPI], AbstractAsyncContextManager[None]],
+        lifespan: Callable[[FastAPI], AbstractAsyncContextManager[None]] | Lazy,
     ) -> ServerBuilder:
         """
         Register a lifespan context manager.
@@ -282,7 +283,7 @@ class ServerBuilder:
 
     def with_on_request(
         self,
-        callback: Callable[[Request], Awaitable[None]],
+        callback: Callable[[Request], Awaitable[None]] | Lazy,
         name: str | None = None,
     ) -> ServerBuilder:
         """
@@ -313,7 +314,7 @@ class ServerBuilder:
 
     def with_on_response(
         self,
-        callback: Callable[[Request, Response], Awaitable[Response]],
+        callback: Callable[[Request, Response], Awaitable[Response]] | Lazy,
         name: str | None = None,
     ) -> ServerBuilder:
         """
@@ -341,7 +342,7 @@ class ServerBuilder:
 
     def with_on_exception(
         self,
-        callback: Callable[[Request, Exception], Awaitable[None]],
+        callback: Callable[[Request, Exception], Awaitable[None]] | Lazy,
         name: str | None = None,
     ) -> ServerBuilder:
         """
@@ -371,7 +372,7 @@ class ServerBuilder:
 
     def with_rate_limiter(
         self,
-        limiter: RateLimiter,
+        limiter: RateLimiter | Lazy,
         exempt_paths: list[str] | None = None,
         cleanup_interval: float = 60.0,
     ) -> ServerBuilder:
