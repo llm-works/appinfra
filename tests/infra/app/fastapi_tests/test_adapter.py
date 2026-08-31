@@ -1545,6 +1545,18 @@ class TestResolveLazy:
         adapter._resolve_lazy()
         assert callable(adapter._startup_callbacks[0].callback)
 
+    def test_resolves_startup_callback_preserves_after_lifespan_false(self, adapter):
+        """Lazy-wrapped callback with after_lifespan=False partitions correctly."""
+        adapter.add_startup_callback(
+            LifecycleCallbackDefinition(
+                callback=Lazy(f"{__name__}:_factory_returns_async_handler"),
+                after_lifespan=False,
+            )
+        )
+        adapter._resolve_lazy()
+        assert callable(adapter._startup_callbacks[0].callback)
+        assert adapter._startup_callbacks[0].after_lifespan is False
+
     def test_resolves_shutdown_callback(self, adapter):
         adapter.add_shutdown_callback(
             LifecycleCallbackDefinition(

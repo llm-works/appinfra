@@ -35,6 +35,7 @@ import pytest
 from appinfra.app.fastapi.config.api import ApiConfig
 from appinfra.app.fastapi.runtime.adapter import (
     FastAPIAdapter,
+    LifecycleCallbackDefinition,
     RouteDefinition,
 )
 from appinfra.subprocess import Lazy
@@ -64,6 +65,34 @@ def _build_health(_cfg: Any = None) -> Any:
         return {"ready": True}
 
     return health
+
+
+def _build_startup_callback(_cfg: Any = None) -> Any:
+    """Module-level factory for a startup callback.
+
+    Lifecycle callbacks (startup, shutdown) also need to cross the pickle
+    boundary; this exercises that path.
+    """
+
+    async def on_startup(app: Any) -> None:
+        app.state.started = True
+
+    return on_startup
+
+
+def _child_verify_lifecycle(adapter: FastAPIAdapter, result_q: mp.Queue[str]) -> None:
+    """Child-process entry for lifecycle callback verification."""
+    try:
+        assert isinstance(adapter._startup_callbacks[0].callback, Lazy), (
+            "expected Lazy pre-resolve"
+        )
+        adapter._resolve_lazy()
+        assert callable(adapter._startup_callbacks[0].callback), (
+            "expected callable post-resolve"
+        )
+        result_q.put("ok")
+    except BaseException as e:  # noqa: BLE001
+        result_q.put(f"fail: {type(e).__name__}: {e}")
 
 
 def _child_verify(adapter: FastAPIAdapter, result_q: mp.Queue[str]) -> None:
@@ -158,6 +187,34 @@ class TestForkserverPickleBoundary:
         ctx = mp.get_context("forkserver")
         result_q: mp.Queue[str] = ctx.Queue()
         proc = ctx.Process(target=_child_verify, args=(adapter, result_q))
+        proc.start()
+        proc.join(timeout=30.0)
+
+        assert not proc.is_alive(), "child did not exit within 30s"
+        assert proc.exitcode == 0, f"child exit code {proc.exitcode}"
+        assert result_q.get(timeout=1.0) == "ok"
+
+    def test_lazy_lifecycle_callback_survives_forkserver_spawn(self):
+        """Lifecycle callbacks with Lazy cross forkserver and resolve in child.
+
+        Extends route handler coverage to lifecycle callbacks (startup,
+        shutdown), which use the same _resolve_lazy mechanism but have their
+        own walker entry in FastAPIAdapter._resolve_lazy().
+        """
+        if "forkserver" not in mp.get_all_start_methods():
+            pytest.skip("forkserver start method not available on this platform")
+
+        adapter = FastAPIAdapter(ApiConfig())
+        adapter.add_startup_callback(
+            LifecycleCallbackDefinition(
+                callback=Lazy(f"{__name__}:_build_startup_callback"),
+                after_lifespan=False,
+            )
+        )
+
+        ctx = mp.get_context("forkserver")
+        result_q: mp.Queue[str] = ctx.Queue()
+        proc = ctx.Process(target=_child_verify_lifecycle, args=(adapter, result_q))
         proc.start()
         proc.join(timeout=30.0)
 
