@@ -38,6 +38,11 @@ def _factory_with_config(cfg):
     return f"resolved:{cfg}"
 
 
+def _factory_accepts_none(cfg):
+    """Factory that distinguishes None from no-arg call."""
+    return f"config-is-none:{cfg is None}"
+
+
 def _factory_returns_router():
     return MagicMock()
 
@@ -1464,6 +1469,17 @@ class TestLazy:
     def test_resolve_with_config(self):
         lazy = Lazy(f"{__name__}:_factory_with_config", "abc")
         assert lazy.resolve() == "resolved:abc"
+
+    def test_resolve_with_explicit_none(self):
+        """Explicit None must be passed through, not treated as omitted."""
+        lazy = Lazy(f"{__name__}:_factory_accepts_none", None)
+        assert lazy.resolve() == "config-is-none:True"
+
+    def test_pickle_roundtrip_explicit_none(self):
+        """Explicit None survives pickle and is still passed to factory."""
+        original = Lazy(f"{__name__}:_factory_accepts_none", None)
+        restored = pickle.loads(pickle.dumps(original))
+        assert restored.resolve() == "config-is-none:True"
 
     def test_resolve_bad_factory_format_missing_colon(self):
         with pytest.raises(ValueError, match="module.path:attr"):

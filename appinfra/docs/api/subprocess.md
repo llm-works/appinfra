@@ -170,10 +170,11 @@ class Lazy:
     def resolve(self) -> Any: ...
 ```
 
-**Why it exists.** Python 3.14+ made `forkserver` the default multiprocessing start method,
-which pickles the target's args at `mp.Process.start()`. Nested closures and other
-locally-defined callables carry `<locals>` in their qualname and are rejected by the pickle
-protocol — any parent-process object holding one fails to cross the boundary.
+**Why it exists.** Python 3.14+ changed multiprocessing defaults: `forkserver` on POSIX
+(except macOS), `spawn` on Windows and macOS. Both pickle the target's args at
+`mp.Process.start()`. Nested closures and other locally-defined callables carry `<locals>`
+in their qualname and are rejected by the pickle protocol — any parent-process object
+holding one fails to cross the boundary.
 
 Wrapping the value as `Lazy("myapp.workers:build_x", config)` pickles as a plain dataclass;
 the child imports `myapp.workers` and calls `build_x(config)` after unpickling, so the

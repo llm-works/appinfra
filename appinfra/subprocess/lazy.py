@@ -6,8 +6,23 @@
 from __future__ import annotations
 
 import importlib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
+
+
+class _Unset:
+    """Picklable sentinel distinguishing omitted config from explicit ``None``."""
+
+    __slots__ = ()
+
+    def __reduce__(self) -> tuple[type[_Unset], tuple[()]]:
+        return (_Unset, ())
+
+    def __repr__(self) -> str:
+        return "UNSET"
+
+
+UNSET = _Unset()
 
 
 @dataclass
@@ -19,15 +34,18 @@ class Lazy:
     factory, so anything the factory constructs (nested closures, live
     resources) is created in the child rather than pickled from the parent.
 
-    Required on Python 3.14+ where the default multiprocessing start method
-    (``forkserver``) pickles the target's args and rejects nested closures /
-    non-module-level callables. Optional on ``fork``.
+    Required on Python 3.14+ where ``forkserver`` (default on POSIX except
+    macOS) and ``spawn`` (default on Windows and macOS) pickle the target's
+    args and reject nested closures / non-module-level callables. Optional
+    on ``fork``.
 
     Fields:
         factory: Module qualname of a callable to import, in the form
             ``"pkg.mod:build_health"``. Split on the final ``":"``.
-        config: Optional argument passed to the factory. Must be picklable
-            (a dataclass with plain fields is the intended shape).
+        config: Argument passed to the factory. Must be picklable (a dataclass
+            with plain fields is the intended shape). Defaults to ``UNSET``;
+            when omitted the factory is called with no arguments. Explicit
+            ``None`` is passed through: ``Lazy("m:f", None)`` calls ``f(None)``.
 
     Example:
         # Module-level factory (produces something that can't be pickled)
@@ -49,14 +67,14 @@ class Lazy:
     """
 
     factory: str
-    config: Any = None
+    config: Any = field(default_factory=lambda: UNSET)
 
     def resolve(self) -> Any:
-        """Import the factory and invoke it (with ``config`` if set)."""
+        """Import the factory and invoke it (with ``config`` if provided)."""
         module_name, _, attr = self.factory.rpartition(":")
         if not module_name or not attr:
             raise ValueError(
                 f"Lazy.factory must be 'module.path:attr', got {self.factory!r}"
             )
         fn = getattr(importlib.import_module(module_name), attr)
-        return fn(self.config) if self.config is not None else fn()
+        return fn() if isinstance(self.config, _Unset) else fn(self.config)
