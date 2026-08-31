@@ -11,9 +11,17 @@ closures / local functions raise ``AttributeError`` at that pickle step;
 constructed in the child instead.
 
 These tests exercise the boundary two ways:
-  1. ``pickle.dumps`` directly — fast, models what ``ForkingPickler`` does.
-  2. Real ``mp.get_context("forkserver").Process`` — end-to-end, without
-     touching the process-global start method.
+  1. ``pickle.dumps`` directly — fast smoke of the underlying pickle
+     protocol behavior (nested closure fails, ``Lazy`` succeeds).
+  2. Real ``mp.get_context("forkserver").Process`` with the adapter
+     passed as a target arg — reproduces the production code path
+     where ``ForkingPickler`` serializes the ``Service`` (which holds
+     the adapter) at ``.start()`` time. This is what actually fires
+     in production; the pickle tests only cover the mechanism it uses.
+
+Neither path touches the process-global start method, so these tests
+are safe to run alongside the rest of the suite regardless of the host
+Python's default.
 """
 
 from __future__ import annotations
@@ -58,10 +66,15 @@ def _build_health(_cfg: Any = None) -> Any:
     return health
 
 
-def _child_verify(payload: bytes, result_q: mp.Queue[str]) -> None:
-    """Child-process entry: unpickle adapter, resolve, verify handler."""
+def _child_verify(adapter: FastAPIAdapter, result_q: mp.Queue[str]) -> None:
+    """Child-process entry: adapter arrives already-unpickled by ForkingPickler.
+
+    Mirrors production: ``ProcessRunner`` passes ``self.service`` (which
+    holds the adapter) as an arg to ``mp.Process(target=_process_entry,
+    args=(self.service, ...))``. ForkingPickler pickles the args on
+    ``.start()`` and the child receives them via its own unpickle.
+    """
     try:
-        adapter = pickle.loads(payload)
         assert isinstance(adapter._routes[0].handler, Lazy), "expected Lazy pre-resolve"
         adapter._resolve_lazy()
         assert callable(adapter._routes[0].handler), "expected callable post-resolve"
@@ -101,9 +114,35 @@ class TestForkserverPickleBoundary:
         restored._resolve_lazy()
         assert callable(restored._routes[0].handler)
 
-    def test_lazy_handler_under_real_forkserver(self):
-        """End-to-end: spawn a real forkserver subprocess and verify the
-        adapter unpickles + resolves + yields a callable handler.
+    def test_nested_closure_adapter_fails_forkserver_spawn(self):
+        """Reproduce #151: passing an adapter with a nested-closure handler
+        as a ``Process`` arg fails at spawn.
+
+        This is the exact production code path: ``ForkingPickler`` walks
+        the arg tuple during ``Process.start()`` and rejects the nested
+        closure. Without ``Lazy``, users get this failure the first time
+        their service spawns under 3.14 forkserver.
+        """
+        if "forkserver" not in mp.get_all_start_methods():
+            pytest.skip("forkserver start method not available on this platform")
+
+        adapter = FastAPIAdapter(ApiConfig())
+        adapter.add_route(
+            RouteDefinition(path="/health", handler=_make_nested_closure_handler())
+        )
+
+        ctx = mp.get_context("forkserver")
+        result_q: mp.Queue[str] = ctx.Queue()
+        proc = ctx.Process(target=_child_verify, args=(adapter, result_q))
+
+        # ForkingPickler serializes args synchronously in .start(); a
+        # nested closure raises before the child is spawned.
+        with pytest.raises((AttributeError, pickle.PicklingError)):
+            proc.start()
+
+    def test_lazy_adapter_survives_forkserver_spawn(self):
+        """Fix: adapter with ``Lazy`` handler crosses forkserver as a
+        ``Process`` arg and resolves in the child.
 
         Uses ``mp.get_context("forkserver")`` so the test doesn't touch the
         process-global start method (which would leak to other tests).
@@ -115,11 +154,10 @@ class TestForkserverPickleBoundary:
         adapter.add_route(
             RouteDefinition(path="/health", handler=Lazy(f"{__name__}:_build_health"))
         )
-        payload = pickle.dumps(adapter)
 
         ctx = mp.get_context("forkserver")
         result_q: mp.Queue[str] = ctx.Queue()
-        proc = ctx.Process(target=_child_verify, args=(payload, result_q))
+        proc = ctx.Process(target=_child_verify, args=(adapter, result_q))
         proc.start()
         proc.join(timeout=30.0)
 
