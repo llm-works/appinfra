@@ -1501,6 +1501,13 @@ class TestLazy:
         assert restored.config == original.config
         assert restored.resolve() == "resolved:payload"
 
+    def test_unset_pickle_preserves_identity(self):
+        """UNSET sentinel must be the same object after pickle round-trip."""
+        from appinfra.subprocess.lazy import UNSET
+
+        restored = pickle.loads(pickle.dumps(UNSET))
+        assert restored is UNSET
+
 
 @pytest.mark.unit
 class TestResolveLazy:

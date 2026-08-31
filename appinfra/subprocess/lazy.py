@@ -15,14 +15,22 @@ class _Unset:
 
     __slots__ = ()
 
-    def __reduce__(self) -> tuple[type[_Unset], tuple[()]]:
-        return (_Unset, ())
+    def __reduce__(self) -> tuple[object, tuple[()]]:
+        # Import at call time so _get_unset (defined after UNSET) is available.
+        from appinfra.subprocess.lazy import _get_unset
+
+        return (_get_unset, ())
 
     def __repr__(self) -> str:
         return "UNSET"
 
 
 UNSET = _Unset()
+
+
+def _get_unset() -> _Unset:
+    """Pickle helper returning the singleton; preserves identity across pickle."""
+    return UNSET
 
 
 @dataclass
