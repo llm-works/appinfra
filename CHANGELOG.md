@@ -10,6 +10,11 @@ For API stability guarantees and deprecation policy, see
 
 ## [Unreleased]
 
+### Fixed
+- `make check.raw` no longer reports a spurious failure when a pytest marker
+  bucket collects zero tests. Empty collection now renders as gray-skip,
+  matching `make check`.
+
 ## [0.10.3] - 2026-08-31
 
 ### Added

@@ -663,8 +663,14 @@ run_raw() {
                 echo "  → $subname"
                 echo ""
 
-                if eval "$subcmd"; then
+                local sub_exit_code=0
+                eval "$subcmd" || sub_exit_code=$?
+                # pytest exit 5 = no tests collected; treat as gray-skip to match
+                # run_check's classification (see case 5 in run_check above).
+                if [ $sub_exit_code -eq 0 ]; then
                     echo "  ${GREEN}✓${RESET} $subname passed"
+                elif [ $sub_exit_code -eq 5 ]; then
+                    echo "  ${GRAY}[ ]${RESET} $subname ${GRAY}(no tests)${RESET}"
                 else
                     echo "  ${RED}✗${RESET} $subname failed"
                     failed=true
