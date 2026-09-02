@@ -14,6 +14,7 @@ All functions in this module are internal implementation details (prefixed with 
 and should not be imported directly by external code.
 """
 
+import os
 import re
 from pathlib import Path
 from typing import Any
@@ -89,6 +90,10 @@ def _resolve_include_path_standalone(
     """
     Resolve include path to absolute path (standalone version for preprocessing).
 
+    Tilde is expanded unconditionally (parity with !path). The expanded
+    path still has to satisfy the project_root guard or match an entry in
+    `allowed_paths` — expansion is UX, not authorization.
+
     Args:
         include_path_str: Path string from !include directive
         current_file: Path to current file (for relative path resolution)
@@ -100,7 +105,7 @@ def _resolve_include_path_standalone(
     Raises:
         yaml.YAMLError: If relative path cannot be resolved
     """
-    include_path = Path(include_path_str)
+    include_path = Path(os.path.expanduser(include_path_str))
 
     if not include_path.is_absolute():
         if current_file is None:
@@ -160,9 +165,16 @@ def _check_project_root(
     include_path: Path,
     project_root: Path | None,
     ctx: ErrorContext | None = None,
+    allowed_paths: frozenset[Path] = frozenset(),
 ) -> None:
-    """Raise error if path is outside project root."""
+    """Raise error if path is outside project root.
+
+    Paths listed in `allowed_paths` bypass the guard — an explicit,
+    per-path opt-in for narrow overlay use cases.
+    """
     if project_root is None:
+        return
+    if include_path in allowed_paths:
         return
     try:
         include_path.relative_to(project_root)
@@ -182,6 +194,7 @@ def _validate_include_standalone(
     max_include_depth: int,
     ctx: ErrorContext | None = None,
     optional: bool = False,
+    allowed_paths: frozenset[Path] = frozenset(),
 ) -> bool:
     """
     Validate include path for circular dependencies, existence, and security.
@@ -193,6 +206,8 @@ def _validate_include_standalone(
         max_include_depth: Maximum allowed include depth
         ctx: Error context for location info
         optional: If True, missing files return False instead of raising
+        allowed_paths: Resolved set of paths that bypass the project_root
+            guard.
 
     Returns:
         True if file exists and passes validation, False if optional and missing.
@@ -200,15 +215,13 @@ def _validate_include_standalone(
     Raises:
         yaml.YAMLError: If validation fails (except for optional missing files)
     """
-    # For optional includes, check existence first
-    if optional and not _file_exists(include_path):
-        return False
-
     _check_circular_include(include_path, include_chain, ctx)
     _check_include_depth(include_path, include_chain, max_include_depth, ctx)
+    _check_project_root(include_path, project_root, ctx, allowed_paths=allowed_paths)
+    if optional and not _file_exists(include_path):
+        return False
     if not optional:
         _check_file_exists(include_path, ctx)
-    _check_project_root(include_path, project_root, ctx)
     return True
 
 

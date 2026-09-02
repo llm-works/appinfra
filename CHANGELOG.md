@@ -10,6 +10,20 @@ For API stability guarantees and deprecation policy, see
 
 ## [Unreleased]
 
+## [0.10.4] - 2026-09-02
+
+### Added
+- `allowed_paths` on `yaml.load`, `yaml.load_file`, and `Config`: explicit
+  per-path allowlist that lets `!include*` reach specific files (e.g.
+  `["~/.myapp.yaml"]`) even when outside `project_root`. `!include*` also
+  now `~`-expands its path unconditionally (parity with `!path`). `!path` is
+  unchanged.
+
+### Fixed
+- `make check.raw` no longer reports a spurious failure when a pytest marker
+  bucket collects zero tests. Empty collection now renders as gray-skip,
+  matching `make check`.
+
 ## [0.10.3] - 2026-08-31
 
 ### Added
@@ -776,7 +790,8 @@ as config. Affected: `ConfigValidator`, `PG.readonly`, `PG.migrate()`,
 ### Changed
 - Package renamed to `appinfra` (install and import both use `appinfra`)
 
-[Unreleased]: https://github.com/llm-works/appinfra/compare/v0.10.3...HEAD
+[Unreleased]: https://github.com/llm-works/appinfra/compare/v0.10.4...HEAD
+[0.10.4]: https://github.com/llm-works/appinfra/compare/v0.10.3...v0.10.4
 [0.10.3]: https://github.com/llm-works/appinfra/compare/v0.10.2...v0.10.3
 [0.10.2]: https://github.com/llm-works/appinfra/compare/v0.10.1...v0.10.2
 [0.10.1]: https://github.com/llm-works/appinfra/compare/v0.10.0...v0.10.1

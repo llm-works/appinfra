@@ -79,6 +79,7 @@ def _preserve_config_attributes(config_instance: Any) -> dict[str, Any]:
         "enable_env_overrides": getattr(config_instance, "_enable_env_overrides", True),
         "env_prefix": getattr(config_instance, "_env_prefix", "INFRA_"),
         "merge_strategy": getattr(config_instance, "_merge_strategy", "replace"),
+        "allowed_paths": getattr(config_instance, "_allowed_paths", None),
     }
 
 
@@ -89,6 +90,7 @@ def _restore_config_attributes(
     config_instance._enable_env_overrides = preserved_attrs["enable_env_overrides"]
     config_instance._env_prefix = preserved_attrs["env_prefix"]
     config_instance._merge_strategy = preserved_attrs["merge_strategy"]
+    config_instance._allowed_paths = preserved_attrs["allowed_paths"]
 
 
 def _check_file_size(fname_path: Any) -> None:
@@ -131,6 +133,7 @@ def _load_yaml_with_includes(
     merge_strategy: str,
     project_root: Path | None = None,
     env_overrides: dict[str, str] | None = None,
+    allowed_paths: list[Path | str] | None = None,
 ) -> tuple[Any, dict[str, Path | None]]:
     """
     Load YAML file with include support.
@@ -141,6 +144,8 @@ def _load_yaml_with_includes(
         project_root: Optional project root to restrict includes (security feature)
         env_overrides: Optional explicit name→value map applied during
             include-time ${var} substitution (forwarded to yaml.load).
+        allowed_paths: Explicit list of paths that `!include*` may reach even
+            when outside project_root (forwarded to yaml.load).
     """
     from ..yaml import load as yaml_load
 
@@ -153,6 +158,7 @@ def _load_yaml_with_includes(
                 track_sources=True,
                 project_root=project_root,
                 env_overrides=env_overrides,
+                allowed_paths=allowed_paths,
             )
         except yaml.YAMLError as e:
             raise e
@@ -204,6 +210,7 @@ class Config(DotDict):
         enable_env_overrides: bool = True,
         env_prefix: str = "INFRA_",
         merge_strategy: str = "replace",
+        allowed_paths: list[Path | str] | None = None,
     ):
         """
         Initialize configuration from a YAML file with optional environment variable overrides.
@@ -214,6 +221,14 @@ class Config(DotDict):
             env_prefix: Prefix for environment variables (default: 'INFRA_')
             merge_strategy: Strategy for handling includes - "replace" or "merge" (default: "replace")
                            Note: Currently only "replace" is fully supported
+            allowed_paths: Optional list of specific paths (e.g. a user
+                overlay at `~/.myapp.yaml`) that `!include*` directives may
+                reach even when outside the project_root. Each entry is
+                `~`-expanded and resolved once; each include path is compared
+                against that set before the project_root guard fires. Use for
+                narrow, named files; avoid broad prefixes. `!path` is not
+                gated by this list — it remains a value-marshalling tag whose
+                use is the application's responsibility.
 
         Note:
             Path resolution is handled explicitly via the !path YAML tag. Use !path for paths
@@ -223,6 +238,7 @@ class Config(DotDict):
         self._enable_env_overrides = enable_env_overrides
         self._env_prefix = env_prefix
         self._merge_strategy = merge_strategy
+        self._allowed_paths = allowed_paths
         self._load(fname)
 
     def __setattr__(self, key: str, value: Any) -> None:
@@ -287,7 +303,11 @@ class Config(DotDict):
             else None
         )
         return _load_yaml_with_includes(
-            fname_path, self._merge_strategy, proj_root, env_overrides
+            fname_path,
+            self._merge_strategy,
+            proj_root,
+            env_overrides,
+            allowed_paths=self._allowed_paths,
         )
 
     def reload(self) -> Self:

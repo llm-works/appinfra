@@ -885,12 +885,14 @@ class TestHelperFunctions:
         mock_config._enable_env_overrides = False
         mock_config._env_prefix = "TEST_"
         mock_config._merge_strategy = "merge"
+        mock_config._allowed_paths = ["~/.myapp.yaml"]
 
         attrs = _preserve_config_attributes(mock_config)
 
         assert attrs["enable_env_overrides"] is False
         assert attrs["env_prefix"] == "TEST_"
         assert attrs["merge_strategy"] == "merge"
+        assert attrs["allowed_paths"] == ["~/.myapp.yaml"]
 
     def test_preserve_config_attributes_with_defaults(self):
         """Test preserving config attributes with missing attributes."""
@@ -902,6 +904,7 @@ class TestHelperFunctions:
         assert attrs["enable_env_overrides"] is True
         assert attrs["env_prefix"] == "INFRA_"
         assert attrs["merge_strategy"] == "replace"
+        assert attrs["allowed_paths"] is None
 
     def test_restore_config_attributes(self):
         """Test restoring config attributes."""
@@ -910,6 +913,7 @@ class TestHelperFunctions:
             "enable_env_overrides": False,
             "env_prefix": "CUSTOM_",
             "merge_strategy": "deep",
+            "allowed_paths": ["~/.myapp.yaml"],
         }
 
         _restore_config_attributes(mock_config, attrs)
@@ -917,6 +921,7 @@ class TestHelperFunctions:
         assert mock_config._enable_env_overrides is False
         assert mock_config._env_prefix == "CUSTOM_"
         assert mock_config._merge_strategy == "deep"
+        assert mock_config._allowed_paths == ["~/.myapp.yaml"]
 
 
 # =============================================================================
@@ -1852,3 +1857,84 @@ class TestResolveEtcDir:
                 assert result == custom_etc.resolve()
             finally:
                 os.chdir(original_cwd)
+
+
+class TestConfigAllowedPaths:
+    """Config-level integration for the allowed_paths per-path allowlist."""
+
+    def test_default_blocks_home_include(self, tmp_path, monkeypatch):
+        home = tmp_path / "home"
+        proj = tmp_path / "proj" / "etc"
+        home.mkdir(parents=True)
+        proj.mkdir(parents=True)
+        monkeypatch.setenv("HOME", str(home))
+        (home / ".overrides.yaml").write_text("db:\n  port: 9999\n")
+        cfg_file = proj / "config.yaml"
+        cfg_file.write_text('db:\n  port: 5432\nextra: !include "~/.overrides.yaml"\n')
+
+        import yaml as _yaml
+
+        with pytest.raises(_yaml.YAMLError, match="outside project root"):
+            Config(str(cfg_file), enable_env_overrides=False)
+
+    def test_allowlist_enables_named_overlay(self, tmp_path, monkeypatch):
+        home = tmp_path / "home"
+        proj = tmp_path / "proj" / "etc"
+        home.mkdir(parents=True)
+        proj.mkdir(parents=True)
+        monkeypatch.setenv("HOME", str(home))
+        (home / ".overrides.yaml").write_text("db:\n  port: 9999\n")
+        cfg_file = proj / "config.yaml"
+        cfg_file.write_text(
+            "db:\n  port: 5432\n  host: localhost\n"
+            '<<: !deep !include? "~/.overrides.yaml"\n'
+        )
+
+        cfg = Config(
+            str(cfg_file),
+            enable_env_overrides=False,
+            allowed_paths=["~/.overrides.yaml"],
+        )
+        assert cfg.db.port == 9999
+        assert cfg.db.host == "localhost"
+
+    def test_allowlist_does_not_unlock_siblings(self, tmp_path, monkeypatch):
+        """One allowlisted overlay does NOT permit reads of other home files."""
+        home = tmp_path / "home"
+        proj = tmp_path / "proj" / "etc"
+        home.mkdir(parents=True)
+        proj.mkdir(parents=True)
+        monkeypatch.setenv("HOME", str(home))
+        (home / ".overrides.yaml").write_text("v: 1\n")
+        (home / ".other.yaml").write_text("present: true\n")
+        cfg_file = proj / "config.yaml"
+        cfg_file.write_text('extra: !include "~/.other.yaml"\n')
+
+        import yaml as _yaml
+
+        with pytest.raises(_yaml.YAMLError, match="outside project root"):
+            Config(
+                str(cfg_file),
+                enable_env_overrides=False,
+                allowed_paths=["~/.overrides.yaml"],
+            )
+
+    def test_reload_preserves_allowlist(self, tmp_path, monkeypatch):
+        home = tmp_path / "home"
+        proj = tmp_path / "proj" / "etc"
+        home.mkdir(parents=True)
+        proj.mkdir(parents=True)
+        monkeypatch.setenv("HOME", str(home))
+        (home / ".overrides.yaml").write_text("v: 1\n")
+        cfg_file = proj / "config.yaml"
+        cfg_file.write_text('overlay: !include? "~/.overrides.yaml"\n')
+
+        cfg = Config(
+            str(cfg_file),
+            enable_env_overrides=False,
+            allowed_paths=["~/.overrides.yaml"],
+        )
+        assert cfg.overlay.v == 1
+        (home / ".overrides.yaml").write_text("v: 2\n")
+        cfg.reload()
+        assert cfg.overlay.v == 2
