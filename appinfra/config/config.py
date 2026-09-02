@@ -253,7 +253,8 @@ class Config(DotDict):
                 user overlay at `~/.myapp.yaml`) that absolute `!include*`
                 directives may reach. Each entry is `~`-expanded and resolved
                 once. Applies only to absolute / tilde-expanded includes —
-                relative includes stay bound to the auto-derived project_root.
+                relative includes stay bound to the effective project_root
+                (auto-derived, or overridden via the `project_root` parameter).
                 Use for narrow, named files; avoid broad prefixes. `!path` is
                 not gated by this list — it remains a value-marshalling tag
                 whose use is the application's responsibility.
