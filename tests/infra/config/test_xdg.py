@@ -104,6 +104,14 @@ class TestXdgCandidatesSkippedEntries:
         dirs = [c.parent.parent for c in candidates]
         assert dirs == [Path("/h"), Path("/h"), Path("/abs"), Path("/abs")]
 
+    def test_relative_home_falls_back_to_default(self, monkeypatch):
+        monkeypatch.setenv("XDG_CONFIG_HOME", "relative/path")
+        monkeypatch.setenv("XDG_CONFIG_DIRS", "/s")
+        candidates = xdg_candidates("ns", "pkg")
+        home = Path.home() / ".config"
+        assert candidates[0].parent.parent == home
+        assert candidates[1].parent.parent == home
+
 
 @pytest.mark.unit
 class TestXdgCandidatesOrdering:
