@@ -3669,6 +3669,20 @@ class TestAllowedPaths:
         data = load_file(main, project_root=proj, allowed_paths=["~/.absent.yaml"])
         assert data == {"overlay": {}}
 
+    def test_optional_non_allowlisted_missing_still_blocked(self, home_and_proj):
+        """Missing optional path outside project_root must still hit guard.
+
+        Ensures authorization happens before existence check - we reject the
+        path for being outside project_root, not silently return empty because
+        the file is missing.
+        """
+        _, proj = home_and_proj
+        main = proj / "main.yaml"
+        main.write_text('overlay: !include? "~/.absent.yaml"\n')
+
+        with pytest.raises(yaml.YAMLError, match="outside project root"):
+            load_file(main, project_root=proj)
+
     def test_deep_merge_overlay_pattern(self, home_and_proj):
         """Package-ships-defaults + user-overlay: <<: !deep !include? '~/.file#section'."""
         home, proj = home_and_proj

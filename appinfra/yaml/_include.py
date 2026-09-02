@@ -215,15 +215,13 @@ def _validate_include_standalone(
     Raises:
         yaml.YAMLError: If validation fails (except for optional missing files)
     """
-    # For optional includes, check existence first
-    if optional and not _file_exists(include_path):
-        return False
-
     _check_circular_include(include_path, include_chain, ctx)
     _check_include_depth(include_path, include_chain, max_include_depth, ctx)
+    _check_project_root(include_path, project_root, ctx, allowed_paths=allowed_paths)
+    if optional and not _file_exists(include_path):
+        return False
     if not optional:
         _check_file_exists(include_path, ctx)
-    _check_project_root(include_path, project_root, ctx, allowed_paths=allowed_paths)
     return True
 
 

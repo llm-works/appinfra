@@ -520,10 +520,6 @@ class Loader(yaml.SafeLoader):
         Returns:
             True if file exists and passes validation, False if optional and missing.
         """
-        # For optional includes, check existence first
-        if optional and not _file_exists(include_path):
-            return False
-
         location = ctx.format_location()
 
         # Check for circular includes
@@ -533,11 +529,14 @@ class Loader(yaml.SafeLoader):
                 f"Circular include detected: {chain_str} -> {include_path} ({location})"
             )
 
-        # Check if file exists (for required includes)
+        # Authorization check must happen before existence check to avoid
+        # leaking file existence info for paths outside project_root
+        self._check_project_root_security(include_path, ctx)
+
+        if optional and not _file_exists(include_path):
+            return False
         if not optional and not _file_exists(include_path):
             raise yaml.YAMLError(f"Include file not found: {include_path} ({location})")
-
-        self._check_project_root_security(include_path, ctx)
         return True
 
     def _store_include_source_map(self, data: Any, loader: Loader) -> None:
