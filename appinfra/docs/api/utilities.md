@@ -14,6 +14,7 @@ class Config(DotDict):
         enable_env_overrides: bool = True,
         env_prefix: str = "INFRA_",
         merge_strategy: str = "replace",
+        allowed_paths: list[Path | str] | None = None,
     ): ...
 
     def get(self, path: str, default=None) -> Any: ...
