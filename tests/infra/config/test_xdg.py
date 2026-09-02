@@ -146,9 +146,12 @@ class TestXdgCandidatesInterpolation:
         assert candidates[1].name == "config.yaml"
 
     def test_no_filesystem_probing(self, monkeypatch):
-        monkeypatch.setenv("XDG_CONFIG_HOME", "/nonexistent/path")
-        monkeypatch.setenv("XDG_CONFIG_DIRS", "/also/does/not/exist")
+        def fail_on_exists(self):
+            raise AssertionError("xdg_candidates must not probe the filesystem")
+
+        monkeypatch.setattr(Path, "exists", fail_on_exists)
+        monkeypatch.setenv("XDG_CONFIG_HOME", "/h")
+        monkeypatch.setenv("XDG_CONFIG_DIRS", "/s")
         candidates = xdg_candidates("ns", "pkg")
         assert len(candidates) == 4
-        for c in candidates:
-            assert not c.exists()
+        assert candidates[0] == Path("/h/ns/pkg.yaml")

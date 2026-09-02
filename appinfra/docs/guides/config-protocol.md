@@ -64,11 +64,17 @@ search order (home first, then system dirs; per-package before unified within ea
 base + overrides is the user's responsibility, expressed with `!include`:
 
 ```yaml
-# ~/.config/llm-works/llm-kelt.yaml
-!include /path/to/site-packages/llm_kelt/etc/llm-kelt.yaml
+# ~/.config/<namespace>/<package>.yaml
+!include <base-config-path>
 
 database:
   pool_size: 20   # override
+```
+
+To find the base config path for an installed package:
+
+```bash
+python -c "import myapp, pathlib; print(pathlib.Path(myapp.__file__).parent / 'etc' / 'myapp.yaml')"
 ```
 
 Absolute paths in `!include` require `allowed_paths` on the `Config` call. See
@@ -101,17 +107,24 @@ CLI flags and file values.
 ## Discovery helper
 
 ```python
+from pathlib import Path
+
 from appinfra.config import Config, xdg_candidates
 
+NAMESPACE = "myorg"
+PACKAGE = "myapp"
+BASE_CONFIG = Path(__file__).parent / "etc" / f"{PACKAGE}.yaml"
 
-def load_user_config(default_path: Path) -> Config:
-    for candidate in xdg_candidates("llm-works", "llm-kelt"):
+
+def load_user_config() -> Config:
+    for candidate in xdg_candidates(NAMESPACE, PACKAGE):
         if candidate.exists():
-            return Config(str(candidate))
-    return Config(str(default_path))
+            return Config(str(candidate), allowed_paths=[str(BASE_CONFIG.parent)])
+    return Config(str(BASE_CONFIG))
 ```
 
-`xdg_candidates` is a pure function — no filesystem probing. Full API contract in
+`xdg_candidates` is a pure function — no filesystem probing. The `allowed_paths` argument
+authorizes absolute `!include` paths in user overrides. Full API contract in
 [XDG Config Discovery](../api/config.md#xdg-config-discovery).
 
 ## See also

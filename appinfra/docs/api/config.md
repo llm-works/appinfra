@@ -164,8 +164,8 @@ def xdg_candidates(namespace: str, package: str) -> list[Path]: ...
 
 | Parameter | Description |
 |-----------|-------------|
-| `namespace` | Shared directory under each XDG dir (e.g. `"llm-works"`) |
-| `package`   | Per-package config basename without extension (e.g. `"llm-kelt"`) |
+| `namespace` | Shared directory under each XDG dir (e.g. `"myorg"`) |
+| `package`   | Per-package config basename without extension (e.g. `"myapp"`) |
 
 **Search order.** For each XDG dir in `[$XDG_CONFIG_HOME, *$XDG_CONFIG_DIRS]`,
 the per-package file precedes the unified file:
@@ -174,24 +174,28 @@ the per-package file precedes the unified file:
 - `D/<namespace>/config.yaml`
 
 Defaults per spec: `XDG_CONFIG_HOME` → `~/.config`, `XDG_CONFIG_DIRS` →
-`/etc/xdg`. Empty and non-absolute entries in `XDG_CONFIG_DIRS` are skipped.
+`/etc/xdg`. Non-absolute `XDG_CONFIG_HOME` falls back to the default; empty and
+non-absolute entries in `XDG_CONFIG_DIRS` are skipped.
 
 **Usage:**
 
 ```python
+from pathlib import Path
+
 from appinfra.config import Config, xdg_candidates
 
+BASE_CONFIG = Path(__file__).parent / "etc" / "myapp.yaml"
 
-def load_user_config(default_path: Path) -> Config:
-    for candidate in xdg_candidates("llm-works", "llm-kelt"):
+
+def load_user_config() -> Config:
+    for candidate in xdg_candidates("myorg", "myapp"):
         if candidate.exists():
-            return Config(str(candidate))
-    return Config(str(default_path))
+            return Config(str(candidate), allowed_paths=[str(BASE_CONFIG.parent)])
+    return Config(str(BASE_CONFIG))
 ```
 
-See [Config Protocol for llm-works packages](../guides/config-protocol.md) for
-the surrounding conventions (one-file-per-package load, `INFRA_*` env prefix,
-user override layout).
+See [Config Protocol](../guides/config-protocol.md) for the surrounding conventions
+(one-file-per-package load, `INFRA_*` env prefix, user override layout).
 
 ## Config Reload
 
