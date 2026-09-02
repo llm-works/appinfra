@@ -538,7 +538,7 @@ class Loader(yaml.SafeLoader):
         if include_path in ctx.allowed_paths:
             return
         inside_root = self._include_inside_project_root(include_path, ctx)
-        if inside_root and not ctx.allowed_paths:
+        if inside_root:
             return
         if ctx.project_root is None and not ctx.allowed_paths:
             return

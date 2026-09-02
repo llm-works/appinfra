@@ -416,3 +416,28 @@ def test_relative_include_bounded_by_project_root_when_set(tmp_path: Path):
 
     with pytest.raises(yaml.YAMLError, match="outside project root"):
         load_file(str(base), project_root=project)
+
+
+@pytest.mark.security
+@pytest.mark.integration
+def test_absolute_inside_project_root_with_allowed_paths_set(tmp_path: Path):
+    """
+    Regression guard: an absolute include that resolves inside project_root
+    is permitted even when allowed_paths is set for other files. The
+    authorization contract is "in allowed_paths OR inside project_root".
+
+    Attack Vector: Inadvertent denial when allowed_paths inadvertently
+    disables the project_root fallback for absolute includes.
+    Module: appinfra/yaml/loader.py (_authorize_absolute_include)
+    OWASP: A01:2021 - Broken Access Control (false positive variant)
+    """
+    from appinfra.yaml import load_file
+
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    (proj / "child.yaml").write_text("ok: true\n")
+    main = proj / "main.yaml"
+    main.write_text(f'x: !include "{proj}/child.yaml"\n')
+
+    result = load_file(str(main), project_root=proj, allowed_paths=["~/.other.yaml"])
+    assert result == {"x": {"ok": True}}
