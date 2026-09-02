@@ -2032,6 +2032,17 @@ class TestConfigProjectRootOverride:
         assert cfg.app == "base"
         assert cfg.models.model == "gpt"
 
+    def test_empty_string_preserves_auto_derivation(self, tmp_path):
+        """Empty string falls back to auto-derivation, same as None.
+
+        Guards against `os.environ.get("VAR", "")` accidentally setting
+        the security boundary to cwd via `Path("").resolve()`.
+        """
+        pkg_root, base = self._make_bundled_base(tmp_path)
+        cfg = Config(str(base), enable_env_overrides=False, project_root="")
+        assert cfg.app == "base"
+        assert cfg.models.model == "gpt"
+
     def test_override_string_path_is_expanded(self, tmp_path, monkeypatch):
         """String paths are `~`-expanded and resolved, matching the
         allowed_paths normalization contract."""

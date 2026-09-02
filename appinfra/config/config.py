@@ -281,9 +281,7 @@ class Config(DotDict):
         self._merge_strategy = merge_strategy
         self._allowed_paths = allowed_paths
         self._project_root_override = (
-            Path(str(project_root)).expanduser().resolve()
-            if project_root is not None
-            else None
+            Path(str(project_root)).expanduser().resolve() if project_root else None
         )
         self._load(fname)
 
