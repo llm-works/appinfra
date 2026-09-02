@@ -16,6 +16,7 @@ class Config(DotDict):
         enable_env_overrides: bool = True,
         env_prefix: str = "INFRA_",
         merge_strategy: str = "replace",
+        allowed_paths: list[Path | str] | None = None,
     ): ...
 
     def reload(self) -> Config: ...
@@ -32,6 +33,7 @@ class Config(DotDict):
 | `enable_env_overrides` | `True` | Apply environment variable overrides |
 | `env_prefix` | `"INFRA_"` | Prefix for environment variables |
 | `merge_strategy` | `"replace"` | Strategy for handling `!include` directives: `"replace"` (included content replaces target key) or `"merge"` (deep merge with existing). Note: only `"replace"` is currently fully supported |
+| `allowed_paths` | `None` | Explicit list of specific paths (e.g. `["~/.myapp.yaml"]`) that `!include*` directives may reach even when outside `project_root`. Each entry is `~`-expanded and resolved once; an include path bypasses the guard only if it resolves to an exact match. Use for narrow user-overlay patterns. See [YAML custom tags](utilities.md#custom-tags) for the overlay-pattern example. |
 
 **Basic Usage:**
 

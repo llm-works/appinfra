@@ -30,6 +30,7 @@ from ._include import (
     _resolve_include_path_standalone,
     _validate_include_standalone,
 )
+from ._utils import _normalize_allowed_paths
 from .loader import Loader, preprocess_deep_tags
 from .types import (
     DeepMergeWrapper,
@@ -57,6 +58,7 @@ class _LoadContext:
     project_root: Path | None
     max_include_depth: int
     env_overrides: dict[str, str] | None
+    allowed_paths: frozenset[Path]
 
 
 # Public API exports
@@ -129,7 +131,9 @@ def _resolve_and_validate_include(
     err_ctx = _create_document_error_context(ctx.current_file, line)
     resolved_root = ctx.project_root.resolve() if ctx.project_root else None
     include_path = _resolve_include_path_standalone(
-        include_path_str, ctx.current_file, err_ctx
+        include_path_str,
+        ctx.current_file,
+        err_ctx,
     )
     file_exists = _validate_include_standalone(
         include_path,
@@ -138,6 +142,7 @@ def _resolve_and_validate_include(
         ctx.max_include_depth,
         err_ctx,
         optional=optional,
+        allowed_paths=ctx.allowed_paths,
     )
     return include_path if file_exists else None
 
@@ -231,6 +236,7 @@ def _parse_yaml_content(
         project_root=ctx.project_root.resolve() if ctx.project_root else None,
         max_include_depth=ctx.max_include_depth,
         env_overrides=ctx.env_overrides,
+        allowed_paths=list(ctx.allowed_paths),
     )
     try:
         data = loader.get_single_data()
@@ -292,6 +298,7 @@ def load(
     project_root: Path | None = None,
     max_include_depth: int = 10,
     env_overrides: dict[str, str] | None = None,
+    allowed_paths: list[Path | str] | None = None,
     _include_chain: set[Path] | None = None,
 ) -> Any | tuple[Any, dict[str, Path | None]]:
     """
@@ -312,6 +319,12 @@ def load(
             include-time `${var}` substitution. Callers that want env-aware
             substitution (e.g. Config) pass an explicit map; standalone callers
             leave this None and get raw YAML values only.
+        allowed_paths: Optional list of specific paths that `!include*` may
+            reach even when outside `project_root`. Each entry is `~`-expanded
+            and resolved once; each include path is compared against that set
+            before the project_root guard fires. Use for narrow user-overlay
+            patterns (e.g. `["~/.myapp.yaml"]`). `!path` is untouched (it
+            remains a value-marshalling tag, not a load-time resource read).
     """
     ctx = _LoadContext(
         current_file=current_file,
@@ -321,6 +334,7 @@ def load(
         project_root=project_root,
         max_include_depth=max_include_depth,
         env_overrides=env_overrides,
+        allowed_paths=_normalize_allowed_paths(allowed_paths),
     )
     return _load_with_context(ctx, stream)
 
@@ -352,6 +366,7 @@ def load_file(
     project_root: Path | None = ...,
     max_include_depth: int = ...,
     optional: bool = ...,
+    allowed_paths: list[Path | str] | None = ...,
 ) -> Any: ...
 
 
@@ -363,6 +378,7 @@ def load_file(
     project_root: Path | None = ...,
     max_include_depth: int = ...,
     optional: bool = ...,
+    allowed_paths: list[Path | str] | None = ...,
 ) -> tuple[Any, dict[str, Path | None]]: ...
 
 
@@ -373,6 +389,7 @@ def load_file(
     project_root: Path | None = None,
     max_include_depth: int = 10,
     optional: bool = False,
+    allowed_paths: list[Path | str] | None = None,
 ) -> Any | tuple[Any, dict[str, Path | None]]:
     """
     Load YAML from a file with automatic file context for includes.
@@ -388,6 +405,8 @@ def load_file(
         max_include_depth: Max nested include depth (default: 10)
         optional: If True, return empty dict (or ({}, {}) with track_sources)
             when file doesn't exist instead of raising FileNotFoundError
+        allowed_paths: Optional list of specific paths that `!include*` may
+            reach even when outside `project_root`. See `load()` for detail.
 
     Example:
         config = load_file('etc/config.yaml')
@@ -403,6 +422,7 @@ def load_file(
                 track_sources=track_sources,
                 project_root=project_root,
                 max_include_depth=max_include_depth,
+                allowed_paths=allowed_paths,
             )
     except FileNotFoundError:
         if optional:
