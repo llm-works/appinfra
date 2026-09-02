@@ -232,20 +232,24 @@ class Loader(yaml.SafeLoader):
             include_chain: Set of files in the current include chain (for circular detection)
             merge_strategy: Strategy for merging includes - "replace" or "merge"
             track_sources: If True, track source file for each value (for path resolution)
-            project_root: Optional project root path to restrict includes (prevents path traversal)
+            project_root: Optional project root path. Relative `!include*`
+                paths are bounded to this directory; absolute (or tilde-
+                expanded) `!include*` paths are permitted only when they
+                resolve inside it (or match `allowed_paths` below).
             max_include_depth: Maximum allowed depth for nested includes (default: 10)
             env_overrides: Optional explicit name→value map applied during
                 include-time `${var}` substitution. Used by Config to inject
                 its INFRA_* overrides so URL strings pick up env values.
                 Standalone callers leave this None.
-            allowed_paths: Optional list of specific paths that `!include*` may
-                reach even when outside `project_root`. Each entry is expanded
-                (~) and resolved once at loader init; each include path is
-                compared against that set before the project_root guard fires.
-                Use for narrow user-overlay patterns (e.g.
-                `["~/.myapp.yaml"]`); avoid broad prefixes. Paths not in the
-                list still hit the guard as before. `!path` is untouched — it
-                remains a value-marshalling tag, not a load-time resource read.
+            allowed_paths: Optional list of specific absolute paths that
+                `!include*` may reach. Each entry is expanded (~) and
+                resolved once at loader init. Applies only to absolute /
+                tilde-expanded includes — relative includes stay bound to
+                `project_root`. Use for narrow user-overlay patterns (e.g.
+                `["~/.myapp.yaml"]`). Absolute includes that are neither in
+                this list nor inside `project_root` are denied. `!path` is
+                untouched — it remains a value-marshalling tag, not a load-
+                time resource read.
         """
         super().__init__(stream)
         self.current_file = current_file
@@ -458,7 +462,9 @@ class Loader(yaml.SafeLoader):
 
         return mapping
 
-    def _resolve_include_path(self, include_path_str: str, ctx: IncludeContext) -> Path:
+    def _resolve_include_path(
+        self, include_path_str: str, ctx: IncludeContext
+    ) -> tuple[Path, bool]:
         """
         Resolve include path to absolute path.
 
@@ -471,48 +477,106 @@ class Loader(yaml.SafeLoader):
             ctx: Include context for error reporting
 
         Returns:
-            Resolved absolute path
+            Tuple of (resolved absolute path, was_absolute) where was_absolute
+            is True when the original include string was absolute (either a
+            leading `/` or a `~` that tilde-expanded to one). The flag drives
+            the two-shape authorization contract in
+            `_check_project_root_security`.
 
         Raises:
             yaml.YAMLError: If relative path cannot be resolved
         """
         include_path = Path(os.path.expanduser(include_path_str))
+        was_absolute = include_path.is_absolute()
 
-        if not include_path.is_absolute():
+        if not was_absolute:
             # Relative path - resolve from current file's directory
             if ctx.current_file is None:
                 raise yaml.YAMLError(
                     f"Cannot resolve relative include path '{include_path_str}' "
                     f"without a current file context ({ctx.format_location()})"
                 )
-            return (ctx.current_file.parent / include_path).resolve()
+            return (ctx.current_file.parent / include_path).resolve(), False
 
-        return include_path.resolve()
+        return include_path.resolve(), True
 
     def _check_project_root_security(
+        self, include_path: Path, ctx: IncludeContext, was_absolute: bool
+    ) -> None:
+        """Enforce the include-authorization contract.
+
+        Relative includes are bounded to project_root when it is set and
+        unbounded otherwise (the YAML author owns the file's layout).
+        Absolute or tilde-expanded includes follow stricter rules: when
+        `allowed_paths` is set they must appear in it or resolve inside
+        project_root; when only project_root is set they must resolve
+        inside it; when neither is set no boundary is enforced.
+        """
+        if not was_absolute:
+            self._authorize_relative_include(include_path, ctx)
+            return
+        self._authorize_absolute_include(include_path, ctx)
+
+    def _authorize_relative_include(
         self, include_path: Path, ctx: IncludeContext
     ) -> None:
-        """Raise error if include path is outside project root.
-
-        Paths listed in `ctx.allowed_paths` bypass the guard — an explicit,
-        per-path opt-in for narrow overlay use cases (e.g. `~/.myapp.yaml`).
-        Any include not in that list still hits the guard.
-        """
         if ctx.project_root is None:
-            return
-        if include_path in ctx.allowed_paths:
             return
         try:
             include_path.relative_to(ctx.project_root)
         except (ValueError, TypeError):
             location = ctx.format_location()
             raise yaml.YAMLError(
-                f"Security: Include path '{include_path}' is outside project root "
-                f"'{ctx.project_root}'. This could be a path traversal attack. ({location})"
+                f"Security: Include path '{include_path}' is outside project "
+                f"root '{ctx.project_root}'. This could be a path traversal "
+                f"attack. ({location})"
             )
 
+    def _authorize_absolute_include(
+        self, include_path: Path, ctx: IncludeContext
+    ) -> None:
+        if include_path in ctx.allowed_paths:
+            return
+        inside_root = self._include_inside_project_root(include_path, ctx)
+        if inside_root:
+            return
+        if ctx.project_root is None and not ctx.allowed_paths:
+            return
+        self._raise_absolute_not_authorized(include_path, ctx)
+
+    def _include_inside_project_root(
+        self, include_path: Path, ctx: IncludeContext
+    ) -> bool:
+        if ctx.project_root is None:
+            return False
+        try:
+            include_path.relative_to(ctx.project_root)
+        except (ValueError, TypeError):
+            return False
+        return True
+
+    def _raise_absolute_not_authorized(
+        self, include_path: Path, ctx: IncludeContext
+    ) -> None:
+        location = ctx.format_location()
+        if ctx.allowed_paths:
+            raise yaml.YAMLError(
+                f"Security: Absolute include path '{include_path}' is not "
+                f"authorized. Add it to allowed_paths, or place it inside "
+                f"project_root. ({location})"
+            )
+        raise yaml.YAMLError(
+            f"Security: Include path '{include_path}' is outside project root "
+            f"'{ctx.project_root}'. This could be a path traversal attack. "
+            f"({location})"
+        )
+
     def _validate_include(
-        self, include_path: Path, ctx: IncludeContext, optional: bool = False
+        self,
+        include_path: Path,
+        ctx: IncludeContext,
+        was_absolute: bool,
+        optional: bool = False,
     ) -> bool:
         """
         Validate include path for circular dependencies, existence, and security.
@@ -530,8 +594,8 @@ class Loader(yaml.SafeLoader):
             )
 
         # Authorization check must happen before existence check to avoid
-        # leaking file existence info for paths outside project_root
-        self._check_project_root_security(include_path, ctx)
+        # leaking file existence info for paths outside the authorized surface
+        self._check_project_root_security(include_path, ctx, was_absolute)
 
         if optional and not _file_exists(include_path):
             return False
@@ -668,10 +732,12 @@ class Loader(yaml.SafeLoader):
             section_path = ""
 
         # Simple pipeline: resolve → validate → load → extract section
-        include_path = self._resolve_include_path(include_path_str, ctx)
+        include_path, was_absolute = self._resolve_include_path(include_path_str, ctx)
 
         # Validation returns False for optional missing files
-        file_exists = self._validate_include(include_path, ctx, optional=optional)
+        file_exists = self._validate_include(
+            include_path, ctx, was_absolute, optional=optional
+        )
         if not file_exists:
             return DeepMergeDict({})  # Consistent wrapping for missing optional
 
@@ -763,8 +829,10 @@ class Loader(yaml.SafeLoader):
             include_path_str = include_spec
             section_path = ""
 
-        include_path = self._resolve_include_path(include_path_str, ctx)
-        file_exists = self._validate_include(include_path, ctx, optional=optional)
+        include_path, was_absolute = self._resolve_include_path(include_path_str, ctx)
+        file_exists = self._validate_include(
+            include_path, ctx, was_absolute, optional=optional
+        )
         if not file_exists:
             return DeepMergeWrapper({}, override=True)
 

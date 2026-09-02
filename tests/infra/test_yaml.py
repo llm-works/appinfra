@@ -652,22 +652,26 @@ class TestSecurityValidation:
         ],
     )
     def test_path_traversal_to_nonexistent_files(self, yaml_files_dir, payload):
-        """Test that path traversal to non-existent files fails gracefully."""
-        # Create a YAML with path traversal attempt to non-existent file
+        """Test that path traversal to non-existent files fails gracefully.
+
+        Both outcomes are acceptable: a relative path may fall through to
+        the existence check ("Include file not found"), while an absolute
+        path fails at the authorization check before existence is probed
+        ("is not authorized"). Either way the loader must raise, not crash.
+        """
         yaml_content = f"""
 data: !include "{payload}"
 """
-        # Should fail with file not found, not crash
-        with pytest.raises(yaml.YAMLError, match="Include file not found"):
+        with pytest.raises(
+            yaml.YAMLError, match="Include file not found|is not authorized"
+        ):
             load(StringIO(yaml_content), current_file=yaml_files_dir / "test.yaml")
 
     def test_absolute_path_to_nonexistent_file(self, yaml_files_dir):
         """Test absolute paths to non-existent files fail."""
-        # Try to include non-existent absolute path
         yaml_content = """
 data: !include "/nonexistent/absolute/path/config.yaml"
 """
-        # Should fail with file not found
         with pytest.raises(yaml.YAMLError, match="Include file not found"):
             load(StringIO(yaml_content), current_file=yaml_files_dir / "test.yaml")
 
@@ -3658,7 +3662,7 @@ class TestAllowedPaths:
         main = proj / "main.yaml"
         main.write_text('extra: !include "~/.other.yaml"\n')
 
-        with pytest.raises(yaml.YAMLError, match="outside project root"):
+        with pytest.raises(yaml.YAMLError, match="is not authorized"):
             load_file(main, project_root=proj, allowed_paths=["~/.overlay.yaml"])
 
     def test_optional_allowlisted_include_missing_returns_empty(self, home_and_proj):
@@ -3710,7 +3714,7 @@ class TestAllowedPaths:
         main = proj / "main.yaml"
         main.write_text(f'extra: !include "{outside}/other.yaml"\n')
 
-        with pytest.raises(yaml.YAMLError, match="outside project root"):
+        with pytest.raises(yaml.YAMLError, match="is not authorized"):
             load_file(main, project_root=proj, allowed_paths=["~/.overlay.yaml"])
 
     def test_document_level_include_honors_allowlist(self, home_and_proj):

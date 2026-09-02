@@ -104,14 +104,36 @@ def _check_file_size(fname_path: Any) -> None:
         )
 
 
+def _has_yaml_config_marker(etc_dir: Path) -> bool:
+    """Return True if etc_dir contains at least one *.yaml or *.yml file.
+
+    A yaml file directly under etc/ marks the ancestor as a real project
+    root. A bare etc/ directory with no yaml children does not qualify —
+    a would-be project root that ships zero yaml is not one.
+    """
+    try:
+        for entry in etc_dir.iterdir():
+            if entry.is_file() and entry.suffix in (".yaml", ".yml"):
+                return True
+    except OSError:
+        pass
+    return False
+
+
 def _get_project_root_from_config(config_path: Path) -> Path | None:
     """
     Determine project root from config file location.
 
     Searches upward from the config file's directory for a directory
-    containing an 'etc' folder. This allows appinfra to work correctly
-    when used as a submodule, where the consuming project's config
-    defines the security boundary.
+    containing an 'etc' folder with at least one yaml file inside it.
+    This allows appinfra to work correctly when used as a submodule,
+    where the consuming project's config defines the security boundary.
+
+    The walk requires the etc/ directory to contain at least one *.yaml
+    or *.yml file (see _has_yaml_config_marker) and never accepts the
+    filesystem root as a match. When the walk finds no qualifying
+    ancestor, the config file's own parent directory is returned
+    instead.
 
     Args:
         config_path: Resolved path to the config file being loaded
@@ -119,12 +141,13 @@ def _get_project_root_from_config(config_path: Path) -> Path | None:
     Returns:
         Path to project root, or None if not determinable
     """
-    # Search upward from the config file's directory
     for parent in config_path.parents:
-        if (parent / "etc").is_dir():
+        if parent == parent.parent:
+            break
+        etc_dir = parent / "etc"
+        if etc_dir.is_dir() and _has_yaml_config_marker(etc_dir):
             return parent
 
-    # Fallback: use config file's parent directory
     return config_path.parent
 
 
@@ -221,14 +244,14 @@ class Config(DotDict):
             env_prefix: Prefix for environment variables (default: 'INFRA_')
             merge_strategy: Strategy for handling includes - "replace" or "merge" (default: "replace")
                            Note: Currently only "replace" is fully supported
-            allowed_paths: Optional list of specific paths (e.g. a user
-                overlay at `~/.myapp.yaml`) that `!include*` directives may
-                reach even when outside the project_root. Each entry is
-                `~`-expanded and resolved once; each include path is compared
-                against that set before the project_root guard fires. Use for
-                narrow, named files; avoid broad prefixes. `!path` is not
-                gated by this list — it remains a value-marshalling tag whose
-                use is the application's responsibility.
+            allowed_paths: Optional list of specific absolute paths (e.g. a
+                user overlay at `~/.myapp.yaml`) that absolute `!include*`
+                directives may reach. Each entry is `~`-expanded and resolved
+                once. Applies only to absolute / tilde-expanded includes —
+                relative includes stay bound to the auto-derived project_root.
+                Use for narrow, named files; avoid broad prefixes. `!path` is
+                not gated by this list — it remains a value-marshalling tag
+                whose use is the application's responsibility.
 
         Note:
             Path resolution is handled explicitly via the !path YAML tag. Use !path for paths

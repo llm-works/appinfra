@@ -80,7 +80,9 @@ malicious_include: !include {malicious_yaml}
             )
 
             # The include should be blocked because malicious_yaml is outside project_root
-            with pytest.raises(yaml.YAMLError, match="outside project root"):
+            with pytest.raises(
+                yaml.YAMLError, match="outside project root|is not authorized"
+            ):
                 loader.get_single_data()
 
         # Stage 4: Test second defense layer - even without project_root restriction
