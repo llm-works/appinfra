@@ -22,6 +22,7 @@ appinfra docs find <text>        # Search documentation for text
 - [Config-Based Logging](guides/config-based-logging.md) - YAML-based logging setup
 - [Hot-Reload Logging](guides/hot-reload-logging.md) - Dynamic config reloading without restart
 - [Environment Variables](guides/environment-variables.md) - Override config with env vars
+- [Config Protocol](guides/config-protocol.md) - XDG discovery, `INFRA_*`, one-file rule
 - [PostgreSQL Test Helper](guides/pg-test-helper.md) - Testing with PostgreSQL
 - [Pytest Plugin](guides/pytest-plugin.md) - Framework pytest plugin and fixtures
 - [Framework Integration](guides/framework-integration.md) - Integrating with external frameworks

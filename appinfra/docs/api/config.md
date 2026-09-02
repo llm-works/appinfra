@@ -149,6 +149,50 @@ models:
 
 See [YAML Tags](utilities.md#yaml-tags) for more details on `!path` and other custom tags.
 
+## XDG Config Discovery
+
+`xdg_candidates` enumerates candidate config file paths for a namespaced package
+in [XDG Base Directory](https://specifications.freedesktop.org/basedir-spec/latest/)
+load-order. Pure function — no filesystem I/O; callers iterate the list and load
+the first existing entry.
+
+```python
+def xdg_candidates(namespace: str, package: str) -> list[Path]: ...
+```
+
+**Parameters:**
+
+| Parameter | Description |
+|-----------|-------------|
+| `namespace` | Shared directory under each XDG dir (e.g. `"llm-works"`) |
+| `package`   | Per-package config basename without extension (e.g. `"llm-kelt"`) |
+
+**Search order.** For each XDG dir in `[$XDG_CONFIG_HOME, *$XDG_CONFIG_DIRS]`,
+the per-package file precedes the unified file:
+
+- `D/<namespace>/<package>.yaml`
+- `D/<namespace>/config.yaml`
+
+Defaults per spec: `XDG_CONFIG_HOME` → `~/.config`, `XDG_CONFIG_DIRS` →
+`/etc/xdg`. Empty and non-absolute entries in `XDG_CONFIG_DIRS` are skipped.
+
+**Usage:**
+
+```python
+from appinfra.config import Config, xdg_candidates
+
+
+def load_user_config(default_path: Path) -> Config:
+    for candidate in xdg_candidates("llm-works", "llm-kelt"):
+        if candidate.exists():
+            return Config(str(candidate))
+    return Config(str(default_path))
+```
+
+See [Config Protocol for llm-works packages](../guides/config-protocol.md) for
+the surrounding conventions (one-file-per-package load, `INFRA_*` env prefix,
+user override layout).
+
 ## Config Reload
 
 Reload configuration from disk:
