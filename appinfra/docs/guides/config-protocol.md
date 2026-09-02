@@ -77,8 +77,10 @@ To find the base config path for an installed package:
 python -c "import myapp, pathlib; print(pathlib.Path(myapp.__file__).parent / 'etc' / 'myapp.yaml')"
 ```
 
-Absolute paths in `!include` require `allowed_paths` on the `Config` call. See
-[Config](../api/config.md#config).
+Loading an overlay that pulls in a base config outside the overlay's own
+directory requires the caller to widen the include-authorization boundary.
+See the discovery-helper example below and [Config](../api/config.md#config)
+for the `project_root` and `allowed_paths` arguments.
 
 ### 4. `INFRA_*` is the only config-override env prefix
 
@@ -114,17 +116,30 @@ from appinfra.config import Config, xdg_candidates
 NAMESPACE = "myorg"
 PACKAGE = "myapp"
 BASE_CONFIG = Path(__file__).parent / "etc" / f"{PACKAGE}.yaml"
+PACKAGE_ROOT = BASE_CONFIG.parent.parent  # anchors include-authorization
 
 
 def load_user_config() -> Config:
     for candidate in xdg_candidates(NAMESPACE, PACKAGE):
         if candidate.exists():
-            return Config(str(candidate), allowed_paths=[str(BASE_CONFIG.parent)])
+            return Config(str(candidate), project_root=PACKAGE_ROOT)
     return Config(str(BASE_CONFIG))
 ```
 
-`xdg_candidates` is a pure function — no filesystem probing. The `allowed_paths` argument
-authorizes absolute `!include` paths in user overrides. Full API contract in
+`xdg_candidates` is a pure function — no filesystem probing.
+
+`project_root=PACKAGE_ROOT` widens the include-authorization boundary to the
+package's install directory when loading a user overlay. Without it, the
+boundary auto-derives from the overlay's own ancestry (typically
+`$XDG_CONFIG_HOME/<namespace>/`), which cannot reach the bundled base:
+both the overlay's absolute `!include <BASE_CONFIG>` and the base's own
+relative sibling `!include './...'` directives would be rejected as path
+traversal. Setting `project_root` to the package install directory
+authorizes the base and all its packaged siblings in one call.
+
+Use `allowed_paths` instead when the overlay references a narrow, named file
+outside the package root (e.g. a shared config elsewhere on disk); the two
+arguments compose. Full API contract in
 [XDG Config Discovery](../api/config.md#xdg-config-discovery).
 
 ## See also

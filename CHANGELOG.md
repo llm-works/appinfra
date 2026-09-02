@@ -16,6 +16,9 @@ For API stability guarantees and deprecation policy, see
   before unified within each dir; `$XDG_CONFIG_HOME` before
   `$XDG_CONFIG_DIRS`). See
   [Config Protocol](appinfra/docs/guides/config-protocol.md).
+- `Config(project_root=...)`: override the include-authorization boundary.
+  Required for user overlays that `!include` a bundled base whose own
+  siblings must resolve inside the package. Corrected in the v1 guide.
 
 ### Changed
 - `yaml.load`/`yaml.load_file`/`Config`: relative and absolute
