@@ -3614,3 +3614,116 @@ class TestDeepIncludeChainSyntax:
         main_content = 'db:\n  host: only-me\n\n<<: !include? "./absent.yaml" !deep\n'
         data = load(StringIO(main_content), current_file=tmp_path / "main.yaml")
         assert data["db"] == {"host": "only-me"}
+
+
+class TestAllowedPaths:
+    """Tests for the allowed_paths per-path allowlist on !include*.
+
+    Splits home from project via monkeypatched HOME so tilde-notation in
+    tests never touches the real user home.
+    """
+
+    @pytest.fixture
+    def home_and_proj(self, tmp_path, monkeypatch):
+        home = tmp_path / "home"
+        proj = tmp_path / "proj"
+        home.mkdir()
+        proj.mkdir()
+        monkeypatch.setenv("HOME", str(home))
+        return home, proj
+
+    def test_allowlisted_path_bypasses_guard(self, home_and_proj):
+        home, proj = home_and_proj
+        (home / ".overlay.yaml").write_text("db:\n  port: 9999\n")
+        main = proj / "main.yaml"
+        main.write_text('overlay: !include "~/.overlay.yaml"\n')
+
+        data = load_file(main, project_root=proj, allowed_paths=["~/.overlay.yaml"])
+        assert data == {"overlay": {"db": {"port": 9999}}}
+
+    def test_home_include_blocked_by_default(self, home_and_proj):
+        home, proj = home_and_proj
+        (home / ".overlay.yaml").write_text("db:\n  port: 9999\n")
+        main = proj / "main.yaml"
+        main.write_text('overlay: !include "~/.overlay.yaml"\n')
+
+        with pytest.raises(yaml.YAMLError, match="outside project root"):
+            load_file(main, project_root=proj)
+
+    def test_non_allowlisted_home_path_still_blocked(self, home_and_proj):
+        """Allowlisting one file does NOT unlock all of home."""
+        home, proj = home_and_proj
+        (home / ".overlay.yaml").write_text("v: 1\n")
+        (home / ".other.yaml").write_text("present: true\n")
+        main = proj / "main.yaml"
+        main.write_text('extra: !include "~/.other.yaml"\n')
+
+        with pytest.raises(yaml.YAMLError, match="outside project root"):
+            load_file(main, project_root=proj, allowed_paths=["~/.overlay.yaml"])
+
+    def test_optional_allowlisted_include_missing_returns_empty(self, home_and_proj):
+        _, proj = home_and_proj
+        main = proj / "main.yaml"
+        main.write_text('overlay: !include? "~/.absent.yaml"\n')
+
+        data = load_file(main, project_root=proj, allowed_paths=["~/.absent.yaml"])
+        assert data == {"overlay": {}}
+
+    def test_deep_merge_overlay_pattern(self, home_and_proj):
+        """Package-ships-defaults + user-overlay: <<: !deep !include? '~/.file#section'."""
+        home, proj = home_and_proj
+        (home / ".overlay.yaml").write_text("myapp:\n  db:\n    host: overlay-host\n")
+        main = proj / "main.yaml"
+        main.write_text(
+            "db:\n"
+            "  host: default-host\n"
+            "  port: 5432\n"
+            '<<: !deep !include? "~/.overlay.yaml#myapp"\n'
+        )
+
+        data = load_file(main, project_root=proj, allowed_paths=["~/.overlay.yaml"])
+        assert data["db"] == {"host": "overlay-host", "port": 5432}
+
+    def test_absolute_traversal_still_blocked_with_allowlist(
+        self, home_and_proj, tmp_path
+    ):
+        """Non-allowlisted absolute paths hit the guard regardless."""
+        home, proj = home_and_proj
+        (home / ".overlay.yaml").write_text("v: 1\n")
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        (outside / "other.yaml").write_text("present: true\n")
+        main = proj / "main.yaml"
+        main.write_text(f'extra: !include "{outside}/other.yaml"\n')
+
+        with pytest.raises(yaml.YAMLError, match="outside project root"):
+            load_file(main, project_root=proj, allowed_paths=["~/.overlay.yaml"])
+
+    def test_document_level_include_honors_allowlist(self, home_and_proj):
+        home, proj = home_and_proj
+        (home / ".base.yaml").write_text("name: overlay\n")
+        main = proj / "main.yaml"
+        main.write_text('!include? "~/.base.yaml"\nversion: 1\n')
+
+        data = load_file(main, project_root=proj, allowed_paths=["~/.base.yaml"])
+        assert data == {"name": "overlay", "version": 1}
+
+    def test_allowlist_accepts_pathlib_and_str_mixed(self, home_and_proj):
+        home, proj = home_and_proj
+        (home / ".overlay.yaml").write_text("v: 1\n")
+        main = proj / "main.yaml"
+        main.write_text('overlay: !include "~/.overlay.yaml"\n')
+
+        data = load_file(
+            main, project_root=proj, allowed_paths=[Path("~/.overlay.yaml")]
+        )
+        assert data == {"overlay": {"v": 1}}
+
+    def test_no_project_root_allowlist_is_noop(self, home_and_proj):
+        """Without project_root the guard is off; allowlist doesn't change data."""
+        home, proj = home_and_proj
+        (home / ".overlay.yaml").write_text("v: 42\n")
+        main = proj / "main.yaml"
+        main.write_text('overlay: !include "~/.overlay.yaml"\n')
+
+        assert load_file(main) == load_file(main, allowed_paths=["~/.overlay.yaml"])

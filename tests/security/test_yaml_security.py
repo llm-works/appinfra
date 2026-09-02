@@ -277,3 +277,41 @@ def test_yaml_null_byte_in_include_path(payload: str, secure_temp_project: Path)
                 project_root=secure_temp_project,
             )
             loader.get_single_data()
+
+
+@pytest.mark.security
+@pytest.mark.integration
+def test_allowed_paths_does_not_broaden_beyond_listed_entries(
+    secure_temp_project: Path, tmp_path: Path
+):
+    """
+    Verify allowed_paths bypasses project_root ONLY for the explicit entries
+    it names — allowlisting one file does not silently permit siblings.
+
+    Attack Vector: Assumption that an opt-in for one overlay unlocks a
+    directory or a wider surface.
+    Module: appinfra/yaml/loader.py (_check_project_root_security)
+    OWASP: A01:2021 - Broken Access Control
+
+    Security Concern: The caller opts into a specific overlay path (e.g.
+    ~/.myapp.yaml). If the guard treated the allowlist as a prefix or
+    directory grant, an attacker could reach adjacent files by name. This
+    test pins the bypass at exact-path membership.
+    """
+    outside = tmp_path / "outside_home"
+    outside.mkdir()
+    (outside / "allowed.yaml").write_text("ok: true\n")
+    (outside / "sibling.yaml").write_text("leaked: true\n")
+
+    config_path = secure_temp_project / "main.yaml"
+    config_path.write_text(f'data: !include "{outside}/sibling.yaml"\n')
+
+    with open(config_path) as f:
+        loader = Loader(
+            f,
+            current_file=config_path,
+            project_root=secure_temp_project,
+            allowed_paths=[str(outside / "allowed.yaml")],
+        )
+        with pytest.raises(yaml.YAMLError, match="outside project root"):
+            loader.get_single_data()

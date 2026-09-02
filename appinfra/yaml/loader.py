@@ -26,7 +26,7 @@ from typing import Any
 import yaml  # type: ignore[import-untyped]
 
 from ._include import _extract_section_data
-from ._utils import _file_exists
+from ._utils import _file_exists, _normalize_allowed_paths
 from .types import (
     DeepMergeDict,
     DeepMergeWrapper,
@@ -221,6 +221,7 @@ class Loader(yaml.SafeLoader):
         project_root: Path | None = None,
         max_include_depth: int = 10,
         env_overrides: dict[str, str] | None = None,
+        allowed_paths: list[Path | str] | None = None,
     ) -> None:
         """
         Initialize the loader with include support.
@@ -237,6 +238,14 @@ class Loader(yaml.SafeLoader):
                 include-time `${var}` substitution. Used by Config to inject
                 its INFRA_* overrides so URL strings pick up env values.
                 Standalone callers leave this None.
+            allowed_paths: Optional list of specific paths that `!include*` may
+                reach even when outside `project_root`. Each entry is expanded
+                (~) and resolved once at loader init; each include path is
+                compared against that set before the project_root guard fires.
+                Use for narrow user-overlay patterns (e.g.
+                `["~/.myapp.yaml"]`); avoid broad prefixes. Paths not in the
+                list still hit the guard as before. `!path` is untouched — it
+                remains a value-marshalling tag, not a load-time resource read.
         """
         super().__init__(stream)
         self.current_file = current_file
@@ -246,6 +255,7 @@ class Loader(yaml.SafeLoader):
         self.project_root = project_root.resolve() if project_root else None
         self.max_include_depth = max_include_depth
         self.env_overrides = env_overrides
+        self.allowed_paths = _normalize_allowed_paths(allowed_paths)
         self.source_map: dict[str, Path | None] = {}
         self._path_stack: list = []  # Stack to track current config path during construction
         self._pending_include_maps: dict[
@@ -452,6 +462,10 @@ class Loader(yaml.SafeLoader):
         """
         Resolve include path to absolute path.
 
+        Tilde is expanded unconditionally (parity with !path). This is a UX
+        affordance — the expanded path still has to satisfy the project_root
+        guard or match an entry in `allowed_paths`.
+
         Args:
             include_path_str: Path string from !include tag
             ctx: Include context for error reporting
@@ -462,7 +476,7 @@ class Loader(yaml.SafeLoader):
         Raises:
             yaml.YAMLError: If relative path cannot be resolved
         """
-        include_path = Path(include_path_str)
+        include_path = Path(os.path.expanduser(include_path_str))
 
         if not include_path.is_absolute():
             # Relative path - resolve from current file's directory
@@ -478,8 +492,15 @@ class Loader(yaml.SafeLoader):
     def _check_project_root_security(
         self, include_path: Path, ctx: IncludeContext
     ) -> None:
-        """Raise error if include path is outside project root."""
+        """Raise error if include path is outside project root.
+
+        Paths listed in `ctx.allowed_paths` bypass the guard — an explicit,
+        per-path opt-in for narrow overlay use cases (e.g. `~/.myapp.yaml`).
+        Any include not in that list still hits the guard.
+        """
         if ctx.project_root is None:
+            return
+        if include_path in ctx.allowed_paths:
             return
         try:
             include_path.relative_to(ctx.project_root)
@@ -562,6 +583,7 @@ class Loader(yaml.SafeLoader):
                 project_root=ctx.project_root,
                 max_include_depth=ctx.max_include_depth,
                 env_overrides=self.env_overrides,
+                allowed_paths=list(ctx.allowed_paths),
             )
             try:
                 included_data = included_loader.get_single_data()
@@ -618,6 +640,7 @@ class Loader(yaml.SafeLoader):
             include_chain=frozenset(self.include_chain),
             project_root=self.project_root,
             max_include_depth=self.max_include_depth,
+            allowed_paths=self.allowed_paths,
         )
 
     def _construct_include(self, node: Any, optional: bool = False) -> Any:

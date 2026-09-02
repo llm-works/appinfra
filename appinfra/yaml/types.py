@@ -45,6 +45,7 @@ class IncludeContext(ErrorContext):
     include_chain: frozenset[Path] = frozenset()
     project_root: Path | None = None
     max_include_depth: int = 10
+    allowed_paths: frozenset[Path] = frozenset()
 
 
 # Pattern for document-level !include directives (at column 0)

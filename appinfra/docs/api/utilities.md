@@ -649,6 +649,32 @@ preserved from the document (deep merge preserves nested keys not present in the
 
 Use this pattern for local config overrides that should take precedence over checked-in defaults.
 
+**User-scoped overlays (`~/…`)** - Includes may reference paths under the user's home directory
+(e.g. `~/.myapp.yaml`), but only when the loader has been told to trust the specific file:
+
+```yaml
+# etc/myapp.yaml
+db:
+  host: default-host
+  port: 5432
+<<: !deep !include? "~/.myapp.yaml"     # merged only if allowlisted
+```
+
+```python
+from appinfra.config import Config
+
+cfg = Config(
+    "etc/myapp.yaml",
+    allowed_paths=["~/.myapp.yaml"],  # explicit, per-path grant
+)
+```
+
+`allowed_paths` is a list of specific files the loader may reach outside `project_root`. Each entry
+is `~`-expanded and resolved once; an include path bypasses the guard only if it resolves to an
+exact match. Allowlisting one file does not permit siblings — any include path not on the list
+still hits the guard. Omit `allowed_paths` and every `~/…` include is blocked by `project_root` as
+before.
+
 **`!reset`** - Bypass deep merge for specific keys:
 
 ```yaml

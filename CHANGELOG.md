@@ -10,6 +10,13 @@ For API stability guarantees and deprecation policy, see
 
 ## [Unreleased]
 
+### Added
+- `allowed_paths` on `yaml.load`, `yaml.load_file`, and `Config`: explicit
+  per-path allowlist that lets `!include*` reach specific files (e.g.
+  `["~/.myapp.yaml"]`) even when outside `project_root`. `!include*` also
+  now `~`-expands its path unconditionally (parity with `!path`). `!path` is
+  unchanged.
+
 ### Fixed
 - `make check.raw` no longer reports a spurious failure when a pytest marker
   bucket collects zero tests. Empty collection now renders as gray-skip,
