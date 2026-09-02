@@ -1912,7 +1912,7 @@ class TestConfigAllowedPaths:
 
         import yaml as _yaml
 
-        with pytest.raises(_yaml.YAMLError, match="outside project root"):
+        with pytest.raises(_yaml.YAMLError, match="is not authorized"):
             Config(
                 str(cfg_file),
                 enable_env_overrides=False,

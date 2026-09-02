@@ -10,6 +10,12 @@ For API stability guarantees and deprecation policy, see
 
 ## [Unreleased]
 
+### Changed
+- `yaml.load`/`yaml.load_file`/`Config`: relative and absolute
+  `!include*` paths follow distinct authorization rules against
+  `project_root` and `allowed_paths` (see docstrings).
+- `Config` project-root derivation uses `etc/*.yaml` marker discovery.
+
 ## [0.10.4] - 2026-09-02
 
 ### Added
