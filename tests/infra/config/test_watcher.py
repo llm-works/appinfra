@@ -499,6 +499,11 @@ class TestConfigWatcherReloadPaths:
         # This should trigger reload since debounce=0 and last_reload=0
         watcher._on_file_changed()
 
+        # Timer runs in a separate thread even with debounce=0; give it time to fire
+        import time
+
+        time.sleep(0.1)
+
         assert len(reload_called) == 1
 
     def test_reload_config_with_none_path_returns_early(self, tmp_path, mock_logger):
