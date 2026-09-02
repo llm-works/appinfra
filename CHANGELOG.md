@@ -10,6 +10,13 @@ For API stability guarantees and deprecation policy, see
 
 ## [Unreleased]
 
+### Added
+- `appinfra.config.xdg_candidates(namespace, package)`: pure helper that
+  enumerates config file candidates in XDG search order (per-package
+  before unified within each dir; `$XDG_CONFIG_HOME` before
+  `$XDG_CONFIG_DIRS`). See
+  [Config Protocol](appinfra/docs/guides/config-protocol.md).
+
 ### Changed
 - `yaml.load`/`yaml.load_file`/`Config`: relative and absolute
   `!include*` paths follow distinct authorization rules against

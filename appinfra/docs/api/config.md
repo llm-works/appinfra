@@ -149,6 +149,54 @@ models:
 
 See [YAML Tags](utilities.md#yaml-tags) for more details on `!path` and other custom tags.
 
+## XDG Config Discovery
+
+`xdg_candidates` enumerates candidate config file paths for a namespaced package
+in [XDG Base Directory](https://specifications.freedesktop.org/basedir-spec/latest/)
+load-order. Pure function — no filesystem I/O; callers iterate the list and load
+the first existing entry.
+
+```python
+def xdg_candidates(namespace: str, package: str) -> list[Path]: ...
+```
+
+**Parameters:**
+
+| Parameter | Description |
+|-----------|-------------|
+| `namespace` | Shared directory under each XDG dir (e.g. `"myorg"`) |
+| `package`   | Per-package config basename without extension (e.g. `"myapp"`) |
+
+**Search order.** For each XDG dir in `[$XDG_CONFIG_HOME, *$XDG_CONFIG_DIRS]`,
+the per-package file precedes the unified file:
+
+- `D/<namespace>/<package>.yaml`
+- `D/<namespace>/config.yaml`
+
+Defaults per spec: `XDG_CONFIG_HOME` → `~/.config`, `XDG_CONFIG_DIRS` →
+`/etc/xdg`. Non-absolute `XDG_CONFIG_HOME` falls back to the default; empty and
+non-absolute entries in `XDG_CONFIG_DIRS` are skipped.
+
+**Usage:**
+
+```python
+from pathlib import Path
+
+from appinfra.config import Config, xdg_candidates
+
+BASE_CONFIG = Path(__file__).parent / "etc" / "myapp.yaml"
+
+
+def load_user_config() -> Config:
+    for candidate in xdg_candidates("myorg", "myapp"):
+        if candidate.exists():
+            return Config(str(candidate), allowed_paths=[str(BASE_CONFIG.parent)])
+    return Config(str(BASE_CONFIG))
+```
+
+See [Config Protocol](../guides/config-protocol.md) for the surrounding conventions
+(one-file-per-package load, `INFRA_*` env prefix, user override layout).
+
 ## Config Reload
 
 Reload configuration from disk:
