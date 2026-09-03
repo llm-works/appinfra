@@ -3,6 +3,7 @@
 
 """Tests for ConfigWatcher - file-based hot-reload."""
 
+import threading
 from unittest.mock import MagicMock
 
 import pytest
@@ -488,22 +489,21 @@ class TestConfigWatcherReloadPaths:
         watcher._last_reload = 0  # Reset last reload time to distant past
 
         reload_called = []
+        reload_event = threading.Event()
         original_reload = watcher._reload_config
 
         def tracking_reload():
             reload_called.append(True)
             original_reload()
+            reload_event.set()
 
         watcher._reload_config = tracking_reload
 
         # This should trigger reload since debounce=0 and last_reload=0
         watcher._on_file_changed()
 
-        # Timer runs in a separate thread even with debounce=0; give it time to fire
-        import time
-
-        time.sleep(0.1)
-
+        # Wait for the timer thread to fire (with timeout for test reliability)
+        assert reload_event.wait(timeout=1.0), "reload not called within timeout"
         assert len(reload_called) == 1
 
     def test_reload_config_with_none_path_returns_early(self, tmp_path, mock_logger):
