@@ -19,6 +19,18 @@ For API stability guarantees and deprecation policy, see
 - `Config(project_root=...)`: override the include-authorization boundary.
   Required for user overlays that `!include` a bundled base whose own
   siblings must resolve inside the package. Corrected in the v1 guide.
+- `appinfra.config.include_root_for(base_config)`: helper returning the
+  base file's `etc/` dir — the tight include-authorization boundary for
+  overlays.
+- `appinfra.config.resolve_config_source(namespace, package, base,
+  custom_etc_dir=None)`: one-call v1 precedence chain (`--etc-dir` > XDG >
+  bundled base), returning `(path, project_root)`.
+- `AppBuilder.with_config_spec(namespace, package, base_config)`: v1
+  config auto-loading. Compose with `.with_standard_args(etc_dir=True)` to
+  expose the `--etc-dir` escape hatch; mutually exclusive with
+  `with_config_file`.
+- Config Protocol guide: rule 6 documents `--etc-dir` as user-authoritative
+  over XDG when the CLI exposes it.
 
 ### Changed
 - `yaml.load`/`yaml.load_file`/`Config`: relative and absolute

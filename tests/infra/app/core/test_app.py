@@ -1597,3 +1597,126 @@ class TestResolveEtcDirReExport:
         from appinfra.config import resolve_etc_dir as r2
 
         assert r1 is r2
+
+
+@pytest.mark.unit
+class TestConfigSpecLoading:
+    """`_load_config_spec` runs the v1 protocol precedence chain in App.setup."""
+
+    def _make_bundled_base(self, tmp_path: Path) -> Path:
+        base = tmp_path / "pkg" / "etc" / "myapp.yaml"
+        base.parent.mkdir(parents=True)
+        base.write_text("origin: bundled\napi:\n  port: 8000\n")
+        return base
+
+    def _make_spec(self, tmp_path: Path):
+        from appinfra.app.builder.app import ConfigSpecV1
+
+        return ConfigSpecV1(
+            namespace="myorg",
+            package="myapp",
+            base_config=self._make_bundled_base(tmp_path),
+        )
+
+    def test_custom_etc_dir_loads_from_user_path(self, tmp_path):
+        custom = tmp_path / "user_etc"
+        custom.mkdir()
+        (custom / "myapp.yaml").write_text("origin: user\napi:\n  port: 12345\n")
+        spec = self._make_spec(tmp_path)
+
+        app = App()
+        app._config_spec = spec
+        app._parsed_args = argparse.Namespace(etc_dir=str(custom))
+
+        result = app._load_config_spec()
+
+        assert app.config.origin == "user"
+        assert app.config.api.port == 12345
+        assert app._etc_dir == str(custom.resolve())
+        assert app._config_file == "myapp.yaml"
+        assert app._project_root == custom.resolve()
+        assert result["etc_dir"] == str(custom.resolve())
+
+    def test_xdg_overlay_loads_when_no_custom(self, monkeypatch, tmp_path):
+        xdg_home = tmp_path / "xdg"
+        (xdg_home / "myorg").mkdir(parents=True)
+        overlay = xdg_home / "myorg" / "myapp.yaml"
+        overlay.write_text("origin: overlay\napi:\n  port: 9000\n")
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg_home))
+        monkeypatch.delenv("XDG_CONFIG_DIRS", raising=False)
+        spec = self._make_spec(tmp_path)
+
+        app = App()
+        app._config_spec = spec
+        app._parsed_args = argparse.Namespace(etc_dir=None)
+
+        app._load_config_spec()
+
+        assert app.config.origin == "overlay"
+        assert app._config_file == "myapp.yaml"
+        assert app._project_root == spec.base_config.parent.resolve()
+
+    def test_bundled_base_when_no_custom_and_no_overlay(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "nonexistent"))
+        monkeypatch.setenv("XDG_CONFIG_DIRS", str(tmp_path / "nonexistent-sys"))
+        spec = self._make_spec(tmp_path)
+
+        app = App()
+        app._config_spec = spec
+        app._parsed_args = argparse.Namespace(etc_dir=None)
+
+        app._load_config_spec()
+
+        assert app.config.origin == "bundled"
+        assert app._project_root == spec.base_config.parent.resolve()
+
+    def test_custom_wins_over_xdg_overlay(self, monkeypatch, tmp_path):
+        """Explicit --etc-dir must not be shadowed by an existing overlay."""
+        xdg_home = tmp_path / "xdg"
+        (xdg_home / "myorg").mkdir(parents=True)
+        (xdg_home / "myorg" / "myapp.yaml").write_text("origin: overlay\n")
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg_home))
+        monkeypatch.delenv("XDG_CONFIG_DIRS", raising=False)
+        custom = tmp_path / "user_etc"
+        custom.mkdir()
+        (custom / "myapp.yaml").write_text("origin: user\n")
+        spec = self._make_spec(tmp_path)
+
+        app = App()
+        app._config_spec = spec
+        app._parsed_args = argparse.Namespace(etc_dir=str(custom))
+
+        app._load_config_spec()
+
+        assert app.config.origin == "user"
+
+    def test_load_and_merge_config_dispatches_to_spec_branch(
+        self, monkeypatch, tmp_path
+    ):
+        """When a spec is set, _load_and_merge_config takes the v1 branch and
+        never touches the deferred/direct file-loading path."""
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "nonexistent"))
+        monkeypatch.setenv("XDG_CONFIG_DIRS", str(tmp_path / "nonexistent-sys"))
+        spec = self._make_spec(tmp_path)
+
+        app = App()
+        app._config_spec = spec
+        app._parsed_args = argparse.Namespace(config=None, etc_dir=None)
+
+        # Deferred/direct paths would raise if invoked with these args.
+        called = {"deferred": False, "direct": False}
+        monkeypatch.setattr(
+            app,
+            "_load_deferred_configs",
+            lambda: called.__setitem__("deferred", True),
+        )
+        monkeypatch.setattr(
+            app,
+            "_load_direct_config",
+            lambda *a, **kw: called.__setitem__("direct", True),
+        )
+
+        app._load_and_merge_config()
+
+        assert called == {"deferred": False, "direct": False}
+        assert app.config.origin == "bundled"

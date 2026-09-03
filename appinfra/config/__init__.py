@@ -26,7 +26,7 @@ from .config import (
 )
 from .constants import MAX_CONFIG_SIZE_BYTES
 from .watcher import ConfigWatcher
-from .xdg import xdg_candidates
+from .xdg import include_root_for, resolve_config_source, xdg_candidates
 
 try:
     from .schemas import (
@@ -62,8 +62,10 @@ __all__ = [
     "DEFAULT_CONFIG_FILENAME",
     # Watcher
     "ConfigWatcher",
-    # XDG discovery
+    # XDG discovery + v1 config-protocol composition helpers
     "xdg_candidates",
+    "include_root_for",
+    "resolve_config_source",
     # Constants
     "MAX_CONFIG_SIZE_BYTES",
     # Validation (optional)

@@ -45,6 +45,21 @@ class ConfigFileSpec:
     optional: bool = False
 
 
+@dataclass
+class ConfigSpecV1:
+    """v1 config-protocol auto-loading declaration.
+
+    Captured by ``AppBuilder.with_v1_config`` and consumed at ``App.setup``
+    time by ``resolve_config_source``. Registers ``--etc-dir`` unconditionally
+    on the CLI and runs the precedence chain (``--etc-dir`` > XDG overlay >
+    packaged base) on every parse.
+    """
+
+    namespace: str
+    package: str
+    base_config: Path
+
+
 # Helper functions for AppBuilder.build()
 
 
@@ -195,6 +210,8 @@ def _initialize_foundation(app: App, builder: AppBuilder) -> None:
     """Initialize app foundation: flags and metadata."""
     # Copy config file specs for deferred loading
     app._config_files = builder._config_files.copy()  # type: ignore[attr-defined]
+    # Config-spec auto-loading (v1 protocol); resolved at App.setup() time.
+    app._config_spec = builder._config_spec  # type: ignore[attr-defined]
     # Copy etc_dir and config_file for hot-reload support (set for absolute paths)
     if hasattr(builder, "_etc_dir"):
         app._etc_dir = builder._etc_dir  # type: ignore[attr-defined]
@@ -316,6 +333,7 @@ class AppBuilder:
         self._name: str | None = name
         self._config: Config | DotDict | None = None
         self._config_files: list[ConfigFileSpec] = []  # Track all config files
+        self._config_spec: ConfigSpecV1 | None = None  # protocol auto-loading
         self._server_config: ServerConfig | None = None
         self._logging_config: LoggingConfig | None = None
         self._tools: list[Tool] = []
@@ -459,6 +477,12 @@ class AppBuilder:
 
         from ...config import DEFAULT_CONFIG_FILENAME
 
+        if self._config_spec is not None:
+            raise ValueError(
+                "with_config_file is mutually exclusive with with_config_spec — "
+                "pick one config-loading mode per builder"
+            )
+
         if path is None:
             path = DEFAULT_CONFIG_FILENAME
 
@@ -472,6 +496,80 @@ class AppBuilder:
             # Deferred loading - auto-enable etc_dir arg so user can specify directory
             self._standard_args["etc_dir"] = True
 
+        return self
+
+    def with_config_spec(
+        self,
+        namespace: str,
+        package: str,
+        base_config: Path | str,
+    ) -> Self:
+        """Enable config-protocol auto-loading (currently v1).
+
+        At setup time, resolves the config source via
+        ``appinfra.config.resolve_config_source`` — precedence:
+
+        1. ``--etc-dir /foo`` (user's explicit choice, when the flag is
+           registered) → ``<foo>/<package>.yaml`` with
+           ``project_root=<foo>``.
+        2. Else first existing XDG candidate for ``<namespace>/<package>``
+           → overlay with ``project_root=include_root_for(base_config)``.
+        3. Else the packaged ``base_config``.
+
+        Under an explicit ``--etc-dir`` the include-authorization boundary
+        follows the user's directory — reaching outside is the user's
+        ``allowed_paths`` problem, not the framework's. On the default
+        path the boundary stays defensively bound to the packaged base's
+        ``etc/`` directory.
+
+        Flag exposure is orthogonal. To let end users override the source
+        with ``--etc-dir``, compose with
+        ``.with_standard_args(etc_dir=True)``. Consumers who deliberately
+        want a locked-down CLI (XDG + bundled base only, no escape hatch)
+        skip that call — the loader safely reads a missing flag as
+        ``None``.
+
+        Args:
+            namespace: XDG namespace (e.g. ``"llm-works"``).
+            package: package name (e.g. ``"llm-infer"``); used for the
+                config filename ``<package>.yaml`` under ``--etc-dir`` and
+                inside the XDG search set.
+            base_config: absolute path to the packaged base config
+                (e.g. ``Path(__file__).parent / "etc" / "<pkg>.yaml"``).
+
+        Returns:
+            Self for method chaining.
+
+        Raises:
+            ValueError: if ``with_config_file`` has already been called on
+                this builder. The two config-loading modes are mutually
+                exclusive.
+
+        Example::
+
+            BASE_CONFIG = Path(__file__).parent / "etc" / "myapp.yaml"
+
+            # XDG + bundled base only, no --etc-dir flag exposed:
+            app = (AppBuilder("myapp")
+                .with_config_spec("myorg", "myapp", BASE_CONFIG)
+                .build())
+
+            # With the --etc-dir escape hatch for end users:
+            app = (AppBuilder("myapp")
+                .with_config_spec("myorg", "myapp", BASE_CONFIG)
+                .with_standard_args(etc_dir=True)
+                .build())
+        """
+        if self._config_files:
+            raise ValueError(
+                "with_config_spec is mutually exclusive with with_config_file — "
+                "pick one config-loading mode per builder"
+            )
+        self._config_spec = ConfigSpecV1(
+            namespace=namespace,
+            package=package,
+            base_config=Path(str(base_config)),
+        )
         return self
 
     def with_config(self, config: Config | DotDict) -> Self:
