@@ -107,7 +107,7 @@ pgserver:
   host: "127.0.0.1"
   port: 25432
   user: "postgres"
-  password: "postgres"
+  pass: ""                       # Set via INFRA_PGSERVER_PASS env var
   replica:                     # Optional: for replication mode
     enabled: true
     port: 25433
