@@ -507,8 +507,8 @@ jobs:
           python -m pip install --upgrade pip
           make setup
 
-      - name: Run make check
-        run: make check
+      - name: Run make check (raw mode for hang diagnosis)
+        run: make check.raw
 
       - name: Stop postgres
         if: always()
