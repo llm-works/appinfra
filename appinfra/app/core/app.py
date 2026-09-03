@@ -88,6 +88,8 @@ class App(Traceable):
         self._custom_args: list[tuple] = []  # Custom args (from builder)
         self._main_tool: str | None = None  # Main tool (runs without subcommand)
         self._config_watcher: ConfigWatcher | None = None  # Hot-reload watcher
+        # Loaded config paths: list of (etc_dir, filename, full_path) tuples.
+        self._loaded_config_paths: list[tuple[str, str, str]] = []
         # v1 config-protocol spec (set by AppBuilder.with_config_spec); loaded
         # in _load_and_merge_config after arg parsing.
         self._config_spec: Any = None
@@ -522,6 +524,10 @@ class App(Traceable):
         self._etc_dir = str(config_path.parent)
         self._config_file = config_path.name
         self._project_root = project_root
+        # Populate for API parity (loaded_config_paths, create_config_watcher, etc.)
+        self._loaded_config_paths.append(
+            (self._etc_dir, self._config_file, str(config_path))
+        )
         return {
             "etc_dir": self._etc_dir,
             "files": [{"path": str(config_path), "name": config_path.name}],
@@ -699,8 +705,6 @@ class App(Traceable):
     ) -> None:
         """Commit loaded configs to self atomically."""
         self.config = local_config
-        if not hasattr(self, "_loaded_config_paths"):
-            self._loaded_config_paths: list[tuple[str, str, str]] = []
         self._loaded_config_paths.extend(local_loaded_paths)
 
         # Set primary config path from first loaded file

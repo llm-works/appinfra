@@ -1720,3 +1720,24 @@ class TestConfigSpecLoading:
 
         assert called == {"deferred": False, "direct": False}
         assert app.config.origin == "bundled"
+
+    def test_populates_loaded_config_paths(self, monkeypatch, tmp_path):
+        """_load_config_spec populates _loaded_config_paths for API parity."""
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "nonexistent"))
+        monkeypatch.setenv("XDG_CONFIG_DIRS", str(tmp_path / "nonexistent-sys"))
+        spec = self._make_spec(tmp_path)
+
+        app = App()
+        app._config_spec = spec
+        app._parsed_args = argparse.Namespace(etc_dir=None)
+
+        app._load_config_spec()
+
+        assert hasattr(app, "_loaded_config_paths")
+        assert len(app._loaded_config_paths) == 1
+        etc_dir, config_file, full_path = app._loaded_config_paths[0]
+        assert etc_dir == str(spec.base_config.parent.resolve())
+        assert config_file == "myapp.yaml"
+        assert full_path == str(spec.base_config.resolve())
+        # Public API should also work
+        assert app.loaded_config_paths == app._loaded_config_paths
