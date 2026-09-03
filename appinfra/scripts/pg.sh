@@ -52,7 +52,8 @@ _pg_require_env() {
 }
 
 _pg_check_status() {
-    if psql -h "${_INFRA_PG_HOST}" -p "${_INFRA_PG_PORT}" -U "${_INFRA_PG_USER}" -c "SELECT 1" >/dev/null 2>&1; then
+    export PGCONNECT_TIMEOUT="${PGCONNECT_TIMEOUT:-5}"
+    if psql -w -h "${_INFRA_PG_HOST}" -p "${_INFRA_PG_PORT}" -U "${_INFRA_PG_USER}" -c "SELECT 1" >/dev/null 2>&1; then
         _primary_up=true
         _primary_status="${_GREEN}UP${_RESET}"
     else
@@ -63,7 +64,7 @@ _pg_check_status() {
     _standby_up=false
     _standby_status="${_RED}DOWN${_RESET}"
     if [ "$_INFRA_PG_REPLICA_ENABLED" = "true" ]; then
-        if psql -h "${_INFRA_PG_HOST}" -p "${_INFRA_PG_PORT_R}" -U "${_INFRA_PG_USER}" -c "SELECT 1" >/dev/null 2>&1; then
+        if psql -w -h "${_INFRA_PG_HOST}" -p "${_INFRA_PG_PORT_R}" -U "${_INFRA_PG_USER}" -c "SELECT 1" >/dev/null 2>&1; then
             _standby_up=true
             _standby_status="${_GREEN}UP${_RESET}"
         fi
@@ -111,9 +112,8 @@ _pg_info_full() {
 
     echo -e "${_BOLD}CONTAINERS${_RESET}"
     echo -e "${_GRAY}----------${_RESET}"
-    local container_output container_exit
-    container_output=$(${container_runtime} ps -a --filter "name=${_INFRA_PG_CONTAINER_NAME}" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" 2>&1)
-    container_exit=$?
+    local container_output container_exit=0
+    container_output=$(${container_runtime} ps -a --filter "name=${_INFRA_PG_CONTAINER_NAME}" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" 2>&1) || container_exit=$?
     if [ $container_exit -ne 0 ]; then
         echo -e "${_RED}Error from '${container_runtime}' (exit $container_exit):${_RESET}"
         echo "$container_output"
