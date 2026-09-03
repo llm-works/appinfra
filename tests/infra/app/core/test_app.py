@@ -1604,15 +1604,11 @@ class TestConfigSpecLoading:
     """`_load_config_spec` runs the v1 protocol precedence chain in App.setup."""
 
     @pytest.fixture(autouse=True)
-    def clear_infra_pgserver_env(self, monkeypatch):
-        """Clear all INFRA_PGSERVER_* env vars that CI sets for integration tests."""
-        for var in (
-            "INFRA_PGSERVER_PASS",
-            "INFRA_PGSERVER_HOST",
-            "INFRA_PGSERVER_PORT",
-            "INFRA_PGSERVER_USER",
-        ):
-            monkeypatch.delenv(var, raising=False)
+    def clear_infra_env_overrides(self, monkeypatch):
+        """Clear INFRA_* env vars that CI sets, so minimal test configs don't fail."""
+        for var in list(os.environ):
+            if var.startswith("INFRA_"):
+                monkeypatch.delenv(var, raising=False)
 
     def _make_bundled_base(self, tmp_path: Path) -> Path:
         base = tmp_path / "pkg" / "etc" / "myapp.yaml"
