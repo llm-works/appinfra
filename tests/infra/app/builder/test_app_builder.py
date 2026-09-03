@@ -12,6 +12,7 @@ Tests key functionality including:
 - Fluent builder API
 """
 
+from pathlib import Path
 from unittest.mock import Mock, patch
 
 import pytest
@@ -719,6 +720,73 @@ class TestAppBuilderFluentMethods:
 
         assert builder._main_tool == "process"
         assert result is builder
+
+
+# =============================================================================
+# Test AppBuilder.with_config_spec (v1 config protocol)
+# =============================================================================
+
+
+@pytest.mark.unit
+class TestAppBuilderWithConfigSpec:
+    """`with_config_spec` opts into v1 config-protocol auto-loading."""
+
+    def test_stores_spec(self, tmp_path):
+        base = tmp_path / "pkg" / "etc" / "myapp.yaml"
+        base.parent.mkdir(parents=True)
+        base.write_text("")
+
+        builder = AppBuilder("test")
+        result = builder.with_config_spec("myorg", "myapp", base)
+
+        assert result is builder
+        assert builder._config_spec is not None
+        assert builder._config_spec.namespace == "myorg"
+        assert builder._config_spec.package == "myapp"
+        assert builder._config_spec.base_config == base
+
+    def test_does_not_auto_register_etc_dir_flag(self, tmp_path):
+        """Flag exposure is orthogonal — spec alone must not force the flag on.
+
+        Consumers who want the escape hatch compose with
+        `.with_standard_args(etc_dir=True)` explicitly; consumers building a
+        locked-down CLI (XDG + bundled base only) call the spec alone.
+        """
+        base = tmp_path / "pkg" / "etc" / "myapp.yaml"
+        base.parent.mkdir(parents=True)
+        base.write_text("")
+
+        builder = AppBuilder("test").with_config_spec("myorg", "myapp", base)
+
+        assert builder._standard_args["etc_dir"] is False
+
+    def test_accepts_string_path(self, tmp_path):
+        base = tmp_path / "etc" / "myapp.yaml"
+        base.parent.mkdir(parents=True)
+        base.write_text("")
+
+        builder = AppBuilder("test").with_config_spec("ns", "myapp", str(base))
+
+        assert isinstance(builder._config_spec.base_config, Path)
+        assert builder._config_spec.base_config == Path(str(base))
+
+    def test_rejects_when_with_config_file_already_used(self, tmp_path):
+        base = tmp_path / "etc" / "myapp.yaml"
+        base.parent.mkdir(parents=True)
+        base.write_text("")
+
+        builder = AppBuilder("test").with_config_file("some.yaml")
+        with pytest.raises(ValueError, match="mutually exclusive"):
+            builder.with_config_spec("ns", "myapp", base)
+
+    def test_rejects_config_file_after_spec(self, tmp_path):
+        base = tmp_path / "etc" / "myapp.yaml"
+        base.parent.mkdir(parents=True)
+        base.write_text("")
+
+        builder = AppBuilder("test").with_config_spec("ns", "myapp", base)
+        with pytest.raises(ValueError, match="mutually exclusive"):
+            builder.with_config_file("some.yaml")
 
 
 # =============================================================================

@@ -17,7 +17,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from ...config import Config, resolve_etc_dir
+from ...config import Config, resolve_config_source, resolve_etc_dir
 from ...dot_dict import DotDict
 
 if TYPE_CHECKING:
@@ -88,6 +88,14 @@ class App(Traceable):
         self._custom_args: list[tuple] = []  # Custom args (from builder)
         self._main_tool: str | None = None  # Main tool (runs without subcommand)
         self._config_watcher: ConfigWatcher | None = None  # Hot-reload watcher
+        # Loaded config paths: list of (etc_dir, filename, full_path) tuples.
+        self._loaded_config_paths: list[tuple[str, str, str]] = []
+        # v1 config-protocol spec (set by AppBuilder.with_config_spec); loaded
+        # in _load_and_merge_config after arg parsing.
+        self._config_spec: Any = None
+        # Include-authorization root for the loaded config; forwarded to
+        # ConfigWatcher so reloads use the same boundary as the initial load.
+        self._project_root: Path | None = None
 
     @property
     def config_watcher(self) -> ConfigWatcher | None:
@@ -467,18 +475,25 @@ class App(Traceable):
         """
         load_result = None
 
-        # Check for -c/--config CLI arg
-        cli_config = getattr(self._parsed_args, "config", None)
+        # v1 config-protocol spec wins over deferred/direct file loading; the
+        # two paths are mutually exclusive at the builder (with_config_spec vs
+        # with_config_file), so at most one branch here does real work.
+        if self._config_spec is not None:
+            load_result = self._load_config_spec()
+        else:
+            # Check for -c/--config CLI arg
+            cli_config = getattr(self._parsed_args, "config", None)
 
-        if cli_config and self._is_direct_path(cli_config):
-            # Direct path (absolute or ./): load directly, bypass etc-dir
-            load_result = self._load_direct_config(cli_config)
-        elif self._has_deferred_configs():
-            # Load deferred configs from etc-dir (cli_config overrides filename if set)
-            load_result = self._load_deferred_configs()
-        elif cli_config:
-            # No deferred configs but -c provided: load from cwd
-            load_result = self._load_direct_config(cli_config)
+            if cli_config and self._is_direct_path(cli_config):
+                # Direct path (absolute or ./): load directly, bypass etc-dir
+                load_result = self._load_direct_config(cli_config)
+            elif self._has_deferred_configs():
+                # Load deferred configs from etc-dir (cli_config overrides
+                # filename if set)
+                load_result = self._load_deferred_configs()
+            elif cli_config:
+                # No deferred configs but -c provided: load from cwd
+                load_result = self._load_direct_config(cli_config)
 
         # Apply command-line args to config, preserving loaded YAML sections
         # CLI args override anything loaded from etc directory
@@ -488,6 +503,41 @@ class App(Traceable):
         )
 
         return load_result
+
+    def _load_config_spec(self) -> dict:
+        """Load config via the v1 protocol precedence chain.
+
+        See ``appinfra.config.resolve_config_source``. Populates
+        ``self.config``, ``self._etc_dir``, ``self._config_file`` and
+        ``self._project_root`` (forwarded to ``ConfigWatcher`` on hot-reload
+        so the reload boundary matches the initial load).
+        """
+        spec = self._config_spec
+        programmatic_config = self.config  # preserve builder-supplied config
+        custom = getattr(self._parsed_args, "etc_dir", None)
+        config_path, project_root = resolve_config_source(
+            spec.namespace,
+            spec.package,
+            spec.base_config,
+            custom_etc_dir=custom,
+        )
+        loaded_config = Config(str(config_path), project_root=project_root)
+        # Re-apply programmatic config (highest precedence after CLI args)
+        if programmatic_config and dict(programmatic_config):
+            self.config = self._merge_config_layers(loaded_config, programmatic_config)
+        else:
+            self.config = loaded_config
+        self._etc_dir = str(config_path.parent)
+        self._config_file = config_path.name
+        self._project_root = project_root
+        # Populate for API parity (loaded_config_paths, create_config_watcher, etc.)
+        self._loaded_config_paths.append(
+            (self._etc_dir, self._config_file, str(config_path))
+        )
+        return {
+            "etc_dir": self._etc_dir,
+            "files": [{"path": str(config_path), "name": config_path.name}],
+        }
 
     def _resolve_etc_dir_if_opted_in(self) -> None:
         """Populate self._etc_dir when the standard arg is enabled but no
@@ -661,8 +711,6 @@ class App(Traceable):
     ) -> None:
         """Commit loaded configs to self atomically."""
         self.config = local_config
-        if not hasattr(self, "_loaded_config_paths"):
-            self._loaded_config_paths: list[tuple[str, str, str]] = []
         self._loaded_config_paths.extend(local_loaded_paths)
 
         # Set primary config path from first loaded file
@@ -948,7 +996,10 @@ class App(Traceable):
 
         # Use first loaded file's etc_dir as the base
         etc_dir, config_file, _ = loaded_paths[0]
-        watcher = ConfigWatcher(lg=type_cast(Logger, self.lg), etc_dir=etc_dir)
+        project_root = getattr(self, "_project_root", None)
+        watcher = ConfigWatcher(
+            lg=type_cast(Logger, self.lg), etc_dir=etc_dir, project_root=project_root
+        )
 
         # Register all config files (for layered configs)
         # First file becomes primary, rest are overlays

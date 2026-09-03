@@ -35,7 +35,7 @@ class Config(DotDict):
 | `env_prefix` | `"INFRA_"` | Prefix for environment variables |
 | `merge_strategy` | `"replace"` | Strategy for handling `!include` directives: `"replace"` (included content replaces target key) or `"merge"` (deep merge with existing). Note: only `"replace"` is currently fully supported |
 | `allowed_paths` | `None` | Explicit list of specific paths (e.g. `["~/.myapp.yaml"]`) that absolute `!include*` directives may reach even when outside `project_root`. Each entry is `~`-expanded and resolved once; an include path bypasses the guard only if it resolves to an exact match. Applies to absolute / tilde-expanded includes only — relative includes stay bound to `project_root`. Use for narrow user-overlay patterns. See [YAML custom tags](utilities.md#custom-tags) for the overlay-pattern example. |
-| `project_root` | `None` | Override for the include-authorization boundary. When set, replaces the auto-derived `project_root` for every include check in the load — both relative and absolute. Auto-derivation walks the config file's ancestry for an `etc/*.yaml` marker and falls back to the file's parent directory; a user overlay under `$XDG_CONFIG_HOME` has no such marker and cannot reach a base config shipped inside a package's `etc/`. Pass the package install directory (`BASE_CONFIG.parent.parent` under the v1 config protocol) to authorize the base and all its packaged siblings. `~`-expanded and resolved once. See [Config Protocol](../guides/config-protocol.md) for the overlay pattern. |
+| `project_root` | `None` | Override for the include-authorization boundary. When set, replaces the auto-derived `project_root` for every include check in the load — both relative and absolute. Auto-derivation walks the config file's ancestry for an `etc/*.yaml` marker and falls back to the file's parent directory; a user overlay under `$XDG_CONFIG_HOME` has no such marker and cannot reach a base config shipped inside a package's `etc/`. Under the v1 config protocol, use `include_root_for(BASE_CONFIG)` — the tightest boundary that authorizes the base and its siblings. Pass the wider `BASE_CONFIG.parent.parent` only when includes reach files outside `etc/`. `~`-expanded and resolved once. See [Config Protocol](../guides/config-protocol.md) for the overlay pattern. |
 
 **Basic Usage:**
 
@@ -179,32 +179,78 @@ Defaults per spec: `XDG_CONFIG_HOME` → `~/.config`, `XDG_CONFIG_DIRS` →
 `/etc/xdg`. Non-absolute `XDG_CONFIG_HOME` falls back to the default; empty and
 non-absolute entries in `XDG_CONFIG_DIRS` are skipped.
 
-**Usage:**
+**Usage.** Callers typically don't call `xdg_candidates` directly — the higher-level
+`resolve_config_source` below composes it with the `--etc-dir` precedence chain and returns the
+`project_root` argument to pass to `Config`. Use `xdg_candidates` on its own only for custom
+lookup logic outside the v1 protocol shape.
+
+```python
+from appinfra.config import xdg_candidates
+
+for candidate in xdg_candidates("myorg", "myapp"):
+    if candidate.exists():
+        ...  # bespoke handling
+```
+
+See [Config Protocol](../guides/config-protocol.md) for the surrounding conventions
+(one-file-per-package load, `INFRA_*` env prefix, user override layout).
+
+### `include_root_for`
+
+Returns the include-authorization root for a bundled base config — the base file's parent
+directory (typically the package's `etc/`). Pass as `project_root=` to `Config` when loading an
+overlay that `!include`s this base. Hides the `.parent` incantation and documents intent.
+
+```python
+def include_root_for(base_config: Path | str) -> Path: ...
+```
+
+The etc-dir boundary is the tightest scope that authorizes both the overlay's absolute
+`!include <base>` and the base's relative sibling `!include './...'` directives. Pass a wider
+ancestor (e.g. `Path(base_config).parent.parent` for the package root) explicitly when the
+base's includes reach files outside `etc/`.
+
+### `resolve_config_source`
+
+Runs the full v1 precedence chain in one call and returns the arguments to pass to `Config`.
+
+```python
+def resolve_config_source(
+    namespace: str,
+    package: str,
+    base_config: Path | str,
+    custom_etc_dir: Path | str | None = None,
+) -> tuple[Path, Path]: ...
+```
+
+**Precedence** (see [rule 6](../guides/config-protocol.md#6-etc-dir-is-user-authoritative)):
+
+1. `custom_etc_dir` present → `(<custom_etc_dir>/<package>.yaml, <custom_etc_dir>)`. The user's
+   explicit path IS the include-authorization root; unvalidated (a missing file surfaces at
+   `Config(...)` load time as a clear `FileNotFoundError`).
+2. Else first existing XDG candidate → `(<candidate>, include_root_for(base_config))`.
+3. Else the packaged base → `(<base_config>, include_root_for(base_config))`.
+
+**Consumer pattern:**
 
 ```python
 from pathlib import Path
 
-from appinfra.config import Config, xdg_candidates
+from appinfra.config import Config, resolve_config_source
 
 BASE_CONFIG = Path(__file__).parent / "etc" / "myapp.yaml"
-PACKAGE_ROOT = BASE_CONFIG.parent.parent
 
 
-def load_user_config() -> Config:
-    for candidate in xdg_candidates("myorg", "myapp"):
-        if candidate.exists():
-            return Config(str(candidate), project_root=PACKAGE_ROOT)
-    return Config(str(BASE_CONFIG))
+def load_user_config(custom_etc_dir: str | None = None) -> Config:
+    config_file, project_root = resolve_config_source(
+        "myorg", "myapp", BASE_CONFIG, custom_etc_dir=custom_etc_dir
+    )
+    return Config(str(config_file), project_root=project_root)
 ```
 
-`project_root=PACKAGE_ROOT` widens the include-authorization boundary so both
-the overlay's absolute `!include <BASE_CONFIG>` and the base's relative
-sibling `!include './...'` directives resolve inside the package. Without it,
-the boundary auto-derives from the overlay's own ancestry and cannot reach
-the bundled base.
-
-See [Config Protocol](../guides/config-protocol.md) for the surrounding conventions
-(one-file-per-package load, `INFRA_*` env prefix, user override layout).
+For applications built on `AppBuilder`, use
+[`with_config_spec`](#appbuilderwith_config_spec) — it registers `--etc-dir`, runs this chain
+on every parse, and wires `ConfigWatcher` with the same `project_root`.
 
 ## Config Reload
 
@@ -423,17 +469,78 @@ from appinfra.config import (
 
 ## Integration with AppBuilder
 
+Two loading modes; pick one per builder — they are mutually exclusive.
+
+### `AppBuilder.with_config_file`
+
+Loads one or more YAML files by name. Under `with_standard_args(etc_dir=True)` the deferred load
+resolves the path against `--etc-dir` at runtime; absolute paths load immediately at build time.
+Pre-v1 shape; `--etc-dir` here uses the `resolve_etc_dir` fallback chain (cwd/etc → walk-up →
+package etc/).
+
 ```python
 from appinfra.app import AppBuilder
 
 app = (
     AppBuilder("myapp")
-    .with_config_file("config.yaml")  # Resolved from --etc-dir
-    .logging.with_hot_reload(True)  # Enable config hot-reload for logging
+    .with_config_file("config.yaml")  # Resolved from --etc-dir at runtime
+    .logging.with_hot_reload(True)
     .done()
     .build()
 )
 ```
+
+### `AppBuilder.with_config_spec`
+
+Opts into the v1 config protocol. At setup time, runs
+[`resolve_config_source`](#resolve_config_source) to load the appropriate file — `--etc-dir`
+(when registered) > XDG overlay > packaged base — with the corresponding `project_root`.
+`ConfigWatcher` is wired with the same `project_root` so hot-reload reuses the initial-load
+boundary.
+
+Flag exposure is orthogonal. To expose the `--etc-dir` escape hatch to end users, compose with
+`.with_standard_args(etc_dir=True)`. Consumers building a locked-down CLI (XDG + bundled base
+only) skip that call — the loader safely reads a missing flag as `None`.
+
+```python
+from pathlib import Path
+
+from appinfra.app import AppBuilder
+
+BASE_CONFIG = Path(__file__).parent / "etc" / "myapp.yaml"
+
+# XDG + bundled base only, no --etc-dir flag exposed:
+app = (
+    AppBuilder("myapp")
+    .with_config_spec("myorg", "myapp", BASE_CONFIG)
+    .logging.with_hot_reload(True)
+    .done()
+    .build()
+)
+
+# With the --etc-dir escape hatch for end users:
+app = (
+    AppBuilder("myapp")
+    .with_config_spec("myorg", "myapp", BASE_CONFIG)
+    .with_standard_args(etc_dir=True)
+    .logging.with_hot_reload(True)
+    .done()
+    .build()
+)
+```
+
+| Parameter     | Description                                                                     |
+|---------------|---------------------------------------------------------------------------------|
+| `namespace`   | XDG namespace (e.g. `"llm-works"`).                                             |
+| `package`     | Package name (e.g. `"myapp"`); used as `<package>.yaml` under `--etc-dir` and inside the XDG search set. |
+| `base_config` | Absolute path to the packaged base config (e.g. `Path(__file__).parent / "etc" / "myapp.yaml"`). |
+
+Consumers using `with_config_spec` should NOT call `with_config_file`; the two modes conflict
+and calling both raises `ValueError` at build time.
+
+See [Config Protocol §6](../guides/config-protocol.md#6-etc-dir-is-user-authoritative) for the
+full `--etc-dir` semantics, and [`resolve_config_source`](#resolve_config_source) for the
+underlying precedence chain if hand-wiring is preferred over the framework path.
 
 ## See Also
 

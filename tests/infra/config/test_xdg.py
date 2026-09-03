@@ -7,7 +7,11 @@ from pathlib import Path
 
 import pytest
 
-from appinfra.config import xdg_candidates
+from appinfra.config import (
+    include_root_for,
+    resolve_config_source,
+    xdg_candidates,
+)
 
 
 @pytest.fixture
@@ -155,3 +159,137 @@ class TestXdgCandidatesInterpolation:
         candidates = xdg_candidates("ns", "pkg")
         assert len(candidates) == 4
         assert candidates[0] == Path("/h/ns/pkg.yaml")
+
+
+@pytest.mark.unit
+class TestIncludeRootFor:
+    """`include_root_for(base_config)` returns the base's parent dir."""
+
+    def test_returns_parent_of_base_config(self, tmp_path):
+        base = tmp_path / "myapp" / "etc" / "myapp.yaml"
+        base.parent.mkdir(parents=True)
+        base.write_text("")
+        assert include_root_for(base) == (tmp_path / "myapp" / "etc").resolve()
+
+    def test_accepts_string(self, tmp_path):
+        base = tmp_path / "etc" / "app.yaml"
+        base.parent.mkdir(parents=True)
+        base.write_text("")
+        assert include_root_for(str(base)) == (tmp_path / "etc").resolve()
+
+    def test_expands_tilde(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("HOME", str(tmp_path))
+        assert include_root_for("~/etc/app.yaml") == (tmp_path / "etc").resolve()
+
+    def test_resolves_symlink(self, tmp_path):
+        real_etc = tmp_path / "real" / "etc"
+        real_etc.mkdir(parents=True)
+        (real_etc / "app.yaml").write_text("")
+        link_etc = tmp_path / "link" / "etc"
+        link_etc.parent.mkdir()
+        link_etc.symlink_to(real_etc)
+        assert include_root_for(link_etc / "app.yaml") == real_etc.resolve()
+
+
+@pytest.mark.unit
+class TestResolveConfigSource:
+    """`resolve_config_source` walks the v1 precedence chain."""
+
+    @pytest.fixture
+    def bundled_base(self, tmp_path):
+        base = tmp_path / "pkg" / "etc" / "myapp.yaml"
+        base.parent.mkdir(parents=True)
+        base.write_text("")
+        return base
+
+    def test_custom_etc_dir_wins(self, bundled_base, tmp_path, clean_xdg_env):
+        custom = tmp_path / "user_etc"
+        custom.mkdir()
+        path, root = resolve_config_source(
+            "myorg", "myapp", bundled_base, custom_etc_dir=custom
+        )
+        assert path == custom.resolve() / "myapp.yaml"
+        assert root == custom.resolve()
+
+    def test_custom_etc_dir_not_pre_validated(self, bundled_base, tmp_path):
+        """Missing file under --etc-dir is not this helper's error to raise."""
+        custom = tmp_path / "user_etc"
+        custom.mkdir()
+        # <custom>/myapp.yaml does not exist; helper still returns the path.
+        path, root = resolve_config_source(
+            "myorg", "myapp", bundled_base, custom_etc_dir=custom
+        )
+        assert not path.exists()
+        assert root == custom.resolve()
+
+    def test_custom_etc_dir_string_accepted(self, bundled_base, tmp_path):
+        custom = tmp_path / "user_etc"
+        custom.mkdir()
+        path, root = resolve_config_source(
+            "myorg", "myapp", bundled_base, custom_etc_dir=str(custom)
+        )
+        assert path == custom.resolve() / "myapp.yaml"
+
+    def test_custom_etc_dir_expands_tilde(self, bundled_base, monkeypatch, tmp_path):
+        monkeypatch.setenv("HOME", str(tmp_path))
+        (tmp_path / "user_etc").mkdir()
+        path, root = resolve_config_source(
+            "myorg", "myapp", bundled_base, custom_etc_dir="~/user_etc"
+        )
+        assert root == (tmp_path / "user_etc").resolve()
+
+    def test_xdg_overlay_when_no_custom(self, bundled_base, monkeypatch, tmp_path):
+        xdg_home = tmp_path / "xdg"
+        (xdg_home / "myorg").mkdir(parents=True)
+        overlay = xdg_home / "myorg" / "myapp.yaml"
+        overlay.write_text("")
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg_home))
+        monkeypatch.delenv("XDG_CONFIG_DIRS", raising=False)
+        path, root = resolve_config_source("myorg", "myapp", bundled_base)
+        assert path == overlay
+        assert root == bundled_base.parent.resolve()
+
+    def test_fallback_to_bundled_base(self, bundled_base, clean_xdg_env, monkeypatch):
+        # Point XDG at empty dirs so no overlay is found.
+        monkeypatch.setenv("XDG_CONFIG_HOME", "/nonexistent/home")
+        monkeypatch.setenv("XDG_CONFIG_DIRS", "/nonexistent/system")
+        path, root = resolve_config_source("myorg", "myapp", bundled_base)
+        assert path == bundled_base.resolve()
+        assert root == bundled_base.parent.resolve()
+
+    def test_custom_wins_over_existing_xdg(self, bundled_base, monkeypatch, tmp_path):
+        """Explicit --etc-dir must not be shadowed by an existing XDG overlay."""
+        xdg_home = tmp_path / "xdg"
+        (xdg_home / "myorg").mkdir(parents=True)
+        (xdg_home / "myorg" / "myapp.yaml").write_text("")
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg_home))
+        custom = tmp_path / "user_etc"
+        custom.mkdir()
+        path, root = resolve_config_source(
+            "myorg", "myapp", bundled_base, custom_etc_dir=custom
+        )
+        assert path == custom.resolve() / "myapp.yaml"
+        assert root == custom.resolve()
+
+    def test_per_package_overlay_preferred_over_unified(
+        self, bundled_base, monkeypatch, tmp_path
+    ):
+        xdg_home = tmp_path / "xdg"
+        (xdg_home / "myorg").mkdir(parents=True)
+        (xdg_home / "myorg" / "myapp.yaml").write_text("")
+        (xdg_home / "myorg" / "config.yaml").write_text("")
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg_home))
+        monkeypatch.delenv("XDG_CONFIG_DIRS", raising=False)
+        path, _ = resolve_config_source("myorg", "myapp", bundled_base)
+        assert path.name == "myapp.yaml"
+
+    def test_unified_used_when_per_package_absent(
+        self, bundled_base, monkeypatch, tmp_path
+    ):
+        xdg_home = tmp_path / "xdg"
+        (xdg_home / "myorg").mkdir(parents=True)
+        (xdg_home / "myorg" / "config.yaml").write_text("")
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg_home))
+        monkeypatch.delenv("XDG_CONFIG_DIRS", raising=False)
+        path, _ = resolve_config_source("myorg", "myapp", bundled_base)
+        assert path.name == "config.yaml"
