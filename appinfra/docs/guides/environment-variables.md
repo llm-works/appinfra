@@ -214,7 +214,7 @@ logging:
   colors: true
 
 pgserver:
-  port: 7432
+  port: 25432
   user: postgres
 
 test:
@@ -355,7 +355,7 @@ overridden values can be used in variable references:
 ```yaml
 # YAML
 pgserver:
-  port: 7432
+  port: 25432
 dbs:
   main:
     url: "postgresql://user:pass@localhost:${pgserver.port}/infra_main"

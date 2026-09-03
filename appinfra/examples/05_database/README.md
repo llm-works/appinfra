@@ -105,12 +105,12 @@ Configure PostgreSQL in `etc/infra.yaml`:
 ```yaml
 pgserver:
   host: "127.0.0.1"
-  port: 7432
+  port: 25432
   user: "postgres"
   password: "postgres"
   replica:                     # Optional: for replication mode
     enabled: true
-    port: 7433
+    port: 25433
 
 dbs:
   test:
@@ -203,7 +203,7 @@ CREATE DATABASE infra_test;
 Check credentials in `etc/infra.yaml`:
 - User: postgres
 - Password: postgres
-- Port: 7432 (Docker default)
+- Port: 25432 (appinfra local pg default)
 
 ## Next Steps
 

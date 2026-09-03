@@ -129,8 +129,8 @@ Defines PostgreSQL server connection settings.
 ```yaml
 pgserver:
   version: 18                   # PostgreSQL version (required unless image is specified)
-  name: infra-pg               # Server name/identifier
-  port: 7432                   # PostgreSQL port
+  name: llm-works-pg           # Server name/identifier (shared across llm-works packages)
+  port: 25432                  # PostgreSQL port
   user: postgres               # Database user
   pass: ''                     # Database password (use environment variable for security)
   image: pgvector/pgvector:pg18  # Optional: custom Docker image (defaults to postgres:VERSION)
@@ -140,7 +140,7 @@ pgserver:
       - pg_stat_statements
   replica:                     # Optional: replication mode configuration
     enabled: true              # Enable replication targets (pg.server.up.repl, pg.standby)
-    port: 7433                 # Standby server port (required when enabled: true)
+    port: 25433                # Standby server port (required when enabled: true)
 ```
 
 #### Version and Image Configuration

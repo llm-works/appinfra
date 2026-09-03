@@ -174,7 +174,7 @@ make pg.info.short      # Compact summary
 Start primary + standby (read-only replica) servers:
 
 ```bash
-make pg.server.up.repl  # Start primary (port 7432) + standby (port 7433)
+make pg.server.up.repl  # Start primary (port 25432) + standby (port 25433)
 make pg                 # Connect to primary
 make pg.standby         # Connect to standby (read-only)
 make pg.info            # Shows replication state, both endpoints

@@ -122,13 +122,13 @@ Expected Output:
 Debugging Failed Tests:
     After running the example, check the database for leftover tables:
 
-    psql -h 127.0.0.1 -p 7432 -U postgres -d unittest -c "
+    psql -h 127.0.0.1 -p 25432 -U postgres -d unittest -c "
     SELECT tablename FROM pg_tables
     WHERE schemaname = 'public' AND tablename LIKE 'example_%';"
 
     Inspect the data:
 
-    psql -h 127.0.0.1 -p 7432 -U postgres -d unittest -c "
+    psql -h 127.0.0.1 -p 25432 -U postgres -d unittest -c "
     SELECT * FROM example_failure_XXXXX;"
 
 Key Features Demonstrated:

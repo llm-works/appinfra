@@ -29,7 +29,7 @@ REQUIRE_PG_MARKER = "require_pg"
 # are present. Matches the canonical port in etc/pg.yaml so a fresh checkout
 # probes the right place. Kept in one spot so the two values can't drift.
 DEFAULT_PG_HOST = "127.0.0.1"
-DEFAULT_PG_PORT = 7432
+DEFAULT_PG_PORT = 25432
 
 
 class PgStatus(TypedDict):

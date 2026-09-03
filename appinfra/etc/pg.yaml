@@ -8,14 +8,15 @@
 # Password should be set via environment variable: INFRA_PGSERVER_PASS=your_password
 pgserver:
   version: 18                  # PostgreSQL major version (used for compatibility checks)
-  name: infra-pg               # Server identifier/name for logging and identification
+  image: docker.io/pgvector/pgvector:pg18  # pgvector superset — shared container supports vector workloads across llm-works domain
+  name: llm-works-pg           # Container name and identifier — shared across llm-works packages so they use one local pg container
   host: 127.0.0.1              # PostgreSQL host (default: 127.0.0.1, can be overridden with INFRA_PGSERVER_HOST)
-  port: 7432                   # PostgreSQL port (default: 5432, can be overridden with INFRA_PGSERVER_PORT)
+  port: 25432                  # Canonical llm-works local pg port (non-standard, avoids collision with a local Postgres on 5432). Overridable via INFRA_PGSERVER_PORT.
   user: postgres               # Database username (can be overridden with INFRA_PGSERVER_USER)
   pass: ''                     # Database password (RECOMMENDED: use environment variable)
   replica:                     # Optional: replication mode configuration
     enabled: false             # Enable replication targets (pg.server.up.repl, pg.standby)
-    port: 7433                 # Standby server port
+    port: 25433                # Standby server port (canonical primary + 1)
 
 # Database Configurations
 # =======================
