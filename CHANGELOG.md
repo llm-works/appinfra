@@ -10,6 +10,8 @@ For API stability guarantees and deprecation policy, see
 
 ## [Unreleased]
 
+## [0.10.5] - 2026-09-03
+
 ### Added
 - `appinfra.config.xdg_candidates(namespace, package)`: pure helper that
   enumerates config file candidates in XDG search order (per-package
@@ -818,7 +820,8 @@ as config. Affected: `ConfigValidator`, `PG.readonly`, `PG.migrate()`,
 ### Changed
 - Package renamed to `appinfra` (install and import both use `appinfra`)
 
-[Unreleased]: https://github.com/llm-works/appinfra/compare/v0.10.4...HEAD
+[Unreleased]: https://github.com/llm-works/appinfra/compare/v0.10.5...HEAD
+[0.10.5]: https://github.com/llm-works/appinfra/compare/v0.10.4...v0.10.5
 [0.10.4]: https://github.com/llm-works/appinfra/compare/v0.10.3...v0.10.4
 [0.10.3]: https://github.com/llm-works/appinfra/compare/v0.10.2...v0.10.3
 [0.10.2]: https://github.com/llm-works/appinfra/compare/v0.10.1...v0.10.2

@@ -163,9 +163,10 @@ the `project_root` to pass. On the default path, `project_root` is `include_root
 `!include <BASE_CONFIG>` and the base's own relative sibling `!include './...'` directives. Under
 `--etc-dir`, `project_root` follows the user's directory.
 
-Prefer `include_root_for(BASE_CONFIG)` (etc dir) over the wider `BASE_CONFIG.parent.parent`
-(package dir). The tighter boundary suffices for the standard shape and locks the include surface
-down. Pass the wider ancestor explicitly only when the base's includes reach files outside `etc/`.
+Pick the tightest ancestor that contains all `!include`-reachable files. Usually that's the
+base's `etc/` directory (`include_root_for(BASE_CONFIG)`); pass the wider package directory
+(`BASE_CONFIG.parent.parent`) explicitly only when the base's includes reach files outside
+`etc/`.
 
 Use `allowed_paths` (rather than `project_root`) when the overlay references one specific file
 outside the package root — e.g. a shared config elsewhere on disk. The two arguments compose.
