@@ -73,7 +73,7 @@ Configuration File Requirements:
     dbs:
       test:
         host: "127.0.0.1"
-        port: 7432
+        port: 25432
         user: "postgres"
         password: "postgres"
         database: "unittest"

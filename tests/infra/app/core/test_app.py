@@ -1291,7 +1291,7 @@ class TestDeepMerge:
                 "location": False,
                 "location_color": "grey-12",
             },
-            "pgserver": {"port": 7432, "user": "postgres"},
+            "pgserver": {"port": 25432, "user": "postgres"},
         }
 
         # Simulates default hardcoded config
@@ -1310,7 +1310,7 @@ class TestDeepMerge:
 
         # Top-level YAML sections should be preserved
         assert "pgserver" in result
-        assert result["pgserver"]["port"] == 7432
+        assert result["pgserver"]["port"] == 25432
 
 
 # =============================================================================

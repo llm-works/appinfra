@@ -190,7 +190,7 @@ def demo_disabled_overrides():
         config = Config(str(DEFAULT_CONFIG_FILE), enable_env_overrides=False)
 
         print(f"Logging level: {config.logging.level} (should be 'info')")
-        print(f"PostgreSQL port: {config.pgserver.port} (should be 7432)")
+        print(f"PostgreSQL port: {config.pgserver.port} (should be 25432)")
         print("✓ Environment overrides disabled correctly")
 
 

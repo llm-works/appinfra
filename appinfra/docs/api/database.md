@@ -477,8 +477,8 @@ Defines the Docker-based PostgreSQL server for local development.
 ```yaml
 pgserver:
   version: 18                      # PostgreSQL version (required unless image is specified)
-  name: infra-pg                   # Server name/identifier
-  port: 7432                       # PostgreSQL port
+  name: llm-works-pg               # Server name/identifier (shared across llm-works packages)
+  port: 25432                      # PostgreSQL port
   user: postgres                   # Database user
   pass: ''                         # Database password
   image: pgvector/pgvector:pg18   # Optional: custom Docker image

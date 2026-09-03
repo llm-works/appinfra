@@ -1581,7 +1581,7 @@ class TestEnvOverrideSubstitution:
         config_file.write_text(
             "pgserver:\n"
             "  host: 127.0.0.1\n"
-            "  port: 7432\n"
+            "  port: 25432\n"
             "  user: postgres\n"
             "  pass: ''\n"
             "dbs:\n"
@@ -1604,7 +1604,7 @@ class TestEnvOverrideSubstitution:
         included.write_text(
             "pgserver:\n"
             "  host: 127.0.0.1\n"
-            "  port: 7432\n"
+            "  port: 25432\n"
             "dbs:\n"
             "  unittest:\n"
             '    url: "postgresql://${pgserver.host}:${pgserver.port}/db"\n'
@@ -1624,13 +1624,13 @@ class TestEnvOverrideSubstitution:
         config_file.write_text(
             "pgserver:\n"
             "  host: 127.0.0.1\n"
-            "  port: 7432\n"
+            "  port: 25432\n"
             "dbs:\n"
             "  unittest:\n"
             '    url: "postgresql://${pgserver.host}:${pgserver.port}/db"\n'
         )
         config = Config(str(config_file))
-        assert config.dbs.unittest.url == "postgresql://127.0.0.1:7432/db"
+        assert config.dbs.unittest.url == "postgresql://127.0.0.1:25432/db"
 
     def test_env_override_multi_underscore_resolves_via_canonical_alias(
         self, tmp_path, clean_env

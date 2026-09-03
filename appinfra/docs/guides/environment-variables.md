@@ -214,7 +214,7 @@ logging:
   colors: true
 
 pgserver:
-  port: 7432
+  port: 25432
   user: postgres
 
 test:
@@ -230,7 +230,7 @@ INFRA_LOGGING_LEVEL=debug
 INFRA_LOGGING_MICROS=true
 INFRA_LOGGING_COLORS_ENABLED=false
 
-INFRA_PGSERVER_PORT=5432
+INFRA_PGSERVER_PORT=25432
 INFRA_PGSERVER_USER=myuser
 
 INFRA_TEST_TIMEOUT=60
@@ -355,7 +355,7 @@ overridden values can be used in variable references:
 ```yaml
 # YAML
 pgserver:
-  port: 7432
+  port: 25432
 dbs:
   main:
     url: "postgresql://user:pass@localhost:${pgserver.port}/infra_main"
