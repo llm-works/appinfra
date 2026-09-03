@@ -477,7 +477,7 @@ All configuration variables follow the `INFRA_<MODULE>_<VAR>` naming convention.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `INFRA_CONTAINER_CMD` | `docker` | Runtime used by `pg.*` / `cicd.*` targets (`ps`, `exec`, `volume`, ...). Also exported to helper shell scripts (`pg-info.sh`, `cicd-test.sh`). |
+| `INFRA_CONTAINER_CMD` | `docker` | Runtime used by `pg.*` / `cicd.*` targets (`ps`, `exec`, `volume`, ...). Also exported to helper shell scripts (`pg.sh`, `cicd-test.sh`). |
 | `INFRA_COMPOSE_CMD` | `docker compose` | Compose orchestrator paired with `INFRA_CONTAINER_CMD`. |
 
 Set both together in `Makefile.local` to run the local-dev container layer under Podman:

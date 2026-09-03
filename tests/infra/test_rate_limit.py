@@ -607,32 +607,55 @@ class TestRateLimiterIntegration:
 
     def test_rate_limiter_with_variable_delays(self):
         """Test rate limiter with variable delays between calls."""
-        mock_logger = Mock()
-        # Use 60/min (1 per second) for more timing tolerance
-        limiter = RateLimiter(mock_logger, per_minute=60)
+        current_time = [0.0]
 
-        limiter.next()
-        time.sleep(0.3)  # Partial delay
+        def mock_monotonic():
+            return current_time[0]
 
-        wait = limiter.next()
-        # Should wait for remaining ~0.7s (with tolerance for timing variance)
-        assert 0.4 < wait < 1.0
+        def mock_sleep(duration):
+            current_time[0] += duration
+
+        with patch("appinfra.rate_limit.time.monotonic", side_effect=mock_monotonic):
+            with patch("appinfra.rate_limit.time.sleep", side_effect=mock_sleep):
+                mock_logger = Mock()
+                # 60/min = 1 per second, so delay between ops is 1.0s
+                # With initial=False, first slot is at t=1.0
+                limiter = RateLimiter(mock_logger, per_minute=60)
+
+                # First next() at t=0: waits 1.0s, time advances to 1.0, _last_t=2.0
+                limiter.next()
+                # Simulate 0.3s additional delay after first call completed
+                current_time[0] += 0.3  # now at t=1.3
+
+                wait = limiter.next()  # Second call at t=1.3, _last_t=2.0
+                # Should wait for remaining 0.7s (2.0 - 1.3 = 0.7)
+                assert wait == pytest.approx(0.7, abs=0.01)
 
     def test_multiple_operations_stay_within_rate(self):
         """Test multiple operations stay within rate limit."""
-        mock_logger = Mock()
-        limiter = RateLimiter(mock_logger, per_minute=120)  # 2 per second
+        current_time = [0.0]
+        total_wait = [0.0]
 
-        start = time.monotonic()
+        def mock_monotonic():
+            return current_time[0]
 
-        # Perform 10 operations
-        for _ in range(10):
-            limiter.next()
+        def mock_sleep(duration):
+            current_time[0] += duration
+            total_wait[0] += duration
 
-        elapsed = time.monotonic() - start
+        with patch("appinfra.rate_limit.time.monotonic", side_effect=mock_monotonic):
+            with patch("appinfra.rate_limit.time.sleep", side_effect=mock_sleep):
+                mock_logger = Mock()
+                limiter = RateLimiter(
+                    mock_logger, per_minute=120
+                )  # 2 per second = 0.5s delay
 
-        # Should take at least 4.5 seconds (10 ops / 2 per sec = 5 sec, minus first op)
-        assert elapsed >= 4.0  # Allow some tolerance
+                # Perform 10 operations
+                for _ in range(10):
+                    limiter.next()
+
+                # 10 ops at 0.5s each = 5.0s total wait (first op waits too since initial=False)
+                assert total_wait[0] == pytest.approx(5.0, abs=0.01)
 
 
 # =============================================================================

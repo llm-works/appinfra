@@ -77,6 +77,19 @@ endif
 PG_HOST := $(INFRA_PG_HOST)
 PG_USER := $(INFRA_PG_USER)
 
+# Wire vars exported to pg.sh (internal contract; underscore prefix marks it
+# as subject to change and distinct from the public INFRA_PG_* / INFRA_PGSERVER_*
+# configuration surface). INFRA_CONTAINER_CMD is exported in Makefile.config.
+_INFRA_PG_CONTAINER_NAME   := $(PG_CONTAINER_NAME)
+_INFRA_PG_VERSION          := $(PG_VERSION)
+_INFRA_PG_PORT             := $(PG_PORT)
+_INFRA_PG_PORT_R           := $(PG_PORT_R)
+_INFRA_PG_REPLICA_ENABLED  := $(PG_REPLICA_ENABLED)
+_INFRA_PG_HOST             := $(PG_HOST)
+_INFRA_PG_USER             := $(PG_USER)
+export _INFRA_PG_CONTAINER_NAME _INFRA_PG_VERSION _INFRA_PG_PORT _INFRA_PG_PORT_R
+export _INFRA_PG_REPLICA_ENABLED _INFRA_PG_HOST _INFRA_PG_USER
+
 # Convenience commands
 PSQL := PAGER='less -S' psql -h $(PG_HOST) -p $(PG_PORT) -U $(PG_USER)
 ifeq ($(PG_REPLICA_ENABLED),true)
@@ -242,11 +255,11 @@ endif
 # =============================================================================
 
 pg.info: ## comprehensive server and database information
-	@$(pg_local)/../pg-info.sh "$(PG_CONTAINER_NAME)" "$(PG_VERSION)" "$(PG_HOST)" "$(PG_PORT)" "$(PG_PORT_R)" "$(PG_USER)" "$(PG_REPLICA_ENABLED)"
+	@$(pg_local)/../pg.sh info
 .PHONY: pg.info
 
 pg.info.short: ## short status summary
-	@$(pg_local)/../pg-info.sh --short "$(PG_CONTAINER_NAME)" "$(PG_VERSION)" "$(PG_HOST)" "$(PG_PORT)" "$(PG_PORT_R)" "$(PG_USER)" "$(PG_REPLICA_ENABLED)"
+	@$(pg_local)/../pg.sh info --short
 .PHONY: pg.info.short
 
 pg.clean.internal:: ## drops all configured databases (no confirmation; for downstream chaining)
@@ -276,14 +289,14 @@ pg.clean:: areyousure ## cleans all databases (with confirmation)
 .PHONY: pg.clean
 
 pg: ## connects to postgres db (primary)
-	@$(pg_local)/../pg-info.sh --short "$(PG_CONTAINER_NAME)" "$(PG_VERSION)" "$(PG_HOST)" "$(PG_PORT)" "$(PG_PORT_R)" "$(PG_USER)" "$(PG_REPLICA_ENABLED)"
+	@$(pg_local)/../pg.sh info --short
 	@echo ""
 	$(PSQL)
 .PHONY: pg
 
 ifeq ($(PG_REPLICA_ENABLED),true)
 pg.standby: ## connects to standby postgres db (replication mode only)
-	@$(pg_local)/../pg-info.sh --short "$(PG_CONTAINER_NAME)" "$(PG_VERSION)" "$(PG_HOST)" "$(PG_PORT)" "$(PG_PORT_R)" "$(PG_USER)" "$(PG_REPLICA_ENABLED)"
+	@$(pg_local)/../pg.sh info --short
 	@echo ""
 	@echo "Connecting to standby server (read-only)..."
 	$(PSQL_STANDBY)
