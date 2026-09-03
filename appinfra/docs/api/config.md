@@ -17,6 +17,7 @@ class Config(DotDict):
         env_prefix: str = "INFRA_",
         merge_strategy: str = "replace",
         allowed_paths: list[Path | str] | None = None,
+        project_root: Path | str | None = None,
     ): ...
 
     def reload(self) -> Config: ...
@@ -33,7 +34,8 @@ class Config(DotDict):
 | `enable_env_overrides` | `True` | Apply environment variable overrides |
 | `env_prefix` | `"INFRA_"` | Prefix for environment variables |
 | `merge_strategy` | `"replace"` | Strategy for handling `!include` directives: `"replace"` (included content replaces target key) or `"merge"` (deep merge with existing). Note: only `"replace"` is currently fully supported |
-| `allowed_paths` | `None` | Explicit list of specific paths (e.g. `["~/.myapp.yaml"]`) that `!include*` directives may reach even when outside `project_root`. Each entry is `~`-expanded and resolved once; an include path bypasses the guard only if it resolves to an exact match. Use for narrow user-overlay patterns. See [YAML custom tags](utilities.md#custom-tags) for the overlay-pattern example. |
+| `allowed_paths` | `None` | Explicit list of specific paths (e.g. `["~/.myapp.yaml"]`) that absolute `!include*` directives may reach even when outside `project_root`. Each entry is `~`-expanded and resolved once; an include path bypasses the guard only if it resolves to an exact match. Applies to absolute / tilde-expanded includes only — relative includes stay bound to `project_root`. Use for narrow user-overlay patterns. See [YAML custom tags](utilities.md#custom-tags) for the overlay-pattern example. |
+| `project_root` | `None` | Override for the include-authorization boundary. When set, replaces the auto-derived `project_root` for every include check in the load — both relative and absolute. Auto-derivation walks the config file's ancestry for an `etc/*.yaml` marker and falls back to the file's parent directory; a user overlay under `$XDG_CONFIG_HOME` has no such marker and cannot reach a base config shipped inside a package's `etc/`. Pass the package install directory (`BASE_CONFIG.parent.parent` under the v1 config protocol) to authorize the base and all its packaged siblings. `~`-expanded and resolved once. See [Config Protocol](../guides/config-protocol.md) for the overlay pattern. |
 
 **Basic Usage:**
 
@@ -185,14 +187,21 @@ from pathlib import Path
 from appinfra.config import Config, xdg_candidates
 
 BASE_CONFIG = Path(__file__).parent / "etc" / "myapp.yaml"
+PACKAGE_ROOT = BASE_CONFIG.parent.parent
 
 
 def load_user_config() -> Config:
     for candidate in xdg_candidates("myorg", "myapp"):
         if candidate.exists():
-            return Config(str(candidate), allowed_paths=[str(BASE_CONFIG.parent)])
+            return Config(str(candidate), project_root=PACKAGE_ROOT)
     return Config(str(BASE_CONFIG))
 ```
+
+`project_root=PACKAGE_ROOT` widens the include-authorization boundary so both
+the overlay's absolute `!include <BASE_CONFIG>` and the base's relative
+sibling `!include './...'` directives resolve inside the package. Without it,
+the boundary auto-derives from the overlay's own ancestry and cannot reach
+the bundled base.
 
 See [Config Protocol](../guides/config-protocol.md) for the surrounding conventions
 (one-file-per-package load, `INFRA_*` env prefix, user override layout).

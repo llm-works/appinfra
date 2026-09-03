@@ -886,6 +886,7 @@ class TestHelperFunctions:
         mock_config._env_prefix = "TEST_"
         mock_config._merge_strategy = "merge"
         mock_config._allowed_paths = ["~/.myapp.yaml"]
+        mock_config._project_root_override = Path("/pkg")
 
         attrs = _preserve_config_attributes(mock_config)
 
@@ -893,6 +894,7 @@ class TestHelperFunctions:
         assert attrs["env_prefix"] == "TEST_"
         assert attrs["merge_strategy"] == "merge"
         assert attrs["allowed_paths"] == ["~/.myapp.yaml"]
+        assert attrs["project_root_override"] == Path("/pkg")
 
     def test_preserve_config_attributes_with_defaults(self):
         """Test preserving config attributes with missing attributes."""
@@ -905,6 +907,7 @@ class TestHelperFunctions:
         assert attrs["env_prefix"] == "INFRA_"
         assert attrs["merge_strategy"] == "replace"
         assert attrs["allowed_paths"] is None
+        assert attrs["project_root_override"] is None
 
     def test_restore_config_attributes(self):
         """Test restoring config attributes."""
@@ -914,6 +917,7 @@ class TestHelperFunctions:
             "env_prefix": "CUSTOM_",
             "merge_strategy": "deep",
             "allowed_paths": ["~/.myapp.yaml"],
+            "project_root_override": Path("/pkg"),
         }
 
         _restore_config_attributes(mock_config, attrs)
@@ -922,6 +926,7 @@ class TestHelperFunctions:
         assert mock_config._env_prefix == "CUSTOM_"
         assert mock_config._merge_strategy == "deep"
         assert mock_config._allowed_paths == ["~/.myapp.yaml"]
+        assert mock_config._project_root_override == Path("/pkg")
 
 
 # =============================================================================
@@ -1938,3 +1943,140 @@ class TestConfigAllowedPaths:
         (home / ".overrides.yaml").write_text("v: 2\n")
         cfg.reload()
         assert cfg.overlay.v == 2
+
+
+@pytest.mark.unit
+class TestConfigProjectRootOverride:
+    """Config-level integration for the project_root override.
+
+    Covers the overlay-loads-bundled-base pattern from the v1 config
+    protocol: a user overlay under $XDG_CONFIG_HOME `!include`s a base
+    config shipped inside a package's etc/ directory, and the base's own
+    sibling includes must resolve against the package install directory —
+    which the auto-derived project_root cannot reach.
+    """
+
+    def _make_bundled_base(self, tmp_path):
+        pkg_root = tmp_path / "pkg"
+        etc = pkg_root / "etc"
+        etc.mkdir(parents=True)
+        (etc / "models.yaml").write_text("model: gpt\n")
+        (etc / "base.yaml").write_text("app: base\nmodels: !include './models.yaml'\n")
+        return pkg_root, etc / "base.yaml"
+
+    def _make_overlay(self, tmp_path, base_path):
+        overlay_dir = tmp_path / "xdg" / "myorg"
+        overlay_dir.mkdir(parents=True)
+        overlay = overlay_dir / "myapp.yaml"
+        overlay.write_text(f'!include "{base_path}"\napp: overlay\n')
+        return overlay
+
+    def test_default_derivation_rejects_bundled_base_siblings(self, tmp_path):
+        """Without an override, sibling relative includes in the base are
+        rejected — this is the failure mode `project_root` fixes."""
+        _, base = self._make_bundled_base(tmp_path)
+        overlay = self._make_overlay(tmp_path, base)
+
+        import yaml as _yaml
+
+        with pytest.raises(_yaml.YAMLError, match="outside project root"):
+            Config(
+                str(overlay),
+                enable_env_overrides=False,
+                allowed_paths=[str(base)],
+            )
+
+    def test_override_authorizes_base_and_relative_siblings(self, tmp_path):
+        """`project_root=<pkg root>` authorizes the base's absolute include
+        AND the base's own relative sibling includes in one call."""
+        pkg_root, base = self._make_bundled_base(tmp_path)
+        overlay = self._make_overlay(tmp_path, base)
+
+        cfg = Config(
+            str(overlay),
+            enable_env_overrides=False,
+            project_root=pkg_root,
+        )
+        assert cfg.app == "overlay"
+        assert cfg.models.model == "gpt"
+
+    def test_override_wins_over_auto_derivation(self, tmp_path):
+        """When project_root is set, auto-derivation is skipped even if the
+        entry file has an etc/*.yaml marker ancestor."""
+        pkg_root, base = self._make_bundled_base(tmp_path)
+        # Overlay lives INSIDE an unrelated project root with its own etc/
+        other_root = tmp_path / "other"
+        other_etc = other_root / "etc"
+        other_etc.mkdir(parents=True)
+        (other_etc / "marker.yaml").write_text("marker: true\n")
+        overlay = other_etc / "myapp.yaml"
+        overlay.write_text(f'!include "{base}"\napp: overlay\n')
+
+        # Auto-derivation would pick `other_root` (has etc/marker.yaml),
+        # which does not contain the base — the include would fail. The
+        # override redirects the boundary to `pkg_root` instead.
+        cfg = Config(
+            str(overlay),
+            enable_env_overrides=False,
+            project_root=pkg_root,
+        )
+        assert cfg.models.model == "gpt"
+
+    def test_none_preserves_auto_derivation(self, tmp_path):
+        """`project_root=None` (the default) leaves auto-derivation in
+        place — same behavior as before this parameter existed."""
+        pkg_root, base = self._make_bundled_base(tmp_path)
+        # Load the base directly from inside the package: auto-derivation
+        # finds pkg_root (has etc/*.yaml) and the sibling include resolves.
+        cfg = Config(str(base), enable_env_overrides=False)
+        assert cfg.app == "base"
+        assert cfg.models.model == "gpt"
+
+    def test_empty_string_preserves_auto_derivation(self, tmp_path):
+        """Empty string falls back to auto-derivation, same as None.
+
+        Guards against `os.environ.get("VAR", "")` accidentally setting
+        the security boundary to cwd via `Path("").resolve()`.
+        """
+        pkg_root, base = self._make_bundled_base(tmp_path)
+        cfg = Config(str(base), enable_env_overrides=False, project_root="")
+        assert cfg.app == "base"
+        assert cfg.models.model == "gpt"
+
+    def test_override_string_path_is_expanded(self, tmp_path, monkeypatch):
+        """String paths are `~`-expanded and resolved, matching the
+        allowed_paths normalization contract."""
+        pkg_root, base = self._make_bundled_base(tmp_path)
+        overlay = self._make_overlay(tmp_path, base)
+        # Move pkg under a fake home so `~/pkg` resolves to it.
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+        target = fake_home / "pkg"
+        pkg_root.rename(target)
+        # Rewrite the overlay so its !include points at the new base path.
+        overlay.write_text(f'!include "{target / "etc" / "base.yaml"}"\napp: overlay\n')
+        monkeypatch.setenv("HOME", str(fake_home))
+
+        cfg = Config(
+            str(overlay),
+            enable_env_overrides=False,
+            project_root="~/pkg",
+        )
+        assert cfg.models.model == "gpt"
+
+    def test_reload_preserves_override(self, tmp_path):
+        """Reload keeps the project_root override — same discipline as
+        allowed_paths (preserved via _preserve_config_attributes)."""
+        pkg_root, base = self._make_bundled_base(tmp_path)
+        overlay = self._make_overlay(tmp_path, base)
+
+        cfg = Config(
+            str(overlay),
+            enable_env_overrides=False,
+            project_root=pkg_root,
+        )
+        assert cfg.models.model == "gpt"
+
+        (pkg_root / "etc" / "models.yaml").write_text("model: gpt-5\n")
+        cfg.reload()
+        assert cfg.models.model == "gpt-5"

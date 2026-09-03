@@ -80,6 +80,9 @@ def _preserve_config_attributes(config_instance: Any) -> dict[str, Any]:
         "env_prefix": getattr(config_instance, "_env_prefix", "INFRA_"),
         "merge_strategy": getattr(config_instance, "_merge_strategy", "replace"),
         "allowed_paths": getattr(config_instance, "_allowed_paths", None),
+        "project_root_override": getattr(
+            config_instance, "_project_root_override", None
+        ),
     }
 
 
@@ -91,6 +94,7 @@ def _restore_config_attributes(
     config_instance._env_prefix = preserved_attrs["env_prefix"]
     config_instance._merge_strategy = preserved_attrs["merge_strategy"]
     config_instance._allowed_paths = preserved_attrs["allowed_paths"]
+    config_instance._project_root_override = preserved_attrs["project_root_override"]
 
 
 def _check_file_size(fname_path: Any) -> None:
@@ -234,6 +238,7 @@ class Config(DotDict):
         env_prefix: str = "INFRA_",
         merge_strategy: str = "replace",
         allowed_paths: list[Path | str] | None = None,
+        project_root: Path | str | None = None,
     ):
         """
         Initialize configuration from a YAML file with optional environment variable overrides.
@@ -248,10 +253,24 @@ class Config(DotDict):
                 user overlay at `~/.myapp.yaml`) that absolute `!include*`
                 directives may reach. Each entry is `~`-expanded and resolved
                 once. Applies only to absolute / tilde-expanded includes —
-                relative includes stay bound to the auto-derived project_root.
+                relative includes stay bound to the effective project_root
+                (auto-derived, or overridden via the `project_root` parameter).
                 Use for narrow, named files; avoid broad prefixes. `!path` is
                 not gated by this list — it remains a value-marshalling tag
                 whose use is the application's responsibility.
+            project_root: Optional override for the include-authorization
+                boundary. When set, this path replaces the auto-derived
+                `project_root` for every include check in the load — both
+                relative and absolute. Use when the entry file's own
+                ancestry does not reach the directory that must anchor
+                includes (typical case: a user overlay under
+                `$XDG_CONFIG_HOME` that `!include`s a base config shipped
+                inside a package's `etc/` directory, whose sibling
+                `!include './...'` directives would otherwise be rejected
+                as path traversal). Pass the package install directory
+                (`BASE_CONFIG.parent.parent` under the v1 config protocol)
+                to authorize the base and all its siblings. `~`-expanded
+                and resolved once.
 
         Note:
             Path resolution is handled explicitly via the !path YAML tag. Use !path for paths
@@ -262,6 +281,9 @@ class Config(DotDict):
         self._env_prefix = env_prefix
         self._merge_strategy = merge_strategy
         self._allowed_paths = allowed_paths
+        self._project_root_override = (
+            Path(str(project_root)).expanduser().resolve() if project_root else None
+        )
         self._load(fname)
 
     def __setattr__(self, key: str, value: Any) -> None:
@@ -319,7 +341,9 @@ class Config(DotDict):
         otherwise raw YAML values get baked in before `_apply_env_overrides`
         runs and Config._resolve has nothing left to substitute.
         """
-        proj_root = _get_project_root_from_config(fname_path)
+        proj_root = self._project_root_override or _get_project_root_from_config(
+            fname_path
+        )
         env_overrides = (
             self._collect_env_overrides_for_yaml()
             if self._enable_env_overrides

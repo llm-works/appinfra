@@ -3,6 +3,7 @@
 
 """Tests for ConfigWatcher - file-based hot-reload."""
 
+import threading
 from unittest.mock import MagicMock
 
 import pytest
@@ -488,17 +489,21 @@ class TestConfigWatcherReloadPaths:
         watcher._last_reload = 0  # Reset last reload time to distant past
 
         reload_called = []
+        reload_event = threading.Event()
         original_reload = watcher._reload_config
 
         def tracking_reload():
             reload_called.append(True)
             original_reload()
+            reload_event.set()
 
         watcher._reload_config = tracking_reload
 
         # This should trigger reload since debounce=0 and last_reload=0
         watcher._on_file_changed()
 
+        # Wait for the timer thread to fire (with timeout for test reliability)
+        assert reload_event.wait(timeout=1.0), "reload not called within timeout"
         assert len(reload_called) == 1
 
     def test_reload_config_with_none_path_returns_early(self, tmp_path, mock_logger):
@@ -710,6 +715,45 @@ class TestConfigWatcherIncludedFiles:
             assert sub_dir in watcher._watched_dirs
         finally:
             watcher.stop()
+
+    def test_project_root_enables_bundled_base_discovery(self, tmp_path, mock_logger):
+        """ConfigWatcher with project_root discovers bundled base files.
+
+        Without project_root, an overlay under a different directory cannot
+        include a bundled base (rejected as path traversal). With project_root
+        pointing to the package install directory, the include succeeds and
+        the watcher discovers both the overlay and the bundled base files.
+        """
+        # Simulate bundled package with etc/base.yaml + etc/models.yaml
+        pkg_root = tmp_path / "pkg"
+        etc = pkg_root / "etc"
+        etc.mkdir(parents=True)
+        (etc / "models.yaml").write_text("model: gpt\n")
+        base = etc / "base.yaml"
+        base.write_text("app: base\nmodels: !include './models.yaml'\n")
+
+        # Simulate user overlay under a separate "xdg" directory
+        overlay_dir = tmp_path / "xdg" / "myorg"
+        overlay_dir.mkdir(parents=True)
+        overlay = overlay_dir / "myapp.yaml"
+        overlay.write_text(f'!include "{base}"\napp: overlay\n')
+
+        # Without project_root, discovery fails and falls back to overlay only
+        watcher_no_root = ConfigWatcher(mock_logger, etc_dir=overlay_dir)
+        watcher_no_root.configure("myapp.yaml")
+        files_no_root = watcher_no_root._get_source_files_from_config()
+        assert files_no_root == {overlay}  # fallback — couldn't load
+
+        # With project_root, discovery succeeds and finds all source files
+        watcher_with_root = ConfigWatcher(
+            mock_logger, etc_dir=overlay_dir, project_root=pkg_root
+        )
+        watcher_with_root.configure("myapp.yaml")
+        files_with_root = watcher_with_root._get_source_files_from_config()
+        assert overlay.resolve() in files_with_root
+        assert base.resolve() in files_with_root
+        assert (etc / "models.yaml").resolve() in files_with_root
+        assert len(files_with_root) == 3
 
 
 # =============================================================================
