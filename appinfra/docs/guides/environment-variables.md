@@ -387,7 +387,7 @@ These environment variables control framework behavior (not config value overrid
 |----------|---------|-------------|
 | `INFRA_DEFAULT_CONFIG_FILE` | `infra.yaml` | Default config filename used by `with_config_file()` and `get_config_file_path()` |
 | `INFRA_NO_CONFIRM` | unset | When set to `1`, bypasses the `areyousure` confirmation prompt used by destructive Make targets (e.g., `pg.server.down`, `pg.server.clean`, `cicd.erase`, `uninstall`). Intended for CI and other non-interactive contexts. |
-| `INFRA_CONTAINER_CMD` | `docker` | Container runtime used by `pg.*` and `cicd.*` Make targets (`ps`, `exec`, `volume`, ...). Set to `podman` to run the local-dev container layer under Podman. Exported to helper shell scripts (`pg-info.sh`, `cicd-test.sh`). |
+| `INFRA_CONTAINER_CMD` | `docker` | Container runtime used by `pg.*` and `cicd.*` Make targets (`ps`, `exec`, `volume`, ...). Set to `podman` to run the local-dev container layer under Podman. Exported to helper shell scripts (`pg.sh`, `cicd-test.sh`). |
 | `INFRA_COMPOSE_CMD` | `docker compose` | Compose orchestrator paired with `INFRA_CONTAINER_CMD`. Set to `podman compose` alongside the container-cmd override. |
 
 **Note:** Because this env var starts with `INFRA_`, it can interfere with config keys named

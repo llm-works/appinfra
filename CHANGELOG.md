@@ -10,6 +10,17 @@ For API stability guarantees and deprecation policy, see
 
 ## [Unreleased]
 
+### Changed
+- `pgserver` defaults: `name` `infra-pg` → `llm-works-pg`, `port` `7432` →
+  `25432`, `replica.port` `7433` → `25433`. Shared `pgserver.name` lets
+  multiple consumers attach to one running container instead of colliding on
+  the port bind. `INFRA_PGSERVER_*` overrides unchanged.
+- `pg-info.sh` replaced by `pg.sh info` — first step of a single dispatcher for
+  pg lifecycle operations. `make pg.info` / `pg.info.short` output unchanged;
+  the shim reads a `_INFRA_PG_*` env contract exported from Makefile.pg
+  (internal wire, not part of the public `INFRA_PG_*` / `INFRA_PGSERVER_*`
+  surface).
+
 ## [0.10.5] - 2026-09-03
 
 ### Added
