@@ -1618,7 +1618,9 @@ class TestConfigSpecLoading:
             base_config=self._make_bundled_base(tmp_path),
         )
 
-    def test_custom_etc_dir_loads_from_user_path(self, tmp_path):
+    def test_custom_etc_dir_loads_from_user_path(self, monkeypatch, tmp_path):
+        # Clear CI env vars that trigger UndeclaredConfigPathError on minimal test configs
+        monkeypatch.delenv("INFRA_PGSERVER_PASS", raising=False)
         custom = tmp_path / "user_etc"
         custom.mkdir()
         (custom / "myapp.yaml").write_text("origin: user\napi:\n  port: 12345\n")
@@ -1638,6 +1640,7 @@ class TestConfigSpecLoading:
         assert result["etc_dir"] == str(custom.resolve())
 
     def test_xdg_overlay_loads_when_no_custom(self, monkeypatch, tmp_path):
+        monkeypatch.delenv("INFRA_PGSERVER_PASS", raising=False)
         xdg_home = tmp_path / "xdg"
         (xdg_home / "myorg").mkdir(parents=True)
         overlay = xdg_home / "myorg" / "myapp.yaml"
@@ -1657,6 +1660,7 @@ class TestConfigSpecLoading:
         assert app._project_root == spec.base_config.parent.resolve()
 
     def test_bundled_base_when_no_custom_and_no_overlay(self, monkeypatch, tmp_path):
+        monkeypatch.delenv("INFRA_PGSERVER_PASS", raising=False)
         monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "nonexistent"))
         monkeypatch.setenv("XDG_CONFIG_DIRS", str(tmp_path / "nonexistent-sys"))
         spec = self._make_spec(tmp_path)
@@ -1672,6 +1676,7 @@ class TestConfigSpecLoading:
 
     def test_custom_wins_over_xdg_overlay(self, monkeypatch, tmp_path):
         """Explicit --etc-dir must not be shadowed by an existing overlay."""
+        monkeypatch.delenv("INFRA_PGSERVER_PASS", raising=False)
         xdg_home = tmp_path / "xdg"
         (xdg_home / "myorg").mkdir(parents=True)
         (xdg_home / "myorg" / "myapp.yaml").write_text("origin: overlay\n")
@@ -1695,6 +1700,7 @@ class TestConfigSpecLoading:
     ):
         """When a spec is set, _load_and_merge_config takes the v1 branch and
         never touches the deferred/direct file-loading path."""
+        monkeypatch.delenv("INFRA_PGSERVER_PASS", raising=False)
         monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "nonexistent"))
         monkeypatch.setenv("XDG_CONFIG_DIRS", str(tmp_path / "nonexistent-sys"))
         spec = self._make_spec(tmp_path)
@@ -1723,6 +1729,7 @@ class TestConfigSpecLoading:
 
     def test_populates_loaded_config_paths(self, monkeypatch, tmp_path):
         """_load_config_spec populates _loaded_config_paths for API parity."""
+        monkeypatch.delenv("INFRA_PGSERVER_PASS", raising=False)
         monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "nonexistent"))
         monkeypatch.setenv("XDG_CONFIG_DIRS", str(tmp_path / "nonexistent-sys"))
         spec = self._make_spec(tmp_path)
