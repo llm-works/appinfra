@@ -513,6 +513,7 @@ class App(Traceable):
         so the reload boundary matches the initial load).
         """
         spec = self._config_spec
+        programmatic_config = self.config  # preserve builder-supplied config
         custom = getattr(self._parsed_args, "etc_dir", None)
         config_path, project_root = resolve_config_source(
             spec.namespace,
@@ -520,7 +521,12 @@ class App(Traceable):
             spec.base_config,
             custom_etc_dir=custom,
         )
-        self.config = Config(str(config_path), project_root=project_root)
+        loaded_config = Config(str(config_path), project_root=project_root)
+        # Re-apply programmatic config (highest precedence after CLI args)
+        if programmatic_config and dict(programmatic_config):
+            self.config = self._merge_config_layers(loaded_config, programmatic_config)
+        else:
+            self.config = loaded_config
         self._etc_dir = str(config_path.parent)
         self._config_file = config_path.name
         self._project_root = project_root
@@ -990,7 +996,10 @@ class App(Traceable):
 
         # Use first loaded file's etc_dir as the base
         etc_dir, config_file, _ = loaded_paths[0]
-        watcher = ConfigWatcher(lg=type_cast(Logger, self.lg), etc_dir=etc_dir)
+        project_root = getattr(self, "_project_root", None)
+        watcher = ConfigWatcher(
+            lg=type_cast(Logger, self.lg), etc_dir=etc_dir, project_root=project_root
+        )
 
         # Register all config files (for layered configs)
         # First file becomes primary, rest are overlays

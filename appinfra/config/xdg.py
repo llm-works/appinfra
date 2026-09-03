@@ -103,7 +103,7 @@ def resolve_config_source(
         ``(config_file, project_root)`` — both pass directly to
         ``Config(str(config_file), project_root=project_root)``.
     """
-    if custom_etc_dir:
+    if custom_etc_dir is not None:
         etc = Path(str(custom_etc_dir)).expanduser().resolve()
         return (etc / f"{package}.yaml", etc)
 
