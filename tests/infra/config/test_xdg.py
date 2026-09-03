@@ -1,0 +1,295 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The appinfra Authors
+
+"""Tests for appinfra.config.xdg — XDG Base Directory helpers."""
+
+from pathlib import Path
+
+import pytest
+
+from appinfra.config import (
+    include_root_for,
+    resolve_config_source,
+    xdg_candidates,
+)
+
+
+@pytest.fixture
+def clean_xdg_env(monkeypatch):
+    """Ensure no XDG_* env vars leak in from the host."""
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    monkeypatch.delenv("XDG_CONFIG_DIRS", raising=False)
+
+
+@pytest.mark.unit
+class TestXdgCandidatesDefaults:
+    """Behavior when XDG_CONFIG_HOME / XDG_CONFIG_DIRS are unset."""
+
+    def test_defaults_use_spec_fallbacks(self, clean_xdg_env):
+        candidates = xdg_candidates("llm-works", "llm-kelt")
+        home = Path.home() / ".config"
+        assert candidates == [
+            home / "llm-works" / "llm-kelt.yaml",
+            home / "llm-works" / "config.yaml",
+            Path("/etc/xdg") / "llm-works" / "llm-kelt.yaml",
+            Path("/etc/xdg") / "llm-works" / "config.yaml",
+        ]
+
+    def test_empty_env_values_treated_as_unset(self, monkeypatch):
+        monkeypatch.setenv("XDG_CONFIG_HOME", "")
+        monkeypatch.setenv("XDG_CONFIG_DIRS", "")
+        candidates = xdg_candidates("ns", "pkg")
+        assert candidates[0].parent.parent == Path.home() / ".config"
+        assert candidates[2].parent.parent == Path("/etc/xdg")
+
+
+@pytest.mark.unit
+class TestXdgCandidatesEnvOverrides:
+    """Behavior when XDG env vars are set."""
+
+    def test_home_override_only(self, monkeypatch):
+        monkeypatch.setenv("XDG_CONFIG_HOME", "/custom/home")
+        monkeypatch.delenv("XDG_CONFIG_DIRS", raising=False)
+        candidates = xdg_candidates("ns", "pkg")
+        assert candidates[0] == Path("/custom/home/ns/pkg.yaml")
+        assert candidates[1] == Path("/custom/home/ns/config.yaml")
+        assert candidates[2] == Path("/etc/xdg/ns/pkg.yaml")
+
+    def test_dirs_override_only(self, monkeypatch):
+        monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+        monkeypatch.setenv("XDG_CONFIG_DIRS", "/a:/b")
+        candidates = xdg_candidates("ns", "pkg")
+        home = Path.home() / ".config"
+        assert candidates == [
+            home / "ns" / "pkg.yaml",
+            home / "ns" / "config.yaml",
+            Path("/a/ns/pkg.yaml"),
+            Path("/a/ns/config.yaml"),
+            Path("/b/ns/pkg.yaml"),
+            Path("/b/ns/config.yaml"),
+        ]
+
+    def test_both_overrides(self, monkeypatch):
+        monkeypatch.setenv("XDG_CONFIG_HOME", "/h")
+        monkeypatch.setenv("XDG_CONFIG_DIRS", "/s1:/s2")
+        candidates = xdg_candidates("ns", "pkg")
+        assert [c.parent.parent for c in candidates] == [
+            Path("/h"),
+            Path("/h"),
+            Path("/s1"),
+            Path("/s1"),
+            Path("/s2"),
+            Path("/s2"),
+        ]
+
+
+@pytest.mark.unit
+class TestXdgCandidatesSkippedEntries:
+    """Malformed XDG_CONFIG_DIRS entries per XDG spec."""
+
+    def test_empty_entries_skipped(self, monkeypatch):
+        monkeypatch.setenv("XDG_CONFIG_HOME", "/h")
+        monkeypatch.setenv("XDG_CONFIG_DIRS", ":/a::/b:")
+        candidates = xdg_candidates("ns", "pkg")
+        dirs = [c.parent.parent for c in candidates]
+        assert dirs == [
+            Path("/h"),
+            Path("/h"),
+            Path("/a"),
+            Path("/a"),
+            Path("/b"),
+            Path("/b"),
+        ]
+
+    def test_relative_entries_skipped(self, monkeypatch):
+        monkeypatch.setenv("XDG_CONFIG_HOME", "/h")
+        monkeypatch.setenv("XDG_CONFIG_DIRS", "relative:/abs:./also-relative")
+        candidates = xdg_candidates("ns", "pkg")
+        dirs = [c.parent.parent for c in candidates]
+        assert dirs == [Path("/h"), Path("/h"), Path("/abs"), Path("/abs")]
+
+    def test_relative_home_falls_back_to_default(self, monkeypatch):
+        monkeypatch.setenv("XDG_CONFIG_HOME", "relative/path")
+        monkeypatch.setenv("XDG_CONFIG_DIRS", "/s")
+        candidates = xdg_candidates("ns", "pkg")
+        home = Path.home() / ".config"
+        assert candidates[0].parent.parent == home
+        assert candidates[1].parent.parent == home
+
+
+@pytest.mark.unit
+class TestXdgCandidatesOrdering:
+    """Order invariants: home before system; per-package before unified per dir."""
+
+    def test_home_before_system(self, monkeypatch):
+        monkeypatch.setenv("XDG_CONFIG_HOME", "/h")
+        monkeypatch.setenv("XDG_CONFIG_DIRS", "/s")
+        candidates = xdg_candidates("ns", "pkg")
+        assert candidates[0].is_relative_to("/h")
+        assert candidates[-1].is_relative_to("/s")
+
+    def test_per_package_before_unified_per_dir(self, monkeypatch):
+        monkeypatch.setenv("XDG_CONFIG_HOME", "/h")
+        monkeypatch.setenv("XDG_CONFIG_DIRS", "/s")
+        candidates = xdg_candidates("ns", "pkg")
+        assert candidates[0].name == "pkg.yaml"
+        assert candidates[1].name == "config.yaml"
+        assert candidates[2].name == "pkg.yaml"
+        assert candidates[3].name == "config.yaml"
+
+
+@pytest.mark.unit
+class TestXdgCandidatesInterpolation:
+    """Namespace and package strings appear verbatim in the paths."""
+
+    def test_namespace_and_package_appear_in_paths(self, clean_xdg_env):
+        candidates = xdg_candidates("my-ns", "my-pkg")
+        for c in candidates:
+            assert c.parent.name == "my-ns"
+        assert candidates[0].name == "my-pkg.yaml"
+        assert candidates[1].name == "config.yaml"
+
+    def test_no_filesystem_probing(self, monkeypatch):
+        def fail_on_exists(self):
+            raise AssertionError("xdg_candidates must not probe the filesystem")
+
+        monkeypatch.setattr(Path, "exists", fail_on_exists)
+        monkeypatch.setenv("XDG_CONFIG_HOME", "/h")
+        monkeypatch.setenv("XDG_CONFIG_DIRS", "/s")
+        candidates = xdg_candidates("ns", "pkg")
+        assert len(candidates) == 4
+        assert candidates[0] == Path("/h/ns/pkg.yaml")
+
+
+@pytest.mark.unit
+class TestIncludeRootFor:
+    """`include_root_for(base_config)` returns the base's parent dir."""
+
+    def test_returns_parent_of_base_config(self, tmp_path):
+        base = tmp_path / "myapp" / "etc" / "myapp.yaml"
+        base.parent.mkdir(parents=True)
+        base.write_text("")
+        assert include_root_for(base) == (tmp_path / "myapp" / "etc").resolve()
+
+    def test_accepts_string(self, tmp_path):
+        base = tmp_path / "etc" / "app.yaml"
+        base.parent.mkdir(parents=True)
+        base.write_text("")
+        assert include_root_for(str(base)) == (tmp_path / "etc").resolve()
+
+    def test_expands_tilde(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("HOME", str(tmp_path))
+        assert include_root_for("~/etc/app.yaml") == (tmp_path / "etc").resolve()
+
+    def test_resolves_symlink(self, tmp_path):
+        real_etc = tmp_path / "real" / "etc"
+        real_etc.mkdir(parents=True)
+        (real_etc / "app.yaml").write_text("")
+        link_etc = tmp_path / "link" / "etc"
+        link_etc.parent.mkdir()
+        link_etc.symlink_to(real_etc)
+        assert include_root_for(link_etc / "app.yaml") == real_etc.resolve()
+
+
+@pytest.mark.unit
+class TestResolveConfigSource:
+    """`resolve_config_source` walks the v1 precedence chain."""
+
+    @pytest.fixture
+    def bundled_base(self, tmp_path):
+        base = tmp_path / "pkg" / "etc" / "myapp.yaml"
+        base.parent.mkdir(parents=True)
+        base.write_text("")
+        return base
+
+    def test_custom_etc_dir_wins(self, bundled_base, tmp_path, clean_xdg_env):
+        custom = tmp_path / "user_etc"
+        custom.mkdir()
+        path, root = resolve_config_source(
+            "myorg", "myapp", bundled_base, custom_etc_dir=custom
+        )
+        assert path == custom.resolve() / "myapp.yaml"
+        assert root == custom.resolve()
+
+    def test_custom_etc_dir_not_pre_validated(self, bundled_base, tmp_path):
+        """Missing file under --etc-dir is not this helper's error to raise."""
+        custom = tmp_path / "user_etc"
+        custom.mkdir()
+        # <custom>/myapp.yaml does not exist; helper still returns the path.
+        path, root = resolve_config_source(
+            "myorg", "myapp", bundled_base, custom_etc_dir=custom
+        )
+        assert not path.exists()
+        assert root == custom.resolve()
+
+    def test_custom_etc_dir_string_accepted(self, bundled_base, tmp_path):
+        custom = tmp_path / "user_etc"
+        custom.mkdir()
+        path, root = resolve_config_source(
+            "myorg", "myapp", bundled_base, custom_etc_dir=str(custom)
+        )
+        assert path == custom.resolve() / "myapp.yaml"
+
+    def test_custom_etc_dir_expands_tilde(self, bundled_base, monkeypatch, tmp_path):
+        monkeypatch.setenv("HOME", str(tmp_path))
+        (tmp_path / "user_etc").mkdir()
+        path, root = resolve_config_source(
+            "myorg", "myapp", bundled_base, custom_etc_dir="~/user_etc"
+        )
+        assert root == (tmp_path / "user_etc").resolve()
+
+    def test_xdg_overlay_when_no_custom(self, bundled_base, monkeypatch, tmp_path):
+        xdg_home = tmp_path / "xdg"
+        (xdg_home / "myorg").mkdir(parents=True)
+        overlay = xdg_home / "myorg" / "myapp.yaml"
+        overlay.write_text("")
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg_home))
+        monkeypatch.delenv("XDG_CONFIG_DIRS", raising=False)
+        path, root = resolve_config_source("myorg", "myapp", bundled_base)
+        assert path == overlay
+        assert root == bundled_base.parent.resolve()
+
+    def test_fallback_to_bundled_base(self, bundled_base, clean_xdg_env, monkeypatch):
+        # Point XDG at empty dirs so no overlay is found.
+        monkeypatch.setenv("XDG_CONFIG_HOME", "/nonexistent/home")
+        monkeypatch.setenv("XDG_CONFIG_DIRS", "/nonexistent/system")
+        path, root = resolve_config_source("myorg", "myapp", bundled_base)
+        assert path == bundled_base.resolve()
+        assert root == bundled_base.parent.resolve()
+
+    def test_custom_wins_over_existing_xdg(self, bundled_base, monkeypatch, tmp_path):
+        """Explicit --etc-dir must not be shadowed by an existing XDG overlay."""
+        xdg_home = tmp_path / "xdg"
+        (xdg_home / "myorg").mkdir(parents=True)
+        (xdg_home / "myorg" / "myapp.yaml").write_text("")
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg_home))
+        custom = tmp_path / "user_etc"
+        custom.mkdir()
+        path, root = resolve_config_source(
+            "myorg", "myapp", bundled_base, custom_etc_dir=custom
+        )
+        assert path == custom.resolve() / "myapp.yaml"
+        assert root == custom.resolve()
+
+    def test_per_package_overlay_preferred_over_unified(
+        self, bundled_base, monkeypatch, tmp_path
+    ):
+        xdg_home = tmp_path / "xdg"
+        (xdg_home / "myorg").mkdir(parents=True)
+        (xdg_home / "myorg" / "myapp.yaml").write_text("")
+        (xdg_home / "myorg" / "config.yaml").write_text("")
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg_home))
+        monkeypatch.delenv("XDG_CONFIG_DIRS", raising=False)
+        path, _ = resolve_config_source("myorg", "myapp", bundled_base)
+        assert path.name == "myapp.yaml"
+
+    def test_unified_used_when_per_package_absent(
+        self, bundled_base, monkeypatch, tmp_path
+    ):
+        xdg_home = tmp_path / "xdg"
+        (xdg_home / "myorg").mkdir(parents=True)
+        (xdg_home / "myorg" / "config.yaml").write_text("")
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg_home))
+        monkeypatch.delenv("XDG_CONFIG_DIRS", raising=False)
+        path, _ = resolve_config_source("myorg", "myapp", bundled_base)
+        assert path.name == "config.yaml"

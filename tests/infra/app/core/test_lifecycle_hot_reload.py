@@ -172,6 +172,46 @@ class TestStartHotReloadWatcher:
 
         lifecycle_manager._lifecycle_logger.error.assert_called_once()
 
+    def test_forwards_project_root_to_watcher(
+        self, lifecycle_manager, mock_config_with_hot_reload
+    ):
+        """Test that app._project_root is passed to ConfigWatcher on create."""
+        from pathlib import Path
+
+        lifecycle_manager._lifecycle_logger = MagicMock()
+        lifecycle_manager._logger = MagicMock()
+        lifecycle_manager.application._project_root = Path("/pkg/etc")
+
+        with patch("appinfra.config.ConfigWatcher") as mock_watcher_class:
+            lifecycle_manager._configure_and_start_watcher(
+                mock_config_with_hot_reload.logging.hot_reload,
+                "/pkg/etc",
+                "myapp.yaml",
+            )
+
+        mock_watcher_class.assert_called_once()
+        kwargs = mock_watcher_class.call_args.kwargs
+        assert kwargs["project_root"] == Path("/pkg/etc")
+
+    def test_forwards_no_project_root_when_unset(
+        self, lifecycle_manager, mock_config_with_hot_reload
+    ):
+        """Test that project_root defaults to None when app hasn't set it."""
+        lifecycle_manager._lifecycle_logger = MagicMock()
+        lifecycle_manager._logger = MagicMock()
+        # MagicMock fixture returns a Mock for any attr; force None here.
+        lifecycle_manager.application._project_root = None
+
+        with patch("appinfra.config.ConfigWatcher") as mock_watcher_class:
+            lifecycle_manager._configure_and_start_watcher(
+                mock_config_with_hot_reload.logging.hot_reload,
+                "/etc/myapp",
+                "config.yaml",
+            )
+
+        kwargs = mock_watcher_class.call_args.kwargs
+        assert kwargs["project_root"] is None
+
 
 @pytest.mark.unit
 class TestStopHotReloadWatcher:

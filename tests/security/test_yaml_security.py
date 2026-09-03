@@ -313,5 +313,131 @@ def test_allowed_paths_does_not_broaden_beyond_listed_entries(
             project_root=secure_temp_project,
             allowed_paths=[str(outside / "allowed.yaml")],
         )
-        with pytest.raises(yaml.YAMLError, match="outside project root"):
+        with pytest.raises(yaml.YAMLError, match="is not authorized"):
             loader.get_single_data()
+
+
+@pytest.mark.security
+@pytest.mark.integration
+def test_config_outside_project_marker_bounds_to_config_parent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """
+    Config auto-derives project_root even when the config file lives outside
+    any project tree with an etc/*.yaml marker. The derivation must resolve
+    to a bounded directory, not the filesystem root.
+
+    Attack Vector: Absolute-path include reaching beyond the intended
+    boundary when a Config caller relies on the auto-derived project_root.
+    Module: appinfra/config/config.py (_get_project_root_from_config)
+    OWASP: A01:2021 - Broken Access Control
+    """
+    fake_home = tmp_path / "home"
+    (fake_home / ".ssh").mkdir(parents=True)
+    (fake_home / ".ssh" / "id_rsa").write_text("PRIV")
+    monkeypatch.setenv("HOME", str(fake_home))
+
+    base_dir = tmp_path / "loose_config"
+    base_dir.mkdir()
+    config_path = base_dir / "base.yaml"
+    config_path.write_text(f'stolen: !include "{fake_home}/.ssh/id_rsa"\n')
+
+    from appinfra.config.config import Config
+
+    with pytest.raises(yaml.YAMLError, match="is not authorized"):
+        Config(str(config_path), allowed_paths=["~/.does-not-match.yaml"])
+
+
+@pytest.mark.security
+@pytest.mark.integration
+def test_load_file_no_project_root_denies_unlisted_absolute(tmp_path: Path):
+    """
+    load_file(project_root=None, allowed_paths=[...]) treats the allowlist
+    as authoritative for absolute includes: only exact-match entries are
+    permitted; every other absolute path is denied.
+
+    Attack Vector: Unlisted absolute include when allowed_paths is set as
+    the sole authorization surface.
+    Module: appinfra/yaml/loader.py (_check_project_root_security)
+    OWASP: A01:2021 - Broken Access Control
+    """
+    from appinfra.yaml import load_file
+
+    allowed = tmp_path / "allowed.yaml"
+    allowed.write_text("ok: true\n")
+    denied = tmp_path / "denied.yaml"
+    denied.write_text("leaked: true\n")
+
+    base = tmp_path / "base.yaml"
+    base.write_text(f'x: !include "{denied}"\n')
+    with pytest.raises(yaml.YAMLError, match="is not authorized"):
+        load_file(str(base), project_root=None, allowed_paths=[str(allowed)])
+
+    base.write_text(f'x: !include "{allowed}"\n')
+    result = load_file(str(base), project_root=None, allowed_paths=[str(allowed)])
+    assert result == {"x": {"ok": True}}
+
+
+@pytest.mark.security
+@pytest.mark.integration
+def test_relative_include_permitted_without_project_root(tmp_path: Path):
+    """
+    Relative includes are permitted when project_root is not set — the
+    YAML author owns their own file layout. Verify a plain relative
+    sibling include still resolves.
+    """
+    from appinfra.yaml import load_file
+
+    (tmp_path / "sibling.yaml").write_text("ok: true\n")
+    base = tmp_path / "base.yaml"
+    base.write_text('x: !include "./sibling.yaml"\n')
+
+    result = load_file(str(base), project_root=None)
+    assert result == {"x": {"ok": True}}
+
+
+@pytest.mark.security
+@pytest.mark.integration
+def test_relative_include_bounded_by_project_root_when_set(tmp_path: Path):
+    """
+    Regression guard: when project_root is set, a relative include using
+    `..` escape resolves outside project_root and is denied.
+    """
+    from appinfra.yaml import load_file
+
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "leaked.yaml").write_text("leaked: true\n")
+
+    project = tmp_path / "project"
+    project.mkdir()
+    base = project / "base.yaml"
+    base.write_text('x: !include "../outside/leaked.yaml"\n')
+
+    with pytest.raises(yaml.YAMLError, match="outside project root"):
+        load_file(str(base), project_root=project)
+
+
+@pytest.mark.security
+@pytest.mark.integration
+def test_absolute_inside_project_root_with_allowed_paths_set(tmp_path: Path):
+    """
+    Regression guard: an absolute include that resolves inside project_root
+    is permitted even when allowed_paths is set for other files. The
+    authorization contract is "in allowed_paths OR inside project_root".
+
+    Attack Vector: Inadvertent denial when allowed_paths inadvertently
+    disables the project_root fallback for absolute includes.
+    Module: appinfra/yaml/loader.py (_authorize_absolute_include)
+    OWASP: A01:2021 - Broken Access Control (false positive variant)
+    """
+    from appinfra.yaml import load_file
+
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    (proj / "child.yaml").write_text("ok: true\n")
+    main = proj / "main.yaml"
+    main.write_text(f'x: !include "{proj}/child.yaml"\n')
+
+    result = load_file(str(main), project_root=proj, allowed_paths=["~/.other.yaml"])
+    assert result == {"x": {"ok": True}}

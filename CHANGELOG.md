@@ -10,6 +10,36 @@ For API stability guarantees and deprecation policy, see
 
 ## [Unreleased]
 
+## [0.10.5] - 2026-09-03
+
+### Added
+- `appinfra.config.xdg_candidates(namespace, package)`: pure helper that
+  enumerates config file candidates in XDG search order (per-package
+  before unified within each dir; `$XDG_CONFIG_HOME` before
+  `$XDG_CONFIG_DIRS`). See
+  [Config Protocol](appinfra/docs/guides/config-protocol.md).
+- `Config(project_root=...)`: override the include-authorization boundary.
+  Required for user overlays that `!include` a bundled base whose own
+  siblings must resolve inside the package. Corrected in the v1 guide.
+- `appinfra.config.include_root_for(base_config)`: helper returning the
+  base file's `etc/` dir — the tight include-authorization boundary for
+  overlays.
+- `appinfra.config.resolve_config_source(namespace, package, base,
+  custom_etc_dir=None)`: one-call v1 precedence chain (`--etc-dir` > XDG >
+  bundled base), returning `(path, project_root)`.
+- `AppBuilder.with_config_spec(namespace, package, base_config)`: v1
+  config auto-loading. Compose with `.with_standard_args(etc_dir=True)` to
+  expose the `--etc-dir` escape hatch; mutually exclusive with
+  `with_config_file`.
+- Config Protocol guide: rule 6 documents `--etc-dir` as user-authoritative
+  over XDG when the CLI exposes it.
+
+### Changed
+- `yaml.load`/`yaml.load_file`/`Config`: relative and absolute
+  `!include*` paths follow distinct authorization rules against
+  `project_root` and `allowed_paths` (see docstrings).
+- `Config` project-root derivation uses `etc/*.yaml` marker discovery.
+
 ## [0.10.4] - 2026-09-02
 
 ### Added
@@ -790,7 +820,8 @@ as config. Affected: `ConfigValidator`, `PG.readonly`, `PG.migrate()`,
 ### Changed
 - Package renamed to `appinfra` (install and import both use `appinfra`)
 
-[Unreleased]: https://github.com/llm-works/appinfra/compare/v0.10.4...HEAD
+[Unreleased]: https://github.com/llm-works/appinfra/compare/v0.10.5...HEAD
+[0.10.5]: https://github.com/llm-works/appinfra/compare/v0.10.4...v0.10.5
 [0.10.4]: https://github.com/llm-works/appinfra/compare/v0.10.3...v0.10.4
 [0.10.3]: https://github.com/llm-works/appinfra/compare/v0.10.2...v0.10.3
 [0.10.2]: https://github.com/llm-works/appinfra/compare/v0.10.1...v0.10.2
