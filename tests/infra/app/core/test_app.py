@@ -1071,6 +1071,34 @@ class TestDeferredConfigLoading:
         assert app._is_direct_path("config.yaml") is False
         assert app._is_direct_path("subdir/config.yaml") is False
 
+    def test_is_direct_path_tilde(self):
+        """Test _is_direct_path returns True for tilde-prefixed paths."""
+        app = App()
+        assert app._is_direct_path("~/config.yaml") is True
+        assert app._is_direct_path("~/.config/app.yaml") is True
+        assert app._is_direct_path("~/subdir/config.yaml") is True
+
+    def test_is_direct_path_tilde_in_middle_is_absolute(self):
+        """Tilde in middle of absolute path is not a home-dir reference."""
+        app = App()
+        # /a/b/~/c is absolute (starts with /), tilde is literal dirname
+        assert app._is_direct_path("/a/b/~/c") is True  # absolute path
+        # ../~/config.yaml starts with ../, tilde is literal
+        assert app._is_direct_path("../~/config.yaml") is True  # explicit relative
+
+    def test_is_direct_path_tilde_no_slash_is_bare_filename(self):
+        """~config.yaml is NOT a valid home-dir reference, it's a bare filename.
+
+        expanduser() raises RuntimeError for ~username when the user doesn't exist,
+        so we must not recognize ~config.yaml as a direct path — only ~/... or ~.
+        """
+        app = App()
+        # ~config.yaml looks like it starts with ~ but is NOT a valid home expansion
+        assert app._is_direct_path("~config.yaml") is False
+        assert app._is_direct_path("~foo") is False
+        # But bare ~ alone is valid (expands to home directory)
+        assert app._is_direct_path("~") is True
+
     def test_load_direct_config_absolute_path(self, clean_env):
         """Test _load_direct_config loads from absolute path."""
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1105,6 +1133,70 @@ class TestDeferredConfigLoading:
                 assert app.config.relative_key == "relative_value"
             finally:
                 os.chdir(old_cwd)
+
+    def test_load_direct_config_tilde_path(self, clean_env, monkeypatch, tmp_path):
+        """Test _load_direct_config expands tilde and loads from home directory."""
+        monkeypatch.setenv("HOME", str(tmp_path))
+        config_path = tmp_path / "config.yaml"
+        config_path.write_text("tilde_key: tilde_value\n")
+
+        app = App()
+        result = app._load_direct_config("~/config.yaml")
+
+        assert result is not None
+        assert hasattr(app.config, "tilde_key")
+        assert app.config.tilde_key == "tilde_value"
+
+    def test_load_direct_config_dot_tilde_normalized(
+        self, clean_env, monkeypatch, tmp_path
+    ):
+        """./~/config.yaml normalizes to ~/config.yaml, then expands."""
+        monkeypatch.setenv("HOME", str(tmp_path))
+        config_path = tmp_path / "config.yaml"
+        config_path.write_text("dot_tilde_key: dot_tilde_value\n")
+
+        app = App()
+        # Path('./~/config.yaml') normalizes to '~/config.yaml'
+        result = app._load_direct_config("./~/config.yaml")
+
+        assert result is not None
+        assert hasattr(app.config, "dot_tilde_key")
+        assert app.config.dot_tilde_key == "dot_tilde_value"
+
+    def test_load_direct_config_tilde_in_middle_is_literal(self, clean_env, tmp_path):
+        """Tilde in middle of path is a literal directory name, not expanded."""
+        # Create /tmp.../a/~/config.yaml (literal ~ directory)
+        tilde_dir = tmp_path / "a" / "~"
+        tilde_dir.mkdir(parents=True)
+        config_path = tilde_dir / "config.yaml"
+        config_path.write_text("literal_tilde_key: literal_value\n")
+
+        app = App()
+        result = app._load_direct_config(str(config_path))
+
+        assert result is not None
+        assert hasattr(app.config, "literal_tilde_key")
+        assert app.config.literal_tilde_key == "literal_value"
+
+    def test_load_direct_config_dot_tilde_filename(
+        self, clean_env, monkeypatch, tmp_path
+    ):
+        """./~config.yaml is literal, not expanded as ~username.
+
+        expanduser() raises RuntimeError for ~username when user doesn't exist.
+        The ./ prefix makes it a direct path, but we must not call expanduser()
+        on paths that don't start with ~.
+        """
+        monkeypatch.chdir(tmp_path)
+        config_path = tmp_path / "~config.yaml"
+        config_path.write_text("dot_tilde_key: dot_tilde_value\n")
+
+        app = App()
+        result = app._load_direct_config("./~config.yaml")
+
+        assert result is not None
+        assert hasattr(app.config, "dot_tilde_key")
+        assert app.config.dot_tilde_key == "dot_tilde_value"
 
     def test_load_direct_config_missing_file_raises(self):
         """Test _load_direct_config raises for missing file."""
@@ -1697,6 +1789,66 @@ class TestConfigSpecLoading:
         app._load_config_spec()
 
         assert app.config.origin == "user"
+
+    def test_custom_config_absolute_path_wins_over_spec(self, monkeypatch, tmp_path):
+        """--config /abs.yaml loads directly, bypasses spec (XDG + base)."""
+        xdg_home = tmp_path / "xdg"
+        (xdg_home / "myorg").mkdir(parents=True)
+        (xdg_home / "myorg" / "myapp.yaml").write_text("origin: overlay\n")
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg_home))
+        monkeypatch.delenv("XDG_CONFIG_DIRS", raising=False)
+        target = tmp_path / "elsewhere" / "custom.yaml"
+        target.parent.mkdir()
+        target.write_text("origin: cli-config\napi:\n  port: 55555\n")
+        spec = self._make_spec(tmp_path)
+
+        app = App()
+        app._config_spec = spec
+        app._parsed_args = argparse.Namespace(etc_dir=None, config=str(target))
+
+        app._load_config_spec()
+
+        assert app.config.origin == "cli-config"
+        assert app.config.api.port == 55555
+        assert app._project_root == target.parent.resolve()
+
+    def test_custom_config_bare_filename_composes_with_etc_dir(
+        self, monkeypatch, tmp_path
+    ):
+        """--etc-dir /foo --config alt.yaml → /foo/alt.yaml."""
+        etc = tmp_path / "user_etc"
+        etc.mkdir()
+        (etc / "alt.yaml").write_text("origin: user-alt\napi:\n  port: 33333\n")
+        # An etc/myapp.yaml also exists but must not be picked (--config wins).
+        (etc / "myapp.yaml").write_text("origin: user-default\n")
+        spec = self._make_spec(tmp_path)
+
+        app = App()
+        app._config_spec = spec
+        app._parsed_args = argparse.Namespace(etc_dir=str(etc), config="alt.yaml")
+
+        app._load_config_spec()
+
+        assert app.config.origin == "user-alt"
+        assert app.config.api.port == 33333
+
+    def test_custom_config_absolute_ignores_etc_dir(self, monkeypatch, tmp_path):
+        """--config /abs.yaml with --etc-dir also set → --etc-dir ignored."""
+        etc = tmp_path / "user_etc"
+        etc.mkdir()
+        (etc / "myapp.yaml").write_text("origin: user-default\n")
+        target = tmp_path / "elsewhere.yaml"
+        target.write_text("origin: cli-absolute\n")
+        spec = self._make_spec(tmp_path)
+
+        app = App()
+        app._config_spec = spec
+        app._parsed_args = argparse.Namespace(etc_dir=str(etc), config=str(target))
+
+        app._load_config_spec()
+
+        assert app.config.origin == "cli-absolute"
+        assert app._project_root == target.parent.resolve()
 
     def test_load_and_merge_config_dispatches_to_spec_branch(
         self, monkeypatch, tmp_path

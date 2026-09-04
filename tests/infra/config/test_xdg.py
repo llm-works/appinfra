@@ -293,3 +293,185 @@ class TestResolveConfigSource:
         monkeypatch.delenv("XDG_CONFIG_DIRS", raising=False)
         path, _ = resolve_config_source("myorg", "myapp", bundled_base)
         assert path.name == "config.yaml"
+
+
+@pytest.mark.unit
+class TestResolveCustomConfig:
+    """`--config` override: direct path or bare filename, always bypasses XDG."""
+
+    @pytest.fixture
+    def bundled_base(self, tmp_path):
+        base = tmp_path / "pkg" / "etc" / "myapp.yaml"
+        base.parent.mkdir(parents=True)
+        base.write_text("")
+        return base
+
+    def test_absolute_path_loaded_directly(self, bundled_base, tmp_path):
+        target = tmp_path / "elsewhere" / "custom.yaml"
+        target.parent.mkdir()
+        target.write_text("")
+        path, root = resolve_config_source(
+            "myorg", "myapp", bundled_base, custom_config=str(target)
+        )
+        assert path == target
+        assert root == target.parent
+
+    def test_absolute_path_ignores_etc_dir(self, bundled_base, tmp_path):
+        target = tmp_path / "elsewhere" / "custom.yaml"
+        target.parent.mkdir()
+        target.write_text("")
+        etc = tmp_path / "user_etc"
+        etc.mkdir()
+        path, root = resolve_config_source(
+            "myorg",
+            "myapp",
+            bundled_base,
+            custom_etc_dir=etc,
+            custom_config=str(target),
+        )
+        assert path == target
+        assert root == target.parent
+
+    def test_absolute_path_with_dotdot_is_canonicalized(self, bundled_base, tmp_path):
+        """Absolute path with .. segments is resolved to canonical form."""
+        target = tmp_path / "elsewhere" / "custom.yaml"
+        target.parent.mkdir()
+        target.write_text("")
+        # Pass non-canonical path: /tmp.../elsewhere/../elsewhere/custom.yaml
+        non_canonical = str(tmp_path / "elsewhere" / ".." / "elsewhere" / "custom.yaml")
+        path, root = resolve_config_source(
+            "myorg", "myapp", bundled_base, custom_config=non_canonical
+        )
+        assert path == target.resolve()
+        assert root == target.parent.resolve()
+        # Verify it's actually canonical (no .. in path)
+        assert ".." not in str(path)
+
+    def test_explicit_relative_path_resolves_from_cwd(
+        self, bundled_base, tmp_path, monkeypatch
+    ):
+        target = tmp_path / "custom.yaml"
+        target.write_text("")
+        monkeypatch.chdir(tmp_path)
+        path, root = resolve_config_source(
+            "myorg", "myapp", bundled_base, custom_config="./custom.yaml"
+        )
+        assert path == target.resolve()
+        assert root == target.resolve().parent
+
+    def test_parent_relative_path_resolves_from_cwd(
+        self, bundled_base, tmp_path, monkeypatch
+    ):
+        target = tmp_path / "custom.yaml"
+        target.write_text("")
+        sub = tmp_path / "sub"
+        sub.mkdir()
+        monkeypatch.chdir(sub)
+        path, root = resolve_config_source(
+            "myorg", "myapp", bundled_base, custom_config="../custom.yaml"
+        )
+        assert path == target.resolve()
+        assert root == target.resolve().parent
+
+    def test_bare_filename_composes_with_etc_dir(self, bundled_base, tmp_path):
+        etc = tmp_path / "user_etc"
+        etc.mkdir()
+        path, root = resolve_config_source(
+            "myorg",
+            "myapp",
+            bundled_base,
+            custom_etc_dir=etc,
+            custom_config="alt.yaml",
+        )
+        assert path == etc.resolve() / "alt.yaml"
+        assert root == etc.resolve()
+
+    def test_bare_filename_no_etc_dir_falls_to_cwd(
+        self, bundled_base, tmp_path, monkeypatch
+    ):
+        monkeypatch.chdir(tmp_path)
+        path, root = resolve_config_source(
+            "myorg", "myapp", bundled_base, custom_config="alt.yaml"
+        )
+        assert path == tmp_path / "alt.yaml"
+        assert root == tmp_path
+
+    def test_custom_config_bypasses_xdg_overlay(
+        self, bundled_base, tmp_path, monkeypatch
+    ):
+        """Existing XDG overlay must not shadow --config (always-bypass rule)."""
+        xdg_home = tmp_path / "xdg"
+        (xdg_home / "myorg").mkdir(parents=True)
+        (xdg_home / "myorg" / "myapp.yaml").write_text("")
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg_home))
+        monkeypatch.chdir(tmp_path)
+        path, _ = resolve_config_source(
+            "myorg", "myapp", bundled_base, custom_config="alt.yaml"
+        )
+        assert path == tmp_path / "alt.yaml"
+
+    def test_custom_config_bypasses_packaged_base(
+        self, bundled_base, tmp_path, clean_xdg_env, monkeypatch
+    ):
+        """--config must not fall back to the packaged base if the file is missing."""
+        monkeypatch.chdir(tmp_path)
+        # Bare filename referring to a nonexistent file: helper still returns
+        # that path (not the packaged base). Config(...) will raise at load.
+        path, _ = resolve_config_source(
+            "myorg", "myapp", bundled_base, custom_config="missing.yaml"
+        )
+        assert path == tmp_path / "missing.yaml"
+        assert path != bundled_base.resolve()
+
+    def test_custom_config_matching_package_name_still_bypasses(
+        self, bundled_base, tmp_path, monkeypatch
+    ):
+        """--config myapp.yaml has no special-case; still direct-load, no XDG."""
+        xdg_home = tmp_path / "xdg"
+        (xdg_home / "myorg").mkdir(parents=True)
+        (xdg_home / "myorg" / "myapp.yaml").write_text("")
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg_home))
+        monkeypatch.chdir(tmp_path)
+        path, _ = resolve_config_source(
+            "myorg", "myapp", bundled_base, custom_config="myapp.yaml"
+        )
+        assert path == tmp_path / "myapp.yaml"
+        assert path != xdg_home / "myorg" / "myapp.yaml"
+
+    def test_absolute_path_expands_tilde(self, bundled_base, monkeypatch, tmp_path):
+        monkeypatch.setenv("HOME", str(tmp_path))
+        (tmp_path / "custom.yaml").write_text("")
+        path, root = resolve_config_source(
+            "myorg", "myapp", bundled_base, custom_config="~/custom.yaml"
+        )
+        assert path == (tmp_path / "custom.yaml").resolve()
+        assert root == tmp_path.resolve()
+
+    def test_tilde_no_slash_is_bare_filename(self, bundled_base, monkeypatch, tmp_path):
+        """~config.yaml is NOT a valid home-dir reference, it's a bare filename.
+
+        expanduser() raises RuntimeError for ~username when the user doesn't exist,
+        so we must not recognize ~config.yaml as a direct path — only ~/... or ~.
+        """
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "~config.yaml").write_text("tilde_key: value\n")
+        path, root = resolve_config_source(
+            "myorg", "myapp", bundled_base, custom_config="~config.yaml"
+        )
+        assert path == (tmp_path / "~config.yaml").resolve()
+        assert root == tmp_path.resolve()
+
+    def test_dot_tilde_filename_not_expanded(self, bundled_base, monkeypatch, tmp_path):
+        """./~config.yaml is literal, not expanded as ~username.
+
+        expanduser() raises RuntimeError for ~username when user doesn't exist.
+        The ./ prefix makes it a direct path, but we must not call expanduser()
+        on paths that don't start with ~.
+        """
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "~config.yaml").write_text("dot_tilde_key: value\n")
+        path, root = resolve_config_source(
+            "myorg", "myapp", bundled_base, custom_config="./~config.yaml"
+        )
+        assert path == (tmp_path / "~config.yaml").resolve()
+        assert root == tmp_path.resolve()

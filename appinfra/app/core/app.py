@@ -514,12 +514,14 @@ class App(Traceable):
         """
         spec = self._config_spec
         programmatic_config = self.config  # preserve builder-supplied config
-        custom = getattr(self._parsed_args, "etc_dir", None)
+        custom_etc = getattr(self._parsed_args, "etc_dir", None)
+        custom_cfg = getattr(self._parsed_args, "config", None)
         config_path, project_root = resolve_config_source(
             spec.namespace,
             spec.package,
             spec.base_config,
-            custom_etc_dir=custom,
+            custom_etc_dir=custom_etc,
+            custom_config=custom_cfg,
         )
         loaded_config = Config(str(config_path), project_root=project_root)
         # Re-apply programmatic config (highest precedence after CLI args)
@@ -562,7 +564,9 @@ class App(Traceable):
     def _is_direct_path(self, path: str) -> bool:
         """Check if path should be loaded directly (absolute or explicit relative)."""
         return (
-            Path(path).is_absolute() or path.startswith("./") or path.startswith("../")
+            Path(path).is_absolute()
+            or path.startswith(("./", "../", "~/"))
+            or path == "~"
         )
 
     def _load_direct_config(self, config_path: str) -> dict | None:
@@ -570,6 +574,9 @@ class App(Traceable):
         from .config import create_config
 
         path = Path(config_path)
+        path_str = str(path)
+        if path_str == "~" or path_str.startswith("~/"):
+            path = path.expanduser()
         if not path.is_absolute():
             path = Path.cwd() / path
 
