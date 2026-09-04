@@ -1178,6 +1178,26 @@ class TestDeferredConfigLoading:
         assert hasattr(app.config, "literal_tilde_key")
         assert app.config.literal_tilde_key == "literal_value"
 
+    def test_load_direct_config_dot_tilde_filename(
+        self, clean_env, monkeypatch, tmp_path
+    ):
+        """./~config.yaml is literal, not expanded as ~username.
+
+        expanduser() raises RuntimeError for ~username when user doesn't exist.
+        The ./ prefix makes it a direct path, but we must not call expanduser()
+        on paths that don't start with ~.
+        """
+        monkeypatch.chdir(tmp_path)
+        config_path = tmp_path / "~config.yaml"
+        config_path.write_text("dot_tilde_key: dot_tilde_value\n")
+
+        app = App()
+        result = app._load_direct_config("./~config.yaml")
+
+        assert result is not None
+        assert hasattr(app.config, "dot_tilde_key")
+        assert app.config.dot_tilde_key == "dot_tilde_value"
+
     def test_load_direct_config_missing_file_raises(self):
         """Test _load_direct_config raises for missing file."""
         app = App()

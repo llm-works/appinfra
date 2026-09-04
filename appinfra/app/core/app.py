@@ -573,7 +573,10 @@ class App(Traceable):
         """Load a config file directly from the given path."""
         from .config import create_config
 
-        path = Path(config_path).expanduser()
+        path = Path(config_path)
+        path_str = str(path)
+        if path_str == "~" or path_str.startswith("~/"):
+            path = path.expanduser()
         if not path.is_absolute():
             path = Path.cwd() / path
 

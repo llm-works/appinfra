@@ -460,3 +460,18 @@ class TestResolveCustomConfig:
         )
         assert path == (tmp_path / "~config.yaml").resolve()
         assert root == tmp_path.resolve()
+
+    def test_dot_tilde_filename_not_expanded(self, bundled_base, monkeypatch, tmp_path):
+        """./~config.yaml is literal, not expanded as ~username.
+
+        expanduser() raises RuntimeError for ~username when user doesn't exist.
+        The ./ prefix makes it a direct path, but we must not call expanduser()
+        on paths that don't start with ~.
+        """
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "~config.yaml").write_text("dot_tilde_key: value\n")
+        path, root = resolve_config_source(
+            "myorg", "myapp", bundled_base, custom_config="./~config.yaml"
+        )
+        assert path == (tmp_path / "~config.yaml").resolve()
+        assert root == tmp_path.resolve()

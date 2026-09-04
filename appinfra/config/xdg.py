@@ -140,7 +140,10 @@ def _resolve_custom_config(
     ``--etc-dir`` if passed, else cwd.
     """
     if _is_direct_path(custom_config):
-        raw = Path(custom_config).expanduser()
+        raw = Path(custom_config)
+        raw_str = str(raw)
+        if raw_str == "~" or raw_str.startswith("~/"):
+            raw = raw.expanduser()
         resolved = (raw if raw.is_absolute() else Path.cwd() / raw).resolve()
         return (resolved, resolved.parent)
 
