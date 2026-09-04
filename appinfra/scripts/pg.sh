@@ -138,7 +138,14 @@ _pg_up() {
     # Toggle: stop conflicting mode first to free the port.
     if [ "${_INFRA_PG_MODE}" = "single" ] && [ "${running_mode}" = "repl" ]; then
         echo "Stopping replication mode..."
-        _pg_compose_run repl down
+        if [ -n "${_INFRA_PG_PORT_R:-}" ]; then
+            _pg_compose_run repl down
+        else
+            # PORT_R unavailable (replica disabled after prior use); stop containers directly.
+            local runtime; runtime="$(_pg_container_runtime)"
+            ${runtime} stop "${_INFRA_PG_CONTAINER_NAME}-primary" "${_INFRA_PG_CONTAINER_NAME}-standby" 2>/dev/null || true
+            ${runtime} rm -f "${_INFRA_PG_CONTAINER_NAME}-primary" "${_INFRA_PG_CONTAINER_NAME}-standby" 2>/dev/null || true
+        fi
         echo "Starting single instance..."
     elif [ "${_INFRA_PG_MODE}" = "repl" ] && [ "${running_mode}" = "single" ]; then
         echo "Stopping single instance..."
@@ -167,7 +174,16 @@ _pg_down() {
     running_mode="$(_pg_detect_running_mode)"
 
     case "${running_mode}" in
-        repl)   _pg_compose_run repl down || true ;;
+        repl)
+            if [ -n "${_INFRA_PG_PORT_R:-}" ]; then
+                _pg_compose_run repl down || true
+            else
+                # PORT_R unavailable (replica disabled after prior use); stop containers directly.
+                local runtime; runtime="$(_pg_container_runtime)"
+                ${runtime} stop "${_INFRA_PG_CONTAINER_NAME}-primary" "${_INFRA_PG_CONTAINER_NAME}-standby" 2>/dev/null || true
+                ${runtime} rm -f "${_INFRA_PG_CONTAINER_NAME}-primary" "${_INFRA_PG_CONTAINER_NAME}-standby" 2>/dev/null || true
+            fi
+            ;;
         single) _pg_compose_run single down || true ;;
         none)
             # Nothing running; still run single-mode down to sweep any lingering
@@ -179,6 +195,70 @@ _pg_down() {
     if [ "${_INFRA_PG_WAIT}" != "0" ]; then
         _pg_wait_down
     fi
+}
+
+# ---------------------------------------------------------------------------
+# reboot — restart server (auto-detects mode)
+# ---------------------------------------------------------------------------
+
+_pg_reboot() {
+    : "${_INFRA_PG_CONTAINER_NAME:?_INFRA_PG_CONTAINER_NAME required}"
+    : "${_INFRA_PG_PORT:?_INFRA_PG_PORT required}"
+    : "${_INFRA_PG_WAIT:=1}"
+
+    local running_mode
+    running_mode="$(_pg_detect_running_mode)"
+
+    case "${running_mode}" in
+        repl)
+            if [ -z "${_INFRA_PG_PORT_R:-}" ]; then
+                echo "pg.sh reboot: _INFRA_PG_PORT_R required for repl mode" >&2
+                exit 2
+            fi
+            _pg_compose_run repl down
+            _pg_compose_run repl up -d
+            ;;
+        single)
+            _pg_compose_run single down
+            _pg_compose_run single up -d
+            ;;
+        none)
+            echo "pg.sh reboot: no server running" >&2
+            exit 1
+            ;;
+    esac
+
+    if [ "${_INFRA_PG_WAIT}" != "0" ]; then
+        _pg_wait_up
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# logs — tail server logs (auto-detects mode)
+# ---------------------------------------------------------------------------
+
+_pg_logs() {
+    : "${_INFRA_PG_CONTAINER_NAME:?_INFRA_PG_CONTAINER_NAME required}"
+
+    local running_mode
+    running_mode="$(_pg_detect_running_mode)"
+
+    case "${running_mode}" in
+        repl)
+            if [ -z "${_INFRA_PG_PORT_R:-}" ]; then
+                echo "pg.sh logs: _INFRA_PG_PORT_R required for repl mode" >&2
+                exit 2
+            fi
+            _pg_compose_run repl logs -f
+            ;;
+        single)
+            _pg_compose_run single logs -f
+            ;;
+        none)
+            echo "pg.sh logs: no server running" >&2
+            exit 1
+            ;;
+    esac
 }
 
 # ---------------------------------------------------------------------------
@@ -322,31 +402,26 @@ _pg_info_short() {
     fi
 }
 
-_pg_info_full() {
-    local container_runtime="${INFRA_CONTAINER_CMD:-docker}"
+# ---------------------------------------------------------------------------
+# info — full output helpers (each ~10-15 lines, single responsibility)
+# ---------------------------------------------------------------------------
 
-    echo ""
-    echo -e "${_BOLD}${_CYAN}PostgreSQL Infrastructure Status${_RESET}"
-    echo -e "${_CYAN}================================${_RESET}"
-    echo ""
-
-    echo -e "${_BOLD}CONTAINERS${_RESET}"
-    echo -e "${_GRAY}----------${_RESET}"
-    local container_output container_exit=0
-    container_output=$(${container_runtime} ps -a --filter "name=${_INFRA_PG_CONTAINER_NAME}" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" 2>&1) || container_exit=$?
-    if [ $container_exit -ne 0 ]; then
-        echo -e "${_RED}Error from '${container_runtime}' (exit $container_exit):${_RESET}"
-        echo "$container_output"
-        exit $container_exit
-    elif [ "$(echo "$container_output" | wc -l)" -le 1 ]; then
+_pg_info_containers() {
+    local runtime="${INFRA_CONTAINER_CMD:-docker}"
+    local output exit_code=0
+    output=$(${runtime} ps -a --filter "name=${_INFRA_PG_CONTAINER_NAME}" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" 2>&1) || exit_code=$?
+    if [ $exit_code -ne 0 ]; then
+        echo -e "${_RED}Error from '${runtime}' (exit $exit_code):${_RESET}"
+        echo "$output"
+        exit $exit_code
+    elif [ "$(echo "$output" | wc -l)" -le 1 ]; then
         echo "No PostgreSQL containers found"
     else
-        echo "$container_output"
+        echo "$output"
     fi
-    echo ""
+}
 
-    echo -e "${_BOLD}SYSTEM CONFIGURATION${_RESET}"
-    echo -e "${_GRAY}--------------------${_RESET}"
+_pg_info_config() {
     echo -e "Version:          ${_BLUE}PostgreSQL ${_INFRA_PG_VERSION}${_RESET}"
     echo -e "Container Name:   ${_BLUE}${_INFRA_PG_CONTAINER_NAME}${_RESET}"
     if [ "$_INFRA_PG_REPLICA_ENABLED" = "true" ]; then
@@ -355,10 +430,9 @@ _pg_info_full() {
     else
         echo -e "Port:             ${_BLUE}${_INFRA_PG_PORT}${_RESET}"
     fi
-    echo ""
+}
 
-    echo -e "${_BOLD}CONNECTION ENDPOINTS${_RESET}"
-    echo -e "${_GRAY}--------------------${_RESET}"
+_pg_info_endpoints() {
     if [ "$_INFRA_PG_REPLICA_ENABLED" = "true" ]; then
         printf "%-30s " "Primary (${_INFRA_PG_HOST}:${_INFRA_PG_PORT}):"
         echo -e "${_primary_status}"
@@ -368,34 +442,86 @@ _pg_info_full() {
         printf "%-30s " "Server (${_INFRA_PG_HOST}:${_INFRA_PG_PORT}):"
         echo -e "${_primary_status}"
     fi
+}
+
+_pg_info_replication() {
+    psql -h "${_INFRA_PG_HOST}" -p "${_INFRA_PG_PORT}" -U "${_INFRA_PG_USER}" \
+        -c "SELECT client_addr AS standby_addr, state, sync_state FROM pg_stat_replication;" 2>/dev/null \
+        || echo "No replication active"
+}
+
+_pg_info_databases() {
+    psql -h "${_INFRA_PG_HOST}" -p "${_INFRA_PG_PORT}" -U "${_INFRA_PG_USER}" \
+        -c "SELECT datname AS database, pg_size_pretty(pg_database_size(datname)) AS size, \
+            (SELECT count(*) FROM pg_stat_activity WHERE datname = d.datname) AS connections \
+            FROM pg_database d WHERE datistemplate = false ORDER BY pg_database_size(datname) DESC;" 2>/dev/null
+}
+
+_pg_info_tables() {
+    local db
+    for db in $(psql -h "${_INFRA_PG_HOST}" -p "${_INFRA_PG_PORT}" -U "${_INFRA_PG_USER}" \
+                -t -A -c "SELECT datname FROM pg_database WHERE datistemplate = false AND datname != 'postgres';" 2>/dev/null); do
+        echo ""
+        echo -e "${_YELLOW}Database: ${db}${_RESET}"
+        psql -h "${_INFRA_PG_HOST}" -p "${_INFRA_PG_PORT}" -U "${_INFRA_PG_USER}" -d "${db}" \
+            -c "SELECT schemaname || '.' || tablename AS table, \
+                pg_size_pretty(pg_total_relation_size(schemaname||'.'||tablename)) AS size \
+                FROM pg_tables WHERE schemaname NOT IN ('pg_catalog', 'information_schema') \
+                ORDER BY pg_total_relation_size(schemaname||'.'||tablename) DESC LIMIT 10;" 2>/dev/null \
+            || echo "  (no tables or access denied)"
+    done
+}
+
+_pg_info_connections() {
+    psql -h "${_INFRA_PG_HOST}" -p "${_INFRA_PG_PORT}" -U "${_INFRA_PG_USER}" \
+        -c "SELECT datname AS database, usename AS user, application_name AS app, \
+            client_addr AS client, state, query_start \
+            FROM pg_stat_activity WHERE state != 'idle' AND pid != pg_backend_pid() \
+            ORDER BY query_start;" 2>/dev/null
+}
+
+_pg_info_full() {
+    echo ""
+    echo -e "${_BOLD}${_CYAN}PostgreSQL Infrastructure Status${_RESET}"
+    echo -e "${_CYAN}================================${_RESET}"
+    echo ""
+
+    echo -e "${_BOLD}CONTAINERS${_RESET}"
+    echo -e "${_GRAY}----------${_RESET}"
+    _pg_info_containers
+    echo ""
+
+    echo -e "${_BOLD}SYSTEM CONFIGURATION${_RESET}"
+    echo -e "${_GRAY}--------------------${_RESET}"
+    _pg_info_config
+    echo ""
+
+    echo -e "${_BOLD}CONNECTION ENDPOINTS${_RESET}"
+    echo -e "${_GRAY}--------------------${_RESET}"
+    _pg_info_endpoints
     echo ""
 
     if [ "$_primary_up" = true ]; then
         if [ "$_INFRA_PG_REPLICA_ENABLED" = "true" ]; then
             echo -e "${_BOLD}REPLICATION STATUS${_RESET}"
             echo -e "${_GRAY}------------------${_RESET}"
-            psql -h "${_INFRA_PG_HOST}" -p "${_INFRA_PG_PORT}" -U "${_INFRA_PG_USER}" -c "SELECT client_addr AS standby_addr, state, sync_state FROM pg_stat_replication;" 2>/dev/null || echo "No replication active"
+            _pg_info_replication
             echo ""
         fi
 
         echo -e "${_BOLD}DATABASES${_RESET}"
         echo -e "${_GRAY}---------${_RESET}"
-        psql -h "${_INFRA_PG_HOST}" -p "${_INFRA_PG_PORT}" -U "${_INFRA_PG_USER}" -c "SELECT datname AS database, pg_size_pretty(pg_database_size(datname)) AS size, (SELECT count(*) FROM pg_stat_activity WHERE datname = d.datname) AS connections FROM pg_database d WHERE datistemplate = false ORDER BY pg_database_size(datname) DESC;" 2>/dev/null
+        _pg_info_databases
         echo ""
 
         echo -e "${_BOLD}TOP TABLES BY SIZE${_RESET}"
         echo -e "${_GRAY}------------------${_RESET}"
-        local db
-        for db in $(psql -h "${_INFRA_PG_HOST}" -p "${_INFRA_PG_PORT}" -U "${_INFRA_PG_USER}" -t -A -c "SELECT datname FROM pg_database WHERE datistemplate = false AND datname != 'postgres';" 2>/dev/null); do
-            echo ""
-            echo -e "${_YELLOW}Database: ${db}${_RESET}"
-            psql -h "${_INFRA_PG_HOST}" -p "${_INFRA_PG_PORT}" -U "${_INFRA_PG_USER}" -d "${db}" -c "SELECT schemaname || '.' || tablename AS table, pg_size_pretty(pg_total_relation_size(schemaname||'.'||tablename)) AS size FROM pg_tables WHERE schemaname NOT IN ('pg_catalog', 'information_schema') ORDER BY pg_total_relation_size(schemaname||'.'||tablename) DESC LIMIT 10;" 2>/dev/null || echo "  (no tables or access denied)"
-        done
+        _pg_info_tables
         echo ""
 
         echo -e "${_BOLD}ACTIVE CONNECTIONS${_RESET}"
         echo -e "${_GRAY}------------------${_RESET}"
-        psql -h "${_INFRA_PG_HOST}" -p "${_INFRA_PG_PORT}" -U "${_INFRA_PG_USER}" -c "SELECT datname AS database, usename AS user, application_name AS app, client_addr AS client, state, query_start FROM pg_stat_activity WHERE state != 'idle' AND pid != pg_backend_pid() ORDER BY query_start;" 2>/dev/null
+        _pg_info_connections
         echo ""
     else
         echo -e "${_BOLD}DATABASES${_RESET}"
@@ -433,6 +559,8 @@ usage: pg.sh <cmd> [args]
 commands:
   up                start server (mode via _INFRA_PG_MODE=single|repl; wait unless _INFRA_PG_WAIT=0)
   down              stop server (auto-detects mode; wait unless _INFRA_PG_WAIT=0)
+  reboot            restart server (auto-detects mode; wait unless _INFRA_PG_WAIT=0)
+  logs              tail server logs (auto-detects mode)
   wait-up           wait for server to accept connections (timeout _INFRA_PG_WAIT_TIMEOUT)
   wait-down         wait for containers to be fully removed
   info [--short]    server + database status (comprehensive or one-line summary)
@@ -452,6 +580,8 @@ shift
 case "$cmd" in
     up)        _pg_up ;;
     down)      _pg_down ;;
+    reboot)    _pg_reboot ;;
+    logs)      _pg_logs ;;
     wait-up)   _pg_wait_up ;;
     wait-down) _pg_wait_down ;;
     info)      _pg_info "$@" ;;

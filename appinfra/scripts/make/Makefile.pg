@@ -46,10 +46,6 @@ INFRA_COMPOSE_CMD   ?= docker compose
 # Path to this Makefile's directory
 pg_local := $(dir $(realpath $(lastword $(MAKEFILE_LIST))))
 
-# Derived values (from YAML config) - single extraction for performance
-PG_COMPOSE_YAML_SINGLE := $(pg_local)/../docker/pg/docker-compose.single.yaml
-PG_COMPOSE_YAML_REPL := $(pg_local)/../docker/pg/docker-compose.repl.yaml
-
 # Newline for $(subst) - must be exactly two newlines between define/endef
 define _pg_newline
 
@@ -114,16 +110,6 @@ ifeq ($(PG_REPLICA_ENABLED),true)
 PSQL_STANDBY := PAGER='less -S' psql -h $(PG_HOST) -p $(PG_PORT_R) -U $(PG_USER)
 endif
 
-# Curated postgres_conf knobs; each fills a slot in the compose YAMLs. Empty
-# values let the YAML default to postgres's built-in (see :- in each slot).
-PG_CONF_ENV := PG_MAX_CONNECTIONS='$(PG_MAX_CONNECTIONS)' PG_SHARED_PRELOAD_LIBRARIES='$(PG_SHARED_PRELOAD_LIBRARIES)' PG_WORK_MEM='$(PG_WORK_MEM)' PG_AUTOVACUUM='$(PG_AUTOVACUUM)'
-
-# Compose commands (runtime selected by INFRA_COMPOSE_CMD / INFRA_CONTAINER_CMD)
-PG_COMPOSE_CMD_SINGLE := NAME=$(PG_CONTAINER_NAME) PORT=$(PG_PORT) IMAGE=$(PG_RESOLVED_IMAGE) $(PG_CONF_ENV) $(INFRA_COMPOSE_CMD) -p $(PG_CONTAINER_NAME) -f $(PG_COMPOSE_YAML_SINGLE)
-ifeq ($(PG_REPLICA_ENABLED),true)
-PG_COMPOSE_CMD_REPL := NAME=$(PG_CONTAINER_NAME) PORT=$(PG_PORT) PORT_R=$(PG_PORT_R) IMAGE=$(PG_RESOLVED_IMAGE) $(PG_CONF_ENV) $(INFRA_COMPOSE_CMD) -p $(PG_CONTAINER_NAME) -f $(PG_COMPOSE_YAML_REPL)
-endif
-
 ##@ Postgres
 
 # =============================================================================
@@ -147,31 +133,11 @@ pg.server.wait.down: ## waits for postgres containers to be fully removed (30s t
 .PHONY: pg.server.wait.down
 
 pg.server.reboot: areyousure ## restarts postgres server (auto-detects mode, waits for readiness)
-ifeq ($(PG_REPLICA_ENABLED),true)
-	@if $(INFRA_CONTAINER_CMD) ps --format '{{.Names}}' | grep -q "$(PG_CONTAINER_NAME)-primary"; then \
-		$(PG_COMPOSE_CMD_REPL) down; \
-		$(PG_COMPOSE_CMD_REPL) up -d; \
-	else \
-		$(PG_COMPOSE_CMD_SINGLE) down; \
-		$(PG_COMPOSE_CMD_SINGLE) up -d; \
-	fi
-else
-	@$(PG_COMPOSE_CMD_SINGLE) down
-	@$(PG_COMPOSE_CMD_SINGLE) up -d
-endif
-	@$(MAKE) --no-print-directory pg.server.wait.up
+	@$(pg_local)/../pg.sh reboot
 .PHONY: pg.server.reboot
 
 pg.server.logs: ## tails postgres server logs (auto-detects mode)
-ifeq ($(PG_REPLICA_ENABLED),true)
-	@if $(INFRA_CONTAINER_CMD) ps --format '{{.Names}}' | grep -q "$(PG_CONTAINER_NAME)-primary"; then \
-		$(PG_COMPOSE_CMD_REPL) logs -f; \
-	else \
-		$(PG_COMPOSE_CMD_SINGLE) logs -f; \
-	fi
-else
-	@$(PG_COMPOSE_CMD_SINGLE) logs -f
-endif
+	@$(pg_local)/../pg.sh logs
 .PHONY: pg.server.logs
 
 pg.server.clean: areyousure ## removes all postgres containers, volumes, images, and networks (WARNING: deletes all data)
