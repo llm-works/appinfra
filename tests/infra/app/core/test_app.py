@@ -1698,6 +1698,66 @@ class TestConfigSpecLoading:
 
         assert app.config.origin == "user"
 
+    def test_custom_config_absolute_path_wins_over_spec(self, monkeypatch, tmp_path):
+        """--config /abs.yaml loads directly, bypasses spec (XDG + base)."""
+        xdg_home = tmp_path / "xdg"
+        (xdg_home / "myorg").mkdir(parents=True)
+        (xdg_home / "myorg" / "myapp.yaml").write_text("origin: overlay\n")
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg_home))
+        monkeypatch.delenv("XDG_CONFIG_DIRS", raising=False)
+        target = tmp_path / "elsewhere" / "custom.yaml"
+        target.parent.mkdir()
+        target.write_text("origin: cli-config\napi:\n  port: 55555\n")
+        spec = self._make_spec(tmp_path)
+
+        app = App()
+        app._config_spec = spec
+        app._parsed_args = argparse.Namespace(etc_dir=None, config=str(target))
+
+        app._load_config_spec()
+
+        assert app.config.origin == "cli-config"
+        assert app.config.api.port == 55555
+        assert app._project_root == target.parent.resolve()
+
+    def test_custom_config_bare_filename_composes_with_etc_dir(
+        self, monkeypatch, tmp_path
+    ):
+        """--etc-dir /foo --config alt.yaml → /foo/alt.yaml."""
+        etc = tmp_path / "user_etc"
+        etc.mkdir()
+        (etc / "alt.yaml").write_text("origin: user-alt\napi:\n  port: 33333\n")
+        # An etc/myapp.yaml also exists but must not be picked (--config wins).
+        (etc / "myapp.yaml").write_text("origin: user-default\n")
+        spec = self._make_spec(tmp_path)
+
+        app = App()
+        app._config_spec = spec
+        app._parsed_args = argparse.Namespace(etc_dir=str(etc), config="alt.yaml")
+
+        app._load_config_spec()
+
+        assert app.config.origin == "user-alt"
+        assert app.config.api.port == 33333
+
+    def test_custom_config_absolute_ignores_etc_dir(self, monkeypatch, tmp_path):
+        """--config /abs.yaml with --etc-dir also set → --etc-dir ignored."""
+        etc = tmp_path / "user_etc"
+        etc.mkdir()
+        (etc / "myapp.yaml").write_text("origin: user-default\n")
+        target = tmp_path / "elsewhere.yaml"
+        target.write_text("origin: cli-absolute\n")
+        spec = self._make_spec(tmp_path)
+
+        app = App()
+        app._config_spec = spec
+        app._parsed_args = argparse.Namespace(etc_dir=str(etc), config=str(target))
+
+        app._load_config_spec()
+
+        assert app.config.origin == "cli-absolute"
+        assert app._project_root == target.parent.resolve()
+
     def test_load_and_merge_config_dispatches_to_spec_branch(
         self, monkeypatch, tmp_path
     ):

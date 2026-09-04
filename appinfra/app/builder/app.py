@@ -509,12 +509,20 @@ class AppBuilder:
         At setup time, resolves the config source via
         ``appinfra.config.resolve_config_source`` — precedence:
 
-        1. ``--etc-dir /foo`` (user's explicit choice, when the flag is
-           registered) → ``<foo>/<package>.yaml`` with
+        1. ``--config /abs.yaml`` or ``./rel.yaml`` (direct path) → load
+           directly; ``--etc-dir`` ignored; ``project_root`` = file's
+           parent.
+        2. ``--config bare.yaml`` (bare filename) →
+           ``<--etc-dir>/bare.yaml`` if ``--etc-dir`` passed, else
+           ``cwd/bare.yaml``; ``project_root`` = the file's parent.
+        3. ``--etc-dir /foo`` alone → ``<foo>/<package>.yaml`` with
            ``project_root=<foo>``.
-        2. Else first existing XDG candidate for ``<namespace>/<package>``
+        4. Else first existing XDG candidate for ``<namespace>/<package>``
            → overlay with ``project_root=include_root_for(base_config)``.
-        3. Else the packaged ``base_config``.
+        5. Else the packaged ``base_config``.
+
+        ``--config`` always bypasses XDG discovery and the packaged-base
+        fallback (no name-comparison special case).
 
         Under an explicit ``--etc-dir`` the include-authorization boundary
         follows the user's directory — reaching outside is the user's
@@ -523,11 +531,11 @@ class AppBuilder:
         ``etc/`` directory.
 
         Flag exposure is orthogonal. To let end users override the source
-        with ``--etc-dir``, compose with
-        ``.with_standard_args(etc_dir=True)``. Consumers who deliberately
-        want a locked-down CLI (XDG + bundled base only, no escape hatch)
-        skip that call — the loader safely reads a missing flag as
-        ``None``.
+        with ``--etc-dir`` or ``--config``, compose with
+        ``.with_standard_args(etc_dir=True, config_file=True)``. Consumers
+        who deliberately want a locked-down CLI (XDG + bundled base only,
+        no escape hatch) skip that call — the loader safely reads a missing
+        flag as ``None``.
 
         Args:
             namespace: XDG namespace (e.g. ``"llm-works"``).
@@ -549,15 +557,15 @@ class AppBuilder:
 
             BASE_CONFIG = Path(__file__).parent / "etc" / "myapp.yaml"
 
-            # XDG + bundled base only, no --etc-dir flag exposed:
+            # XDG + bundled base only, no escape-hatch flags exposed:
             app = (AppBuilder("myapp")
                 .with_config_spec("myorg", "myapp", BASE_CONFIG)
                 .build())
 
-            # With the --etc-dir escape hatch for end users:
+            # With --etc-dir and --config escape hatches for end users:
             app = (AppBuilder("myapp")
                 .with_config_spec("myorg", "myapp", BASE_CONFIG)
-                .with_standard_args(etc_dir=True)
+                .with_standard_args(etc_dir=True, config_file=True)
                 .build())
         """
         if self._config_files:

@@ -10,6 +10,13 @@ For API stability guarantees and deprecation policy, see
 
 ## [Unreleased]
 
+### Added
+- `resolve_config_source(..., custom_config=...)`: extends precedence with
+  `--config` — direct paths load directly, bare filenames compose with
+  `--etc-dir` or fall to cwd. Bypasses XDG and the packaged base. Framework
+  mode wires the flag via `.with_standard_args(config_file=True)`. See
+  [Config Protocol](appinfra/docs/guides/config-protocol.md).
+
 ### Changed
 - `pgserver` defaults: `name` `infra-pg` → `llm-works-pg`, `port` `7432` →
   `25432`, `replica.port` `7433` → `25433`. Shared `pgserver.name` lets

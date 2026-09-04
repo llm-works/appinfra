@@ -68,26 +68,35 @@ def resolve_config_source(
     package: str,
     base_config: Path | str,
     custom_etc_dir: Path | str | None = None,
+    custom_config: str | None = None,
 ) -> tuple[Path, Path]:
     """Resolve the v1 config file + include-authorization root in one call.
 
     Encapsulates the v1 config-protocol precedence chain:
 
-    1. ``custom_etc_dir`` present (typically ``args.etc_dir`` from
-       ``--etc-dir``) → ``(<custom_etc_dir>/<package>.yaml,
-       <custom_etc_dir>)``. The user's explicit path IS the
-       include-authorization root; sibling ``!include``s inside it resolve
-       by default, anything outside is the user's ``allowed_paths``
-       problem.
-    2. Else first existing ``xdg_candidates(namespace, package)``
+    1. ``custom_config`` is a direct path (absolute, or starts with
+       ``./`` / ``../``) → ``(<resolved>, <resolved>.parent)``.
+       ``custom_etc_dir`` is ignored; matches non-spec-mode's
+       ``_load_direct_config`` semantics.
+    2. ``custom_config`` is a bare filename →
+       ``(<custom_etc_dir>/<custom_config>, <custom_etc_dir>)`` if
+       ``custom_etc_dir`` is set, else
+       ``(cwd/<custom_config>, cwd)``. Matches non-spec cases 2 and 3.
+    3. ``custom_etc_dir`` present without ``custom_config`` →
+       ``(<custom_etc_dir>/<package>.yaml, <custom_etc_dir>)``. The user's
+       explicit path IS the include-authorization root; sibling
+       ``!include``s inside it resolve by default, anything outside is the
+       user's ``allowed_paths`` problem.
+    4. Else first existing ``xdg_candidates(namespace, package)``
        → ``(<candidate>, include_root_for(base_config))``. Defensive;
        includes bound to the packaged base's directory.
-    3. Else packaged base → ``(<base_config>, include_root_for(base_config))``.
+    5. Else packaged base → ``(<base_config>, include_root_for(base_config))``.
 
-    Existence is probed only on the XDG candidates. The custom path is
-    trusted: this helper does not pre-validate that
-    ``<custom_etc_dir>/<package>.yaml`` exists — ``Config(...)`` raises a
-    clear ``FileNotFoundError`` at load time if it does not.
+    ``custom_config`` always bypasses XDG discovery and the packaged-base
+    fallback (no name-comparison special case — matches non-spec-mode
+    convention). Existence is probed only on the XDG candidates. Direct
+    paths are trusted: ``Config(...)`` raises a clear ``FileNotFoundError``
+    at load time if the file does not exist.
 
     Args:
         namespace: XDG namespace (e.g. ``"llm-works"``).
@@ -98,11 +107,17 @@ def resolve_config_source(
             (e.g. ``.../llm_infer/etc/llm-infer.yaml``).
         custom_etc_dir: user's ``--etc-dir`` value if passed;
             ``None`` otherwise.
+        custom_config: user's ``--config`` value if passed; ``None``
+            otherwise. When set, XDG discovery and packaged-base fallback
+            are skipped.
 
     Returns:
         ``(config_file, project_root)`` — both pass directly to
         ``Config(str(config_file), project_root=project_root)``.
     """
+    if custom_config is not None:
+        return _resolve_custom_config(custom_config, custom_etc_dir)
+
     if custom_etc_dir is not None:
         etc = Path(str(custom_etc_dir)).expanduser().resolve()
         return (etc / f"{package}.yaml", etc)
@@ -113,6 +128,40 @@ def resolve_config_source(
 
     base = Path(str(base_config)).expanduser().resolve()
     return (base, include_root_for(base_config))
+
+
+def _resolve_custom_config(
+    custom_config: str, custom_etc_dir: Path | str | None
+) -> tuple[Path, Path]:
+    """Resolve ``--config`` under precedence rules 1 and 2.
+
+    Direct path (absolute, or explicit relative ``./`` / ``../``) → load
+    directly, ``--etc-dir`` ignored. Bare filename → compose with
+    ``--etc-dir`` if passed, else cwd.
+    """
+    if _is_direct_path(custom_config):
+        raw = Path(custom_config).expanduser()
+        resolved = raw if raw.is_absolute() else (Path.cwd() / raw).resolve()
+        return (resolved, resolved.parent)
+
+    base_dir = (
+        Path(str(custom_etc_dir)).expanduser().resolve()
+        if custom_etc_dir is not None
+        else Path.cwd()
+    )
+    return (base_dir / custom_config, base_dir)
+
+
+def _is_direct_path(config: str) -> bool:
+    """Direct path if absolute, ``./``, ``../``, or ``~``-prefixed.
+
+    Matches non-spec ``_is_direct_path`` (see ``appinfra/app/core/app.py``)
+    with a small addition for tilde-prefixed paths — ``--etc-dir`` already
+    expands ``~`` explicitly (see ``TestResolveConfigSource.
+    test_custom_etc_dir_expands_tilde``), so ``--config ~/x.yaml`` is
+    likewise treated as an absolute path rather than a bare filename.
+    """
+    return Path(config).is_absolute() or config.startswith(("./", "../", "~"))
 
 
 def _xdg_config_dirs() -> list[Path]:

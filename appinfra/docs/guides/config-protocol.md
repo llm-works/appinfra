@@ -106,28 +106,37 @@ CLI flags and file values.
   [`xdg_candidates`](../api/config.md#xdg-config-discovery), iterate the returned list, and load
   the first existing entry.
 
-### 6. `--etc-dir` is user-authoritative
+### 6. `--config` and `--etc-dir` are user-authoritative
 
-CLI entry points that expose `--etc-dir` MUST honor it as authoritative over XDG discovery.
-Registration is the consumer's choice: a locked-down CLI may deliberately skip `--etc-dir` (XDG +
-bundled base only); a general-purpose CLI registers it so end users can point at any tree they
-own.
+CLI entry points that expose `--etc-dir` or `--config` MUST honor them as authoritative over XDG
+discovery. Registration is the consumer's choice: a locked-down CLI may deliberately skip both
+(XDG + bundled base only); a general-purpose CLI registers them so end users can point at any tree
+or file they own.
 
-Precedence chain when the flag is registered, evaluated left-to-right, first hit wins:
+Precedence chain when the flags are registered, evaluated left-to-right, first hit wins:
 
-1. `--etc-dir /foo` present → load `/foo/<package>.yaml`, `project_root=/foo`. The user's directory
+1. `--config /abs.yaml` or `./rel.yaml` (direct path) → load directly, `project_root` = the file's
+   own parent directory. `--etc-dir` is ignored; matches non-spec-mode's `_load_direct_config`
+   semantics.
+2. `--config bare.yaml` (bare filename) → `<--etc-dir>/bare.yaml` if `--etc-dir` passed, else
+   `cwd/bare.yaml`. `project_root` = the file's parent.
+3. `--etc-dir /foo` alone → load `/foo/<package>.yaml`, `project_root=/foo`. The user's directory
    IS the include-authorization root; sibling `!include`s inside it resolve by default, anything
    outside is the user's `allowed_paths` problem.
-2. Else first existing XDG candidate → load overlay,
+4. Else first existing XDG candidate → load overlay,
    `project_root=include_root_for(base_config)` (the packaged base's `etc/` directory). Defensive.
-3. Else the packaged base itself.
+5. Else the packaged base itself.
 
-When the flag is not registered, the chain starts at step 2.
+When neither flag is registered, the chain starts at step 4.
+
+`--config` always bypasses XDG discovery and the packaged-base fallback. No name-comparison special
+case — `--config <package>.yaml` behaves the same as any other filename, matching non-spec-mode
+convention.
 
 Rationale: appinfra's include-authorization guard has a job on the DEFAULT path — the user hasn't
 specified anything, so defensive boundaries apply. It cannot dictate where a caller pointing
-`--etc-dir` is allowed to go — that choice is authoritative. Same principle as `sudo` vs
-unprivileged shell.
+`--etc-dir` or `--config` is allowed to go — that choice is authoritative. Same principle as `sudo`
+vs unprivileged shell.
 
 `--etc-dir` and an XDG overlay cannot compose in one invocation — the overlay's `!include` target
 is a static string in a YAML file that no runtime flag can rewrite. A user who wants a custom base
@@ -150,9 +159,15 @@ PACKAGE = "myapp"
 BASE_CONFIG = Path(__file__).parent / "etc" / f"{PACKAGE}.yaml"
 
 
-def load_user_config(custom_etc_dir: str | None = None) -> Config:
+def load_user_config(
+    custom_etc_dir: str | None = None, custom_config: str | None = None
+) -> Config:
     config_file, project_root = resolve_config_source(
-        NAMESPACE, PACKAGE, BASE_CONFIG, custom_etc_dir=custom_etc_dir
+        NAMESPACE,
+        PACKAGE,
+        BASE_CONFIG,
+        custom_etc_dir=custom_etc_dir,
+        custom_config=custom_config,
     )
     return Config(str(config_file), project_root=project_root)
 ```
@@ -161,7 +176,8 @@ def load_user_config(custom_etc_dir: str | None = None) -> Config:
 the `project_root` to pass. On the default path, `project_root` is `include_root_for(BASE_CONFIG)`
 — the base's `etc/` directory, the tightest boundary that authorizes both the overlay's absolute
 `!include <BASE_CONFIG>` and the base's own relative sibling `!include './...'` directives. Under
-`--etc-dir`, `project_root` follows the user's directory.
+`--etc-dir`, `project_root` follows the user's directory. Under `--config` (direct path or bare
+filename), `project_root` follows the resolved file's own parent.
 
 Pick the tightest ancestor that contains all `!include`-reachable files. Usually that's the
 base's `etc/` directory (`include_root_for(BASE_CONFIG)`); pass the wider package directory
@@ -175,8 +191,8 @@ outside the package root — e.g. a shared config elsewhere on disk. The two arg
 
 `AppBuilder.with_config_spec` runs the rule-6 chain on every parse and wires `ConfigWatcher` with
 the same `project_root` so hot-reload matches the initial load. Flag exposure is orthogonal —
-compose with `.with_standard_args(etc_dir=True)` to expose the escape hatch to end users, skip
-that call for a locked-down CLI:
+compose with `.with_standard_args(etc_dir=True, config_file=True)` to expose the escape hatches to
+end users, skip either flag for a locked-down CLI:
 
 ```python
 from pathlib import Path
@@ -185,14 +201,14 @@ from appinfra.app import AppBuilder
 
 BASE_CONFIG = Path(__file__).parent / "etc" / "myapp.yaml"
 
-# XDG + bundled base only, no --etc-dir flag exposed:
+# XDG + bundled base only, no escape-hatch flags exposed:
 app = AppBuilder("myapp").with_config_spec("myorg", "myapp", BASE_CONFIG).build()
 
-# With the --etc-dir escape hatch for end users:
+# With --etc-dir and --config escape hatches for end users:
 app = (
     AppBuilder("myapp")
     .with_config_spec("myorg", "myapp", BASE_CONFIG)
-    .with_standard_args(etc_dir=True)
+    .with_standard_args(etc_dir=True, config_file=True)
     .build()
 )
 ```

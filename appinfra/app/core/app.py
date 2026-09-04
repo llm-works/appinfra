@@ -514,12 +514,14 @@ class App(Traceable):
         """
         spec = self._config_spec
         programmatic_config = self.config  # preserve builder-supplied config
-        custom = getattr(self._parsed_args, "etc_dir", None)
+        custom_etc = getattr(self._parsed_args, "etc_dir", None)
+        custom_cfg = getattr(self._parsed_args, "config", None)
         config_path, project_root = resolve_config_source(
             spec.namespace,
             spec.package,
             spec.base_config,
-            custom_etc_dir=custom,
+            custom_etc_dir=custom_etc,
+            custom_config=custom_cfg,
         )
         loaded_config = Config(str(config_path), project_root=project_root)
         # Re-apply programmatic config (highest precedence after CLI args)
