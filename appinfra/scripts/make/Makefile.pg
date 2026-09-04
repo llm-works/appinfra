@@ -98,17 +98,12 @@ _INFRA_PG_MAX_CONNECTIONS          := $(PG_MAX_CONNECTIONS)
 _INFRA_PG_SHARED_PRELOAD_LIBRARIES := $(PG_SHARED_PRELOAD_LIBRARIES)
 _INFRA_PG_WORK_MEM                 := $(PG_WORK_MEM)
 _INFRA_PG_AUTOVACUUM               := $(PG_AUTOVACUUM)
+_INFRA_PG_DATABASES                := $(INFRA_PG_DATABASES)
 export _INFRA_PG_CONTAINER_NAME _INFRA_PG_VERSION _INFRA_PG_PORT _INFRA_PG_PORT_R
 export _INFRA_PG_REPLICA_ENABLED _INFRA_PG_HOST _INFRA_PG_USER
 export _INFRA_PG_IMAGE _INFRA_PG_MAX_CONNECTIONS _INFRA_PG_SHARED_PRELOAD_LIBRARIES
-export _INFRA_PG_WORK_MEM _INFRA_PG_AUTOVACUUM
+export _INFRA_PG_WORK_MEM _INFRA_PG_AUTOVACUUM _INFRA_PG_DATABASES
 export INFRA_COMPOSE_CMD INFRA_CONTAINER_CMD
-
-# Convenience commands
-PSQL := PAGER='less -S' psql -h $(PG_HOST) -p $(PG_PORT) -U $(PG_USER)
-ifeq ($(PG_REPLICA_ENABLED),true)
-PSQL_STANDBY := PAGER='less -S' psql -h $(PG_HOST) -p $(PG_PORT_R) -U $(PG_USER)
-endif
 
 ##@ Postgres
 
@@ -141,22 +136,11 @@ pg.server.logs: ## tails postgres server logs (auto-detects mode)
 .PHONY: pg.server.logs
 
 pg.server.clean: areyousure ## removes all postgres containers, volumes, images, and networks (WARNING: deletes all data)
-	@$(MAKE) pg.server.clean.internal
+	@$(pg_local)/../pg.sh erase
 .PHONY: pg.server.clean
 
 pg.server.clean.internal:: # Internal: cleanup without confirmation (used by clean.full)
-	@echo "Stopping all PostgreSQL containers..."
-	@$(INFRA_CONTAINER_CMD) ps -a --filter "name=$(PG_CONTAINER_NAME)" --format "{{.Names}}" | xargs -r $(INFRA_CONTAINER_CMD) stop 2>/dev/null || true
-	@$(INFRA_CONTAINER_CMD) ps -a --filter "name=$(PG_CONTAINER_NAME)" --format "{{.Names}}" | xargs -r $(INFRA_CONTAINER_CMD) rm 2>/dev/null || true
-	@echo "Removing PostgreSQL volumes..."
-	@$(INFRA_CONTAINER_CMD) volume ls --filter "name=$(PG_CONTAINER_NAME)" --format "{{.Name}}" | xargs -r $(INFRA_CONTAINER_CMD) volume rm 2>/dev/null || true
-	@echo "Removing PostgreSQL networks..."
-	@$(INFRA_CONTAINER_CMD) network ls --filter "name=$(PG_CONTAINER_NAME)" --format "{{.Name}}" | xargs -r $(INFRA_CONTAINER_CMD) network rm 2>/dev/null || true
-	@echo "Removing PostgreSQL images (force)..."
-	@if [ -n "$(PG_RESOLVED_IMAGE)" ]; then \
-		$(INFRA_CONTAINER_CMD) images --filter "reference=$(PG_RESOLVED_IMAGE)" --format "{{.ID}}" | xargs -r $(INFRA_CONTAINER_CMD) rmi -f 2>/dev/null || true; \
-	fi
-	@echo "PostgreSQL cleanup complete (containers, volumes, networks, and images removed)"
+	@$(pg_local)/../pg.sh erase
 .PHONY: pg.server.clean.internal
 
 # =============================================================================
@@ -183,46 +167,23 @@ pg.info.short: ## short status summary
 .PHONY: pg.info.short
 
 pg.clean.internal:: ## drops all configured databases (no confirmation; for downstream chaining)
-ifeq ($(INFRA_PG_DATABASES),)
-	@echo "no databases configured"
-else
-	@echo "* cleaning pg databases..."
-	@for db in $(INFRA_PG_DATABASES); do \
-		if ! echo "$${db}" | grep -Eq '^[A-Za-z_][A-Za-z0-9_]*$$'; then \
-			echo "  * skipping unsafe database name: $${db}"; \
-			continue; \
-		fi; \
-		exists=`$(PSQL) -XtAc "SELECT 1 FROM pg_database WHERE datname='$${db}'"`; \
-		if [ "$${exists}" = "1" ]; then \
-			echo "  * dropping db $${db}..."; \
-			$(PSQL) -c "DROP DATABASE \"$${db}\" WITH (FORCE)" 2>/dev/null; \
-		else \
-			echo "  * database $${db} not found"; \
-		fi; \
-	done
-	@echo "* done cleaning pg databases"
-endif
+	@$(pg_local)/../pg.sh clean
 .PHONY: pg.clean.internal
 
 pg.clean:: areyousure ## cleans all databases (with confirmation)
-	@$(MAKE) pg.clean.internal
+	@$(pg_local)/../pg.sh clean
 .PHONY: pg.clean
 
 pg: ## connects to postgres db (primary)
-	@$(pg_local)/../pg.sh info --short
-	@echo ""
-	$(PSQL)
+	@$(pg_local)/../pg.sh psql
 .PHONY: pg
 
 ifeq ($(PG_REPLICA_ENABLED),true)
 pg.standby: ## connects to standby postgres db (replication mode only)
-	@$(pg_local)/../pg.sh info --short
-	@echo ""
-	@echo "Connecting to standby server (read-only)..."
-	$(PSQL_STANDBY)
+	@$(pg_local)/../pg.sh psql --target standby
 .PHONY: pg.standby
 endif
 
 pg.top: ## pgtop for primary server
-	pg_top -h $(PG_HOST) -p $(PG_PORT) -U $(PG_USER)
+	@$(pg_local)/../pg.sh top
 .PHONY: pg.top

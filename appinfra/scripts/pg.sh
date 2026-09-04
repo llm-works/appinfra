@@ -26,6 +26,7 @@
 #   _INFRA_PG_SHARED_PRELOAD_LIBRARIES  postgres_conf: shared_preload_libraries (optional)
 #   _INFRA_PG_WORK_MEM           postgres_conf: work_mem (optional)
 #   _INFRA_PG_AUTOVACUUM         postgres_conf: autovacuum (optional)
+#   _INFRA_PG_DATABASES          space-separated allowlist of databases the `clean` verb may drop
 #   _INFRA_PG_MODE               "single" | "repl" — target mode for `up` / `reboot`
 #   _INFRA_PG_WAIT               "0" to skip readiness/teardown wait on up/down/reboot
 #   _INFRA_PG_WAIT_TIMEOUT       wait-up / wait-down loop timeout in seconds (default 30)
@@ -259,6 +260,39 @@ _pg_logs() {
             exit 1
             ;;
     esac
+}
+
+# ---------------------------------------------------------------------------
+# erase — remove containers, volumes, networks, and images (destructive)
+# ---------------------------------------------------------------------------
+
+_pg_erase() {
+    : "${_INFRA_PG_CONTAINER_NAME:?_INFRA_PG_CONTAINER_NAME required}"
+
+    local runtime
+    runtime="$(_pg_container_runtime)"
+
+    echo "Stopping all PostgreSQL containers..."
+    ${runtime} ps -a --filter "name=${_INFRA_PG_CONTAINER_NAME}" --format "{{.Names}}" \
+        | xargs -r ${runtime} stop 2>/dev/null || true
+    ${runtime} ps -a --filter "name=${_INFRA_PG_CONTAINER_NAME}" --format "{{.Names}}" \
+        | xargs -r ${runtime} rm 2>/dev/null || true
+
+    echo "Removing PostgreSQL volumes..."
+    ${runtime} volume ls --filter "name=${_INFRA_PG_CONTAINER_NAME}" --format "{{.Name}}" \
+        | xargs -r ${runtime} volume rm 2>/dev/null || true
+
+    echo "Removing PostgreSQL networks..."
+    ${runtime} network ls --filter "name=${_INFRA_PG_CONTAINER_NAME}" --format "{{.Name}}" \
+        | xargs -r ${runtime} network rm 2>/dev/null || true
+
+    echo "Removing PostgreSQL images (force)..."
+    if [ -n "${_INFRA_PG_IMAGE:-}" ]; then
+        ${runtime} images --filter "reference=${_INFRA_PG_IMAGE}" --format "{{.ID}}" \
+            | xargs -r ${runtime} rmi -f 2>/dev/null || true
+    fi
+
+    echo "PostgreSQL cleanup complete (containers, volumes, networks, and images removed)"
 }
 
 # ---------------------------------------------------------------------------
@@ -549,6 +583,94 @@ _pg_info() {
 }
 
 # ---------------------------------------------------------------------------
+# clean — drop configured databases (allowlisted via _INFRA_PG_DATABASES)
+# ---------------------------------------------------------------------------
+
+_pg_clean() {
+    : "${_INFRA_PG_HOST:?_INFRA_PG_HOST required}"
+    : "${_INFRA_PG_PORT:?_INFRA_PG_PORT required}"
+    : "${_INFRA_PG_USER:?_INFRA_PG_USER required}"
+
+    if [ -z "${_INFRA_PG_DATABASES:-}" ]; then
+        echo "no databases configured"
+        return 0
+    fi
+
+    echo "* cleaning pg databases..."
+    local db exists
+    for db in ${_INFRA_PG_DATABASES}; do
+        if ! echo "${db}" | grep -Eq '^[A-Za-z_][A-Za-z0-9_]*$'; then
+            echo "  * skipping unsafe database name: ${db}"
+            continue
+        fi
+        exists=$(psql -w -h "${_INFRA_PG_HOST}" -p "${_INFRA_PG_PORT}" -U "${_INFRA_PG_USER}" \
+            -XtAc "SELECT 1 FROM pg_database WHERE datname='${db}'" 2>/dev/null || true)
+        if [ "${exists}" = "1" ]; then
+            echo "  * dropping db ${db}..."
+            psql -w -h "${_INFRA_PG_HOST}" -p "${_INFRA_PG_PORT}" -U "${_INFRA_PG_USER}" \
+                -c "DROP DATABASE \"${db}\" WITH (FORCE)" 2>/dev/null
+        else
+            echo "  * database ${db} not found"
+        fi
+    done
+    echo "* done cleaning pg databases"
+}
+
+# ---------------------------------------------------------------------------
+# psql — interactive shell (--target primary|standby; default primary)
+# ---------------------------------------------------------------------------
+
+_pg_psql() {
+    _pg_require_env
+
+    local target="primary"
+    if [ "${1:-}" = "--target" ]; then
+        shift
+        target="${1:?pg.sh psql --target: value required (primary|standby)}"
+        shift
+    fi
+
+    local port
+    case "${target}" in
+        primary)
+            port="${_INFRA_PG_PORT}"
+            ;;
+        standby)
+            if [ "${_INFRA_PG_REPLICA_ENABLED}" != "true" ]; then
+                echo "pg.sh psql --target standby: replica not enabled" >&2
+                exit 2
+            fi
+            : "${_INFRA_PG_PORT_R:?_INFRA_PG_PORT_R required for --target standby}"
+            port="${_INFRA_PG_PORT_R}"
+            ;;
+        *)
+            echo "pg.sh psql --target: unknown target '${target}' (expected primary|standby)" >&2
+            exit 2
+            ;;
+    esac
+
+    _pg_check_status
+    _pg_info_short
+    echo ""
+    if [ "${target}" = "standby" ]; then
+        echo "Connecting to standby server (read-only)..."
+    fi
+
+    PAGER='less -S' exec psql -h "${_INFRA_PG_HOST}" -p "${port}" -U "${_INFRA_PG_USER}"
+}
+
+# ---------------------------------------------------------------------------
+# top — pg_top for the primary server
+# ---------------------------------------------------------------------------
+
+_pg_top() {
+    : "${_INFRA_PG_HOST:?_INFRA_PG_HOST required}"
+    : "${_INFRA_PG_PORT:?_INFRA_PG_PORT required}"
+    : "${_INFRA_PG_USER:?_INFRA_PG_USER required}"
+    exec pg_top -h "${_INFRA_PG_HOST}" -p "${_INFRA_PG_PORT}" -U "${_INFRA_PG_USER}"
+}
+
+# ---------------------------------------------------------------------------
 # Dispatcher
 # ---------------------------------------------------------------------------
 
@@ -564,6 +686,11 @@ commands:
   wait-up           wait for server to accept connections (timeout _INFRA_PG_WAIT_TIMEOUT)
   wait-down         wait for containers to be fully removed
   info [--short]    server + database status (comprehensive or one-line summary)
+  erase             remove all containers, volumes, networks, and images (destructive)
+  clean             drop databases in _INFRA_PG_DATABASES allowlist (server keeps running)
+  psql [--target primary|standby]
+                    interactive psql shell (default primary; standby is read-only)
+  top               pg_top for the primary server
 
 All inputs are read from environment variables; see the header of this script
 for the required set per command.
@@ -585,6 +712,10 @@ case "$cmd" in
     wait-up)   _pg_wait_up ;;
     wait-down) _pg_wait_down ;;
     info)      _pg_info "$@" ;;
+    erase)     _pg_erase ;;
+    clean)     _pg_clean ;;
+    psql)      _pg_psql "$@" ;;
+    top)       _pg_top ;;
     -h | --help | help) _pg_usage ;;
     *)
         echo "pg.sh: unknown command: $cmd" >&2
