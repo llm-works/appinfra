@@ -601,22 +601,36 @@ _pg_clean() {
     fi
 
     echo "* cleaning pg databases..."
-    local db exists
+    local db exists failed=0
+    set -f  # disable pathname expansion for the loop
     for db in ${_INFRA_PG_DATABASES}; do
+        set +f
         if ! echo "${db}" | grep -Eq '^[A-Za-z_][A-Za-z0-9_]*$'; then
             echo "  * skipping unsafe database name: ${db}"
             continue
         fi
-        exists=$(psql -w -h "${_INFRA_PG_HOST}" -p "${_INFRA_PG_PORT}" -U "${_INFRA_PG_USER}" \
-            -d postgres -XtAc "SELECT 1 FROM pg_database WHERE datname='${db}'" 2>&1) || true
+        if ! exists=$(psql -w -h "${_INFRA_PG_HOST}" -p "${_INFRA_PG_PORT}" -U "${_INFRA_PG_USER}" \
+            -d postgres -XtAc "SELECT 1 FROM pg_database WHERE datname='${db}'" 2>&1); then
+            echo "  * error checking ${db}: ${exists}" >&2
+            failed=1
+            continue
+        fi
         if [ "${exists}" = "1" ]; then
             echo "  * dropping db ${db}..."
-            psql -w -h "${_INFRA_PG_HOST}" -p "${_INFRA_PG_PORT}" -U "${_INFRA_PG_USER}" \
-                -d postgres -c "DROP DATABASE \"${db}\" WITH (FORCE)" || true
+            if ! psql -w -h "${_INFRA_PG_HOST}" -p "${_INFRA_PG_PORT}" -U "${_INFRA_PG_USER}" \
+                -d postgres -c "DROP DATABASE \"${db}\" WITH (FORCE)"; then
+                echo "  * failed to drop ${db}" >&2
+                failed=1
+            fi
         else
             echo "  * database ${db} not found"
         fi
     done
+    set +f
+    if [ "${failed}" = "1" ]; then
+        echo "* done cleaning pg databases (with errors)" >&2
+        return 1
+    fi
     echo "* done cleaning pg databases"
 }
 
