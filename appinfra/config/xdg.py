@@ -141,7 +141,7 @@ def _resolve_custom_config(
     """
     if _is_direct_path(custom_config):
         raw = Path(custom_config).expanduser()
-        resolved = raw if raw.is_absolute() else (Path.cwd() / raw).resolve()
+        resolved = (raw if raw.is_absolute() else Path.cwd() / raw).resolve()
         return (resolved, resolved.parent)
 
     base_dir = (

@@ -1071,6 +1071,21 @@ class TestDeferredConfigLoading:
         assert app._is_direct_path("config.yaml") is False
         assert app._is_direct_path("subdir/config.yaml") is False
 
+    def test_is_direct_path_tilde(self):
+        """Test _is_direct_path returns True for tilde-prefixed paths."""
+        app = App()
+        assert app._is_direct_path("~/config.yaml") is True
+        assert app._is_direct_path("~/.config/app.yaml") is True
+        assert app._is_direct_path("~/subdir/config.yaml") is True
+
+    def test_is_direct_path_tilde_in_middle_is_absolute(self):
+        """Tilde in middle of absolute path is not a home-dir reference."""
+        app = App()
+        # /a/b/~/c is absolute (starts with /), tilde is literal dirname
+        assert app._is_direct_path("/a/b/~/c") is True  # absolute path
+        # ../~/config.yaml starts with ../, tilde is literal
+        assert app._is_direct_path("../~/config.yaml") is True  # explicit relative
+
     def test_load_direct_config_absolute_path(self, clean_env):
         """Test _load_direct_config loads from absolute path."""
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1105,6 +1120,50 @@ class TestDeferredConfigLoading:
                 assert app.config.relative_key == "relative_value"
             finally:
                 os.chdir(old_cwd)
+
+    def test_load_direct_config_tilde_path(self, clean_env, monkeypatch, tmp_path):
+        """Test _load_direct_config expands tilde and loads from home directory."""
+        monkeypatch.setenv("HOME", str(tmp_path))
+        config_path = tmp_path / "config.yaml"
+        config_path.write_text("tilde_key: tilde_value\n")
+
+        app = App()
+        result = app._load_direct_config("~/config.yaml")
+
+        assert result is not None
+        assert hasattr(app.config, "tilde_key")
+        assert app.config.tilde_key == "tilde_value"
+
+    def test_load_direct_config_dot_tilde_normalized(
+        self, clean_env, monkeypatch, tmp_path
+    ):
+        """./~/config.yaml normalizes to ~/config.yaml, then expands."""
+        monkeypatch.setenv("HOME", str(tmp_path))
+        config_path = tmp_path / "config.yaml"
+        config_path.write_text("dot_tilde_key: dot_tilde_value\n")
+
+        app = App()
+        # Path('./~/config.yaml') normalizes to '~/config.yaml'
+        result = app._load_direct_config("./~/config.yaml")
+
+        assert result is not None
+        assert hasattr(app.config, "dot_tilde_key")
+        assert app.config.dot_tilde_key == "dot_tilde_value"
+
+    def test_load_direct_config_tilde_in_middle_is_literal(self, clean_env, tmp_path):
+        """Tilde in middle of path is a literal directory name, not expanded."""
+        # Create /tmp.../a/~/config.yaml (literal ~ directory)
+        tilde_dir = tmp_path / "a" / "~"
+        tilde_dir.mkdir(parents=True)
+        config_path = tilde_dir / "config.yaml"
+        config_path.write_text("literal_tilde_key: literal_value\n")
+
+        app = App()
+        result = app._load_direct_config(str(config_path))
+
+        assert result is not None
+        assert hasattr(app.config, "literal_tilde_key")
+        assert app.config.literal_tilde_key == "literal_value"
 
     def test_load_direct_config_missing_file_raises(self):
         """Test _load_direct_config raises for missing file."""

@@ -115,10 +115,10 @@ or file they own.
 
 Precedence chain when the flags are registered, evaluated left-to-right, first hit wins:
 
-1. `--config /abs.yaml` or `./rel.yaml` (direct path) → load directly, `project_root` = the file's
-   own parent directory. `--etc-dir` is ignored; matches non-spec-mode's `_load_direct_config`
-   semantics.
-2. `--config bare.yaml` (bare filename) → `<--etc-dir>/bare.yaml` if `--etc-dir` passed, else
+1. `--config /abs.yaml`, `./rel.yaml`, `../rel.yaml`, or `~/path.yaml` (direct path) → load
+   directly, `project_root` = the file's own parent directory. `--etc-dir` is ignored; matches
+   non-spec-mode's `_load_direct_config` semantics.
+2. `--config bare.yaml` (bare filename) → `<etc-dir>/bare.yaml` if `--etc-dir` passed, else
    `cwd/bare.yaml`. `project_root` = the file's parent.
 3. `--etc-dir /foo` alone → load `/foo/<package>.yaml`, `project_root=/foo`. The user's directory
    IS the include-authorization root; sibling `!include`s inside it resolve by default, anything

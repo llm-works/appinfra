@@ -569,7 +569,7 @@ class App(Traceable):
         """Load a config file directly from the given path."""
         from .config import create_config
 
-        path = Path(config_path)
+        path = Path(config_path).expanduser()
         if not path.is_absolute():
             path = Path.cwd() / path
 

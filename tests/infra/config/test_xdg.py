@@ -332,6 +332,21 @@ class TestResolveCustomConfig:
         assert path == target
         assert root == target.parent
 
+    def test_absolute_path_with_dotdot_is_canonicalized(self, bundled_base, tmp_path):
+        """Absolute path with .. segments is resolved to canonical form."""
+        target = tmp_path / "elsewhere" / "custom.yaml"
+        target.parent.mkdir()
+        target.write_text("")
+        # Pass non-canonical path: /tmp.../elsewhere/../elsewhere/custom.yaml
+        non_canonical = str(tmp_path / "elsewhere" / ".." / "elsewhere" / "custom.yaml")
+        path, root = resolve_config_source(
+            "myorg", "myapp", bundled_base, custom_config=non_canonical
+        )
+        assert path == target.resolve()
+        assert root == target.parent.resolve()
+        # Verify it's actually canonical (no .. in path)
+        assert ".." not in str(path)
+
     def test_explicit_relative_path_resolves_from_cwd(
         self, bundled_base, tmp_path, monkeypatch
     ):

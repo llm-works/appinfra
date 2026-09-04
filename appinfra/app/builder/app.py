@@ -509,11 +509,11 @@ class AppBuilder:
         At setup time, resolves the config source via
         ``appinfra.config.resolve_config_source`` — precedence:
 
-        1. ``--config /abs.yaml`` or ``./rel.yaml`` (direct path) → load
-           directly; ``--etc-dir`` ignored; ``project_root`` = file's
-           parent.
+        1. ``--config /abs.yaml``, ``./rel.yaml``, ``../rel.yaml``, or
+           ``~/path.yaml`` (direct path) → load directly; ``--etc-dir``
+           ignored; ``project_root`` = file's parent.
         2. ``--config bare.yaml`` (bare filename) →
-           ``<--etc-dir>/bare.yaml`` if ``--etc-dir`` passed, else
+           ``<etc-dir>/bare.yaml`` if ``--etc-dir`` passed, else
            ``cwd/bare.yaml``; ``project_root`` = the file's parent.
         3. ``--etc-dir /foo`` alone → ``<foo>/<package>.yaml`` with
            ``project_root=<foo>``.
