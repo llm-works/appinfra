@@ -113,7 +113,7 @@ discovery. Registration is the consumer's choice: a locked-down CLI may delibera
 (XDG + bundled base only); a general-purpose CLI registers them so end users can point at any tree
 or file they own.
 
-Precedence chain when the flags are registered, evaluated left-to-right, first hit wins:
+Precedence chain when the flags are registered, evaluated top-down, first hit wins:
 
 1. `--config /abs.yaml`, `./rel.yaml`, `../rel.yaml`, or `~/path.yaml` (direct path) → load
    directly, `project_root` = the file's own parent directory. `--etc-dir` is ignored; matches
@@ -123,15 +123,73 @@ Precedence chain when the flags are registered, evaluated left-to-right, first h
 3. `--etc-dir /foo` alone → load `/foo/<package>.yaml`, `project_root=/foo`. The user's directory
    IS the include-authorization root; sibling `!include`s inside it resolve by default, anything
    outside is the user's `allowed_paths` problem.
-4. Else first existing XDG candidate → load overlay,
-   `project_root=include_root_for(base_config)` (the packaged base's `etc/` directory). Defensive.
-5. Else the packaged base itself.
+4. **Project-local**: walk up from cwd looking for `etc/<base_config.name>`. First hit →
+   load it, `project_root` = that `etc/` directory. Restores the `./etc/` + project-root
+   auto-detection that predates the discovery helper. Keyed on the filename the package
+   actually ships (so a package's own `<name>.yaml` matches without a naming special case).
+   Stops before `$HOME` and before filesystem root, so home-dir dotfiles and system `/etc`
+   are never picked up.
+5. Else first existing XDG candidate → load overlay,
+   `project_root=include_root_for(base_config)` (the packaged base's `etc/` directory).
+   Defensive.
+6. Else the packaged base itself.
 
 When neither flag is registered, the chain starts at step 4.
 
-`--config` always bypasses XDG discovery and the packaged-base fallback. No name-comparison special
-case — `--config <package>.yaml` behaves the same as any other filename, matching non-spec-mode
-convention.
+`--config` always bypasses everything below it (project-local walk-up, XDG, packaged base). No
+name-comparison special case — `--config <package>.yaml` behaves the same as any other filename,
+matching non-spec-mode convention.
+
+#### Resolution table
+
+| `--etc-dir` | `--config`      | Loads from                             | `project_root`      |
+|-------------|-----------------|----------------------------------------|---------------------|
+| —           | —               | see fallback chain below               | (varies by tier)    |
+| —           | direct path     | `<config>` (as given)                  | `<config>.parent`   |
+| —           | bare filename   | `cwd/<config>`                         | `cwd`               |
+| `/foo`      | —               | `/foo/<package>.yaml`                  | `/foo`              |
+| `/foo`      | direct path     | `<config>` (`/foo` IGNORED)            | `<config>.parent`   |
+| `/foo`      | bare filename   | `/foo/<config>`                        | `/foo`              |
+
+*"Direct path"*: absolute (`/x`), `./rel`, `../rel`, `~/x`, or `~`.
+*"Bare filename"*: anything else (e.g. `infra.yaml`, `sub/x.yaml`).
+
+Fallback chain (only when neither flag is set):
+
+```
+1. cwd (walk up) → etc/<base_config.name>      first hit, stopping before $HOME
+2. first existing XDG candidate:               $XDG_CONFIG_HOME/<ns>/<pkg>.yaml
+                                               $XDG_CONFIG_HOME/<ns>/config.yaml
+                                               then each $XDG_CONFIG_DIRS entry, same pair
+3. packaged base                               the file registered via with_config_spec(...)
+```
+
+Ordering rationale: a developer inside a project checkout gets that checkout's config —
+XDG cannot shadow it. An operator running from a wheel install gets the packaged base as
+default, with XDG available as a machine-level overlay above that default.
+
+#### Decision tree
+
+```
+                    ┌────────────────────────┐
+                    │  --config passed?      │
+                    └───┬────────────────┬───┘
+                    yes │                │ no
+                        ▼                ▼
+              ┌─────────────────┐   ┌────────────────────────┐
+              │ direct path?    │   │  --etc-dir passed?     │
+              └─┬─────────────┬─┘   └───┬────────────────┬───┘
+             yes│           no│      yes│                │ no
+                ▼             ▼         ▼                ▼
+         load <config>   ┌─────────┐  <etc>/<pkg>.yaml   [FALLBACK CHAIN]
+         (--etc-dir      │--etc-dir│  root = <etc>       (project-local →
+          ignored)       │passed?  │                      XDG → packaged base)
+                         └─┬─────┬─┘
+                        yes│    no│
+                           ▼      ▼
+                    <etc>/<cfg>  cwd/<cfg>
+                    root=<etc>   root=cwd
+```
 
 Rationale: appinfra's include-authorization guard has a job on the DEFAULT path — the user hasn't
 specified anything, so defensive boundaries apply. It cannot dictate where a caller pointing

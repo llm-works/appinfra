@@ -475,3 +475,164 @@ class TestResolveCustomConfig:
         )
         assert path == (tmp_path / "~config.yaml").resolve()
         assert root == tmp_path.resolve()
+
+
+@pytest.mark.unit
+class TestProjectLocalResolution:
+    """Rule 4 — project-local walk-up from cwd for ``etc/<base_config.name>``."""
+
+    @pytest.fixture
+    def bundled_base(self, tmp_path):
+        base = tmp_path / "pkg" / "etc" / "myapp.yaml"
+        base.parent.mkdir(parents=True)
+        base.write_text("")
+        return base
+
+    def _fake_home(self, monkeypatch, home_path):
+        """Point ``Path.home()`` at ``home_path`` for this test."""
+        monkeypatch.setenv("HOME", str(home_path))
+
+    def test_cwd_etc_is_used_when_present(
+        self, bundled_base, tmp_path, monkeypatch, clean_xdg_env
+    ):
+        """cwd/etc/<name> exists → resolves to it, project_root = cwd/etc."""
+        home = tmp_path / "home"
+        home.mkdir()
+        project = tmp_path / "home" / "project"
+        etc = project / "etc"
+        etc.mkdir(parents=True)
+        local = etc / "myapp.yaml"
+        local.write_text("")
+        self._fake_home(monkeypatch, home)
+        monkeypatch.chdir(project)
+        path, root = resolve_config_source("myorg", "myapp", bundled_base)
+        assert path == local
+        assert root == etc
+
+    def test_walk_up_finds_ancestor_etc(
+        self, bundled_base, tmp_path, monkeypatch, clean_xdg_env
+    ):
+        """cwd deep in the tree → walk up until an ancestor has etc/<name>."""
+        home = tmp_path / "home"
+        home.mkdir()
+        project = home / "project"
+        etc = project / "etc"
+        etc.mkdir(parents=True)
+        local = etc / "myapp.yaml"
+        local.write_text("")
+        deep = project / "tests" / "sub" / "deeper"
+        deep.mkdir(parents=True)
+        self._fake_home(monkeypatch, home)
+        monkeypatch.chdir(deep)
+        path, root = resolve_config_source("myorg", "myapp", bundled_base)
+        assert path == local
+        assert root == etc
+
+    def test_stops_before_home(
+        self, bundled_base, tmp_path, monkeypatch, clean_xdg_env
+    ):
+        """An etc/<name> sitting AT $HOME must not be picked up."""
+        home = tmp_path / "home"
+        etc = home / "etc"
+        etc.mkdir(parents=True)
+        (etc / "myapp.yaml").write_text("")  # tempts the walk-up
+        project = home / "project"
+        project.mkdir()
+        self._fake_home(monkeypatch, home)
+        monkeypatch.chdir(project)
+        path, _root = resolve_config_source("myorg", "myapp", bundled_base)
+        # Walk-up skipped $HOME → falls to bundled base.
+        assert path == bundled_base.resolve()
+
+    def test_no_probing_when_cwd_is_home(
+        self, bundled_base, tmp_path, monkeypatch, clean_xdg_env
+    ):
+        """cwd == $HOME → project-local returns None immediately."""
+        home = tmp_path / "home"
+        home.mkdir()
+        self._fake_home(monkeypatch, home)
+        monkeypatch.chdir(home)
+        path, _root = resolve_config_source("myorg", "myapp", bundled_base)
+        assert path == bundled_base.resolve()
+
+    def test_project_local_beats_xdg(
+        self, bundled_base, tmp_path, monkeypatch, clean_xdg_env
+    ):
+        """cwd/etc/<name> present + XDG overlay present → project-local wins."""
+        home = tmp_path / "home"
+        home.mkdir()
+        project = home / "project"
+        etc = project / "etc"
+        etc.mkdir(parents=True)
+        local = etc / "myapp.yaml"
+        local.write_text("")
+        xdg_home = tmp_path / "xdg"
+        (xdg_home / "myorg").mkdir(parents=True)
+        (xdg_home / "myorg" / "myapp.yaml").write_text("")
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg_home))
+        self._fake_home(monkeypatch, home)
+        monkeypatch.chdir(project)
+        path, _root = resolve_config_source("myorg", "myapp", bundled_base)
+        assert path == local
+
+    def test_custom_etc_dir_beats_project_local(
+        self, bundled_base, tmp_path, monkeypatch, clean_xdg_env
+    ):
+        """--etc-dir explicit takes precedence over the project-local walk-up."""
+        home = tmp_path / "home"
+        home.mkdir()
+        project = home / "project"
+        (project / "etc").mkdir(parents=True)
+        (project / "etc" / "myapp.yaml").write_text("")
+        explicit = tmp_path / "explicit"
+        explicit.mkdir()
+        self._fake_home(monkeypatch, home)
+        monkeypatch.chdir(project)
+        path, root = resolve_config_source(
+            "myorg", "myapp", bundled_base, custom_etc_dir=explicit
+        )
+        assert path == explicit.resolve() / "myapp.yaml"
+        assert root == explicit.resolve()
+
+    def test_custom_config_beats_project_local(
+        self, bundled_base, tmp_path, monkeypatch, clean_xdg_env
+    ):
+        """--config direct path takes precedence over project-local."""
+        home = tmp_path / "home"
+        home.mkdir()
+        project = home / "project"
+        (project / "etc").mkdir(parents=True)
+        (project / "etc" / "myapp.yaml").write_text("")
+        explicit_file = tmp_path / "explicit.yaml"
+        explicit_file.write_text("")
+        self._fake_home(monkeypatch, home)
+        monkeypatch.chdir(project)
+        path, _root = resolve_config_source(
+            "myorg", "myapp", bundled_base, custom_config=str(explicit_file)
+        )
+        assert path == explicit_file.resolve()
+
+    def test_project_local_uses_base_config_name_not_package(
+        self, tmp_path, monkeypatch, clean_xdg_env
+    ):
+        """
+        Search filename comes from base_config.name, not <package>.yaml —
+        so appinfra's infra.yaml matches without a naming special case.
+        """
+        home = tmp_path / "home"
+        home.mkdir()
+        # Base ships as "infra.yaml" though the package is "appinfra"
+        bundled = tmp_path / "pkg" / "etc" / "infra.yaml"
+        bundled.parent.mkdir(parents=True)
+        bundled.write_text("")
+        project = home / "project"
+        etc = project / "etc"
+        etc.mkdir(parents=True)
+        local = etc / "infra.yaml"
+        local.write_text("")
+        # etc/appinfra.yaml would be the naive default; make sure it's NOT picked
+        (etc / "appinfra.yaml").write_text("")
+        self._fake_home(monkeypatch, home)
+        monkeypatch.chdir(project)
+        path, _root = resolve_config_source("llm-works", "appinfra", bundled)
+        assert path == local

@@ -87,16 +87,25 @@ def resolve_config_source(
        explicit path IS the include-authorization root; sibling
        ``!include``s inside it resolve by default, anything outside is the
        user's ``allowed_paths`` problem.
-    4. Else first existing ``xdg_candidates(namespace, package)``
+    4. Project-local: walk up from cwd looking for
+       ``etc/<base_config.name>``. First hit → ``(<hit>, <hit>.parent)``.
+       Restores the ``./etc/`` + project-root auto-detection that non-spec
+       ``resolve_etc_dir`` gave, keyed on the filename the package
+       actually ships (so a package's own ``<name>.yaml`` matches without
+       a naming-convention special case). Stops before ``$HOME`` and
+       before filesystem root, so home-dir dotfiles and system ``/etc``
+       are never picked up.
+    5. Else first existing ``xdg_candidates(namespace, package)``
        → ``(<candidate>, include_root_for(base_config))``. Defensive;
        includes bound to the packaged base's directory.
-    5. Else packaged base → ``(<base_config>, include_root_for(base_config))``.
+    6. Else packaged base → ``(<base_config>, include_root_for(base_config))``.
 
     ``custom_config`` always bypasses XDG discovery and the packaged-base
     fallback (no name-comparison special case — matches non-spec-mode
-    convention). Existence is probed only on the XDG candidates. Direct
-    paths are trusted: ``Config(...)`` raises a clear ``FileNotFoundError``
-    at load time if the file does not exist.
+    convention). Existence is probed only on the XDG candidates and the
+    project-local walk-up. Direct paths are trusted: ``Config(...)``
+    raises a clear ``FileNotFoundError`` at load time if the file does
+    not exist.
 
     Args:
         namespace: XDG namespace (e.g. ``"llm-works"``).
@@ -122,12 +131,39 @@ def resolve_config_source(
         etc = Path(str(custom_etc_dir)).expanduser().resolve()
         return (etc / f"{package}.yaml", etc)
 
+    project_local = _find_project_local(base_config)
+    if project_local is not None:
+        return (project_local, project_local.parent)
+
     for candidate in xdg_candidates(namespace, package):
         if candidate.exists():
             return (candidate, include_root_for(base_config))
 
     base = Path(str(base_config)).expanduser().resolve()
     return (base, include_root_for(base_config))
+
+
+def _find_project_local(base_config: Path | str) -> Path | None:
+    """Walk up from cwd looking for ``etc/<base_config.name>``.
+
+    Returns the first hit as an absolute path, or ``None`` if none found.
+    Stops before ``$HOME`` and before filesystem root, so home-dir
+    dotfiles and system ``/etc`` are excluded. cwd = ``$HOME`` or above
+    produces ``None`` without any probing.
+    """
+    filename = Path(str(base_config)).name
+    try:
+        current = Path.cwd().resolve()
+    except (OSError, FileNotFoundError):
+        return None
+    home = Path.home().resolve()
+
+    while current != home and current != current.parent:
+        candidate = current / "etc" / filename
+        if candidate.is_file():
+            return candidate
+        current = current.parent
+    return None
 
 
 def _resolve_custom_config(
