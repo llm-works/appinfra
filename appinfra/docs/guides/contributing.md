@@ -155,18 +155,26 @@ extending framework targets, overriding variables, and available extension point
 
 ## PostgreSQL Setup
 
-Integration tests require PostgreSQL. Use Docker for local development:
+Integration tests require PostgreSQL. Use Docker (or Podman) for local
+development. Two entry points are equivalent — pick by installation shape:
+
+- Repo cloners: `make pg.server.up` (reads `etc/infra.yaml` via Makefile).
+- Wheel installers: `appinfra pg up` (reads the packaged base or a config
+  named via `--config` / `--etc-dir`).
+
+Both project the same `_INFRA_PG_*` wire protocol into
+`appinfra/scripts/pg.sh`, so container state is identical either way.
 
 ### Single Instance Mode (Default)
 
 ```bash
-make pg.server.up       # Start PostgreSQL
-make pg.server.down     # Stop PostgreSQL (auto-detects mode)
-make pg.server.reboot   # Restart PostgreSQL (auto-detects mode)
-make pg.server.logs     # View logs (auto-detects mode)
-make pg                 # Connect to database
-make pg.info            # Full detailed status
-make pg.info.short      # Compact summary
+make pg.server.up       # or: appinfra pg up
+make pg.server.down     # or: appinfra pg down
+make pg.server.reboot   # or: appinfra pg reboot
+make pg.server.logs     # or: appinfra pg logs
+make pg                 # or: appinfra pg psql
+make pg.info            # or: appinfra pg info
+make pg.info.short      # or: appinfra pg status
 ```
 
 ### Replication Mode
@@ -174,12 +182,12 @@ make pg.info.short      # Compact summary
 Start primary + standby (read-only replica) servers:
 
 ```bash
-make pg.server.up.repl  # Start primary (port 25432) + standby (port 25433)
-make pg                 # Connect to primary
-make pg.standby         # Connect to standby (read-only)
-make pg.info            # Shows replication state, both endpoints
-make pg.info.short      # Compact: endpoints, replication, databases
-make pg.server.down     # Stop all (auto-detects mode)
+make pg.server.up.repl  # or: appinfra pg up --repl
+make pg                 # or: appinfra pg psql
+make pg.standby         # or: appinfra pg psql --target standby
+make pg.info            # or: appinfra pg info
+make pg.info.short      # or: appinfra pg status
+make pg.server.down     # or: appinfra pg down
 ```
 
 **Configuration** (in `etc/infra.yaml`):
