@@ -651,4 +651,112 @@ class TestConfigToolIntegration:
 
             assert result == 1
 
-        Path(f.name).unlink()
+
+# =============================================================================
+# --source reporting: precedence-chain provenance
+# =============================================================================
+
+
+@pytest.mark.unit
+class TestSourceReport:
+    """Test --source output: loaded path, winning rule, chain rendering."""
+
+    def _tool_with_app(self, spec, loaded_paths, parsed_args):
+        """Build a ConfigTool with a stub App carrying spec + loaded paths."""
+        from types import SimpleNamespace
+        from unittest.mock import patch
+
+        tool = ConfigTool()
+        tool._parsed_args = Mock(source=True)
+        tool._logger = Mock()
+        fake_app = SimpleNamespace(
+            _config_spec=spec,
+            _loaded_config_paths=loaded_paths,
+            _parsed_args=parsed_args,
+        )
+        return tool, patch.object(ConfigTool, "app", new=property(lambda s: fake_app))
+
+    def _spec(self, base):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(
+            namespace="llm-works", package="appinfra", base_config=Path(base)
+        )
+
+    def test_no_spec_reports_bare_loaded(self, capsys, tmp_path):
+        f = tmp_path / "x.yaml"
+        f.write_text("k: v")
+        tool, ctx = self._tool_with_app(
+            spec=None,
+            loaded_paths=[(str(tmp_path), "x.yaml", str(f))],
+            parsed_args=Mock(etc_dir=None, config=None),
+        )
+        with ctx:
+            assert tool.run() == 0
+        out = capsys.readouterr().out
+        assert f"loaded: {f}" in out
+        assert "no chain" in out
+
+    def test_rule_5_packaged_base(self, capsys, tmp_path):
+        base = tmp_path / "base.yaml"
+        base.write_text("k: v")
+        tool, ctx = self._tool_with_app(
+            spec=self._spec(base),
+            loaded_paths=[(str(tmp_path), "base.yaml", str(base.resolve()))],
+            parsed_args=Mock(etc_dir=None, config=None),
+        )
+        with ctx:
+            tool.run()
+        out = capsys.readouterr().out
+        assert "rule:   5 (packaged base)" in out
+        assert "[x] 5. packaged base" in out
+        # Rules 1-3 not marked when neither flag was passed
+        assert "[ ] 1. --config direct path" in out
+        assert "[ ] 3. --etc-dir alone" in out
+
+    def test_rule_1_direct_path(self, capsys, tmp_path):
+        base = tmp_path / "base.yaml"
+        base.write_text("k: v")
+        custom = tmp_path / "custom.yaml"
+        custom.write_text("k: v")
+        tool, ctx = self._tool_with_app(
+            spec=self._spec(base),
+            loaded_paths=[(str(tmp_path), "custom.yaml", str(custom))],
+            parsed_args=Mock(etc_dir=None, config=str(custom)),
+        )
+        with ctx:
+            tool.run()
+        out = capsys.readouterr().out
+        assert "rule:   1 (--config direct path)" in out
+        assert "[x] 1. --config direct path" in out
+        # rule 5 must NOT be marked even if loaded==base by coincidence
+        assert "[ ] 5. packaged base" in out
+
+    def test_rule_2_bare_filename(self, capsys, tmp_path):
+        base = tmp_path / "base.yaml"
+        base.write_text("k: v")
+        tool, ctx = self._tool_with_app(
+            spec=self._spec(base),
+            loaded_paths=[(str(tmp_path), "bare.yaml", str(tmp_path / "bare.yaml"))],
+            parsed_args=Mock(etc_dir=str(tmp_path), config="bare.yaml"),
+        )
+        with ctx:
+            tool.run()
+        out = capsys.readouterr().out
+        assert "rule:   2 (--config bare + --etc-dir)" in out
+
+    def test_rule_3_etc_dir_alone(self, capsys, tmp_path):
+        base = tmp_path / "base.yaml"
+        base.write_text("k: v")
+        tool, ctx = self._tool_with_app(
+            spec=self._spec(base),
+            loaded_paths=[
+                (str(tmp_path), "appinfra.yaml", str(tmp_path / "appinfra.yaml"))
+            ],
+            parsed_args=Mock(etc_dir=str(tmp_path), config=None),
+        )
+        with ctx:
+            tool.run()
+        out = capsys.readouterr().out
+        assert "rule:   3 (--etc-dir alone)" in out
+        assert "[x] 3. --etc-dir alone" in out
