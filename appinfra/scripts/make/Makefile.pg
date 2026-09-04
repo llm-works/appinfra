@@ -77,6 +77,16 @@ endif
 PG_HOST := $(INFRA_PG_HOST)
 PG_USER := $(INFRA_PG_USER)
 
+# Resolved image: use explicit pgserver.image when set, else docker.io/postgres:<version>.
+# Pre-resolved here (rather than via ${IMAGE:-...} in the compose YAML) because
+# podman-compose does not recursively expand nested shell-style defaults. The default
+# is fully qualified (docker.io/...) because podman does not assume docker.io for
+# unqualified image names — docker accepts the qualified form transparently.
+# When neither image nor version is configured, leaves IMAGE empty so the YAML's
+# ${IMAGE:?} produces a clean "IMAGE: required variable not set" error.
+# Must be defined BEFORE the _INFRA_PG_IMAGE export below (:= is immediate).
+PG_RESOLVED_IMAGE := $(if $(PG_IMAGE),$(PG_IMAGE),$(if $(PG_VERSION),docker.io/postgres:$(PG_VERSION)))
+
 # Wire vars exported to pg.sh (internal contract; underscore prefix marks it
 # as subject to change and distinct from the public INFRA_PG_* / INFRA_PGSERVER_*
 # configuration surface). INFRA_CONTAINER_CMD is exported in Makefile.config.
@@ -103,15 +113,6 @@ PSQL := PAGER='less -S' psql -h $(PG_HOST) -p $(PG_PORT) -U $(PG_USER)
 ifeq ($(PG_REPLICA_ENABLED),true)
 PSQL_STANDBY := PAGER='less -S' psql -h $(PG_HOST) -p $(PG_PORT_R) -U $(PG_USER)
 endif
-
-# Resolved image: use explicit pgserver.image when set, else docker.io/postgres:<version>.
-# Pre-resolved here (rather than via ${IMAGE:-...} in the compose YAML) because
-# podman-compose does not recursively expand nested shell-style defaults. The default
-# is fully qualified (docker.io/...) because podman does not assume docker.io for
-# unqualified image names — docker accepts the qualified form transparently.
-# When neither image nor version is configured, leaves IMAGE empty so the YAML's
-# ${IMAGE:?} produces a clean "IMAGE: required variable not set" error.
-PG_RESOLVED_IMAGE := $(if $(PG_IMAGE),$(PG_IMAGE),$(if $(PG_VERSION),docker.io/postgres:$(PG_VERSION)))
 
 # Curated postgres_conf knobs; each fills a slot in the compose YAMLs. Empty
 # values let the YAML default to postgres's built-in (see :- in each slot).
