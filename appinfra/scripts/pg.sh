@@ -20,12 +20,25 @@
 #   _INFRA_PG_PORT               primary connection port
 #   _INFRA_PG_PORT_R             standby port (only when _INFRA_PG_REPLICA_ENABLED=true)
 #   _INFRA_PG_USER               postgres user
-#   _INFRA_PG_REPLICA_ENABLED    "true" enables replica-aware output
+#   _INFRA_PG_REPLICA_ENABLED    "true" enables replica-aware behavior
+#   _INFRA_PG_IMAGE              pre-resolved container image (e.g. docker.io/postgres:18)
+#   _INFRA_PG_MAX_CONNECTIONS    postgres_conf: max_connections (optional)
+#   _INFRA_PG_SHARED_PRELOAD_LIBRARIES  postgres_conf: shared_preload_libraries (optional)
+#   _INFRA_PG_WORK_MEM           postgres_conf: work_mem (optional)
+#   _INFRA_PG_AUTOVACUUM         postgres_conf: autovacuum (optional)
+#   _INFRA_PG_MODE               "single" | "repl" — target mode for `up` / `reboot`
+#   _INFRA_PG_WAIT               "0" to skip readiness/teardown wait on up/down/reboot
+#   _INFRA_PG_WAIT_TIMEOUT       wait-up / wait-down loop timeout in seconds (default 30)
 #   INFRA_CONTAINER_CMD          container runtime (docker/podman); default docker
+#   INFRA_COMPOSE_CMD            compose runtime (docker compose / podman compose); default docker compose
 #
 # The `_INFRA_PG_*` prefix marks these as an internal wire protocol between the
 # caller layer and pg.sh — subject to change, not part of the public
 # INFRA_PG_* / INFRA_PGSERVER_* user-facing configuration surface.
+
+# All _INFRA_PG_* / INFRA_* vars are supplied by the caller (Makefile shim or
+# `appinfra pg` CLI), not assigned here — silence "may not be assigned" hints.
+# shellcheck disable=SC2153
 
 set -euo pipefail
 
@@ -36,6 +49,213 @@ set -euo pipefail
 _BOLD='\033[1m' _RED='\033[0;31m' _GREEN='\033[0;32m'
 _YELLOW='\033[0;33m' _BLUE='\033[0;34m' _CYAN='\033[0;36m'
 _GRAY='\033[0;90m' _RESET='\033[0m'
+
+# ---------------------------------------------------------------------------
+# Shared: container / compose helpers
+# ---------------------------------------------------------------------------
+
+_pg_script_dir() {
+    cd "$(dirname "${BASH_SOURCE[0]}")" && pwd
+}
+
+_pg_compose_yaml() {
+    # $1 = single|repl
+    local script_dir
+    script_dir="$(_pg_script_dir)"
+    if [ "$1" = "repl" ]; then
+        echo "${script_dir}/docker/pg/docker-compose.repl.yaml"
+    else
+        echo "${script_dir}/docker/pg/docker-compose.single.yaml"
+    fi
+}
+
+_pg_container_runtime() {
+    echo "${INFRA_CONTAINER_CMD:-docker}"
+}
+
+_pg_compose_run() {
+    # Invoke compose with the mode-appropriate YAML and env. $1 = single|repl,
+    # remaining args pass through to compose.
+    local mode="$1"; shift
+    local compose_yaml compose_cmd
+    compose_yaml="$(_pg_compose_yaml "${mode}")"
+    compose_cmd="${INFRA_COMPOSE_CMD:-docker compose}"
+
+    local -a compose_env=(
+        NAME="${_INFRA_PG_CONTAINER_NAME}"
+        PORT="${_INFRA_PG_PORT}"
+        IMAGE="${_INFRA_PG_IMAGE:-}"
+        PG_MAX_CONNECTIONS="${_INFRA_PG_MAX_CONNECTIONS:-}"
+        PG_SHARED_PRELOAD_LIBRARIES="${_INFRA_PG_SHARED_PRELOAD_LIBRARIES:-}"
+        PG_WORK_MEM="${_INFRA_PG_WORK_MEM:-}"
+        PG_AUTOVACUUM="${_INFRA_PG_AUTOVACUUM:-}"
+    )
+    if [ "${mode}" = "repl" ]; then
+        compose_env+=(PORT_R="${_INFRA_PG_PORT_R}")
+    fi
+
+    # ${compose_cmd} is intentionally unquoted: it commonly holds
+    # "docker compose" or "podman compose" (two words) that must word-split.
+    # shellcheck disable=SC2086
+    env "${compose_env[@]}" ${compose_cmd} -p "${_INFRA_PG_CONTAINER_NAME}" -f "${compose_yaml}" "$@"
+}
+
+_pg_detect_running_mode() {
+    # Echoes: "single" | "repl" | "none"
+    local runtime
+    runtime="$(_pg_container_runtime)"
+    if ${runtime} ps --format '{{.Names}}' 2>/dev/null | grep -q "^${_INFRA_PG_CONTAINER_NAME}-primary$"; then
+        echo "repl"
+    elif ${runtime} ps --format '{{.Names}}' 2>/dev/null | grep -q "^${_INFRA_PG_CONTAINER_NAME}$"; then
+        echo "single"
+    else
+        echo "none"
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# up — start server (single or repl mode)
+# ---------------------------------------------------------------------------
+
+_pg_up() {
+    : "${_INFRA_PG_CONTAINER_NAME:?_INFRA_PG_CONTAINER_NAME required}"
+    : "${_INFRA_PG_PORT:?_INFRA_PG_PORT required}"
+    : "${_INFRA_PG_MODE:=single}"
+    : "${_INFRA_PG_WAIT:=1}"
+
+    if [ "${_INFRA_PG_MODE}" != "single" ] && [ "${_INFRA_PG_MODE}" != "repl" ]; then
+        echo "pg.sh up: _INFRA_PG_MODE must be 'single' or 'repl' (got '${_INFRA_PG_MODE}')" >&2
+        exit 2
+    fi
+    if [ "${_INFRA_PG_MODE}" = "repl" ] && [ -z "${_INFRA_PG_PORT_R:-}" ]; then
+        echo "pg.sh up: _INFRA_PG_PORT_R required for repl mode" >&2
+        exit 2
+    fi
+
+    local running_mode
+    running_mode="$(_pg_detect_running_mode)"
+
+    # Toggle: stop conflicting mode first to free the port.
+    if [ "${_INFRA_PG_MODE}" = "single" ] && [ "${running_mode}" = "repl" ]; then
+        echo "Stopping replication mode..."
+        _pg_compose_run repl down
+        echo "Starting single instance..."
+    elif [ "${_INFRA_PG_MODE}" = "repl" ] && [ "${running_mode}" = "single" ]; then
+        echo "Stopping single instance..."
+        _pg_compose_run single down
+        echo "Starting PostgreSQL replication mode..."
+        echo "  Primary:  port ${_INFRA_PG_PORT}"
+        echo "  Standby:  port ${_INFRA_PG_PORT_R} (read-only replica)"
+    fi
+
+    _pg_compose_run "${_INFRA_PG_MODE}" up -d
+
+    if [ "${_INFRA_PG_WAIT}" != "0" ]; then
+        _pg_wait_up
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# down — stop server (auto-detects mode)
+# ---------------------------------------------------------------------------
+
+_pg_down() {
+    : "${_INFRA_PG_CONTAINER_NAME:?_INFRA_PG_CONTAINER_NAME required}"
+    : "${_INFRA_PG_WAIT:=1}"
+
+    local running_mode
+    running_mode="$(_pg_detect_running_mode)"
+
+    case "${running_mode}" in
+        repl)   _pg_compose_run repl down || true ;;
+        single) _pg_compose_run single down || true ;;
+        none)
+            # Nothing running; still run single-mode down to sweep any lingering
+            # network/volume artifacts. Matches historic Makefile behavior.
+            _pg_compose_run single down || true
+            ;;
+    esac
+
+    if [ "${_INFRA_PG_WAIT}" != "0" ]; then
+        _pg_wait_down
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# wait-up / wait-down — readiness / teardown probes
+# ---------------------------------------------------------------------------
+
+_pg_wait_container_up() {
+    # $1 = container name, $2 = timeout seconds
+    local target="$1" timeout="$2"
+    local runtime i
+    runtime="$(_pg_container_runtime)"
+
+    for i in $(seq 1 "${timeout}"); do
+        if ${runtime} exec "${target}" psql -U "${_INFRA_PG_USER}" -c "SELECT 1" >/dev/null 2>&1; then
+            return 0
+        fi
+        if [ $((i % 5)) -eq 0 ]; then
+            echo "  still waiting (${i}s elapsed)"
+        fi
+        sleep 1
+    done
+    echo "ERROR: ${target} did not become ready within ${timeout}s" >&2
+    exit 1
+}
+
+_pg_wait_up() {
+    : "${_INFRA_PG_CONTAINER_NAME:?_INFRA_PG_CONTAINER_NAME required}"
+    : "${_INFRA_PG_USER:?_INFRA_PG_USER required}"
+    : "${_INFRA_PG_PORT:?_INFRA_PG_PORT required}"
+    : "${_INFRA_PG_WAIT_TIMEOUT:=30}"
+
+    local runtime
+    runtime="$(_pg_container_runtime)"
+
+    local primary_target="${_INFRA_PG_CONTAINER_NAME}"
+    if ${runtime} ps --format '{{.Names}}' 2>/dev/null | grep -q "^${_INFRA_PG_CONTAINER_NAME}-primary$"; then
+        primary_target="${_INFRA_PG_CONTAINER_NAME}-primary"
+    fi
+
+    echo "Waiting for ${primary_target} to accept connections..."
+    _pg_wait_container_up "${primary_target}" "${_INFRA_PG_WAIT_TIMEOUT}"
+    echo "Server is UP (${primary_target} on port ${_INFRA_PG_PORT})"
+
+    # In repl mode the standby container's psql only answers once basebackup
+    # completes. Fixes the historic wait-up quirk where the target went ready
+    # while the standby was still cloning.
+    if [ "${primary_target}" = "${_INFRA_PG_CONTAINER_NAME}-primary" ]; then
+        local standby_target="${_INFRA_PG_CONTAINER_NAME}-standby"
+        if ${runtime} ps --format '{{.Names}}' 2>/dev/null | grep -q "^${standby_target}$"; then
+            echo "Waiting for ${standby_target} to accept connections (basebackup)..."
+            _pg_wait_container_up "${standby_target}" "${_INFRA_PG_WAIT_TIMEOUT}"
+            echo "Standby is UP (${standby_target} on port ${_INFRA_PG_PORT_R:-?})"
+        fi
+    fi
+}
+
+_pg_wait_down() {
+    : "${_INFRA_PG_CONTAINER_NAME:?_INFRA_PG_CONTAINER_NAME required}"
+    : "${_INFRA_PG_WAIT_TIMEOUT:=30}"
+
+    local runtime i
+    runtime="$(_pg_container_runtime)"
+
+    echo "Waiting for ${_INFRA_PG_CONTAINER_NAME} container(s) to be removed..."
+    for i in $(seq 1 "${_INFRA_PG_WAIT_TIMEOUT}"); do
+        if ! ${runtime} ps -a --format '{{.Names}}' 2>/dev/null | grep -qE "^${_INFRA_PG_CONTAINER_NAME}(-primary|-standby)?$"; then
+            echo "Server is DOWN"
+            return 0
+        fi
+        if [ $((i % 5)) -eq 0 ]; then
+            echo "  still waiting (${i}s elapsed)"
+        fi
+        sleep 1
+    done
+    echo "ERROR: container(s) for ${_INFRA_PG_CONTAINER_NAME} still present after teardown" >&2
+    exit 1
+}
 
 # ---------------------------------------------------------------------------
 # info — comprehensive server + database status (also --short summary line)
@@ -211,6 +431,10 @@ _pg_usage() {
 usage: pg.sh <cmd> [args]
 
 commands:
+  up                start server (mode via _INFRA_PG_MODE=single|repl; wait unless _INFRA_PG_WAIT=0)
+  down              stop server (auto-detects mode; wait unless _INFRA_PG_WAIT=0)
+  wait-up           wait for server to accept connections (timeout _INFRA_PG_WAIT_TIMEOUT)
+  wait-down         wait for containers to be fully removed
   info [--short]    server + database status (comprehensive or one-line summary)
 
 All inputs are read from environment variables; see the header of this script
@@ -226,7 +450,11 @@ fi
 cmd="$1"
 shift
 case "$cmd" in
-    info) _pg_info "$@" ;;
+    up)        _pg_up ;;
+    down)      _pg_down ;;
+    wait-up)   _pg_wait_up ;;
+    wait-down) _pg_wait_down ;;
+    info)      _pg_info "$@" ;;
     -h | --help | help) _pg_usage ;;
     *)
         echo "pg.sh: unknown command: $cmd" >&2
