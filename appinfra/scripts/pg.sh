@@ -272,11 +272,15 @@ _pg_erase() {
     local runtime
     runtime="$(_pg_container_runtime)"
 
+    # Stop and remove containers by explicit name (single-mode + replication-mode names).
+    # Avoids substring matching that could affect unrelated containers.
     echo "Stopping all PostgreSQL containers..."
-    ${runtime} ps -a --filter "name=${_INFRA_PG_CONTAINER_NAME}" --format "{{.Names}}" \
-        | xargs -r ${runtime} stop 2>/dev/null || true
-    ${runtime} ps -a --filter "name=${_INFRA_PG_CONTAINER_NAME}" --format "{{.Names}}" \
-        | xargs -r ${runtime} rm 2>/dev/null || true
+    ${runtime} stop "${_INFRA_PG_CONTAINER_NAME}" \
+        "${_INFRA_PG_CONTAINER_NAME}-primary" \
+        "${_INFRA_PG_CONTAINER_NAME}-standby" 2>/dev/null || true
+    ${runtime} rm -f "${_INFRA_PG_CONTAINER_NAME}" \
+        "${_INFRA_PG_CONTAINER_NAME}-primary" \
+        "${_INFRA_PG_CONTAINER_NAME}-standby" 2>/dev/null || true
 
     echo "Removing PostgreSQL volumes..."
     ${runtime} volume ls --filter "name=${_INFRA_PG_CONTAINER_NAME}" --format "{{.Name}}" \
@@ -604,11 +608,11 @@ _pg_clean() {
             continue
         fi
         exists=$(psql -w -h "${_INFRA_PG_HOST}" -p "${_INFRA_PG_PORT}" -U "${_INFRA_PG_USER}" \
-            -XtAc "SELECT 1 FROM pg_database WHERE datname='${db}'" 2>/dev/null || true)
+            -d postgres -XtAc "SELECT 1 FROM pg_database WHERE datname='${db}'" 2>&1) || true
         if [ "${exists}" = "1" ]; then
             echo "  * dropping db ${db}..."
             psql -w -h "${_INFRA_PG_HOST}" -p "${_INFRA_PG_PORT}" -U "${_INFRA_PG_USER}" \
-                -c "DROP DATABASE \"${db}\" WITH (FORCE)" 2>/dev/null || true
+                -d postgres -c "DROP DATABASE \"${db}\" WITH (FORCE)" || true
         else
             echo "  * database ${db} not found"
         fi
@@ -621,7 +625,12 @@ _pg_clean() {
 # ---------------------------------------------------------------------------
 
 _pg_psql() {
-    _pg_require_env
+    # Connection-only checks (don't require PG_VERSION — not needed for psql).
+    : "${_INFRA_PG_HOST:?_INFRA_PG_HOST required}"
+    : "${_INFRA_PG_PORT:?_INFRA_PG_PORT required}"
+    : "${_INFRA_PG_USER:?_INFRA_PG_USER required}"
+    : "${_INFRA_PG_REPLICA_ENABLED:=false}"
+    : "${_INFRA_PG_PORT_R:=}"
 
     local target="primary"
     if [ "${1:-}" = "--target" ]; then
