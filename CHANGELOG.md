@@ -16,6 +16,11 @@ For API stability guarantees and deprecation policy, see
   `--etc-dir` or fall to cwd. Bypasses XDG and the packaged base. Framework
   mode wires the flag via `.with_standard_args(config_file=True)`. See
   [Config Protocol](appinfra/docs/guides/config-protocol.md).
+- `resolve_config_source`: project-local step. When neither `--config` nor
+  `--etc-dir` is set, walks up from cwd looking for `etc/<base_config.name>`
+  (stops before `$HOME`) and loads the first hit. Restores the `./etc/`
+  auto-detection that predates the discovery helper; a checkout's config
+  wins over XDG. See [Config Protocol](appinfra/docs/guides/config-protocol.md).
 
 ### Changed
 - `pgserver` defaults: `name` `infra-pg` → `llm-works-pg`, `port` `7432` →

@@ -150,13 +150,20 @@ def _find_project_local(base_config: Path | str) -> Path | None:
     Stops before ``$HOME`` and before filesystem root, so home-dir
     dotfiles and system ``/etc`` are excluded. cwd = ``$HOME`` or above
     produces ``None`` without any probing.
+
+    Silent-fails to ``None`` when cwd or ``$HOME`` cannot be determined
+    (deleted cwd; ``$HOME`` unset and ``pwd`` lookup fails). Never
+    raises: an unresolvable environment falls through to XDG / packaged
+    base, matching the "defensive default" intent of the fallback tiers.
     """
     filename = Path(str(base_config)).name
+    if not filename:
+        return None
     try:
         current = Path.cwd().resolve()
-    except (OSError, FileNotFoundError):
+        home = Path.home().resolve()
+    except (OSError, RuntimeError):
         return None
-    home = Path.home().resolve()
 
     while current != home and current != current.parent:
         candidate = current / "etc" / filename

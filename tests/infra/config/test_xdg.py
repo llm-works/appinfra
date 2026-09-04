@@ -612,6 +612,18 @@ class TestProjectLocalResolution:
         )
         assert path == explicit_file.resolve()
 
+    def test_empty_filename_short_circuits(self, tmp_path, monkeypatch, clean_xdg_env):
+        """A base_config whose .name is empty (e.g. Path('/')) must not probe."""
+        from appinfra.config.xdg import _find_project_local
+
+        home = tmp_path / "home"
+        home.mkdir()
+        self._fake_home(monkeypatch, home)
+        (home / "project").mkdir()
+        monkeypatch.chdir(home / "project")
+        # Path('/').name == '' — guard hits, returns None without any probe
+        assert _find_project_local(Path("/")) is None
+
     def test_project_local_uses_base_config_name_not_package(
         self, tmp_path, monkeypatch, clean_xdg_env
     ):

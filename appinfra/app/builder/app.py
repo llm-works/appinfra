@@ -52,8 +52,8 @@ class ConfigSpecV1:
     Captured by ``AppBuilder.with_v1_config`` and consumed at ``App.setup``
     time by ``resolve_config_source``. Flag exposure is optional via
     ``.with_standard_args(etc_dir=True, config_file=True)``. Runs the
-    precedence chain (``--config`` > ``--etc-dir`` > XDG overlay > packaged
-    base) on every parse.
+    precedence chain (``--config`` > ``--etc-dir`` > project-local walk-up
+    > XDG overlay > packaged base) on every parse.
     """
 
     namespace: str
@@ -518,12 +518,15 @@ class AppBuilder:
            ``cwd/bare.yaml``; ``project_root`` = the file's parent.
         3. ``--etc-dir /foo`` alone → ``<foo>/<package>.yaml`` with
            ``project_root=<foo>``.
-        4. Else first existing XDG candidate for ``<namespace>/<package>``
+        4. Project-local: walk up from cwd for ``etc/<base_config.name>``.
+           First hit → load it with ``project_root`` = that ``etc/``.
+           Stops before ``$HOME`` and before filesystem root.
+        5. Else first existing XDG candidate for ``<namespace>/<package>``
            → overlay with ``project_root=include_root_for(base_config)``.
-        5. Else the packaged ``base_config``.
+        6. Else the packaged ``base_config``.
 
-        ``--config`` always bypasses XDG discovery and the packaged-base
-        fallback (no name-comparison special case).
+        ``--config`` always bypasses everything below it (project-local
+        walk-up, XDG, packaged base). No name-comparison special case.
 
         Under an explicit ``--etc-dir`` the include-authorization boundary
         follows the user's directory — reaching outside is the user's
