@@ -608,7 +608,7 @@ _pg_clean() {
         if [ "${exists}" = "1" ]; then
             echo "  * dropping db ${db}..."
             psql -w -h "${_INFRA_PG_HOST}" -p "${_INFRA_PG_PORT}" -U "${_INFRA_PG_USER}" \
-                -c "DROP DATABASE \"${db}\" WITH (FORCE)" 2>/dev/null
+                -c "DROP DATABASE \"${db}\" WITH (FORCE)" 2>/dev/null || true
         else
             echo "  * database ${db} not found"
         fi

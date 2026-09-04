@@ -136,7 +136,7 @@ pg.server.logs: ## tails postgres server logs (auto-detects mode)
 .PHONY: pg.server.logs
 
 pg.server.clean: areyousure ## removes all postgres containers, volumes, images, and networks (WARNING: deletes all data)
-	@$(pg_local)/../pg.sh erase
+	@$(MAKE) pg.server.clean.internal
 .PHONY: pg.server.clean
 
 pg.server.clean.internal:: # Internal: cleanup without confirmation (used by clean.full)
@@ -171,7 +171,7 @@ pg.clean.internal:: ## drops all configured databases (no confirmation; for down
 .PHONY: pg.clean.internal
 
 pg.clean:: areyousure ## cleans all databases (with confirmation)
-	@$(pg_local)/../pg.sh clean
+	@$(MAKE) pg.clean.internal
 .PHONY: pg.clean
 
 pg: ## connects to postgres db (primary)
