@@ -17,6 +17,7 @@ resolve to identical container state.
 
 import argparse
 import os
+import shutil
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -131,6 +132,27 @@ def _project_env(cfg: Any) -> dict[str, str]:
     }
 
 
+def _detect_runtime_env() -> dict[str, str]:
+    """
+    Auto-detect a container runtime for pg.sh when the caller didn't set one.
+
+    Precedence: honor an explicit ``INFRA_CONTAINER_CMD`` (Makefile.config
+    does this); else prefer ``podman`` if on PATH; else ``docker``. Sets
+    ``INFRA_COMPOSE_CMD`` to a matching ``<runtime> compose`` when
+    unset. Falls through empty if neither is present — pg.sh will then
+    report its own missing-runtime error.
+    """
+    if os.environ.get("INFRA_CONTAINER_CMD"):
+        return {}
+    for runtime in ("podman", "docker"):
+        if shutil.which(runtime):
+            env = {"INFRA_CONTAINER_CMD": runtime}
+            if not os.environ.get("INFRA_COMPOSE_CMD"):
+                env["INFRA_COMPOSE_CMD"] = f"{runtime} compose"
+            return env
+    return {}
+
+
 def _exec_pg(
     cfg: Any,
     verb: str,
@@ -138,7 +160,7 @@ def _exec_pg(
     extra_env: dict[str, str] | None = None,
 ) -> int:
     """Project env + exec pg.sh <verb>. Returns exit code."""
-    env = {**os.environ, **_project_env(cfg)}
+    env = {**os.environ, **_detect_runtime_env(), **_project_env(cfg)}
     if extra_env:
         env.update(extra_env)
     cmd = [str(_pg_script_path()), verb, *(extra_args or [])]

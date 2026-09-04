@@ -28,6 +28,7 @@ from appinfra.cli.tools.pg_tool import (
     PgTopTool,
     PgUpTool,
     PgUrlTool,
+    _detect_runtime_env,
     _exec_pg,
     _get,
     _pg_script_path,
@@ -224,6 +225,39 @@ class TestExec:
         assert p.name == "pg.sh"
         assert p.parent.name == "scripts"
         assert p.exists()
+
+    def test_detect_runtime_honors_explicit_env(self, monkeypatch):
+        monkeypatch.setenv("INFRA_CONTAINER_CMD", "docker")
+        assert _detect_runtime_env() == {}
+
+    def test_detect_runtime_prefers_podman(self, monkeypatch):
+        monkeypatch.delenv("INFRA_CONTAINER_CMD", raising=False)
+        monkeypatch.delenv("INFRA_COMPOSE_CMD", raising=False)
+        with patch(
+            "appinfra.cli.tools.pg_tool.shutil.which",
+            side_effect=lambda name: f"/usr/bin/{name}" if name == "podman" else None,
+        ):
+            env = _detect_runtime_env()
+        assert env == {
+            "INFRA_CONTAINER_CMD": "podman",
+            "INFRA_COMPOSE_CMD": "podman compose",
+        }
+
+    def test_detect_runtime_falls_back_to_docker(self, monkeypatch):
+        monkeypatch.delenv("INFRA_CONTAINER_CMD", raising=False)
+        monkeypatch.delenv("INFRA_COMPOSE_CMD", raising=False)
+        with patch(
+            "appinfra.cli.tools.pg_tool.shutil.which",
+            side_effect=lambda name: f"/usr/bin/{name}" if name == "docker" else None,
+        ):
+            env = _detect_runtime_env()
+        assert env["INFRA_CONTAINER_CMD"] == "docker"
+        assert env["INFRA_COMPOSE_CMD"] == "docker compose"
+
+    def test_detect_runtime_empty_when_neither_present(self, monkeypatch):
+        monkeypatch.delenv("INFRA_CONTAINER_CMD", raising=False)
+        with patch("appinfra.cli.tools.pg_tool.shutil.which", return_value=None):
+            assert _detect_runtime_env() == {}
 
     def test_exec_pg_calls_subprocess_with_env(self):
         cfg = {
