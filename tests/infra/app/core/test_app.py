@@ -1086,6 +1086,19 @@ class TestDeferredConfigLoading:
         # ../~/config.yaml starts with ../, tilde is literal
         assert app._is_direct_path("../~/config.yaml") is True  # explicit relative
 
+    def test_is_direct_path_tilde_no_slash_is_bare_filename(self):
+        """~config.yaml is NOT a valid home-dir reference, it's a bare filename.
+
+        expanduser() raises RuntimeError for ~username when the user doesn't exist,
+        so we must not recognize ~config.yaml as a direct path — only ~/... or ~.
+        """
+        app = App()
+        # ~config.yaml looks like it starts with ~ but is NOT a valid home expansion
+        assert app._is_direct_path("~config.yaml") is False
+        assert app._is_direct_path("~foo") is False
+        # But bare ~ alone is valid (expands to home directory)
+        assert app._is_direct_path("~") is True
+
     def test_load_direct_config_absolute_path(self, clean_env):
         """Test _load_direct_config loads from absolute path."""
         with tempfile.TemporaryDirectory() as tmpdir:

@@ -50,9 +50,10 @@ class ConfigSpecV1:
     """v1 config-protocol auto-loading declaration.
 
     Captured by ``AppBuilder.with_v1_config`` and consumed at ``App.setup``
-    time by ``resolve_config_source``. Registers ``--etc-dir`` unconditionally
-    on the CLI and runs the precedence chain (``--etc-dir`` > XDG overlay >
-    packaged base) on every parse.
+    time by ``resolve_config_source``. Flag exposure is optional via
+    ``.with_standard_args(etc_dir=True, config_file=True)``. Runs the
+    precedence chain (``--config`` > ``--etc-dir`` > XDG overlay > packaged
+    base) on every parse.
     """
 
     namespace: str

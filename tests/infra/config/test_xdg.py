@@ -446,3 +446,17 @@ class TestResolveCustomConfig:
         )
         assert path == (tmp_path / "custom.yaml").resolve()
         assert root == tmp_path.resolve()
+
+    def test_tilde_no_slash_is_bare_filename(self, bundled_base, monkeypatch, tmp_path):
+        """~config.yaml is NOT a valid home-dir reference, it's a bare filename.
+
+        expanduser() raises RuntimeError for ~username when the user doesn't exist,
+        so we must not recognize ~config.yaml as a direct path — only ~/... or ~.
+        """
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "~config.yaml").write_text("tilde_key: value\n")
+        path, root = resolve_config_source(
+            "myorg", "myapp", bundled_base, custom_config="~config.yaml"
+        )
+        assert path == (tmp_path / "~config.yaml").resolve()
+        assert root == tmp_path.resolve()

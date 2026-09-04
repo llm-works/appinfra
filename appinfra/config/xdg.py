@@ -153,15 +153,21 @@ def _resolve_custom_config(
 
 
 def _is_direct_path(config: str) -> bool:
-    """Direct path if absolute, ``./``, ``../``, or ``~``-prefixed.
+    """Direct path if absolute, ``./``, ``../``, or ``~/``-prefixed.
 
     Matches non-spec ``_is_direct_path`` (see ``appinfra/app/core/app.py``)
     with a small addition for tilde-prefixed paths — ``--etc-dir`` already
     expands ``~`` explicitly (see ``TestResolveConfigSource.
     test_custom_etc_dir_expands_tilde``), so ``--config ~/x.yaml`` is
     likewise treated as an absolute path rather than a bare filename.
+    Only ``~/...`` or ``~`` alone are matched; ``~username`` is not a
+    valid expanduser target and would raise RuntimeError.
     """
-    return Path(config).is_absolute() or config.startswith(("./", "../", "~"))
+    return (
+        Path(config).is_absolute()
+        or config.startswith(("./", "../", "~/"))
+        or config == "~"
+    )
 
 
 def _xdg_config_dirs() -> list[Path]:

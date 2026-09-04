@@ -563,7 +563,11 @@ class App(Traceable):
 
     def _is_direct_path(self, path: str) -> bool:
         """Check if path should be loaded directly (absolute or explicit relative)."""
-        return Path(path).is_absolute() or path.startswith(("./", "../", "~"))
+        return (
+            Path(path).is_absolute()
+            or path.startswith(("./", "../", "~/"))
+            or path == "~"
+        )
 
     def _load_direct_config(self, config_path: str) -> dict | None:
         """Load a config file directly from the given path."""
