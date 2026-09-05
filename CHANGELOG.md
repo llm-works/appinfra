@@ -47,6 +47,8 @@ For API stability guarantees and deprecation policy, see
 ### Fixed
 - `appinfra pg` and `make pg.*` targets exit with install guidance when
   no container runtime is on `PATH`.
+- `make pg.server.up` readiness wait probes over TCP. On a fresh volume the
+  socket probe reported ready against the image's temporary init server.
 
 ## [0.10.5] - 2026-09-03
 
