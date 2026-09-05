@@ -26,7 +26,12 @@ from .config import (
 )
 from .constants import MAX_CONFIG_SIZE_BYTES
 from .watcher import ConfigWatcher
-from .xdg import include_root_for, resolve_config_source, xdg_candidates
+from .xdg import (
+    find_project_local,
+    include_root_for,
+    resolve_config_source,
+    xdg_candidates,
+)
 
 try:
     from .schemas import (
@@ -66,6 +71,7 @@ __all__ = [
     "xdg_candidates",
     "include_root_for",
     "resolve_config_source",
+    "find_project_local",
     # Constants
     "MAX_CONFIG_SIZE_BYTES",
     # Validation (optional)
