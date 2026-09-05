@@ -27,9 +27,9 @@ the PEP 8 module → dashed distribution name convention).
 
 Running (assumes appinfra is installed in the active environment):
 
-    python examples/04_configuration/library_mode_from_spec.py
+    python appinfra/examples/04_configuration/library_mode_from_spec.py
 
-Expected output (two INFO lines from the root logger):
+Expected output (assumes no XDG override at example-org/example-pkg.yaml):
 
     bootstrap ok  app[example-pkg] port[8080]
     hello from the packaged base config

@@ -118,7 +118,7 @@ Library-mode bootstrap via `Config.from_spec` for a package that ships
 
 **Run:**
 ```bash
-python examples/04_configuration/library_mode_from_spec.py
+python appinfra/examples/04_configuration/library_mode_from_spec.py
 ```
 
 **See also:** [Library-Mode Bootstrap](../../docs/guides/library-mode-bootstrap.md)

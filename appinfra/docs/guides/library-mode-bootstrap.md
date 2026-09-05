@@ -28,7 +28,7 @@ covers everywhere argv is not the entry point.
 | Shape                                     | Config surface                        | Section    |
 |-------------------------------------------|---------------------------------------|------------|
 | Script, no config file                    | None — logger only                    | [Case A](#case-a--script-no-config-file) |
-| Script with a config file next to it      | `Config("./config.yaml")`             | [Case B](#case-b--script-with-a-config-file) |
+| Script with a config file next to it      | `Config(str(Path(__file__).parent / "config.yaml"))` | [Case B](#case-b--script-with-a-config-file) |
 | Script with `App`/`Tool` shape            | `AppBuilder(...)` — framework mode    | [Case C](#case-c--script-with-app-shape) |
 | Library that ships a packaged base config | `Config.from_spec(namespace, module)` | [Case D](#case-d--library-with-a-packaged-base-config) |
 
@@ -112,7 +112,7 @@ target for `Config.from_spec`.
 my_package/
 ├── __init__.py
 ├── etc/
-│   └── my_package.yaml
+│   └── my-package.yaml
 └── ...
 ```
 
