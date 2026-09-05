@@ -46,7 +46,9 @@ services:
       - INFRA_PGSERVER_USER=postgres
       - INFRA_PGSERVER_PASS=postgres
       - COVERAGE_FILE=.cover/data
-      # Spread Makefile.pytest targets across the runner's cores (test.perf stays serial)
+      # pytest-xdist workers for lanes that override the command with make test.*
+      # targets (test.all, test.coverage). check.summary goes through check.sh,
+      # which has its own per-suite worker heuristic. test.perf always runs serial.
       - INFRA_PYTEST_WORKERS=auto
 
     # Default command: run complete CI checks with summary output (summaries + failures only)

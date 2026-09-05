@@ -14,7 +14,9 @@
 #                                     Set to 0 to disable coverage checking entirely
 #   INFRA_PYTEST_TESTS_DIR          - Tests directory (default: tests)
 #   INFRA_PYTEST_WORKERS            - pytest-xdist worker count, auto or N (default: empty = no -n flag)
-#                                     Never applied to test.perf targets
+#                                     Never applied to test.perf targets. Not read by check.sh
+#                                     (make check), which runs suites concurrently with its own
+#                                     per-suite worker heuristic
 #   INFRA_PYTEST_ARGS               - Additional pytest arguments (default: empty)
 #   INFRA_DEV_SKIP_TARGETS          - Space-separated list of targets to skip (project provides own)
 #                                     Supported: test.unit test.integration test.e2e test.perf test.security
@@ -54,8 +56,8 @@ $(PYTHON) -m pytest $(_PYTEST_WORKERS_ARG) $(1) || { ec=$$?; [ $$ec -eq 5 ] && e
 endef
 
 # Same, ignoring INFRA_PYTEST_WORKERS. Performance targets always run
-# in-process: benchmarks need an unloaded CPU, and -s output is not relayed
-# from xdist workers.
+# in-process: test.perf.v passes -s, and xdist workers do not relay
+# uncaptured output.
 # Usage: $(call run_pytest_serial,args)
 define run_pytest_serial
 $(PYTHON) -m pytest $(1) || { ec=$$?; [ $$ec -eq 5 ] && exit 0 || exit $$ec; }

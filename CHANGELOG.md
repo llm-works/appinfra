@@ -25,6 +25,8 @@ For API stability guarantees and deprecation policy, see
   packages that ship `<package_module>/etc/<package>.yaml` (default filename:
   module name with `_→-`). Chains `resolve_config_source` + `Config`. See
   [Library-Mode Bootstrap](appinfra/docs/guides/library-mode-bootstrap.md).
+- `INFRA_PYTEST_WORKERS` Makefile variable (default empty): pytest-xdist worker count for
+  `make test.*` targets. `run_pytest_serial` macro for custom targets that must stay in-process.
 
 ### Changed
 - `pgserver` defaults: `name` `infra-pg` → `llm-works-pg`, `port` `7432` →
