@@ -17,7 +17,6 @@ Bare ``appinfra config`` runs ``dump``.
 
 import argparse
 import json
-import os
 from pathlib import Path
 from typing import Any
 
@@ -26,6 +25,7 @@ import yaml  # type: ignore[import-untyped]
 from ...app.tools import Tool, ToolConfig
 from ...app.tracing.traceable import Traceable
 from ...config import Config, find_project_local, xdg_candidates
+from ...config.xdg import _is_direct_path
 
 _PRECEDENCE_EPILOG = """\
 config-source precedence (v1, checked top-down; first match wins):
@@ -282,7 +282,7 @@ class ConfigSourceTool(Tool):
     ) -> str:
         """Identify which precedence rule (1-6) produced the loaded path."""
         if custom_cfg is not None:
-            if self._is_direct_path(custom_cfg):
+            if _is_direct_path(custom_cfg):
                 return "1 (--config direct path)"
             where = "--etc-dir" if custom_etc else "cwd"
             return f"2 (--config bare + {where})"
@@ -301,16 +301,6 @@ class ConfigSourceTool(Tool):
         ):
             return "5 (XDG overlay)"
         return "6 (packaged base)"
-
-    def _is_direct_path(self, s: str) -> bool:
-        """Match paths treated as direct by the v1 spec."""
-        return (
-            os.path.isabs(s)
-            or s.startswith("./")
-            or s.startswith("../")
-            or s == "~"
-            or s.startswith("~/")
-        )
 
     def _render_chain(
         self,

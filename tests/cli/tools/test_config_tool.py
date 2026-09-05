@@ -67,6 +67,33 @@ class TestConfigToolInit:
         assert dump.name == "dump"
         assert "d" in dump.config.aliases
 
+    def test_parent_dispatch_runs_dump(self, capsys):
+        """Test that parent ConfigTool.run() dispatches to dump subtool."""
+        tool = ConfigTool()
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write("dispatch_test:\n  verified: true\n")
+            f.flush()
+
+            # Set up args/logger on the parent (for dispatch) and dump subtool (for execution)
+            # config_cmd tells the ToolGroup which subtool to dispatch to
+            tool._parsed_args = Mock(config_cmd="dump")
+            tool._logger = Mock()
+            dump = tool.group.get_tool("dump")
+            dump._parsed_args = Mock(
+                config_file=f.name, format="yaml", no_env=True, section=None
+            )
+            dump._logger = Mock()
+
+            result = tool.run()
+
+            assert result == 0
+            captured = capsys.readouterr()
+            assert "dispatch_test:" in captured.out
+            assert "verified: true" in captured.out
+
+        Path(f.name).unlink()
+
     def test_source_subtool_registered(self):
         """Test `source` sub-tool is registered under the parent."""
         tool = ConfigTool()
