@@ -448,6 +448,7 @@ All configuration variables follow the `INFRA_<MODULE>_<VAR>` naming convention.
 | `INFRA_PYTEST_COVERAGE_PKG` | `$(INFRA_DEV_PKG_NAME)` | Package to measure coverage |
 | `INFRA_PYTEST_COVERAGE_THRESHOLD` | `80` | Coverage threshold for `make check` (0 to disable) |
 | `INFRA_PYTEST_TESTS_DIR` | `tests` | Tests directory |
+| `INFRA_PYTEST_WORKERS` | (empty) | pytest-xdist worker count (`auto` or N) for `test.*` targets; empty runs pytest in-process. Never applied to `test.perf*` |
 | `INFRA_PYTEST_ARGS` | (empty) | Additional pytest arguments |
 
 **Documentation (DOCS):**
