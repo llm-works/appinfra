@@ -32,6 +32,15 @@ For API stability guarantees and deprecation policy, see
   the shim reads a `_INFRA_PG_*` env contract exported from Makefile.pg
   (internal wire, not part of the public `INFRA_PG_*` / `INFRA_PGSERVER_*`
   surface).
+- `appinfra pg erase` (and `make pg.*` equivalents) is scoped to the target
+  instance — containers, volumes, networks; images are left in place with
+  a post-erase note on manual reclaim.
+- `appinfra pg erase` shows a preview and prompts for typed confirmation;
+  `--yes` skips (required in non-interactive contexts).
+
+### Fixed
+- `appinfra pg` and `make pg.*` targets exit with install guidance when
+  no container runtime is on `PATH`.
 
 ## [0.10.5] - 2026-09-03
 

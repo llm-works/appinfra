@@ -74,6 +74,56 @@ _pg_container_runtime() {
     echo "${INFRA_CONTAINER_CMD:-docker}"
 }
 
+_pg_ensure_runtime() {
+    # Verify the container runtime resolves to an executable on PATH so we can
+    # emit actionable install guidance instead of a cryptic
+    # `command not found` from the first ${runtime} invocation.
+    local runtime explicit
+    runtime="$(_pg_container_runtime)"
+    if command -v "${runtime}" >/dev/null 2>&1; then
+        return 0
+    fi
+    explicit="${INFRA_CONTAINER_CMD:-}"
+    if [ -n "${explicit}" ]; then
+        printf '%b' "${_RED}pg.sh: INFRA_CONTAINER_CMD='${explicit}' but '${explicit}' is not on PATH.${_RESET}\n" >&2
+        local other=""
+        if [ "${explicit}" = "podman" ] && command -v docker >/dev/null 2>&1; then other="docker"; fi
+        if [ "${explicit}" = "docker" ] && command -v podman >/dev/null 2>&1; then other="podman"; fi
+        if [ -n "${other}" ]; then
+            echo "Hint: '${other}' is available — set INFRA_CONTAINER_CMD=${other} or unset it to auto-detect." >&2
+        fi
+        return 2
+    fi
+    # Default "docker" not found; check if podman is available before
+    # printing install guidance (avoid "no runtime" when one exists).
+    if command -v podman >/dev/null 2>&1; then
+        cat >&2 <<'MSG'
+pg.sh: 'docker' not found, but 'podman' is available.
+
+Set the runtime explicitly:
+  export INFRA_CONTAINER_CMD=podman
+
+Or install docker if you prefer it over podman.
+MSG
+        return 2
+    fi
+    cat >&2 <<'MSG'
+pg.sh: no container runtime found on PATH.
+
+pg requires podman (preferred) or docker to manage the PostgreSQL
+container. Install one:
+
+  Linux (Fedora/RHEL):    sudo dnf install podman
+  Linux (Debian/Ubuntu):  sudo apt install podman
+  macOS:                  brew install podman
+                          (then: podman machine init && podman machine start)
+
+Or set INFRA_CONTAINER_CMD to point at an installed binary if it lives
+under a non-standard name.
+MSG
+    return 2
+}
+
 _pg_compose_run() {
     # Invoke compose with the mode-appropriate YAML and env. $1 = single|repl,
     # remaining args pass through to compose.
@@ -263,40 +313,68 @@ _pg_logs() {
 }
 
 # ---------------------------------------------------------------------------
-# erase — remove containers, volumes, networks, and images (destructive)
+# erase — remove this instance's containers, volumes, networks (destructive)
 # ---------------------------------------------------------------------------
+#
+# Scope guarantee: erase touches ONLY resources named after
+# $_INFRA_PG_CONTAINER_NAME. It never removes images — the image store is
+# shared across every container on the podman/docker runtime, and reaching
+# into it would silently take down siblings. A post-erase advisory tells
+# the user which other containers currently reference the image and,
+# if any, that manual `rmi` will affect them.
 
 _pg_erase() {
     : "${_INFRA_PG_CONTAINER_NAME:?_INFRA_PG_CONTAINER_NAME required}"
 
-    local runtime
+    local runtime name
     runtime="$(_pg_container_runtime)"
+    name="${_INFRA_PG_CONTAINER_NAME}"
 
-    # Stop and remove containers by explicit name (single-mode + replication-mode names).
-    # Avoids substring matching that could affect unrelated containers.
-    echo "Stopping all PostgreSQL containers..."
-    ${runtime} stop "${_INFRA_PG_CONTAINER_NAME}" \
-        "${_INFRA_PG_CONTAINER_NAME}-primary" \
-        "${_INFRA_PG_CONTAINER_NAME}-standby" 2>/dev/null || true
-    ${runtime} rm -f "${_INFRA_PG_CONTAINER_NAME}" \
-        "${_INFRA_PG_CONTAINER_NAME}-primary" \
-        "${_INFRA_PG_CONTAINER_NAME}-standby" 2>/dev/null || true
+    # Containers: explicit names, single-mode + replication-mode.
+    echo "Stopping containers..."
+    ${runtime} stop "${name}" "${name}-primary" "${name}-standby" 2>/dev/null || true
+    ${runtime} rm -f "${name}" "${name}-primary" "${name}-standby" 2>/dev/null || true
 
-    echo "Removing PostgreSQL volumes..."
-    ${runtime} volume ls --filter "name=${_INFRA_PG_CONTAINER_NAME}" --format "{{.Name}}" \
-        | xargs -r ${runtime} volume rm 2>/dev/null || true
+    # Volumes: enumerate the exact set compose creates for this instance
+    # (project=${name}, volumes pgdata / pgdata_primary / pgdata_standby).
+    # Substring filters could catch unrelated volumes like ${name}-backup.
+    echo "Removing volumes..."
+    for vol in "${name}_pgdata" "${name}_pgdata_primary" "${name}_pgdata_standby"; do
+        ${runtime} volume rm "${vol}" 2>/dev/null || true
+    done
 
-    echo "Removing PostgreSQL networks..."
-    ${runtime} network ls --filter "name=${_INFRA_PG_CONTAINER_NAME}" --format "{{.Name}}" \
-        | xargs -r ${runtime} network rm 2>/dev/null || true
+    # Networks: compose creates ${project}_default; same rationale as volumes.
+    echo "Removing networks..."
+    ${runtime} network rm "${name}_default" 2>/dev/null || true
 
-    echo "Removing PostgreSQL images (force)..."
-    if [ -n "${_INFRA_PG_IMAGE:-}" ]; then
-        ${runtime} images --filter "reference=${_INFRA_PG_IMAGE}" --format "{{.ID}}" \
-            | xargs -r ${runtime} rmi -f 2>/dev/null || true
+    echo "Erase complete."
+    _pg_erase_image_advisory "${runtime}"
+}
+
+_pg_erase_image_advisory() {
+    # Print the image left behind + which other containers reference it, so
+    # the user can decide whether a manual `rmi` is safe. Query is
+    # runtime-native (--filter ancestor=X) and works on both podman/docker.
+    local runtime="$1"
+    [ -n "${_INFRA_PG_IMAGE:-}" ] || return 0
+
+    local users
+    users="$(${runtime} ps -a --filter "ancestor=${_INFRA_PG_IMAGE}" \
+        --format '{{.Names}} ({{.Status}})' 2>/dev/null || true)"
+
+    printf '\n'
+    printf 'Image not removed (shared runtime resource): %s\n' "${_INFRA_PG_IMAGE}"
+    if [ -n "${users}" ]; then
+        printf '\nStill used by:\n'
+        while IFS= read -r user; do
+            [ -n "${user}" ] && printf '  - %s\n' "${user}"
+        done <<< "${users}"
+        printf '\nRemoving the image would affect the above containers.\n'
+        printf 'To erase the image anyway:  %s rmi %s\n' "${runtime}" "${_INFRA_PG_IMAGE}"
+    else
+        printf 'No other containers use it.\n'
+        printf 'To erase the image:  %s rmi %s\n' "${runtime}" "${_INFRA_PG_IMAGE}"
     fi
-
-    echo "PostgreSQL cleanup complete (containers, volumes, networks, and images removed)"
 }
 
 # ---------------------------------------------------------------------------
@@ -709,7 +787,8 @@ commands:
   wait-up           wait for server to accept connections (timeout _INFRA_PG_WAIT_TIMEOUT)
   wait-down         wait for containers to be fully removed
   info [--short]    server + database status (comprehensive or one-line summary)
-  erase             remove all containers, volumes, networks, and images (destructive)
+  erase             remove this instance's containers, volumes, networks (destructive;
+                    images are never touched — see the post-erase advisory)
   clean             drop databases in _INFRA_PG_DATABASES allowlist (server keeps running)
   psql [--target primary|standby]
                     interactive psql shell (default primary; standby is read-only)
@@ -727,6 +806,14 @@ fi
 
 cmd="$1"
 shift
+
+# Fail fast with actionable install guidance when the runtime is missing,
+# BEFORE any verb tries to shell out and get a `command not found`.
+case "$cmd" in
+    -h | --help | help) : ;;
+    *) _pg_ensure_runtime || exit $? ;;
+esac
+
 case "$cmd" in
     up)        _pg_up ;;
     down)      _pg_down ;;
