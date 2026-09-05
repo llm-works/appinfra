@@ -49,6 +49,8 @@ For API stability guarantees and deprecation policy, see
   no container runtime is on `PATH`.
 - `make pg.server.up` readiness wait probes over TCP. On a fresh volume the
   socket probe reported ready against the image's temporary init server.
+- `ThreadRunner.wait_healthy()` reliably raises `RunError` for a service that
+  exits during startup on Python 3.13+, instead of sometimes reporting RUNNING.
 
 ## [0.10.5] - 2026-09-03
 
