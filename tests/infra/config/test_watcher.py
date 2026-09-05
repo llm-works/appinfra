@@ -959,6 +959,68 @@ app:
 
 
 @pytest.mark.unit
+class TestConfigWatcherStopBounded:
+    """stop() returns even when the observer's own stop() never does."""
+
+    def test_stop_returns_when_observer_stop_blocks(
+        self, tmp_path, mock_logger, monkeypatch
+    ):
+        """A blocking Observer.stop() is abandoned after the bound, with a warning."""
+        import time
+
+        import appinfra.config.watcher as watcher_mod
+
+        release = threading.Event()
+
+        class BlockingObserver:
+            def stop(self) -> None:
+                release.wait()
+
+            def join(self, timeout: float | None = None) -> None:
+                raise AssertionError("join() must not run after an abandoned stop()")
+
+        monkeypatch.setattr(watcher_mod, "_OBSERVER_STOP_TIMEOUT_S", 0.2)
+        watcher = ConfigWatcher(mock_logger, etc_dir=tmp_path)
+        watcher._observer = BlockingObserver()
+        watcher._running = True
+
+        try:
+            started = time.monotonic()
+            watcher.stop()
+            elapsed = time.monotonic() - started
+        finally:
+            release.set()
+
+        assert elapsed < 1.0
+        assert watcher.is_running() is False
+        assert watcher._observer is None
+        mock_logger.warning.assert_called_once()
+
+    def test_stop_joins_observer_that_stops_promptly(self, tmp_path, mock_logger):
+        """A cooperative observer is stopped and joined, with no warning."""
+        import appinfra.config.watcher as watcher_mod
+
+        calls: list[object] = []
+
+        class PromptObserver:
+            def stop(self) -> None:
+                calls.append("stop")
+
+            def join(self, timeout: float | None = None) -> None:
+                calls.append(("join", timeout))
+
+        watcher = ConfigWatcher(mock_logger, etc_dir=tmp_path)
+        watcher._observer = PromptObserver()
+        watcher._running = True
+
+        watcher.stop()
+
+        assert calls == ["stop", ("join", watcher_mod._OBSERVER_STOP_TIMEOUT_S)]
+        assert watcher._observer is None
+        mock_logger.warning.assert_not_called()
+
+
+@pytest.mark.unit
 @pytest.mark.usefixtures("clean_env")
 class TestConfigWatcherMultiConfig:
     """Tests for multi-config file scenarios."""

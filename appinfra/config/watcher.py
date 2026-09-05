@@ -21,6 +21,9 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from ..log import Logger
 
+# Bound on Observer.stop() and Observer.join(); see ConfigWatcher._stop_observer.
+_OBSERVER_STOP_TIMEOUT_S = 2.0
+
 
 class ConfigWatcher:
     """
@@ -256,16 +259,38 @@ class ConfigWatcher:
             if self._debounce_timer is not None:
                 self._debounce_timer.cancel()
                 self._debounce_timer = None
-            if self._observer is not None:  # pragma: no cover
-                self._observer.stop()
-                self._observer.join(timeout=2.0)
-                self._observer = None
+            if self._observer is not None:
+                observer, self._observer = self._observer, None
+                self._stop_observer(observer)
             self._running = False
             self._watched_files = set()
             self._watched_dirs = set()
             self._dir_watches = {}
             self._file_handler = None
             self._last_config_hash = None
+
+    def _stop_observer(self, observer: Any) -> None:
+        """Stop the watchdog observer without letting it block the caller.
+
+        Observer.stop() joins every emitter thread with no timeout. The
+        FSEvents emitter on macOS registers its run loop from its own
+        thread; a stop() that lands before that registration is a silent
+        no-op, the emitter then blocks in CFRunLoopRun for good, and the
+        join never returns. Upstream report:
+        https://github.com/gorakhargosh/watchdog/issues/64
+        """
+        stopper = threading.Thread(
+            target=observer.stop, name="config-watcher-stop", daemon=True
+        )
+        stopper.start()
+        stopper.join(timeout=_OBSERVER_STOP_TIMEOUT_S)
+        if stopper.is_alive():
+            self._lg.warning(
+                "file observer did not stop in time; abandoning its threads",
+                extra={"timeout_s": _OBSERVER_STOP_TIMEOUT_S},
+            )
+            return
+        observer.join(timeout=_OBSERVER_STOP_TIMEOUT_S)
 
     def is_running(self) -> bool:
         """Check if watcher is active."""
