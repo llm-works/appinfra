@@ -281,6 +281,8 @@ class ConfigSourceTool(Tool):
         loaded_path: Path | None,
     ) -> str:
         """Identify which precedence rule (1-6) produced the loaded path."""
+        if loaded_path is None:
+            return "none (no config loaded)"
         if custom_cfg is not None:
             if _is_direct_path(custom_cfg):
                 return "1 (--config direct path)"
