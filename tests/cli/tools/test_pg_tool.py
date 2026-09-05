@@ -582,6 +582,27 @@ class TestPgEraseConfirmation:
         assert rc == 2
         ex.assert_called_once()
 
+    def test_query_timeout_falls_through_to_pg_sh(self):
+        """When runtime queries fail (timeout/OSError), fall through to pg.sh
+        rather than falsely reporting 'nothing to erase'."""
+        from appinfra.cli.tools.pg_tool import _QueryUnavailableError
+
+        t = _erase_tool(yes=False)
+        with (
+            patch(
+                "appinfra.cli.tools.pg_tool._resolve_preview_runtime",
+                return_value="podman",
+            ),
+            patch(
+                "appinfra.cli.tools.pg_tool._gather_erase_targets",
+                side_effect=_QueryUnavailableError("timeout"),
+            ),
+            patch("appinfra.cli.tools.pg_tool._exec_pg", return_value=0) as ex,
+        ):
+            rc = t.run()
+        assert rc == 0
+        ex.assert_called_once()
+
 
 # =============================================================================
 # PgUrlTool.run — URL computation

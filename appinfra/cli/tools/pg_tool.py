@@ -363,9 +363,13 @@ def _resolve_preview_runtime() -> str | None:
     return None
 
 
+class _QueryUnavailableError(Exception):
+    """Runtime query failed (timeout, missing binary); caller should fall
+    through to pg.sh rather than assume 'resource absent'."""
+
+
 def _run_query(cmd: list[str]) -> subprocess.CompletedProcess[str]:
-    """Read-only runtime query with a short timeout; failures are treated
-    as 'resource not present' rather than propagated."""
+    """Read-only runtime query with a short timeout."""
     return subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=5)
 
 
@@ -385,8 +389,8 @@ def _container_status(runtime: str, name: str) -> str | None:
                 "{{.Status}}",
             ]
         )
-    except (OSError, subprocess.TimeoutExpired):
-        return None
+    except (OSError, subprocess.TimeoutExpired) as e:
+        raise _QueryUnavailableError(str(e)) from e
     line = out.stdout.strip().splitlines()
     return line[0] if line else None
 
@@ -396,8 +400,8 @@ def _resource_exists(runtime: str, kind: str, name: str) -> bool:
     podman and docker (both use exit code 0/1 for present/absent)."""
     try:
         r = _run_query([runtime, kind, "inspect", name])
-    except (OSError, subprocess.TimeoutExpired):
-        return False
+    except (OSError, subprocess.TimeoutExpired) as e:
+        raise _QueryUnavailableError(str(e)) from e
     return r.returncode == 0
 
 
@@ -550,7 +554,10 @@ class PgEraseTool(_PgVerbTool):
         runtime = _resolve_preview_runtime()
         if runtime is None:
             return None
-        containers, volumes, networks = _gather_erase_targets(runtime, name)
+        try:
+            containers, volumes, networks = _gather_erase_targets(runtime, name)
+        except _QueryUnavailableError:
+            return None  # Query failed; fall through to pg.sh
         if not (containers or volumes or networks):
             print(
                 f"\nNothing to erase — pgserver instance '{name}' has no "

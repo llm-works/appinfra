@@ -94,6 +94,19 @@ _pg_ensure_runtime() {
         fi
         return 2
     fi
+    # Default "docker" not found; check if podman is available before
+    # printing install guidance (avoid "no runtime" when one exists).
+    if command -v podman >/dev/null 2>&1; then
+        cat >&2 <<'MSG'
+pg.sh: 'docker' not found, but 'podman' is available.
+
+Set the runtime explicitly:
+  export INFRA_CONTAINER_CMD=podman
+
+Or install docker if you prefer it over podman.
+MSG
+        return 2
+    fi
     cat >&2 <<'MSG'
 pg.sh: no container runtime found on PATH.
 
