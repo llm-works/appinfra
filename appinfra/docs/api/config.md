@@ -220,16 +220,25 @@ def resolve_config_source(
     package: str,
     base_config: Path | str,
     custom_etc_dir: Path | str | None = None,
+    custom_config: str | None = None,
 ) -> tuple[Path, Path]: ...
 ```
 
 **Precedence** (see [rule 6](../guides/config-protocol.md#6-etc-dir-is-user-authoritative)):
 
-1. `custom_etc_dir` present → `(<custom_etc_dir>/<package>.yaml, <custom_etc_dir>)`. The user's
+1. `custom_config` is a direct path (absolute, `./`, `../`, `~/`, or `~`) → `(<resolved>,
+   <resolved>.parent)`. `custom_etc_dir` is ignored.
+2. `custom_config` is a bare filename → `(<custom_etc_dir>/<custom_config>, <custom_etc_dir>)`
+   if `custom_etc_dir` is set, else `(cwd/<custom_config>, cwd)`.
+3. `custom_etc_dir` present → `(<custom_etc_dir>/<package>.yaml, <custom_etc_dir>)`. The user's
    explicit path IS the include-authorization root; unvalidated (a missing file surfaces at
    `Config(...)` load time as a clear `FileNotFoundError`).
-2. Else first existing XDG candidate → `(<candidate>, include_root_for(base_config))`.
-3. Else the packaged base → `(<base_config>, include_root_for(base_config))`.
+4. Project-local: walk up from cwd for `etc/<base_config.name>`. First hit → `(<hit>,
+   <hit>.parent)`. Stops before `$HOME` and before filesystem root.
+5. Else first existing XDG candidate → `(<candidate>, include_root_for(base_config))`.
+6. Else the packaged base → `(<base_config>, include_root_for(base_config))`.
+
+`custom_config` always bypasses steps 4-6 (no name-comparison special case).
 
 **Consumer pattern:**
 
@@ -249,8 +258,9 @@ def load_user_config(custom_etc_dir: str | None = None) -> Config:
 ```
 
 For applications built on `AppBuilder`, use
-[`with_config_spec`](#appbuilderwith_config_spec) — it registers `--etc-dir`, runs this chain
-on every parse, and wires `ConfigWatcher` with the same `project_root`.
+[`with_config_spec`](#appbuilderwith_config_spec) — it runs this chain on every parse and
+wires `ConfigWatcher` with the same `project_root`. To expose the `--etc-dir` and `--config`
+flags, compose with `.with_standard_args(etc_dir=True, config_file=True)`.
 
 ## Config Reload
 
@@ -493,14 +503,15 @@ app = (
 ### `AppBuilder.with_config_spec`
 
 Opts into the v1 config protocol. At setup time, runs
-[`resolve_config_source`](#resolve_config_source) to load the appropriate file — `--etc-dir`
-(when registered) > XDG overlay > packaged base — with the corresponding `project_root`.
-`ConfigWatcher` is wired with the same `project_root` so hot-reload reuses the initial-load
-boundary.
+[`resolve_config_source`](#resolve_config_source) to load the appropriate file — `--config`
+> `--etc-dir` (when registered) > project-local walk-up > XDG overlay > packaged base — with
+the corresponding `project_root`. `ConfigWatcher` is wired with the same `project_root` so
+hot-reload reuses the initial-load boundary.
 
-Flag exposure is orthogonal. To expose the `--etc-dir` escape hatch to end users, compose with
-`.with_standard_args(etc_dir=True)`. Consumers building a locked-down CLI (XDG + bundled base
-only) skip that call — the loader safely reads a missing flag as `None`.
+Flag exposure is orthogonal. To expose the `--etc-dir` and `--config` escape hatches, compose
+with `.with_standard_args(etc_dir=True, config_file=True)`. Consumers building a locked-down
+CLI (project-local + XDG + bundled base only) skip that call — the loader safely reads a
+missing flag as `None`.
 
 ```python
 from pathlib import Path
