@@ -530,8 +530,9 @@ class AppBuilder:
 
         Under an explicit ``--etc-dir`` the include-authorization boundary
         follows the user's directory — reaching outside is the user's
-        ``allowed_paths`` problem, not the framework's. On the default
-        path the boundary stays defensively bound to the packaged base's
+        ``allowed_paths`` problem, not the framework's. Project-local uses
+        its discovered ``etc/`` directory. On the XDG and packaged-base
+        tiers the boundary stays defensively bound to the packaged base's
         ``etc/`` directory.
 
         Flag exposure is orthogonal. To let end users override the source

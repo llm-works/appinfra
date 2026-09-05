@@ -258,8 +258,9 @@ def load_user_config(custom_etc_dir: str | None = None) -> Config:
 ```
 
 For applications built on `AppBuilder`, use
-[`with_config_spec`](#appbuilderwith_config_spec) — it registers `--etc-dir`, runs this chain
-on every parse, and wires `ConfigWatcher` with the same `project_root`.
+[`with_config_spec`](#appbuilderwith_config_spec) — it runs this chain on every parse and
+wires `ConfigWatcher` with the same `project_root`. To expose the `--etc-dir` and `--config`
+flags, compose with `.with_standard_args(etc_dir=True, config_file=True)`.
 
 ## Config Reload
 

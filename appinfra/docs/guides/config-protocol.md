@@ -156,7 +156,7 @@ matching non-spec-mode convention.
 
 Fallback chain (only when neither flag is set):
 
-```
+```text
 1. cwd (walk up) → etc/<base_config.name>      first hit, stopping before $HOME
 2. first existing XDG candidate:               $XDG_CONFIG_HOME/<ns>/<pkg>.yaml
                                                $XDG_CONFIG_HOME/<ns>/config.yaml
@@ -170,7 +170,7 @@ default, with XDG available as a machine-level overlay above that default.
 
 #### Decision tree
 
-```
+```text
                     ┌────────────────────────┐
                     │  --config passed?      │
                     └───┬────────────────┬───┘
