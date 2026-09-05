@@ -408,9 +408,9 @@ def _gather_erase_targets(
     Split from rendering so the caller can short-circuit when everything
     is missing (no point prompting for a no-op)."""
     containers = [
-        f"{name}{s} ({_container_status(runtime, f'{name}{s}')})"
+        f"{name}{s} ({status})"
         for s in _ERASE_CONTAINER_SUFFIXES
-        if _container_status(runtime, f"{name}{s}") is not None
+        if (status := _container_status(runtime, f"{name}{s}")) is not None
     ]
     volumes = [
         f"{name}{s}"
@@ -494,7 +494,7 @@ def _config_source_path(app: Any) -> str:
     """Best-effort resolved-config path for the preview. Not fatal if
     unavailable — the app may have been built without a config spec.
     Entries are (etc_dir, filename, full_path) tuples; take the full path."""
-    paths = getattr(app, "_loaded_config_paths", None) or []
+    paths = getattr(app, "loaded_config_paths", [])
     if not paths:
         return ""
     last = paths[-1]
