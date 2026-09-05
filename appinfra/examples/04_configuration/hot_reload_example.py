@@ -150,14 +150,15 @@ class StatusCommand(Tool):
             return 0
 
 
+BASE_CONFIG = pathlib.Path(__file__).parent / "etc" / "hot_reload.yaml"
+
+
 def create_app():
     """Create app with hot-reload enabled."""
     return (
         AppBuilder("hot-reload-demo")
-        # Load config from relative path (not from --etc-dir)
-        .with_config_file(
-            "examples/04_configuration/etc/hot_reload.yaml", from_etc_dir=False
-        )
+        # Absolute path anchored on __file__ so the example runs from any cwd
+        .with_config_file(str(BASE_CONFIG), from_etc_dir=False)
         .logging.with_level("debug")
         .with_hot_reload(enabled=True, debounce_ms=500)
         .done()

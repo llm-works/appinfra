@@ -12,6 +12,7 @@ file inclusion support via !include tags.
 import os
 import re
 from pathlib import Path
+from types import ModuleType
 from typing import Any, Self
 
 import yaml  # type: ignore[import-untyped]
@@ -19,6 +20,7 @@ import yaml  # type: ignore[import-untyped]
 from ..dot_dict import DotDict
 from ..errors import UndeclaredConfigPathError
 from .constants import MAX_CONFIG_SIZE_BYTES
+from .xdg import resolve_config_source
 
 # Inventory of `INFRA_*` env vars consumed by appinfra's own tooling (shell
 # scripts, Makefiles, pytest fixtures) rather than as yaml config overrides.
@@ -285,6 +287,73 @@ class Config(DotDict):
             Path(str(project_root)).expanduser().resolve() if project_root else None
         )
         self._load(fname)
+
+    @classmethod
+    def from_spec(
+        cls,
+        namespace: str,
+        package_module: ModuleType,
+        *,
+        package: str | None = None,
+        etc_dir: str | None = None,
+        config_file: str | None = None,
+    ) -> Self:
+        """
+        Load a Config for library-mode use.
+
+        Derives the base config path from ``package_module.__file__`` per v1
+        config protocol rule 2 (``<package_module>/etc/<package>.yaml``), runs
+        ``resolve_config_source`` with the given namespace + package identity,
+        and returns a Config with ``project_root`` scoped to the resulting
+        include-authorization boundary.
+
+        Downstream code collapses to::
+
+            import my_package
+            config = Config.from_spec("myorg", my_package)
+
+        Args:
+            namespace: XDG namespace (e.g. ``"llm-works"``).
+            package_module: the Python module whose ``__file__`` locates the
+                packaged ``etc/`` directory.
+            package: package name as it appears in the config filename
+                (e.g. ``"llm-kelt"``). Defaults to
+                ``package_module.__name__.replace("_", "-")``, matching the
+                convention where the PyPI/protocol package name uses hyphens
+                and the Python module name uses underscores (PEP 8). Pass
+                explicitly when the config filename does not follow the
+                convention.
+            etc_dir: caller-provided ``--etc-dir`` equivalent. Library callers
+                surface this via their own kwarg; must not be read from the
+                ambient environment (protocol rule 5).
+            config_file: caller-provided ``--config`` equivalent. Same rule.
+
+        Returns:
+            Config loaded from the resolved file.
+
+        Raises:
+            ValueError: if ``package_module.__file__`` is None.
+        """
+        module_file = package_module.__file__
+        if module_file is None:
+            raise ValueError(
+                f"package_module {package_module.__name__!r} has no __file__; "
+                f"pass a top-level package module rather than a namespace package"
+            )
+        resolved_package = (
+            package
+            if package is not None
+            else package_module.__name__.replace("_", "-")
+        )
+        base = Path(module_file).parent / "etc" / f"{resolved_package}.yaml"
+        cfg_path, project_root = resolve_config_source(
+            namespace,
+            resolved_package,
+            base,
+            custom_etc_dir=etc_dir,
+            custom_config=config_file,
+        )
+        return cls(str(cfg_path), project_root=project_root)
 
     def __setattr__(self, key: str, value: Any) -> None:
         """

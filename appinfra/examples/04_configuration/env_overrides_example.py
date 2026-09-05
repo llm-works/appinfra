@@ -269,25 +269,6 @@ def demo_multiple_overrides():
         print("✓ Multiple overrides demonstration complete")
 
 
-def demo_creating_new_sections():
-    """Demonstrate creating new configuration sections via environment variables."""
-    print("\n=== Creating New Configuration Sections ===")
-
-    with patch.dict(
-        os.environ,
-        {
-            "INFRA_NEW_SECTION_NEW_KEY": "new_value",
-            "INFRA_ANOTHER_SECTION_DEEP_NESTED_VALUE": "deep_value",
-        },
-    ):
-        # Create a fresh Config object to demonstrate new section creation
-        config = Config(str(DEFAULT_CONFIG_FILE))
-
-        print(f"New section value: {config.new.section.new.key}")
-        print(f"Deep nested value: {config.another.section.deep.nested.value}")
-        print("✓ New sections created via environment variables")
-
-
 def demo_command_line_usage():
     """Demonstrate command line usage patterns."""
     print("\n=== Command Line Usage Patterns ===")
@@ -321,7 +302,6 @@ def _run_all_env_demos():
     demo_logging_integration()
     demo_variable_substitution()
     demo_multiple_overrides()
-    demo_creating_new_sections()
     demo_command_line_usage()
 
 
