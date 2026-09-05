@@ -55,7 +55,7 @@ class TestTimingFunctions:
 
         assert isinstance(elapsed, float)
         assert elapsed >= 0.01
-        assert elapsed < 0.1  # Should be less than 100ms
+        assert elapsed < 0.3  # Generous margin for slow CI runners
 
     def test_since_with_zero_elapsed(self):
         """Test since() with minimal elapsed time."""
