@@ -30,49 +30,13 @@ from appinfra.cli.tools.pg_tool import (
     PgUrlTool,
     _detect_runtime_env,
     _exec_pg,
-    _get,
     _pg_script_path,
     _project_env,
     _project_postgres_conf,
     _render_conf_value,
     _resolve_image,
 )
-
-# =============================================================================
-# _get — dotted-path lookup
-# =============================================================================
-
-
-@pytest.mark.unit
-class TestGet:
-    """Test dotted-path lookup on nested config shapes."""
-
-    def test_dict_hit(self):
-        assert _get({"a": {"b": 1}}, "a.b") == 1
-
-    def test_dict_miss_returns_default(self):
-        assert _get({"a": {}}, "a.b", "fallback") == "fallback"
-
-    def test_dict_deep_miss_returns_default(self):
-        assert _get({}, "a.b.c", 42) == 42
-
-    def test_dotdict_style_attr_access(self):
-        cfg = SimpleNamespace(pgserver=SimpleNamespace(port=25432))
-        assert _get(cfg, "pgserver.port") == 25432
-
-    def test_none_intermediate_returns_default(self):
-        assert _get({"a": None}, "a.b", "d") == "d"
-
-    def test_default_none_on_full_miss(self):
-        assert _get({}, "nope") is None
-
-    def test_get_style_lookup_when_available(self):
-        cfg = MagicMock()
-        cfg.get.return_value = "hit"
-        # Force hasattr fallback to .get()
-        del cfg.foo
-        assert _get(cfg, "foo") == "hit"
-
+from appinfra.dot_dict import DotDict
 
 # =============================================================================
 # _render_conf_value — postgres_conf value serialization
@@ -176,7 +140,7 @@ class TestProjectEnv:
             "postgres_conf": {},
         }
         base.update(overrides)
-        return {"pgserver": base}
+        return DotDict({"pgserver": base})
 
     def test_minimal_projection(self):
         env = _project_env(self._cfg())
@@ -260,16 +224,18 @@ class TestExec:
             assert _detect_runtime_env() == {}
 
     def test_exec_pg_calls_subprocess_with_env(self):
-        cfg = {
-            "pgserver": {
-                "name": "n",
-                "version": 18,
-                "port": 25432,
-                "user": "postgres",
-                "host": "127.0.0.1",
-                "postgres_conf": {},
+        cfg = DotDict(
+            {
+                "pgserver": {
+                    "name": "n",
+                    "version": 18,
+                    "port": 25432,
+                    "user": "postgres",
+                    "host": "127.0.0.1",
+                    "postgres_conf": {},
+                }
             }
-        }
+        )
         with patch("appinfra.cli.tools.pg_tool.subprocess.call") as mock_call:
             mock_call.return_value = 0
             rc = _exec_pg(
@@ -296,23 +262,41 @@ class TestVerbTools:
 
     def test_up_default_env(self):
         t = PgUpTool()
-        t._parsed_args = Namespace(repl=False, no_wait=False)
+        t._parsed_args = Namespace(repl=False, no_wait=False, timeout=None)
         assert t._extra_env() == {"_INFRA_PG_MODE": "single", "_INFRA_PG_WAIT": "1"}
 
     def test_up_repl_and_no_wait(self):
         t = PgUpTool()
-        t._parsed_args = Namespace(repl=True, no_wait=True)
+        t._parsed_args = Namespace(repl=True, no_wait=True, timeout=None)
         assert t._extra_env() == {"_INFRA_PG_MODE": "repl", "_INFRA_PG_WAIT": "0"}
+
+    def test_up_with_timeout(self):
+        t = PgUpTool()
+        t._parsed_args = Namespace(repl=False, no_wait=False, timeout=60)
+        env = t._extra_env()
+        assert env["_INFRA_PG_WAIT_TIMEOUT"] == "60"
 
     def test_down_no_wait(self):
         t = PgDownTool()
-        t._parsed_args = Namespace(no_wait=True)
+        t._parsed_args = Namespace(no_wait=True, timeout=None)
         assert t._extra_env() == {"_INFRA_PG_WAIT": "0"}
+
+    def test_down_with_timeout(self):
+        t = PgDownTool()
+        t._parsed_args = Namespace(no_wait=False, timeout=45)
+        env = t._extra_env()
+        assert env["_INFRA_PG_WAIT_TIMEOUT"] == "45"
 
     def test_reboot_wait_default(self):
         t = PgRebootTool()
-        t._parsed_args = Namespace(no_wait=False)
+        t._parsed_args = Namespace(no_wait=False, timeout=None)
         assert t._extra_env() == {"_INFRA_PG_WAIT": "1"}
+
+    def test_reboot_with_timeout(self):
+        t = PgRebootTool()
+        t._parsed_args = Namespace(no_wait=False, timeout=90)
+        env = t._extra_env()
+        assert env["_INFRA_PG_WAIT_TIMEOUT"] == "90"
 
     def test_info_short_flag(self):
         t = PgInfoTool()
@@ -369,7 +353,7 @@ class TestPgUrlTool:
         defaults.update(args)
         t._parsed_args = Namespace(**defaults)
         t._logger = MagicMock()
-        fake_app = SimpleNamespace(config=cfg)
+        fake_app = SimpleNamespace(config=DotDict(cfg))
         with patch.object(PgUrlTool, "app", new=property(lambda s: fake_app)):
             return t.run()
 
@@ -395,6 +379,10 @@ class TestPgUrlTool:
     def test_server_url_standby_missing_returns_1(self):
         cfg = {"pgserver": {"host": "h", "user": "u", "port": 5555}}
         assert self._run(cfg, target="standby") == 1
+
+    def test_server_url_primary_missing_returns_1(self):
+        cfg = {"pgserver": {"host": "h", "user": "u"}}
+        assert self._run(cfg, target="primary") == 1
 
     def test_db_url_lookup(self, capsys):
         cfg = {"dbs": {"main": {"url": "postgresql://x/main"}}}

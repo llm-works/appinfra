@@ -49,24 +49,6 @@ def _render_conf_value(key: str, value: Any) -> str:
     return f"{key}={value}"
 
 
-def _get(cfg: Any, path: str, default: Any = None) -> Any:
-    """Dotted-path lookup on Config/DotDict/dict, returning default on any miss."""
-    cur = cfg
-    for part in path.split("."):
-        if cur is None:
-            return default
-        if hasattr(cur, part):
-            cur = getattr(cur, part)
-        elif isinstance(cur, dict) and part in cur:
-            cur = cur[part]
-        else:
-            try:
-                cur = cur.get(part)  # type: ignore[union-attr]
-            except (AttributeError, TypeError):
-                return default
-    return cur if cur is not None else default
-
-
 def _resolve_image(image: Any, version: Any) -> str:
     """Resolve the container image: explicit ``pgserver.image`` wins, else
     ``docker.io/postgres:<version>``. Fully qualifies the default because
@@ -111,18 +93,18 @@ def _project_env(cfg: Any) -> dict[str, str]:
     path and the Make path produce identical container state. Missing
     optional fields become empty strings (pg.sh treats those as unset).
     """
-    version = _get(cfg, "pgserver.version", "") or ""
-    replica_enabled = bool(_get(cfg, "pgserver.replica.enabled", False))
-    resolved_image = _resolve_image(_get(cfg, "pgserver.image", ""), version)
-    knobs = _project_postgres_conf(_get(cfg, "pgserver.postgres_conf", {}) or {})
+    version = cfg.get("pgserver.version", "") or ""
+    replica_enabled = bool(cfg.get("pgserver.replica.enabled", False))
+    resolved_image = _resolve_image(cfg.get("pgserver.image", ""), version)
+    knobs = _project_postgres_conf(cfg.get("pgserver.postgres_conf", {}) or {})
 
     return {
-        "_INFRA_PG_CONTAINER_NAME": str(_get(cfg, "pgserver.name", "") or ""),
+        "_INFRA_PG_CONTAINER_NAME": str(cfg.get("pgserver.name", "") or ""),
         "_INFRA_PG_VERSION": str(version),
-        "_INFRA_PG_HOST": str(_get(cfg, "pgserver.host", "127.0.0.1") or "127.0.0.1"),
-        "_INFRA_PG_PORT": str(_get(cfg, "pgserver.port", "") or ""),
-        "_INFRA_PG_PORT_R": str(_get(cfg, "pgserver.replica.port", "") or ""),
-        "_INFRA_PG_USER": str(_get(cfg, "pgserver.user", "postgres") or "postgres"),
+        "_INFRA_PG_HOST": str(cfg.get("pgserver.host", "127.0.0.1") or "127.0.0.1"),
+        "_INFRA_PG_PORT": str(cfg.get("pgserver.port", "") or ""),
+        "_INFRA_PG_PORT_R": str(cfg.get("pgserver.replica.port", "") or ""),
+        "_INFRA_PG_USER": str(cfg.get("pgserver.user", "postgres") or "postgres"),
         "_INFRA_PG_REPLICA_ENABLED": "true" if replica_enabled else "false",
         "_INFRA_PG_IMAGE": resolved_image,
         "_INFRA_PG_MAX_CONNECTIONS": knobs.get("MAX_CONNECTIONS", ""),
@@ -210,7 +192,7 @@ class PgUpTool(_PgVerbTool):
     HELP = "Start postgres server (single mode by default; --repl for primary+standby)"
 
     def add_args(self, parser: argparse.ArgumentParser) -> None:
-        """Add --repl and --no-wait flags."""
+        """Add --repl, --no-wait, and --timeout flags."""
         parser.add_argument(
             "--repl",
             action="store_true",
@@ -221,13 +203,22 @@ class PgUpTool(_PgVerbTool):
             action="store_true",
             help="Skip readiness wait after start",
         )
+        parser.add_argument(
+            "--timeout",
+            type=int,
+            metavar="SECS",
+            help="Readiness wait timeout in seconds (default: 30)",
+        )
 
     def _extra_env(self) -> dict[str, str]:
-        """Set _INFRA_PG_MODE and _INFRA_PG_WAIT from flags."""
-        return {
+        """Set _INFRA_PG_MODE, _INFRA_PG_WAIT, and _INFRA_PG_WAIT_TIMEOUT from flags."""
+        env = {
             "_INFRA_PG_MODE": "repl" if self.args.repl else "single",
             "_INFRA_PG_WAIT": "0" if self.args.no_wait else "1",
         }
+        if self.args.timeout is not None:
+            env["_INFRA_PG_WAIT_TIMEOUT"] = str(self.args.timeout)
+        return env
 
 
 class PgDownTool(_PgVerbTool):
@@ -238,16 +229,25 @@ class PgDownTool(_PgVerbTool):
     HELP = "Stop postgres server (auto-detects mode)"
 
     def add_args(self, parser: argparse.ArgumentParser) -> None:
-        """Add --no-wait flag."""
+        """Add --no-wait and --timeout flags."""
         parser.add_argument(
             "--no-wait",
             action="store_true",
             help="Skip teardown-verification wait",
         )
+        parser.add_argument(
+            "--timeout",
+            type=int,
+            metavar="SECS",
+            help="Teardown wait timeout in seconds (default: 30)",
+        )
 
     def _extra_env(self) -> dict[str, str]:
-        """Set _INFRA_PG_WAIT from flag."""
-        return {"_INFRA_PG_WAIT": "0" if self.args.no_wait else "1"}
+        """Set _INFRA_PG_WAIT and _INFRA_PG_WAIT_TIMEOUT from flags."""
+        env = {"_INFRA_PG_WAIT": "0" if self.args.no_wait else "1"}
+        if self.args.timeout is not None:
+            env["_INFRA_PG_WAIT_TIMEOUT"] = str(self.args.timeout)
+        return env
 
 
 class PgRebootTool(_PgVerbTool):
@@ -258,16 +258,25 @@ class PgRebootTool(_PgVerbTool):
     HELP = "Restart postgres server (auto-detects mode)"
 
     def add_args(self, parser: argparse.ArgumentParser) -> None:
-        """Add --no-wait flag."""
+        """Add --no-wait and --timeout flags."""
         parser.add_argument(
             "--no-wait",
             action="store_true",
             help="Skip readiness wait after restart",
         )
+        parser.add_argument(
+            "--timeout",
+            type=int,
+            metavar="SECS",
+            help="Readiness wait timeout in seconds (default: 30)",
+        )
 
     def _extra_env(self) -> dict[str, str]:
-        """Set _INFRA_PG_WAIT from flag."""
-        return {"_INFRA_PG_WAIT": "0" if self.args.no_wait else "1"}
+        """Set _INFRA_PG_WAIT and _INFRA_PG_WAIT_TIMEOUT from flags."""
+        env = {"_INFRA_PG_WAIT": "0" if self.args.no_wait else "1"}
+        if self.args.timeout is not None:
+            env["_INFRA_PG_WAIT_TIMEOUT"] = str(self.args.timeout)
+        return env
 
 
 class PgLogsTool(_PgVerbTool):
@@ -405,7 +414,7 @@ class PgUrlTool(Tool):
         cfg = self.app.config
 
         if self.args.db:
-            url = _get(cfg, f"dbs.{self.args.db}.url")
+            url = cfg.get(f"dbs.{self.args.db}.url")
             if not url:
                 self.lg.error(  # type: ignore[union-attr]
                     "no dbs entry found", extra={"name": self.args.db}
@@ -414,15 +423,18 @@ class PgUrlTool(Tool):
             print(url)
             return 0
 
-        host = _get(cfg, "pgserver.host", "127.0.0.1")
-        user = _get(cfg, "pgserver.user", "postgres")
+        host = cfg.get("pgserver.host", "127.0.0.1") or "127.0.0.1"
+        user = cfg.get("pgserver.user", "postgres") or "postgres"
         if self.args.target == "standby":
-            port = _get(cfg, "pgserver.replica.port")
+            port = cfg.get("pgserver.replica.port")
             if not port:
                 self.lg.error("pgserver.replica.port not set")  # type: ignore[union-attr]
                 return 1
         else:
-            port = _get(cfg, "pgserver.port")
+            port = cfg.get("pgserver.port")
+            if not port:
+                self.lg.error("pgserver.port not set")  # type: ignore[union-attr]
+                return 1
         print(f"postgresql://{user}@{host}:{port}")
         return 0
 
