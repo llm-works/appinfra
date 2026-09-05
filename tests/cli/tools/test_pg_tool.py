@@ -393,6 +393,18 @@ class TestPgUrlTool:
     def test_db_url_missing_returns_1(self):
         assert self._run({"dbs": {}}, db="nope") == 1
 
+    def test_server_url_ipv6_host_bracketed(self, capsys):
+        cfg = {"pgserver": {"host": "::1", "user": "u", "port": 5555}}
+        rc = self._run(cfg)
+        assert rc == 0
+        assert capsys.readouterr().out.strip() == "postgresql://u@[::1]:5555"
+
+    def test_server_url_user_percent_encoded(self, capsys):
+        cfg = {"pgserver": {"host": "h", "user": "user@domain", "port": 5555}}
+        rc = self._run(cfg)
+        assert rc == 0
+        assert capsys.readouterr().out.strip() == "postgresql://user%40domain@h:5555"
+
 
 # =============================================================================
 # PgTool — grouping tool

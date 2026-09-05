@@ -21,6 +21,7 @@ import shutil
 import subprocess
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 import appinfra
 
@@ -435,7 +436,8 @@ class PgUrlTool(Tool):
             if not port:
                 self.lg.error("pgserver.port not set")  # type: ignore[union-attr]
                 return 1
-        print(f"postgresql://{user}@{host}:{port}")
+        url_host = f"[{host}]" if ":" in host and not host.startswith("[") else host
+        print(f"postgresql://{quote(str(user), safe='')}@{url_host}:{port}")
         return 0
 
 
