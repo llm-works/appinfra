@@ -139,6 +139,7 @@ class TestConfigWatcherDebounce:
         config_file.write_text("logging:\n  level: info\n")
 
         watcher.configure("test.yaml", debounce_ms=500)
+        watcher._running = True
 
         # Simulate rapid file changes
         watcher._last_reload = time.time() * 1000  # Set last reload to now
@@ -454,8 +455,10 @@ class TestConfigWatcherIntegration:
 
         watcher = ConfigWatcher(mock_logger, etc_dir=tmp_path)
         watcher.configure("test.yaml", debounce_ms=0)  # No debounce
+        watcher._running = True
 
         reload_count = 0
+        reloaded = threading.Event()
 
         original_reload = watcher._reload_config
 
@@ -463,12 +466,14 @@ class TestConfigWatcherIntegration:
             nonlocal reload_count
             reload_count += 1
             original_reload()
+            reloaded.set()
 
         watcher._reload_config = counting_reload
 
-        # Should not be debounced with debounce_ms=0
+        # Should not be debounced with debounce_ms=0; the timer runs on its own thread
         watcher._on_file_changed()
 
+        assert reloaded.wait(timeout=1.0), "reload not called within timeout"
         assert reload_count == 1
 
 
@@ -486,6 +491,7 @@ class TestConfigWatcherReloadPaths:
 
         watcher = ConfigWatcher(mock_logger, etc_dir=tmp_path)
         watcher.configure("test.yaml", debounce_ms=0)  # No debounce
+        watcher._running = True
         watcher._last_reload = 0  # Reset last reload time to distant past
 
         reload_called = []
@@ -666,16 +672,24 @@ class TestConfigWatcherIncludedFiles:
 
         watcher = ConfigWatcher(mock_logger, etc_dir=tmp_path)
         watcher.configure("config.yaml", debounce_ms=0)
+        watcher._running = True
         watcher._watched_files = {config_file.resolve(), logging_file.resolve()}
         watcher._last_reload = 0
 
         # Mock the reload method
         reload_calls = []
+        reloaded = threading.Event()
         original_reload = watcher._reload_config
-        watcher._reload_config = lambda: reload_calls.append(True)
+
+        def recording_reload():
+            reload_calls.append(True)
+            reloaded.set()
+
+        watcher._reload_config = recording_reload
 
         try:
             handler = watcher._create_file_handler()
+            watcher._file_handler = handler
 
             # Create mock event for included file modification
             mock_event = MagicMock()
@@ -685,7 +699,8 @@ class TestConfigWatcherIncludedFiles:
             # Trigger handler
             handler.on_modified(mock_event)
 
-            # Should have triggered reload
+            # Should have triggered reload; the debounce timer runs on its own thread
+            assert reloaded.wait(timeout=1.0), "reload not called within timeout"
             assert len(reload_calls) == 1
         finally:
             watcher._reload_config = original_reload
@@ -1018,6 +1033,83 @@ class TestConfigWatcherStopBounded:
         assert calls == ["stop", ("join", watcher_mod._OBSERVER_STOP_TIMEOUT_S)]
         assert watcher._observer is None
         mock_logger.warning.assert_not_called()
+
+    def test_stop_releases_watcher_lock_while_observer_stops(
+        self, tmp_path, mock_logger
+    ):
+        """Observer.stop() runs with the watcher lock free.
+
+        watchdog's dispatcher holds the observer lock while calling the file
+        handler, which needs the watcher lock; Observer.stop() needs the
+        observer lock back. Holding the watcher lock across the stop would
+        stall every stop that races with an in-flight event.
+        """
+        watcher = ConfigWatcher(mock_logger, etc_dir=tmp_path)
+        acquired: list[bool] = []
+
+        class LockProbingObserver:
+            def stop(self) -> None:
+                got = watcher._lock.acquire(timeout=0.5)
+                acquired.append(got)
+                if got:
+                    watcher._lock.release()
+
+            def join(self, timeout: float | None = None) -> None:
+                pass
+
+        watcher._observer = LockProbingObserver()
+        watcher._running = True
+
+        watcher.stop()
+
+        assert acquired == [True]
+        mock_logger.warning.assert_not_called()
+
+    def test_late_event_after_stop_schedules_nothing(self, tmp_path, mock_logger):
+        """A handler that fires after stop() must not schedule a reload."""
+        watcher = ConfigWatcher(mock_logger, etc_dir=tmp_path)
+        watcher._running = True
+        watcher._debounce_ms = 10_000
+        watcher.stop()
+
+        watcher._on_file_changed()
+
+        assert watcher._debounce_timer is None
+
+    def test_debounced_reload_skips_when_not_running(self, tmp_path, mock_logger):
+        """A timer callback that outlives stop() must not reload."""
+        watcher = ConfigWatcher(mock_logger, etc_dir=tmp_path)
+        reloads: list[bool] = []
+        watcher._reload_config = lambda: reloads.append(True)
+
+        watcher._running = False
+        watcher._debounced_reload()
+        assert reloads == []
+
+        watcher._running = True
+        watcher._debounced_reload()
+        assert reloads == [True]
+
+    def test_handler_from_ended_run_ignores_events(self, tmp_path, mock_logger):
+        """A handler that is no longer the watcher's current one schedules nothing."""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("logging: {}\n")
+        watcher = ConfigWatcher(mock_logger, etc_dir=tmp_path)
+        watcher.configure("config.yaml")
+        watcher._running = True
+        watcher._watched_files = {config_file.resolve()}
+        calls: list[bool] = []
+        watcher._on_file_changed = lambda: calls.append(True)
+
+        stale = watcher._create_file_handler()
+        watcher._file_handler = watcher._create_file_handler()  # a newer run's handler
+        event = MagicMock(is_directory=False, src_path=str(config_file))
+
+        stale.on_modified(event)
+        assert calls == []
+
+        watcher._file_handler.on_modified(event)
+        assert calls == [True]
 
 
 @pytest.mark.unit

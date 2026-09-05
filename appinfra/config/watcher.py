@@ -172,6 +172,8 @@ class ConfigWatcher:
             def on_modified(self, event: Any) -> None:
                 if event.is_directory:
                     return
+                if watcher._file_handler is not self:
+                    return  # handler from a run that stop() has ended
                 modified_path = Path(event.src_path).resolve()
                 # Trigger reload if ANY watched file changes (main or includes)
                 if watcher._is_watched_file(modified_path):
@@ -259,15 +261,18 @@ class ConfigWatcher:
             if self._debounce_timer is not None:
                 self._debounce_timer.cancel()
                 self._debounce_timer = None
-            if self._observer is not None:
-                observer, self._observer = self._observer, None
-                self._stop_observer(observer)
+            observer, self._observer = self._observer, None
             self._running = False
             self._watched_files = set()
             self._watched_dirs = set()
             self._dir_watches = {}
             self._file_handler = None
             self._last_config_hash = None
+        # Outside the lock: the observer's dispatcher may be inside the file
+        # handler waiting for it, and Observer.stop() cannot complete until
+        # that dispatcher releases the observer's own lock.
+        if observer is not None:
+            self._stop_observer(observer)
 
     def _stop_observer(self, observer: Any) -> None:
         """Stop the watchdog observer without letting it block the caller.
@@ -305,6 +310,9 @@ class ConfigWatcher:
         final state after rapid changes (e.g., editor save-all).
         """
         with self._lock:
+            if not self._running:
+                return  # late event from an observer that stop() has released
+
             # Cancel any pending timer
             if self._debounce_timer is not None:
                 self._debounce_timer.cancel()
@@ -312,10 +320,22 @@ class ConfigWatcher:
             # Schedule reload after debounce period
             self._debounce_timer = threading.Timer(
                 self._debounce_ms / 1000.0,  # Convert ms to seconds
-                self._reload_config,
+                self._debounced_reload,
             )
             self._debounce_timer.daemon = True
             self._debounce_timer.start()
+
+    def _debounced_reload(self) -> None:
+        """Timer target: reload unless stop() ran while the timer was pending.
+
+        A timer whose callback is already executing cannot be cancelled by
+        stop(), so the check happens here. reload_now() bypasses this on
+        purpose; it is an explicit manual trigger.
+        """
+        with self._lock:
+            if not self._running:
+                return
+        self._reload_config()
 
     def _compute_config_hash(self, config_dict: dict[str, Any]) -> str:
         """Compute stable hash of config dict for change detection."""
