@@ -1,0 +1,10 @@
+# Qodo Merge repository configuration.
+#
+# Re-review on every push to an open PR. The portal's "Review every push"
+# toggle did not fire on follow-up pushes; the file-based setting is the
+# documented alternative. Both keys live under [github_app] in PR-Agent's
+# reference configuration:
+# https://github.com/qodo-ai/pr-agent/blob/main/pr_agent/settings/configuration.toml
+[github_app]
+handle_push_trigger = true
+push_commands = ["/review"]
