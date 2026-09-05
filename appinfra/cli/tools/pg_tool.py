@@ -401,49 +401,93 @@ def _resource_exists(runtime: str, kind: str, name: str) -> bool:
     return r.returncode == 0
 
 
-def _build_erase_preview(runtime: str, name: str, image: str, config_src: str) -> str:
-    """Assemble the human-facing preview shown before the confirm prompt.
-    Only enumerates resources that currently exist — reduces clutter and
-    makes the 'what will happen' answer literal."""
-    lines: list[str] = [f"\nAbout to erase pgserver instance '{name}':\n"]
-    lines.append(f"  config:      {config_src or '(not tracked)'}")
-
+def _gather_erase_targets(
+    runtime: str, name: str
+) -> tuple[list[str], list[str], list[str]]:
+    """Read-only inventory of what erase would touch for this instance.
+    Split from rendering so the caller can short-circuit when everything
+    is missing (no point prompting for a no-op)."""
     containers = [
         f"{name}{s} ({_container_status(runtime, f'{name}{s}')})"
         for s in _ERASE_CONTAINER_SUFFIXES
         if _container_status(runtime, f"{name}{s}") is not None
     ]
-    _append_group(lines, "containers:", containers)
-
     volumes = [
         f"{name}{s}"
         for s in _ERASE_VOLUME_SUFFIXES
         if _resource_exists(runtime, "volume", f"{name}{s}")
     ]
-    _append_group(lines, "volumes:   ", volumes)
-
     networks = [
         f"{name}{s}"
         for s in _ERASE_NETWORK_SUFFIXES
         if _resource_exists(runtime, "network", f"{name}{s}")
     ]
-    _append_group(lines, "networks:  ", networks)
+    return containers, volumes, networks
 
-    lines.append(f"  images:      {image or '(none configured)'} (NOT touched)")
+
+def _render_erase_preview(
+    name: str,
+    image: str,
+    config_src: str,
+    containers: list[str],
+    volumes: list[str],
+    networks: list[str],
+) -> str:
+    """Preview shown before the confirm prompt. Split into two visually
+    distinct sections so the boundary between what erase touches and what
+    it doesn't is unambiguous — the images line under the same column as
+    containers/volumes/networks previously read as 'also affected'."""
+    lines: list[str] = [
+        f"\nAbout to erase pgserver instance '{name}':\n",
+        f"  config:  {config_src or '(not tracked)'}",
+        "",
+        "Will be removed:",
+    ]
+    _append_group(lines, "containers:", containers)
+    _append_group(lines, "volumes:   ", volumes)
+    _append_group(lines, "networks:  ", networks)
+    lines.append("")
+    lines.append("Left in place (out of scope — see post-erase note):")
+    lines.append(f"  image:       {image or '(none configured)'}")
     lines.append("")
     return "\n".join(lines)
 
 
 def _append_group(lines: list[str], label: str, items: list[str]) -> None:
-    """Render a label + wrapped list; keeps preview columns aligned when
-    a group has multiple entries."""
-    pad = " " * (len("  " + label) + 1)
+    """Render a label + wrapped list under a section heading; items are
+    indented twice (heading level + list level) to sit visually inside
+    their section."""
+    pad = " " * (len("    " + label) + 1)
     if not items:
-        lines.append(f"  {label} (none)")
+        lines.append(f"    {label} (none)")
         return
-    lines.append(f"  {label} {items[0]}")
+    lines.append(f"    {label} {items[0]}")
     for extra in items[1:]:
         lines.append(f"{pad}{extra}")
+
+
+def _prompt_erase_confirm() -> int | None:
+    """Interactive typed-confirmation prompt after the preview prints.
+    Returns None on typed 'erase' (caller proceeds), or an int exit code
+    when the request is fully resolved here — 2 on non-tty (destructive
+    verb; needs interactive intent or explicit --yes), 1 on abort/wrong
+    input."""
+    if not sys.stdin.isatty():
+        print(
+            "appinfra pg erase: refusing without --yes on non-tty "
+            "(destructive; needs interactive confirmation or explicit --yes)",
+            file=sys.stderr,
+        )
+        return 2
+    try:
+        resp = input("Type 'erase' to confirm: ")
+    except (EOFError, KeyboardInterrupt):
+        print("\naborted", file=sys.stderr)
+        return 1
+    if resp.strip() != "erase":
+        print("aborted", file=sys.stderr)
+        return 1
+    return None
 
 
 def _config_source_path(app: Any) -> str:
@@ -494,37 +538,40 @@ class PgEraseTool(_PgVerbTool):
             return _exec_pg(cfg, self.VERB)
 
         gate = self._interactive_gate(cfg, name)
-        if gate != 0:
+        if gate is not None:
             return gate
         return _exec_pg(cfg, self.VERB)
 
-    def _interactive_gate(self, cfg: Any, name: str) -> int:
-        """Render the preview and prompt; return 0 to proceed, non-zero to
-        abort. No runtime → pass through so pg.sh's own pre-flight fires."""
+    def _interactive_gate(self, cfg: Any, name: str) -> int | None:
+        """Render the preview and prompt. Return None to signal 'proceed
+        with erase', or an int exit code to signal the request is fully
+        resolved here (no-op, non-tty refusal, aborted confirm). No
+        runtime → return None so pg.sh's own pre-flight fires and reports."""
         runtime = _resolve_preview_runtime()
         if runtime is None:
+            return None
+        containers, volumes, networks = _gather_erase_targets(runtime, name)
+        if not (containers or volumes or networks):
+            print(
+                f"\nNothing to erase — pgserver instance '{name}' has no "
+                f"containers, volumes, or networks on {runtime}."
+            )
             return 0
         image = _resolve_image(
             cfg.get("pgserver.image", ""),
             cfg.get("pgserver.version", "") or "",
         )
-        print(_build_erase_preview(runtime, name, image, _config_source_path(self.app)))
-        if not sys.stdin.isatty():
-            print(
-                "appinfra pg erase: refusing without --yes on non-tty "
-                "(destructive; needs interactive confirmation or explicit --yes)",
-                file=sys.stderr,
+        print(
+            _render_erase_preview(
+                name,
+                image,
+                _config_source_path(self.app),
+                containers,
+                volumes,
+                networks,
             )
-            return 2
-        try:
-            resp = input("Type 'erase' to confirm: ")
-        except (EOFError, KeyboardInterrupt):
-            print("\naborted", file=sys.stderr)
-            return 1
-        if resp.strip() != "erase":
-            print("aborted", file=sys.stderr)
-            return 1
-        return 0
+        )
+        return _prompt_erase_confirm()
 
 
 class PgPsqlTool(_PgVerbTool):

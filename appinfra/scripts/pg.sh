@@ -306,10 +306,9 @@ _pg_logs() {
 # Scope guarantee: erase touches ONLY resources named after
 # $_INFRA_PG_CONTAINER_NAME. It never removes images — the image store is
 # shared across every container on the podman/docker runtime, and reaching
-# into it would risk taking down siblings (see #204: the rmi -f cascade
-# that killed llm-xray-pg while erasing llm-works-pg). A post-erase
-# advisory tells the user how to reclaim image disk manually, with the
-# warning to check for cross-use first.
+# into it would silently take down siblings. A post-erase advisory tells
+# the user which other containers currently reference the image and,
+# if any, that manual `rmi` will affect them.
 
 _pg_erase() {
     : "${_INFRA_PG_CONTAINER_NAME:?_INFRA_PG_CONTAINER_NAME required}"
@@ -336,27 +335,32 @@ _pg_erase() {
     ${runtime} network rm "${name}_default" 2>/dev/null || true
 
     echo "Erase complete."
+    _pg_erase_image_advisory "${runtime}"
+}
 
-    # Post-erase advisory. Image removal is intentionally out of scope
-    # because the image store is shared across the whole runtime; a
-    # single `rmi` would cascade to any container using the image, not
-    # just this pgserver instance.
-    if [ -n "${_INFRA_PG_IMAGE:-}" ]; then
-        cat <<ADVISORY
+_pg_erase_image_advisory() {
+    # Print the image left behind + which other containers reference it, so
+    # the user can decide whether a manual `rmi` is safe. Query is
+    # runtime-native (--filter ancestor=X) and works on both podman/docker.
+    local runtime="$1"
+    [ -n "${_INFRA_PG_IMAGE:-}" ] || return 0
 
-Image NOT removed (out of scope — the image store is shared with
-other containers on this machine):
+    local users
+    users="$(${runtime} ps -a --filter "ancestor=${_INFRA_PG_IMAGE}" \
+        --format '{{.Names}} ({{.Status}})' 2>/dev/null || true)"
 
-  ${_INFRA_PG_IMAGE}
-
-To reclaim disk, first check what else uses this image:
-
-  ${runtime} ps -a --format '{{.Names}} {{.Image}}' | grep '${_INFRA_PG_IMAGE}'
-
-If nothing else needs it, remove manually:
-
-  ${runtime} rmi '${_INFRA_PG_IMAGE}'
-ADVISORY
+    printf '\n'
+    printf 'Image not removed (shared runtime resource): %s\n' "${_INFRA_PG_IMAGE}"
+    if [ -n "${users}" ]; then
+        printf '\nStill used by:\n'
+        while IFS= read -r user; do
+            [ -n "${user}" ] && printf '  - %s\n' "${user}"
+        done <<< "${users}"
+        printf '\nRemoving the image would affect the above containers.\n'
+        printf 'To erase the image anyway:  %s rmi %s\n' "${runtime}" "${_INFRA_PG_IMAGE}"
+    else
+        printf 'No other containers use it.\n'
+        printf 'To erase the image:  %s rmi %s\n' "${runtime}" "${_INFRA_PG_IMAGE}"
     fi
 }
 

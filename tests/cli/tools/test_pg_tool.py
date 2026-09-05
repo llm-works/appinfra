@@ -370,8 +370,8 @@ def _erase_tool(yes: bool = False, cfg: DotDict = _ERASE_CFG) -> PgEraseTool:
 class TestPgErasePreview:
     """Preview rendering — reflects live runtime state without touching it."""
 
-    def test_preview_lists_only_existing_resources(self):
-        from appinfra.cli.tools.pg_tool import _build_erase_preview
+    def test_gather_returns_only_existing(self):
+        from appinfra.cli.tools.pg_tool import _gather_erase_targets
 
         with (
             patch("appinfra.cli.tools.pg_tool._container_status") as cs,
@@ -385,29 +385,42 @@ class TestPgErasePreview:
                     "test-pg_default",
                 }
             )
-            out = _build_erase_preview("podman", "test-pg", "img:tag", "/etc/x")
+            containers, volumes, networks = _gather_erase_targets("podman", "test-pg")
 
-        assert "test-pg (Up 2 hours)" in out
-        assert "test-pg-primary" not in out  # doesn't exist → skipped
-        assert "test-pg_pgdata" in out
-        assert "test-pg_pgdata_primary" not in out
-        assert "test-pg_default" in out
-        assert "img:tag (NOT touched)" in out
-        assert "/etc/x" in out
+        assert containers == ["test-pg (Up 2 hours)"]
+        assert volumes == ["test-pg_pgdata"]
+        assert networks == ["test-pg_default"]
 
-    def test_preview_all_missing_shows_none(self):
-        from appinfra.cli.tools.pg_tool import _build_erase_preview
+    def test_render_puts_image_in_separate_section(self):
+        """Boundary check: image sits under 'Left in place', not under
+        'Will be removed' — the old single-column layout read as if the
+        image were also affected."""
+        from appinfra.cli.tools.pg_tool import _render_erase_preview
 
-        with (
-            patch("appinfra.cli.tools.pg_tool._container_status", return_value=None),
-            patch("appinfra.cli.tools.pg_tool._resource_exists", return_value=False),
-        ):
-            out = _build_erase_preview("podman", "test-pg", "", "")
+        out = _render_erase_preview(
+            "test-pg",
+            "img:tag",
+            "/etc/x",
+            ["test-pg (Up 2h)"],
+            ["test-pg_pgdata"],
+            ["test-pg_default"],
+        )
+        will_ix = out.index("Will be removed:")
+        left_ix = out.index("Left in place")
+        img_ix = out.index("image:       img:tag")
+        assert will_ix < left_ix < img_ix
+        # Image line must appear AFTER the 'Left in place' section header.
+        assert "test-pg (Up 2h)" in out[will_ix:left_ix]
+        assert "test-pg_pgdata" in out[will_ix:left_ix]
 
+    def test_render_all_missing_shows_none(self):
+        from appinfra.cli.tools.pg_tool import _render_erase_preview
+
+        out = _render_erase_preview("test-pg", "", "", [], [], [])
         assert "containers: (none)" in out
         assert "volumes:    (none)" in out
         assert "networks:   (none)" in out
-        assert "(none configured) (NOT touched)" in out
+        assert "image:       (none configured)" in out
         assert "(not tracked)" in out
 
     def test_container_status_uses_anchored_regex(self):
@@ -468,6 +481,29 @@ class TestPgEraseConfirmation:
         assert rc == 2
         assert "pgserver.name is empty" in capsys.readouterr().err
 
+    def test_nothing_to_erase_short_circuits_with_exit_0(self, capsys):
+        """When no target resources exist, skip the prompt entirely and
+        exit 0 — erase would be a no-op and the prompt would just annoy."""
+        t = _erase_tool(yes=False)
+        with (
+            patch(
+                "appinfra.cli.tools.pg_tool._resolve_preview_runtime",
+                return_value="podman",
+            ),
+            patch(
+                "appinfra.cli.tools.pg_tool._gather_erase_targets",
+                return_value=([], [], []),
+            ),
+            patch("builtins.input") as inp,
+            patch("appinfra.cli.tools.pg_tool._exec_pg") as ex,
+        ):
+            rc = t.run()
+
+        assert rc == 0
+        assert "Nothing to erase" in capsys.readouterr().out
+        inp.assert_not_called()
+        ex.assert_not_called()
+
     def test_non_tty_without_yes_refuses_with_exit_2(self, capsys):
         t = _erase_tool(yes=False)
         with (
@@ -475,8 +511,10 @@ class TestPgEraseConfirmation:
                 "appinfra.cli.tools.pg_tool._resolve_preview_runtime",
                 return_value="podman",
             ),
-            patch("appinfra.cli.tools.pg_tool._container_status", return_value=None),
-            patch("appinfra.cli.tools.pg_tool._resource_exists", return_value=False),
+            patch(
+                "appinfra.cli.tools.pg_tool._gather_erase_targets",
+                return_value=(["c"], [], []),
+            ),
             patch("appinfra.cli.tools.pg_tool.sys.stdin") as stdin,
             patch("appinfra.cli.tools.pg_tool._exec_pg") as ex,
         ):
@@ -494,8 +532,10 @@ class TestPgEraseConfirmation:
                 "appinfra.cli.tools.pg_tool._resolve_preview_runtime",
                 return_value="podman",
             ),
-            patch("appinfra.cli.tools.pg_tool._container_status", return_value=None),
-            patch("appinfra.cli.tools.pg_tool._resource_exists", return_value=False),
+            patch(
+                "appinfra.cli.tools.pg_tool._gather_erase_targets",
+                return_value=(["c"], [], []),
+            ),
             patch("appinfra.cli.tools.pg_tool.sys.stdin") as stdin,
             patch("builtins.input", return_value="erase"),
             patch("appinfra.cli.tools.pg_tool._exec_pg", return_value=0) as ex,
@@ -513,8 +553,10 @@ class TestPgEraseConfirmation:
                 "appinfra.cli.tools.pg_tool._resolve_preview_runtime",
                 return_value="podman",
             ),
-            patch("appinfra.cli.tools.pg_tool._container_status", return_value=None),
-            patch("appinfra.cli.tools.pg_tool._resource_exists", return_value=False),
+            patch(
+                "appinfra.cli.tools.pg_tool._gather_erase_targets",
+                return_value=(["c"], [], []),
+            ),
             patch("appinfra.cli.tools.pg_tool.sys.stdin") as stdin,
             patch("builtins.input", return_value="y"),
             patch("appinfra.cli.tools.pg_tool._exec_pg") as ex,
