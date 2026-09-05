@@ -391,6 +391,8 @@ def _container_status(runtime: str, name: str) -> str | None:
         )
     except (OSError, subprocess.TimeoutExpired) as e:
         raise _QueryUnavailableError(str(e)) from e
+    if out.returncode != 0:
+        raise _QueryUnavailableError(out.stderr.strip() or f"exit {out.returncode}")
     line = out.stdout.strip().splitlines()
     return line[0] if line else None
 
@@ -402,7 +404,11 @@ def _resource_exists(runtime: str, kind: str, name: str) -> bool:
         r = _run_query([runtime, kind, "inspect", name])
     except (OSError, subprocess.TimeoutExpired) as e:
         raise _QueryUnavailableError(str(e)) from e
-    return r.returncode == 0
+    if r.returncode == 0:
+        return True
+    if "no such" in r.stderr.lower():
+        return False
+    raise _QueryUnavailableError(r.stderr.strip() or f"exit {r.returncode}")
 
 
 def _gather_erase_targets(

@@ -442,6 +442,38 @@ class TestPgErasePreview:
             _resource_exists("docker", "volume", "v")
             assert q.call_args.args[0] == ["docker", "volume", "inspect", "v"]
 
+    def test_container_status_raises_on_nonzero_returncode(self):
+        """Daemon-down produces nonzero exit; must not be mistaken for 'no containers'."""
+        from appinfra.cli.tools.pg_tool import _container_status, _QueryUnavailableError
+
+        with patch("appinfra.cli.tools.pg_tool._run_query") as q:
+            q.return_value = SimpleNamespace(
+                returncode=1, stdout="", stderr="Cannot connect to daemon"
+            )
+            with pytest.raises(_QueryUnavailableError, match="Cannot connect"):
+                _container_status("docker", "x")
+
+    def test_resource_exists_raises_on_daemon_error(self):
+        """Daemon-down (not 'no such') must raise, not return False."""
+        from appinfra.cli.tools.pg_tool import _QueryUnavailableError, _resource_exists
+
+        with patch("appinfra.cli.tools.pg_tool._run_query") as q:
+            q.return_value = SimpleNamespace(
+                returncode=1, stderr="Cannot connect to the Docker daemon"
+            )
+            with pytest.raises(_QueryUnavailableError, match="Cannot connect"):
+                _resource_exists("docker", "volume", "v")
+
+    def test_resource_exists_returns_false_on_no_such(self):
+        """'No such volume' is expected; must return False, not raise."""
+        from appinfra.cli.tools.pg_tool import _resource_exists
+
+        with patch("appinfra.cli.tools.pg_tool._run_query") as q:
+            q.return_value = SimpleNamespace(
+                returncode=1, stderr="Error: No such volume: v"
+            )
+            assert _resource_exists("docker", "volume", "v") is False
+
     def test_config_source_extracts_full_path_from_tuple(self):
         """loaded_config_paths entries are (etc_dir, name, full_path)
         tuples; the preview must show the full path, not the raw tuple."""
