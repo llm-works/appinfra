@@ -74,6 +74,43 @@ _pg_container_runtime() {
     echo "${INFRA_CONTAINER_CMD:-docker}"
 }
 
+_pg_ensure_runtime() {
+    # Verify the container runtime resolves to an executable on PATH so we can
+    # emit actionable install guidance instead of a cryptic
+    # `command not found` from the first ${runtime} invocation.
+    local runtime explicit
+    runtime="$(_pg_container_runtime)"
+    if command -v "${runtime}" >/dev/null 2>&1; then
+        return 0
+    fi
+    explicit="${INFRA_CONTAINER_CMD:-}"
+    if [ -n "${explicit}" ]; then
+        printf '%b' "${_RED}pg.sh: INFRA_CONTAINER_CMD='${explicit}' but '${explicit}' is not on PATH.${_RESET}\n" >&2
+        local other=""
+        if [ "${explicit}" = "podman" ] && command -v docker >/dev/null 2>&1; then other="docker"; fi
+        if [ "${explicit}" = "docker" ] && command -v podman >/dev/null 2>&1; then other="podman"; fi
+        if [ -n "${other}" ]; then
+            echo "Hint: '${other}' is available — set INFRA_CONTAINER_CMD=${other} or unset it to auto-detect." >&2
+        fi
+        return 2
+    fi
+    cat >&2 <<'MSG'
+pg.sh: no container runtime found on PATH.
+
+pg requires podman (preferred) or docker to manage the PostgreSQL
+container. Install one:
+
+  Linux (Fedora/RHEL):    sudo dnf install podman
+  Linux (Debian/Ubuntu):  sudo apt install podman
+  macOS:                  brew install podman
+                          (then: podman machine init && podman machine start)
+
+Or set INFRA_CONTAINER_CMD to point at an installed binary if it lives
+under a non-standard name.
+MSG
+    return 2
+}
+
 _pg_compose_run() {
     # Invoke compose with the mode-appropriate YAML and env. $1 = single|repl,
     # remaining args pass through to compose.
@@ -263,40 +300,64 @@ _pg_logs() {
 }
 
 # ---------------------------------------------------------------------------
-# erase — remove containers, volumes, networks, and images (destructive)
+# erase — remove this instance's containers, volumes, networks (destructive)
 # ---------------------------------------------------------------------------
+#
+# Scope guarantee: erase touches ONLY resources named after
+# $_INFRA_PG_CONTAINER_NAME. It never removes images — the image store is
+# shared across every container on the podman/docker runtime, and reaching
+# into it would risk taking down siblings (see #204: the rmi -f cascade
+# that killed llm-xray-pg while erasing llm-works-pg). A post-erase
+# advisory tells the user how to reclaim image disk manually, with the
+# warning to check for cross-use first.
 
 _pg_erase() {
     : "${_INFRA_PG_CONTAINER_NAME:?_INFRA_PG_CONTAINER_NAME required}"
 
-    local runtime
+    local runtime name
     runtime="$(_pg_container_runtime)"
+    name="${_INFRA_PG_CONTAINER_NAME}"
 
-    # Stop and remove containers by explicit name (single-mode + replication-mode names).
-    # Avoids substring matching that could affect unrelated containers.
-    echo "Stopping all PostgreSQL containers..."
-    ${runtime} stop "${_INFRA_PG_CONTAINER_NAME}" \
-        "${_INFRA_PG_CONTAINER_NAME}-primary" \
-        "${_INFRA_PG_CONTAINER_NAME}-standby" 2>/dev/null || true
-    ${runtime} rm -f "${_INFRA_PG_CONTAINER_NAME}" \
-        "${_INFRA_PG_CONTAINER_NAME}-primary" \
-        "${_INFRA_PG_CONTAINER_NAME}-standby" 2>/dev/null || true
+    # Containers: explicit names, single-mode + replication-mode.
+    echo "Stopping containers..."
+    ${runtime} stop "${name}" "${name}-primary" "${name}-standby" 2>/dev/null || true
+    ${runtime} rm -f "${name}" "${name}-primary" "${name}-standby" 2>/dev/null || true
 
-    echo "Removing PostgreSQL volumes..."
-    ${runtime} volume ls --filter "name=${_INFRA_PG_CONTAINER_NAME}" --format "{{.Name}}" \
-        | xargs -r ${runtime} volume rm 2>/dev/null || true
+    # Volumes: enumerate the exact set compose creates for this instance
+    # (project=${name}, volumes pgdata / pgdata_primary / pgdata_standby).
+    # Substring filters could catch unrelated volumes like ${name}-backup.
+    echo "Removing volumes..."
+    for vol in "${name}_pgdata" "${name}_pgdata_primary" "${name}_pgdata_standby"; do
+        ${runtime} volume rm "${vol}" 2>/dev/null || true
+    done
 
-    echo "Removing PostgreSQL networks..."
-    ${runtime} network ls --filter "name=${_INFRA_PG_CONTAINER_NAME}" --format "{{.Name}}" \
-        | xargs -r ${runtime} network rm 2>/dev/null || true
+    # Networks: compose creates ${project}_default; same rationale as volumes.
+    echo "Removing networks..."
+    ${runtime} network rm "${name}_default" 2>/dev/null || true
 
-    echo "Removing PostgreSQL images (force)..."
+    echo "Erase complete."
+
+    # Post-erase advisory. Image removal is intentionally out of scope
+    # because the image store is shared across the whole runtime; a
+    # single `rmi` would cascade to any container using the image, not
+    # just this pgserver instance.
     if [ -n "${_INFRA_PG_IMAGE:-}" ]; then
-        ${runtime} images --filter "reference=${_INFRA_PG_IMAGE}" --format "{{.ID}}" \
-            | xargs -r ${runtime} rmi -f 2>/dev/null || true
-    fi
+        cat <<ADVISORY
 
-    echo "PostgreSQL cleanup complete (containers, volumes, networks, and images removed)"
+Image NOT removed (out of scope — the image store is shared with
+other containers on this machine):
+
+  ${_INFRA_PG_IMAGE}
+
+To reclaim disk, first check what else uses this image:
+
+  ${runtime} ps -a --format '{{.Names}} {{.Image}}' | grep '${_INFRA_PG_IMAGE}'
+
+If nothing else needs it, remove manually:
+
+  ${runtime} rmi '${_INFRA_PG_IMAGE}'
+ADVISORY
+    fi
 }
 
 # ---------------------------------------------------------------------------
@@ -709,7 +770,8 @@ commands:
   wait-up           wait for server to accept connections (timeout _INFRA_PG_WAIT_TIMEOUT)
   wait-down         wait for containers to be fully removed
   info [--short]    server + database status (comprehensive or one-line summary)
-  erase             remove all containers, volumes, networks, and images (destructive)
+  erase             remove this instance's containers, volumes, networks (destructive;
+                    images are never touched — see the post-erase advisory)
   clean             drop databases in _INFRA_PG_DATABASES allowlist (server keeps running)
   psql [--target primary|standby]
                     interactive psql shell (default primary; standby is read-only)
@@ -727,6 +789,14 @@ fi
 
 cmd="$1"
 shift
+
+# Fail fast with actionable install guidance when the runtime is missing,
+# BEFORE any verb tries to shell out and get a `command not found`.
+case "$cmd" in
+    -h | --help | help) : ;;
+    *) _pg_ensure_runtime || exit $? ;;
+esac
+
 case "$cmd" in
     up)        _pg_up ;;
     down)      _pg_down ;;

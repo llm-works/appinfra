@@ -330,11 +330,215 @@ class TestVerbTools:
     def test_psql_shell_alias(self):
         assert "shell" in PgPsqlTool().config.aliases
 
-    def test_logs_and_top_and_erase_have_no_flags(self):
+    def test_logs_and_top_have_no_flags(self):
         assert PgLogsTool()._extra_args() == []
         assert PgLogsTool()._extra_env() == {}
         assert PgTopTool()._extra_args() == []
-        assert PgEraseTool()._extra_env() == {}
+
+
+# =============================================================================
+# PgEraseTool — preview + confirmation gate
+# =============================================================================
+
+
+_ERASE_CFG = DotDict(
+    {
+        "pgserver": {
+            "name": "test-pg",
+            "version": 18,
+            "port": 25432,
+            "user": "postgres",
+            "host": "127.0.0.1",
+            "image": "docker.io/pgvector/pgvector:pg18",
+            "postgres_conf": {},
+        }
+    }
+)
+
+
+def _erase_tool(yes: bool = False, cfg: DotDict = _ERASE_CFG) -> PgEraseTool:
+    """Build a PgEraseTool with faked args + faked app.config."""
+    t = PgEraseTool()
+    t._parsed_args = Namespace(yes=yes)
+    t._logger = MagicMock()
+    fake_app = SimpleNamespace(config=cfg, _loaded_config_paths=["/tmp/etc/infra.yaml"])
+    patch.object(PgEraseTool, "app", new=property(lambda s: fake_app)).start()
+    return t
+
+
+@pytest.mark.unit
+class TestPgErasePreview:
+    """Preview rendering — reflects live runtime state without touching it."""
+
+    def test_preview_lists_only_existing_resources(self):
+        from appinfra.cli.tools.pg_tool import _build_erase_preview
+
+        with (
+            patch("appinfra.cli.tools.pg_tool._container_status") as cs,
+            patch("appinfra.cli.tools.pg_tool._resource_exists") as re,
+        ):
+            cs.side_effect = lambda rt, n: "Up 2 hours" if n == "test-pg" else None
+            re.side_effect = lambda rt, kind, n: (
+                n
+                in {
+                    "test-pg_pgdata",
+                    "test-pg_default",
+                }
+            )
+            out = _build_erase_preview("podman", "test-pg", "img:tag", "/etc/x")
+
+        assert "test-pg (Up 2 hours)" in out
+        assert "test-pg-primary" not in out  # doesn't exist → skipped
+        assert "test-pg_pgdata" in out
+        assert "test-pg_pgdata_primary" not in out
+        assert "test-pg_default" in out
+        assert "img:tag (NOT touched)" in out
+        assert "/etc/x" in out
+
+    def test_preview_all_missing_shows_none(self):
+        from appinfra.cli.tools.pg_tool import _build_erase_preview
+
+        with (
+            patch("appinfra.cli.tools.pg_tool._container_status", return_value=None),
+            patch("appinfra.cli.tools.pg_tool._resource_exists", return_value=False),
+        ):
+            out = _build_erase_preview("podman", "test-pg", "", "")
+
+        assert "containers: (none)" in out
+        assert "volumes:    (none)" in out
+        assert "networks:   (none)" in out
+        assert "(none configured) (NOT touched)" in out
+        assert "(not tracked)" in out
+
+    def test_container_status_uses_anchored_regex(self):
+        """`test-pg` query must not match `test-pg-primary`."""
+        from appinfra.cli.tools.pg_tool import _container_status
+
+        with patch("appinfra.cli.tools.pg_tool._run_query") as q:
+            q.return_value = SimpleNamespace(stdout="", returncode=0)
+            _container_status("podman", "test-pg")
+            cmd = q.call_args.args[0]
+            assert "name=^test-pg$" in cmd
+
+    def test_resource_exists_uses_inspect(self):
+        """Portability check — `inspect` works on both podman and docker."""
+        from appinfra.cli.tools.pg_tool import _resource_exists
+
+        with patch("appinfra.cli.tools.pg_tool._run_query") as q:
+            q.return_value = SimpleNamespace(returncode=0)
+            _resource_exists("docker", "volume", "v")
+            assert q.call_args.args[0] == ["docker", "volume", "inspect", "v"]
+
+    def test_config_source_extracts_full_path_from_tuple(self):
+        """_loaded_config_paths entries are (etc_dir, name, full_path)
+        tuples; the preview must show the full path, not the raw tuple."""
+        from appinfra.cli.tools.pg_tool import _config_source_path
+
+        app = SimpleNamespace(
+            _loaded_config_paths=[("/x/etc", "infra.yaml", "/x/etc/infra.yaml")]
+        )
+        assert _config_source_path(app) == "/x/etc/infra.yaml"
+
+    def test_config_source_empty_when_no_paths(self):
+        from appinfra.cli.tools.pg_tool import _config_source_path
+
+        assert _config_source_path(SimpleNamespace()) == ""
+        assert _config_source_path(SimpleNamespace(_loaded_config_paths=[])) == ""
+
+
+@pytest.mark.unit
+class TestPgEraseConfirmation:
+    """Confirmation gate — bypass paths, prompt paths, refusal paths."""
+
+    def teardown_method(self, method):
+        patch.stopall()
+
+    def test_yes_flag_skips_prompt_and_calls_exec(self):
+        t = _erase_tool(yes=True)
+        with patch("appinfra.cli.tools.pg_tool._exec_pg", return_value=0) as ex:
+            rc = t.run()
+        assert rc == 0
+        ex.assert_called_once()
+        assert ex.call_args.args[1] == "erase"
+
+    def test_empty_pgserver_name_returns_2(self, capsys):
+        cfg = DotDict({"pgserver": {"name": "", "port": 25432, "user": "p"}})
+        t = _erase_tool(cfg=cfg)
+        rc = t.run()
+        assert rc == 2
+        assert "pgserver.name is empty" in capsys.readouterr().err
+
+    def test_non_tty_without_yes_refuses_with_exit_2(self, capsys):
+        t = _erase_tool(yes=False)
+        with (
+            patch(
+                "appinfra.cli.tools.pg_tool._resolve_preview_runtime",
+                return_value="podman",
+            ),
+            patch("appinfra.cli.tools.pg_tool._container_status", return_value=None),
+            patch("appinfra.cli.tools.pg_tool._resource_exists", return_value=False),
+            patch("appinfra.cli.tools.pg_tool.sys.stdin") as stdin,
+            patch("appinfra.cli.tools.pg_tool._exec_pg") as ex,
+        ):
+            stdin.isatty.return_value = False
+            rc = t.run()
+
+        assert rc == 2
+        assert "refusing without --yes on non-tty" in capsys.readouterr().err
+        ex.assert_not_called()
+
+    def test_tty_confirm_string_erase_proceeds(self):
+        t = _erase_tool(yes=False)
+        with (
+            patch(
+                "appinfra.cli.tools.pg_tool._resolve_preview_runtime",
+                return_value="podman",
+            ),
+            patch("appinfra.cli.tools.pg_tool._container_status", return_value=None),
+            patch("appinfra.cli.tools.pg_tool._resource_exists", return_value=False),
+            patch("appinfra.cli.tools.pg_tool.sys.stdin") as stdin,
+            patch("builtins.input", return_value="erase"),
+            patch("appinfra.cli.tools.pg_tool._exec_pg", return_value=0) as ex,
+        ):
+            stdin.isatty.return_value = True
+            rc = t.run()
+
+        assert rc == 0
+        ex.assert_called_once()
+
+    def test_tty_wrong_confirm_aborts_with_exit_1(self, capsys):
+        t = _erase_tool(yes=False)
+        with (
+            patch(
+                "appinfra.cli.tools.pg_tool._resolve_preview_runtime",
+                return_value="podman",
+            ),
+            patch("appinfra.cli.tools.pg_tool._container_status", return_value=None),
+            patch("appinfra.cli.tools.pg_tool._resource_exists", return_value=False),
+            patch("appinfra.cli.tools.pg_tool.sys.stdin") as stdin,
+            patch("builtins.input", return_value="y"),
+            patch("appinfra.cli.tools.pg_tool._exec_pg") as ex,
+        ):
+            stdin.isatty.return_value = True
+            rc = t.run()
+
+        assert rc == 1
+        assert "aborted" in capsys.readouterr().err
+        ex.assert_not_called()
+
+    def test_no_runtime_available_falls_through_to_pg_sh(self):
+        """When podman/docker missing, preview is skipped and pg.sh runs its
+        own pre-flight — the CLI does not duplicate the install message."""
+        t = _erase_tool(yes=False)
+        with (
+            patch(
+                "appinfra.cli.tools.pg_tool._resolve_preview_runtime", return_value=None
+            ),
+            patch("appinfra.cli.tools.pg_tool._exec_pg", return_value=2) as ex,
+        ):
+            rc = t.run()
+        assert rc == 2
+        ex.assert_called_once()
 
 
 # =============================================================================

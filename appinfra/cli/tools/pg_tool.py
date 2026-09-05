@@ -19,6 +19,7 @@ import argparse
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
@@ -342,12 +343,188 @@ class PgCleanTool(_PgVerbTool):
         return {"_INFRA_PG_DATABASES": " ".join(self.args.db)}
 
 
+# Exact resource names touched by `pg erase` for a given pgserver.name.
+# Enumerated (not substring-matched) so unrelated resources with a shared
+# prefix — a hypothetical `${name}-backup` volume, say — can't be caught up.
+_ERASE_CONTAINER_SUFFIXES = ("", "-primary", "-standby")
+_ERASE_VOLUME_SUFFIXES = ("_pgdata", "_pgdata_primary", "_pgdata_standby")
+_ERASE_NETWORK_SUFFIXES = ("_default",)
+
+
+def _resolve_preview_runtime() -> str | None:
+    """Runtime binary to use for the pre-erase inventory query. None means
+    the check is skipped and pg.sh's own runtime pre-flight will fire."""
+    explicit = os.environ.get("INFRA_CONTAINER_CMD", "").strip()
+    if explicit:
+        return explicit if shutil.which(explicit) else None
+    for r in ("podman", "docker"):
+        if shutil.which(r):
+            return r
+    return None
+
+
+def _run_query(cmd: list[str]) -> subprocess.CompletedProcess[str]:
+    """Read-only runtime query with a short timeout; failures are treated
+    as 'resource not present' rather than propagated."""
+    return subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=5)
+
+
+def _container_status(runtime: str, name: str) -> str | None:
+    """Container status line if the container exists (any state), else None.
+    Uses regex-anchored name filter so `${name}-primary` doesn't spuriously
+    match a query for `${name}`."""
+    try:
+        out = _run_query(
+            [
+                runtime,
+                "ps",
+                "-a",
+                "--filter",
+                f"name=^{name}$",
+                "--format",
+                "{{.Status}}",
+            ]
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    line = out.stdout.strip().splitlines()
+    return line[0] if line else None
+
+
+def _resource_exists(runtime: str, kind: str, name: str) -> bool:
+    """True iff `runtime <kind> inspect <name>` returns 0. Portable across
+    podman and docker (both use exit code 0/1 for present/absent)."""
+    try:
+        r = _run_query([runtime, kind, "inspect", name])
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return r.returncode == 0
+
+
+def _build_erase_preview(runtime: str, name: str, image: str, config_src: str) -> str:
+    """Assemble the human-facing preview shown before the confirm prompt.
+    Only enumerates resources that currently exist — reduces clutter and
+    makes the 'what will happen' answer literal."""
+    lines: list[str] = [f"\nAbout to erase pgserver instance '{name}':\n"]
+    lines.append(f"  config:      {config_src or '(not tracked)'}")
+
+    containers = [
+        f"{name}{s} ({_container_status(runtime, f'{name}{s}')})"
+        for s in _ERASE_CONTAINER_SUFFIXES
+        if _container_status(runtime, f"{name}{s}") is not None
+    ]
+    _append_group(lines, "containers:", containers)
+
+    volumes = [
+        f"{name}{s}"
+        for s in _ERASE_VOLUME_SUFFIXES
+        if _resource_exists(runtime, "volume", f"{name}{s}")
+    ]
+    _append_group(lines, "volumes:   ", volumes)
+
+    networks = [
+        f"{name}{s}"
+        for s in _ERASE_NETWORK_SUFFIXES
+        if _resource_exists(runtime, "network", f"{name}{s}")
+    ]
+    _append_group(lines, "networks:  ", networks)
+
+    lines.append(f"  images:      {image or '(none configured)'} (NOT touched)")
+    lines.append("")
+    return "\n".join(lines)
+
+
+def _append_group(lines: list[str], label: str, items: list[str]) -> None:
+    """Render a label + wrapped list; keeps preview columns aligned when
+    a group has multiple entries."""
+    pad = " " * (len("  " + label) + 1)
+    if not items:
+        lines.append(f"  {label} (none)")
+        return
+    lines.append(f"  {label} {items[0]}")
+    for extra in items[1:]:
+        lines.append(f"{pad}{extra}")
+
+
+def _config_source_path(app: Any) -> str:
+    """Best-effort resolved-config path for the preview. Not fatal if
+    unavailable — the app may have been built without a config spec.
+    Entries are (etc_dir, filename, full_path) tuples; take the full path."""
+    paths = getattr(app, "_loaded_config_paths", None) or []
+    if not paths:
+        return ""
+    last = paths[-1]
+    if isinstance(last, tuple) and len(last) >= 3:
+        return str(last[2])
+    return str(last)
+
+
 class PgEraseTool(_PgVerbTool):
-    """Remove all containers, volumes, networks, and images (destructive)."""
+    """Remove this instance's containers, volumes, networks (destructive)."""
 
     VERB = "erase"
     NAME = "erase"
-    HELP = "Remove all containers, volumes, networks, and images (destructive)"
+    HELP = (
+        "Remove this instance's containers, volumes, networks "
+        "(destructive; images untouched)"
+    )
+
+    def add_args(self, parser: argparse.ArgumentParser) -> None:
+        """Add --yes to bypass the interactive confirmation. No short alias:
+        erase is destructive enough that the caller should type the flag
+        out — a bare `-y` is too casual for the blast radius."""
+        parser.add_argument(
+            "--yes",
+            action="store_true",
+            help="Skip the interactive confirmation (for scripting)",
+        )
+
+    def run(self, **kwargs: Any) -> int:
+        """Preview + confirm, then delegate to pg.sh erase."""
+        cfg = self.app.config
+        name = str(cfg.get("pgserver.name", "") or "")
+        if not name:
+            print(
+                "appinfra pg erase: pgserver.name is empty in resolved config",
+                file=sys.stderr,
+            )
+            return 2
+
+        if self.args.yes:
+            return _exec_pg(cfg, self.VERB)
+
+        gate = self._interactive_gate(cfg, name)
+        if gate != 0:
+            return gate
+        return _exec_pg(cfg, self.VERB)
+
+    def _interactive_gate(self, cfg: Any, name: str) -> int:
+        """Render the preview and prompt; return 0 to proceed, non-zero to
+        abort. No runtime → pass through so pg.sh's own pre-flight fires."""
+        runtime = _resolve_preview_runtime()
+        if runtime is None:
+            return 0
+        image = _resolve_image(
+            cfg.get("pgserver.image", ""),
+            cfg.get("pgserver.version", "") or "",
+        )
+        print(_build_erase_preview(runtime, name, image, _config_source_path(self.app)))
+        if not sys.stdin.isatty():
+            print(
+                "appinfra pg erase: refusing without --yes on non-tty "
+                "(destructive; needs interactive confirmation or explicit --yes)",
+                file=sys.stderr,
+            )
+            return 2
+        try:
+            resp = input("Type 'erase' to confirm: ")
+        except (EOFError, KeyboardInterrupt):
+            print("\naborted", file=sys.stderr)
+            return 1
+        if resp.strip() != "erase":
+            print("aborted", file=sys.stderr)
+            return 1
+        return 0
 
 
 class PgPsqlTool(_PgVerbTool):
