@@ -30,9 +30,12 @@ from appinfra.cli.tools.config_tool import ConfigTool
 from appinfra.cli.tools.docs_tool import DocsTool
 from appinfra.cli.tools.doctor_tool import DoctorTool
 from appinfra.cli.tools.etc_path_tool import EtcPathTool
+from appinfra.cli.tools.pg_tool import PgTool
 from appinfra.cli.tools.scaffold_tool import ScaffoldTool
 from appinfra.cli.tools.scripts_path_tool import ScriptsPathTool
 from appinfra.cli.tools.version_tool import VersionTool
+
+_BASE_CONFIG = Path(appinfra.__file__).parent / "etc" / "infra.yaml"
 
 # All CLI tools
 _TOOLS = [
@@ -41,6 +44,7 @@ _TOOLS = [
     ConfigTool,
     DoctorTool,
     DocsTool,
+    PgTool,
     ScaffoldTool,
     ScriptsPathTool,
     EtcPathTool,
@@ -54,7 +58,10 @@ def _build_app() -> App:
         AppBuilder("appinfra")
         .with_description("Infra framework utility commands")
         .without_standard_args()
-        .with_standard_args(help=True, log_level=True, quiet=True)
+        .with_standard_args(
+            help=True, log_level=True, quiet=True, etc_dir=True, config_file=True
+        )
+        .with_config_spec("llm-works", "appinfra", _BASE_CONFIG)
         .version.with_semver(appinfra.__version__)
         .with_build_info()
         .done()
