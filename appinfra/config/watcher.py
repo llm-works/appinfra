@@ -328,14 +328,18 @@ class ConfigWatcher:
     def _debounced_reload(self) -> None:
         """Timer target: reload unless stop() ran while the timer was pending.
 
-        A timer whose callback is already executing cannot be cancelled by
-        stop(), so the check happens here. reload_now() bypasses this on
-        purpose; it is an explicit manual trigger.
+        Runs under the watcher lock so stop() cannot return while a
+        debounced reload is executing; a stop() that arrives mid-reload
+        waits for it, and no callback or state write lands on a watcher
+        that already reported stopped. Callbacks therefore run with the
+        lock held: a callback that blocks on another thread needing this
+        lock would deadlock. reload_now() bypasses this on purpose; it is
+        an explicit manual trigger.
         """
         with self._lock:
             if not self._running:
                 return
-        self._reload_config()
+            self._reload_config()
 
     def _compute_config_hash(self, config_dict: dict[str, Any]) -> str:
         """Compute stable hash of config dict for change detection."""

@@ -1111,6 +1111,39 @@ class TestConfigWatcherStopBounded:
         watcher._file_handler.on_modified(event)
         assert calls == [True]
 
+    def test_stop_waits_for_in_flight_debounced_reload(self, tmp_path, mock_logger):
+        """stop() cannot return while a debounced reload is executing."""
+        watcher = ConfigWatcher(mock_logger, etc_dir=tmp_path)
+        watcher._running = True
+        entered = threading.Event()
+        release = threading.Event()
+        order: list[str] = []
+
+        def slow_reload() -> None:
+            entered.set()
+            release.wait(timeout=2.0)
+            order.append("reload")
+
+        watcher._reload_config = slow_reload
+        reloader = threading.Thread(target=watcher._debounced_reload, daemon=True)
+        reloader.start()
+        assert entered.wait(timeout=1.0), "reload did not start"
+
+        def stop_and_record() -> None:
+            watcher.stop()
+            order.append("stop")
+
+        stopper = threading.Thread(target=stop_and_record, daemon=True)
+        stopper.start()
+        stopper.join(timeout=0.2)
+        assert stopper.is_alive(), "stop() returned while the reload was in flight"
+
+        release.set()
+        reloader.join(timeout=1.0)
+        stopper.join(timeout=1.0)
+        assert order == ["reload", "stop"]
+        assert watcher.is_running() is False
+
 
 @pytest.mark.unit
 @pytest.mark.usefixtures("clean_env")
