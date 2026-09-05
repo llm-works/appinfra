@@ -106,6 +106,25 @@ port: 5432
 
 ---
 
+### library_mode_from_spec.py
+Library-mode bootstrap via `Config.from_spec` for a package that ships
+`<pkg>/etc/<pkg>.yaml`.
+
+**What's demonstrated:**
+- One-line config load: `Config.from_spec("example-org", example_pkg)`
+- Default filename derivation (`example_pkg` → `example-pkg.yaml`)
+- Pairing with `create_root_lg` for the root logger
+- No CLI shell — headless entry point
+
+**Run:**
+```bash
+python examples/04_configuration/library_mode_from_spec.py
+```
+
+**See also:** [Library-Mode Bootstrap](../../docs/guides/library-mode-bootstrap.md)
+
+---
+
 ## Configuration File Structure
 
 The framework uses `etc/infra.yaml` for configuration:

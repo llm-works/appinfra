@@ -1,0 +1,13 @@
+# Packaged base config for example_pkg.
+#
+# Loaded by ../../library_mode_from_spec.py via Config.from_spec.
+# In a real package this file ships inside the wheel; here it lives
+# under an examples subtree that plays the same role.
+
+app:
+  name: example-pkg
+  port: 8080
+  greeting: hello from the packaged base config
+
+logging:
+  level: info
