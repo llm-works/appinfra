@@ -167,8 +167,11 @@ def _find_project_local(base_config: Path | str) -> Path | None:
 
     while current != home and current != current.parent:
         candidate = current / "etc" / filename
-        if candidate.is_file():
-            return candidate
+        try:
+            if candidate.is_file():
+                return candidate
+        except OSError:
+            pass  # permission denied or other I/O error — skip candidate
         current = current.parent
     return None
 

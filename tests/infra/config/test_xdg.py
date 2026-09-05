@@ -648,3 +648,24 @@ class TestProjectLocalResolution:
         monkeypatch.chdir(project)
         path, _root = resolve_config_source("llm-works", "appinfra", bundled)
         assert path == local
+
+    def test_returns_none_when_cwd_raises_oserror(self, monkeypatch):
+        """OSError from Path.cwd() → None, no crash (matches 'Never raises' contract)."""
+        from appinfra.config.xdg import _find_project_local
+
+        def raise_oserror():
+            raise OSError("cwd deleted")
+
+        monkeypatch.setattr(Path, "cwd", raise_oserror)
+        assert _find_project_local(Path("/pkg/etc/app.yaml")) is None
+
+    def test_returns_none_when_home_raises_runtimeerror(self, monkeypatch, tmp_path):
+        """RuntimeError from Path.home() → None, no crash."""
+        from appinfra.config.xdg import _find_project_local
+
+        def raise_runtimeerror():
+            raise RuntimeError("HOME unset")
+
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(Path, "home", raise_runtimeerror)
+        assert _find_project_local(Path("/pkg/etc/app.yaml")) is None
