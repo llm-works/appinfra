@@ -22,7 +22,11 @@ from unittest.mock import Mock
 import pytest
 import yaml
 
-from appinfra.cli.tools.config_tool import ConfigTool
+from appinfra.cli.tools.config_tool import (
+    ConfigDumpTool,
+    ConfigSourceTool,
+    ConfigTool,
+)
 
 # =============================================================================
 # Test Initialization
@@ -34,7 +38,7 @@ class TestConfigToolInit:
     """Test ConfigTool initialization."""
 
     def test_basic_initialization(self):
-        """Test tool initializes with correct name and aliases."""
+        """Test parent tool initializes with correct name and aliases."""
         tool = ConfigTool()
 
         assert tool.name == "config"
@@ -42,18 +46,34 @@ class TestConfigToolInit:
         assert "cfg" in tool.config.aliases
 
     def test_has_help_text(self):
-        """Test tool has help text."""
+        """Test parent tool has help text."""
         tool = ConfigTool()
 
         assert tool.config.help_text is not None
         assert len(tool.config.help_text) > 0
 
     def test_has_description(self):
-        """Test tool has description."""
+        """Test parent tool has description."""
         tool = ConfigTool()
 
         assert tool.config.description is not None
         assert "resolved" in tool.config.description.lower()
+
+    def test_dump_is_default_subtool(self):
+        """Test bare `appinfra c` dispatches to `dump` by default."""
+        tool = ConfigTool()
+
+        dump = tool.group.get_tool("dump")
+        assert dump.name == "dump"
+        assert "d" in dump.config.aliases
+
+    def test_source_subtool_registered(self):
+        """Test `source` sub-tool is registered under the parent."""
+        tool = ConfigTool()
+
+        source = tool.group.get_tool("source")
+        assert source.name == "source"
+        assert "s" in source.config.aliases
 
 
 @pytest.mark.unit
@@ -62,7 +82,7 @@ class TestAddArgs:
 
     def test_adds_config_file_argument(self):
         """Test adds config_file positional argument."""
-        tool = ConfigTool()
+        tool = ConfigDumpTool()
         parser = Mock()
 
         tool.add_args(parser)
@@ -72,7 +92,7 @@ class TestAddArgs:
 
     def test_adds_format_argument(self):
         """Test adds --format argument with choices."""
-        tool = ConfigTool()
+        tool = ConfigDumpTool()
         parser = Mock()
 
         tool.add_args(parser)
@@ -86,7 +106,7 @@ class TestAddArgs:
 
     def test_adds_no_env_argument(self):
         """Test adds --no-env flag."""
-        tool = ConfigTool()
+        tool = ConfigDumpTool()
         parser = Mock()
 
         tool.add_args(parser)
@@ -98,7 +118,7 @@ class TestAddArgs:
 
     def test_adds_section_argument(self):
         """Test adds --section argument."""
-        tool = ConfigTool()
+        tool = ConfigDumpTool()
         parser = Mock()
 
         tool.add_args(parser)
@@ -121,7 +141,7 @@ class TestYAMLOutput:
 
     def test_format_yaml_simple(self):
         """Test YAML output for simple config."""
-        tool = ConfigTool()
+        tool = ConfigDumpTool()
         data = {"key": "value", "number": 42}
 
         result = tool._format_yaml(data)
@@ -131,7 +151,7 @@ class TestYAMLOutput:
 
     def test_format_yaml_nested(self):
         """Test YAML output preserves nested structure."""
-        tool = ConfigTool()
+        tool = ConfigDumpTool()
         data = {"database": {"host": "localhost", "port": 5432}}
 
         result = tool._format_yaml(data)
@@ -142,7 +162,7 @@ class TestYAMLOutput:
 
     def test_format_yaml_valid(self):
         """Test YAML output is valid YAML."""
-        tool = ConfigTool()
+        tool = ConfigDumpTool()
         data = {"key": "value", "nested": {"a": 1, "b": 2}}
 
         result = tool._format_yaml(data)
@@ -162,7 +182,7 @@ class TestJSONOutput:
 
     def test_format_json_simple(self):
         """Test JSON output for simple config."""
-        tool = ConfigTool()
+        tool = ConfigDumpTool()
         data = {"key": "value", "number": 42}
 
         result = tool._format_json(data)
@@ -172,7 +192,7 @@ class TestJSONOutput:
 
     def test_format_json_valid(self):
         """Test JSON output is valid JSON."""
-        tool = ConfigTool()
+        tool = ConfigDumpTool()
         data = {"key": "value", "nested": {"a": 1, "b": 2}}
 
         result = tool._format_json(data)
@@ -182,7 +202,7 @@ class TestJSONOutput:
 
     def test_format_json_indented(self):
         """Test JSON output is properly indented."""
-        tool = ConfigTool()
+        tool = ConfigDumpTool()
         data = {"key": "value"}
 
         result = tool._format_json(data)
@@ -201,7 +221,7 @@ class TestFlatOutput:
 
     def test_format_flat_simple(self):
         """Test flat output for simple config."""
-        tool = ConfigTool()
+        tool = ConfigDumpTool()
         data = {"key": "value", "number": 42}
 
         result = tool._format_flat(data)
@@ -211,7 +231,7 @@ class TestFlatOutput:
 
     def test_format_flat_nested(self):
         """Test flat output correctly flattens nested keys."""
-        tool = ConfigTool()
+        tool = ConfigDumpTool()
         data = {"database": {"host": "localhost", "port": 5432}}
 
         result = tool._format_flat(data)
@@ -221,7 +241,7 @@ class TestFlatOutput:
 
     def test_format_flat_deeply_nested(self):
         """Test flat output handles deeply nested structures."""
-        tool = ConfigTool()
+        tool = ConfigDumpTool()
         data = {"a": {"b": {"c": {"d": "value"}}}}
 
         result = tool._format_flat(data)
@@ -230,7 +250,7 @@ class TestFlatOutput:
 
     def test_format_flat_list_simple(self):
         """Test flat output for simple list values."""
-        tool = ConfigTool()
+        tool = ConfigDumpTool()
         data = {"items": ["a", "b", "c"]}
 
         result = tool._format_flat(data)
@@ -239,7 +259,7 @@ class TestFlatOutput:
 
     def test_format_flat_list_numbers(self):
         """Test flat output for list of numbers."""
-        tool = ConfigTool()
+        tool = ConfigDumpTool()
         data = {"ports": [80, 443, 8080]}
 
         result = tool._format_flat(data)
@@ -248,7 +268,7 @@ class TestFlatOutput:
 
     def test_format_flat_bool_lowercase(self):
         """Test flat output converts booleans to lowercase."""
-        tool = ConfigTool()
+        tool = ConfigDumpTool()
         data = {"enabled": True, "disabled": False}
 
         result = tool._format_flat(data)
@@ -258,7 +278,7 @@ class TestFlatOutput:
 
     def test_format_flat_none_empty(self):
         """Test flat output converts None to empty string."""
-        tool = ConfigTool()
+        tool = ConfigDumpTool()
         data = {"empty": None}
 
         result = tool._format_flat(data)
@@ -277,7 +297,7 @@ class TestSectionFiltering:
 
     def test_filter_top_level_section(self):
         """Test filtering to top-level section."""
-        tool = ConfigTool()
+        tool = ConfigDumpTool()
         tool._parsed_args = Mock(section="database")
         data = {"database": {"host": "localhost"}, "logging": {"level": "info"}}
 
@@ -287,7 +307,7 @@ class TestSectionFiltering:
 
     def test_filter_nested_section(self):
         """Test filtering to nested section."""
-        tool = ConfigTool()
+        tool = ConfigDumpTool()
         tool._parsed_args = Mock(section="database.connection")
         data = {"database": {"connection": {"host": "localhost", "port": 5432}}}
 
@@ -297,7 +317,7 @@ class TestSectionFiltering:
 
     def test_filter_nonexistent_section_returns_none(self):
         """Test filtering to nonexistent section returns None."""
-        tool = ConfigTool()
+        tool = ConfigDumpTool()
         tool._parsed_args = Mock(section="nonexistent")
         tool._logger = Mock()
         data = {"database": {"host": "localhost"}}
@@ -309,7 +329,7 @@ class TestSectionFiltering:
 
     def test_filter_no_section_returns_full_data(self):
         """Test no section filter returns full data."""
-        tool = ConfigTool()
+        tool = ConfigDumpTool()
         tool._parsed_args = Mock(section=None)
         data = {"database": {"host": "localhost"}, "logging": {"level": "info"}}
 
@@ -319,7 +339,7 @@ class TestSectionFiltering:
 
     def test_filter_scalar_value_wraps_in_dict(self):
         """Test filtering to scalar value wraps it in a dict."""
-        tool = ConfigTool()
+        tool = ConfigDumpTool()
         tool._parsed_args = Mock(section="database.host")
         data = {"database": {"host": "localhost", "port": 5432}}
 
@@ -339,7 +359,7 @@ class TestConfigLoading:
 
     def test_load_valid_config(self):
         """Test loading a valid config file."""
-        tool = ConfigTool()
+        tool = ConfigDumpTool()
 
         with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
             f.write("database:\n  host: localhost\n  port: 5432\n")
@@ -358,7 +378,7 @@ class TestConfigLoading:
 
     def test_load_missing_file_returns_none(self):
         """Test loading missing file returns None."""
-        tool = ConfigTool()
+        tool = ConfigDumpTool()
         tool._parsed_args = Mock(config_file="/nonexistent/path.yaml", no_env=True)
         tool._logger = Mock()
 
@@ -369,7 +389,7 @@ class TestConfigLoading:
 
     def test_load_invalid_yaml_returns_none(self):
         """Test loading invalid YAML returns None."""
-        tool = ConfigTool()
+        tool = ConfigDumpTool()
 
         with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
             f.write("invalid: yaml: content: [")
@@ -398,7 +418,7 @@ class TestEnvVarHandling:
 
     def test_env_overrides_applied_by_default(self, monkeypatch):
         """Test environment variables are applied by default."""
-        tool = ConfigTool()
+        tool = ConfigDumpTool()
 
         with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
             f.write("database:\n  host: localhost\n")
@@ -418,7 +438,7 @@ class TestEnvVarHandling:
 
     def test_no_env_flag_disables_overrides(self, monkeypatch):
         """Test --no-env flag disables env overrides."""
-        tool = ConfigTool()
+        tool = ConfigDumpTool()
 
         with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
             f.write("database:\n  host: localhost\n")
@@ -448,7 +468,7 @@ class TestConfigToolIntegration:
 
     def test_full_run_yaml_output(self, capsys):
         """Test full run with YAML output."""
-        tool = ConfigTool()
+        tool = ConfigDumpTool()
 
         with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
             f.write("app:\n  name: test\n  version: 1.0\n")
@@ -470,7 +490,7 @@ class TestConfigToolIntegration:
 
     def test_full_run_json_output(self, capsys):
         """Test full run with JSON output."""
-        tool = ConfigTool()
+        tool = ConfigDumpTool()
 
         with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
             f.write("app:\n  name: test\n")
@@ -492,7 +512,7 @@ class TestConfigToolIntegration:
 
     def test_full_run_flat_output(self, capsys):
         """Test full run with flat output."""
-        tool = ConfigTool()
+        tool = ConfigDumpTool()
 
         with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
             f.write("app:\n  name: test\n  port: 8080\n")
@@ -514,7 +534,7 @@ class TestConfigToolIntegration:
 
     def test_full_run_with_section(self, capsys):
         """Test full run with section filter."""
-        tool = ConfigTool()
+        tool = ConfigDumpTool()
 
         with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
             f.write("app:\n  name: test\ndb:\n  host: localhost\n")
@@ -536,7 +556,7 @@ class TestConfigToolIntegration:
 
     def test_full_run_missing_file(self):
         """Test full run with missing file returns error."""
-        tool = ConfigTool()
+        tool = ConfigDumpTool()
         tool._parsed_args = Mock(
             config_file="/nonexistent/path.yaml", no_env=True, section=None
         )
@@ -551,7 +571,7 @@ class TestConfigToolIntegration:
         # Change to a temp directory so etc/infra.yaml doesn't exist
         monkeypatch.chdir(tmp_path)
 
-        tool = ConfigTool()
+        tool = ConfigDumpTool()
         tool._parsed_args = Mock(config_file=None, no_env=True)
         tool._logger = Mock()
 
@@ -565,7 +585,7 @@ class TestConfigToolIntegration:
 
     def test_load_config_generic_exception(self, tmp_path, monkeypatch):
         """Test that generic exceptions during config load are handled."""
-        tool = ConfigTool()
+        tool = ConfigDumpTool()
         config_file = tmp_path / "test.yaml"
         config_file.write_text("valid: yaml\n")
 
@@ -591,7 +611,7 @@ class TestConfigToolIntegration:
 
     def test_format_output_json(self):
         """Test _format_output selects JSON formatter."""
-        tool = ConfigTool()
+        tool = ConfigDumpTool()
         tool._parsed_args = Mock(format="json")
         data = {"key": "value"}
 
@@ -601,7 +621,7 @@ class TestConfigToolIntegration:
 
     def test_format_output_flat(self):
         """Test _format_output selects flat formatter."""
-        tool = ConfigTool()
+        tool = ConfigDumpTool()
         tool._parsed_args = Mock(format="flat")
         data = {"key": "value"}
 
@@ -611,7 +631,7 @@ class TestConfigToolIntegration:
 
     def test_format_output_yaml_default(self):
         """Test _format_output defaults to YAML formatter."""
-        tool = ConfigTool()
+        tool = ConfigDumpTool()
         tool._parsed_args = Mock(format="yaml")
         data = {"key": "value"}
 
@@ -621,7 +641,7 @@ class TestConfigToolIntegration:
 
     def test_format_list_value_complex_objects(self):
         """Test _format_list_value falls back to JSON for complex objects."""
-        tool = ConfigTool()
+        tool = ConfigDumpTool()
         # List with complex objects (dicts)
         complex_list = [{"a": 1}, {"b": 2}]
 
@@ -633,7 +653,7 @@ class TestConfigToolIntegration:
 
     def test_full_run_returns_1_on_section_filter_failure(self):
         """Test run returns 1 when section filter fails."""
-        tool = ConfigTool()
+        tool = ConfigDumpTool()
 
         with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
             f.write("app:\n  name: test\n")
@@ -662,19 +682,20 @@ class TestSourceReport:
     """Test --source output: loaded path, winning rule, chain rendering."""
 
     def _tool_with_app(self, spec, loaded_paths, parsed_args):
-        """Build a ConfigTool with a stub App carrying spec + loaded paths."""
+        """Build a ConfigSourceTool with a stub App carrying spec + loaded paths."""
         from types import SimpleNamespace
         from unittest.mock import patch
 
-        tool = ConfigTool()
-        tool._parsed_args = Mock(source=True)
+        tool = ConfigSourceTool()
         tool._logger = Mock()
         fake_app = SimpleNamespace(
             _config_spec=spec,
             _loaded_config_paths=loaded_paths,
             _parsed_args=parsed_args,
         )
-        return tool, patch.object(ConfigTool, "app", new=property(lambda s: fake_app))
+        return tool, patch.object(
+            ConfigSourceTool, "app", new=property(lambda s: fake_app)
+        )
 
     def _spec(self, base):
         from types import SimpleNamespace
@@ -697,7 +718,9 @@ class TestSourceReport:
         assert f"loaded: {f}" in out
         assert "no chain" in out
 
-    def test_rule_5_packaged_base(self, capsys, tmp_path):
+    def test_rule_6_packaged_base(self, capsys, tmp_path, monkeypatch):
+        # cwd outside any repo so project-local (rule 4) finds nothing
+        monkeypatch.chdir(tmp_path)
         base = tmp_path / "base.yaml"
         base.write_text("k: v")
         tool, ctx = self._tool_with_app(
@@ -708,11 +731,37 @@ class TestSourceReport:
         with ctx:
             tool.run()
         out = capsys.readouterr().out
-        assert "rule:   5 (packaged base)" in out
-        assert "[x] 5. packaged base" in out
+        assert "rule:   6 (packaged base)" in out
+        assert "[x] 6. packaged base" in out
         # Rules 1-3 not marked when neither flag was passed
         assert "[ ] 1. --config direct path" in out
         assert "[ ] 3. --etc-dir alone" in out
+
+    def test_rule_4_project_local(self, capsys, tmp_path, monkeypatch):
+        # Repo-shape: <root>/etc/base.yaml, cwd inside a subdirectory
+        etc = tmp_path / "etc"
+        etc.mkdir()
+        project_hit = etc / "base.yaml"
+        project_hit.write_text("k: v")
+        sub = tmp_path / "sub"
+        sub.mkdir()
+        monkeypatch.chdir(sub)
+        # spec.base_config is the packaged base (elsewhere on disk);
+        # loaded_paths reflects what resolve_config_source picked.
+        packaged_base = tmp_path / "pkg" / "base.yaml"
+        packaged_base.parent.mkdir()
+        packaged_base.write_text("k: v")
+        tool, ctx = self._tool_with_app(
+            spec=self._spec(packaged_base),
+            loaded_paths=[(str(etc), "base.yaml", str(project_hit))],
+            parsed_args=Mock(etc_dir=None, config=None),
+        )
+        with ctx:
+            tool.run()
+        out = capsys.readouterr().out
+        assert "rule:   4 (project-local)" in out
+        assert f"[x] 4. project-local ({project_hit})" in out
+        assert "[ ] 6. packaged base" in out
 
     def test_rule_1_direct_path(self, capsys, tmp_path):
         base = tmp_path / "base.yaml"
@@ -729,8 +778,8 @@ class TestSourceReport:
         out = capsys.readouterr().out
         assert "rule:   1 (--config direct path)" in out
         assert "[x] 1. --config direct path" in out
-        # rule 5 must NOT be marked even if loaded==base by coincidence
-        assert "[ ] 5. packaged base" in out
+        # rule 6 must NOT be marked even if loaded==base by coincidence
+        assert "[ ] 6. packaged base" in out
 
     def test_rule_2_bare_filename(self, capsys, tmp_path):
         base = tmp_path / "base.yaml"

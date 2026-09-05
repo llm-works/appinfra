@@ -2,10 +2,17 @@
 # SPDX-FileCopyrightText: Copyright 2026 The appinfra Authors
 
 """
-Configuration resolution tool for the appinfra CLI.
+Configuration inspection tool for the appinfra CLI.
 
-Displays fully resolved configuration with includes expanded,
-environment variables applied, and variable substitutions completed.
+Parent tool ``config`` with two sub-tools:
+
+- ``dump`` (default): render the fully resolved configuration content
+  (YAML, JSON, or flat key=value), with includes expanded, environment
+  variables applied, and variable substitutions completed.
+- ``source``: report where the config was resolved from, which
+  precedence rule fired, and which XDG candidates were checked.
+
+Bare ``appinfra config`` runs ``dump``.
 """
 
 import argparse
@@ -18,7 +25,7 @@ import yaml  # type: ignore[import-untyped]
 
 from ...app.tools import Tool, ToolConfig
 from ...app.tracing.traceable import Traceable
-from ...config import Config, xdg_candidates
+from ...config import Config, find_project_local, xdg_candidates
 
 _PRECEDENCE_EPILOG = """\
 config-source precedence (v1, checked top-down; first match wins):
@@ -32,35 +39,35 @@ config-source precedence (v1, checked top-down; first match wins):
   3. --etc-dir /foo alone                          (etc-dir default)
      resolves to /foo/<package>.yaml.
 
-  4. First existing XDG candidate                  (user overlay)
+  4. Project-local walk-up                         (repo checkout)
+     walks up from cwd looking for etc/<base-filename>; first hit wins.
+     Stops before $HOME and filesystem root, so home dotfiles and
+     system /etc are never picked up.
+
+  5. First existing XDG candidate                  (user overlay)
      searched in $XDG_CONFIG_HOME then $XDG_CONFIG_DIRS, per-file first:
        <dir>/<namespace>/<package>.yaml
        <dir>/<namespace>/config.yaml
 
-  5. Packaged base                                 (fallback)
+  6. Packaged base                                 (fallback)
      the file registered via .with_config_spec(...).
 
---config always bypasses XDG discovery and the packaged base.
-Run `<cli> config --source` to see which rule fired and what got loaded.
+--config always bypasses project-local, XDG discovery, and the packaged base.
+
+For the canonical spec and rationale, see the config-protocol guide:
+  appinfra docs show config-protocol
 """
 
 
-class ConfigTool(Tool):
-    """
-    CLI tool to display fully resolved configuration.
-
-    Supports three output formats:
-    - yaml: YAML format (default, human-readable)
-    - json: JSON format (for programmatic consumption)
-    - flat: key=value format (for shell scripts, grep, etc.)
-    """
+class ConfigDumpTool(Tool):
+    """Render the fully resolved configuration content."""
 
     def __init__(self, parent: Traceable | None = None):
-        """Initialize the config tool."""
+        """Initialize the dump sub-tool."""
         config = ToolConfig(
-            name="config",
-            aliases=["c", "cfg"],
-            help_text="Display fully resolved configuration",
+            name="dump",
+            aliases=["d"],
+            help_text="Render the fully resolved configuration content",
             description=(
                 "Load and display the fully resolved configuration file "
                 "with all includes expanded, environment variables applied, "
@@ -71,20 +78,6 @@ class ConfigTool(Tool):
         super().__init__(parent, config)
 
     def add_args(self, parser: Any) -> None:
-        """Add command-line arguments."""
-        parser.epilog = _PRECEDENCE_EPILOG
-        parser.formatter_class = argparse.RawDescriptionHelpFormatter
-        self._add_content_args(parser)
-        parser.add_argument(
-            "--source",
-            action="store_true",
-            help=(
-                "Print where the config was resolved from + which precedence "
-                "rule fired + XDG candidates checked, instead of the content"
-            ),
-        )
-
-    def _add_content_args(self, parser: Any) -> None:
         """Add args controlling what content gets dumped and how."""
         parser.add_argument(
             "config_file",
@@ -112,11 +105,7 @@ class ConfigTool(Tool):
         )
 
     def run(self, **kwargs: Any) -> int:
-        """Execute the config resolution."""
-        if getattr(self.args, "source", False) is True:
-            print(self._render_source_report())
-            return 0
-
+        """Load, filter, format, and print the resolved config."""
         config_data = self._load_config()
         if config_data is None:
             return 1
@@ -125,8 +114,127 @@ class ConfigTool(Tool):
         if config_data is None:
             return 1
 
-        output = self._format_output(config_data)
-        print(output)
+        print(self._format_output(config_data))
+        return 0
+
+    def _load_config(self) -> dict[str, Any] | None:
+        """Load and resolve configuration file."""
+        config_path = getattr(self.args, "config_file", None) or "etc/infra.yaml"
+
+        path = Path(config_path)
+        if not path.exists():
+            self.lg.error("config file not found", extra={"path": config_path})  # type: ignore[union-attr]
+            return None
+
+        try:
+            enable_env = not getattr(self.args, "no_env", False)
+            cfg = Config(str(path), enable_env_overrides=enable_env)
+            data = cfg.to_dict()
+            return {k: v for k, v in data.items() if not k.startswith("_")}
+        except yaml.YAMLError as e:
+            self.lg.error("YAML parse error", extra={"exception": e})  # type: ignore[union-attr]
+            return None
+        except Exception as e:
+            self.lg.error("failed to load config", extra={"exception": e})  # type: ignore[union-attr]
+            return None
+
+    def _filter_section(self, data: dict[str, Any]) -> dict[str, Any] | None:
+        """Filter to a specific section if requested."""
+        section = getattr(self.args, "section", None)
+        if section is None:
+            return data
+
+        current: Any = data
+        for part in section.split("."):
+            if not isinstance(current, dict) or part not in current:
+                self.lg.error("section not found", extra={"section": section})  # type: ignore[union-attr]
+                return None
+            current = current[part]
+
+        if isinstance(current, dict):
+            return current
+        return {section.split(".")[-1]: current}
+
+    def _format_output(self, data: dict[str, Any]) -> str:
+        """Format data according to selected format."""
+        output_format = getattr(self.args, "format", "yaml")
+        if output_format == "json":
+            return self._format_json(data)
+        if output_format == "flat":
+            return self._format_flat(data)
+        return self._format_yaml(data)
+
+    def _format_yaml(self, data: dict[str, Any]) -> str:
+        """Format data as YAML."""
+        result: str = yaml.dump(
+            data,
+            default_flow_style=False,
+            sort_keys=False,
+            allow_unicode=True,
+            indent=2,
+        )
+        return result.rstrip()
+
+    def _format_json(self, data: dict[str, Any]) -> str:
+        """Format data as JSON."""
+        return json.dumps(data, indent=2, sort_keys=False)
+
+    def _format_flat(self, data: dict[str, Any]) -> str:
+        """Format data as flat key=value lines."""
+        pairs = self._flatten_dict(data)
+        return "\n".join(f"{key}={value}" for key, value in pairs)
+
+    def _flatten_dict(
+        self, data: dict[str, Any], prefix: str = ""
+    ) -> list[tuple[str, str]]:
+        """Recursively flatten a dictionary to key=value pairs."""
+        result: list[tuple[str, str]] = []
+        for key, value in data.items():
+            full_key = f"{prefix}.{key}" if prefix else key
+            if isinstance(value, dict):
+                result.extend(self._flatten_dict(value, full_key))
+            elif isinstance(value, list):
+                result.append((full_key, self._format_list_value(value)))
+            elif value is None:
+                result.append((full_key, ""))
+            elif isinstance(value, bool):
+                result.append((full_key, str(value).lower()))
+            else:
+                result.append((full_key, str(value)))
+        return result
+
+    def _format_list_value(self, value: list[Any]) -> str:
+        """Format a list value for flat output."""
+        if all(isinstance(v, (str, int, float, bool)) for v in value):
+            return ",".join(str(v) for v in value)
+        return json.dumps(value)
+
+
+class ConfigSourceTool(Tool):
+    """Report which precedence rule chose the loaded config."""
+
+    def __init__(self, parent: Traceable | None = None):
+        """Initialize the source sub-tool."""
+        config = ToolConfig(
+            name="source",
+            aliases=["s"],
+            help_text="Report config source + precedence chain",
+            description=(
+                "Print where the config was resolved from, which precedence "
+                "rule fired, and which XDG candidates were checked. Reports "
+                "provenance, not content — use `dump` for the resolved YAML."
+            ),
+        )
+        super().__init__(parent, config)
+
+    def add_args(self, parser: Any) -> None:
+        """Show the precedence-chain reference at the top of --help output."""
+        parser.description = f"{parser.description or ''}\n\n{_PRECEDENCE_EPILOG}"
+        parser.formatter_class = argparse.RawDescriptionHelpFormatter
+
+    def run(self, **kwargs: Any) -> int:
+        """Print the source-report."""
+        print(self._render_source_report())
         return 0
 
     def _render_source_report(self) -> str:
@@ -172,7 +280,7 @@ class ConfigTool(Tool):
         custom_cfg: str | None,
         loaded_path: Path | None,
     ) -> str:
-        """Identify which precedence rule (1-5) produced the loaded path."""
+        """Identify which precedence rule (1-6) produced the loaded path."""
         if custom_cfg is not None:
             if self._is_direct_path(custom_cfg):
                 return "1 (--config direct path)"
@@ -180,12 +288,19 @@ class ConfigTool(Tool):
             return f"2 (--config bare + {where})"
         if custom_etc is not None:
             return "3 (--etc-dir alone)"
+        project_local = find_project_local(spec.base_config)
+        if (
+            loaded_path is not None
+            and project_local is not None
+            and str(project_local) == str(loaded_path)
+        ):
+            return "4 (project-local)"
         candidates = xdg_candidates(spec.namespace, spec.package)
         if loaded_path is not None and any(
             str(c) == str(loaded_path) for c in candidates
         ):
-            return "4 (XDG overlay)"
-        return "5 (packaged base)"
+            return "5 (XDG overlay)"
+        return "6 (packaged base)"
 
     def _is_direct_path(self, s: str) -> bool:
         """Match paths treated as direct by the v1 spec."""
@@ -208,136 +323,87 @@ class ConfigTool(Tool):
         """Format the checkbox-style precedence chain lines.
 
         Only the winning rule is marked ``[x]``; others are ``[ ]``. On the
-        XDG line the winner is marked ``[x]``, existing-but-not-chosen
-        candidates get ``[·]``, missing candidates stay ``[ ]``.
+        project-local and XDG lines the winner is marked ``[x]``,
+        existing-but-not-chosen entries get ``[·]``, missing entries stay
+        ``[ ]``.
         """
-        won = {"1": False, "2": False, "3": False, "4": False, "5": False}
+        won = {str(i): False for i in range(1, 7)}
         won[winning[:1]] = True
-
-        def mark(rule: str) -> str:
-            return "[x]" if won[rule] else "[ ]"
-
-        rule1_shown = custom_cfg if custom_cfg is not None else ""
-        rule2_shown = custom_cfg if custom_cfg is not None else ""
-        rule3_shown = custom_etc if custom_etc is not None else ""
+        mark = lambda r: "[x]" if won[r] else "[ ]"  # noqa: E731
+        cfg = custom_cfg or ""
+        etc = custom_etc or ""
+        loaded_str = str(loaded_path) if loaded_path else ""
 
         out = [
             f"  {mark('1')} 1. --config direct path"
-            + (f" ({rule1_shown})" if won["1"] else ""),
+            + (f" ({cfg})" if won["1"] else ""),
             f"  {mark('2')} 2. --config bare filename"
-            + (f" ({rule2_shown})" if won["2"] else ""),
+            + (f" ({cfg})" if won["2"] else ""),
             f"  {mark('3')} 3. --etc-dir alone"
-            + (f" ({rule3_shown}/{spec.package}.yaml)" if won["3"] else ""),
-            "  4. XDG candidates:",
+            + (f" ({etc}/{spec.package}.yaml)" if won["3"] else ""),
+            self._project_local_line(spec, won["4"], loaded_str),
+            "  5. XDG candidates:",
         ]
-        loaded_str = str(loaded_path) if loaded_path else ""
-        for c in xdg_candidates(spec.namespace, spec.package):
-            exists = c.exists()
-            matched = won["4"] and str(c) == loaded_str
-            glyph = "[x]" if matched else ("[·]" if exists else "[ ]")
-            out.append(f"       {glyph} {c}")
+        out.extend(self._xdg_lines(spec, won["5"], loaded_str))
         base = Path(str(spec.base_config)).expanduser().resolve()
-        out.append(f"  {mark('5')} 5. packaged base ({base})")
+        out.append(f"  {mark('6')} 6. packaged base ({base})")
         return out
 
-    def _load_config(self) -> dict[str, Any] | None:
-        """Load and resolve configuration file."""
-        config_path = self.args.config_file
+    def _project_local_line(self, spec: Any, won: bool, loaded_str: str) -> str:
+        """Format the rule-4 project-local line for the chain rendering."""
+        project_local = find_project_local(spec.base_config)
+        if project_local is None:
+            return "  [ ] 4. project-local (no etc/<base-filename> above cwd)"
+        glyph = "[x]" if (won and str(project_local) == loaded_str) else "[·]"
+        return f"  {glyph} 4. project-local ({project_local})"
 
-        if config_path is None:
-            config_path = "etc/infra.yaml"
+    def _xdg_lines(self, spec: Any, won: bool, loaded_str: str) -> list[str]:
+        """Format the rule-5 XDG candidate lines for the chain rendering."""
+        lines: list[str] = []
+        for c in xdg_candidates(spec.namespace, spec.package):
+            matched = won and str(c) == loaded_str
+            glyph = "[x]" if matched else ("[·]" if c.exists() else "[ ]")
+            lines.append(f"       {glyph} {c}")
+        return lines
 
-        path = Path(config_path)
-        if not path.exists():
-            self.lg.error("config file not found", extra={"path": config_path})  # type: ignore[union-attr]
-            return None
 
-        try:
-            enable_env = not getattr(self.args, "no_env", False)
-            cfg = Config(str(path), enable_env_overrides=enable_env)
-            data = cfg.to_dict()
-            # Filter out internal Config attributes (start with underscore)
-            return {k: v for k, v in data.items() if not k.startswith("_")}
-        except yaml.YAMLError as e:
-            self.lg.error("YAML parse error", extra={"exception": e})  # type: ignore[union-attr]
-            return None
-        except Exception as e:
-            self.lg.error("failed to load config", extra={"exception": e})  # type: ignore[union-attr]
-            return None
+class ConfigTool(Tool):
+    """
+    Parent tool for configuration inspection.
 
-    def _filter_section(self, data: dict[str, Any]) -> dict[str, Any] | None:
-        """Filter to a specific section if requested."""
-        section = getattr(self.args, "section", None)
-        if section is None:
-            return data
+    Bare ``appinfra config`` (aka ``c``, ``cfg``) runs ``dump``; ``source``
+    reports which precedence rule fired instead of the resolved content.
+    """
 
-        current: Any = data
-        for part in section.split("."):
-            if not isinstance(current, dict) or part not in current:
-                self.lg.error("section not found", extra={"section": section})  # type: ignore[union-attr]
-                return None
-            current = current[part]
-
-        if isinstance(current, dict):
-            return current
-        else:
-            return {section.split(".")[-1]: current}
-
-    def _format_output(self, data: dict[str, Any]) -> str:
-        """Format data according to selected format."""
-        output_format = self.args.format
-
-        if output_format == "json":
-            return self._format_json(data)
-        elif output_format == "flat":
-            return self._format_flat(data)
-        else:
-            return self._format_yaml(data)
-
-    def _format_yaml(self, data: dict[str, Any]) -> str:
-        """Format data as YAML."""
-        result: str = yaml.dump(
-            data,
-            default_flow_style=False,
-            sort_keys=False,
-            allow_unicode=True,
-            indent=2,
+    def __init__(self, parent: Traceable | None = None):
+        """Initialize the parent + register sub-tools."""
+        config = ToolConfig(
+            name="config",
+            aliases=["c", "cfg"],
+            help_text="Inspect configuration (dump content or report source)",
+            description=(
+                "Configuration inspection. `dump` (default) renders the "
+                "fully resolved YAML/JSON/flat content; `source` reports "
+                "which precedence rule fired and which candidates got checked."
+            ),
         )
-        return result.rstrip()
+        super().__init__(parent, config)
 
-    def _format_json(self, data: dict[str, Any]) -> str:
-        """Format data as JSON."""
-        return json.dumps(data, indent=2, sort_keys=False)
+        # `dump` registered first so it becomes the group default —
+        # bare `appinfra c` runs it instead of printing help.
+        self.add_tool(ConfigDumpTool(self), default="dump")
+        self.add_tool(ConfigSourceTool(self))
 
-    def _format_flat(self, data: dict[str, Any]) -> str:
-        """Format data as flat key=value lines."""
-        pairs = self._flatten_dict(data)
-        return "\n".join(f"{key}={value}" for key, value in pairs)
+    def add_args(self, parser: Any) -> None:
+        """Point to the source sub-tool + docs guide for further reading."""
+        parser.description = (
+            f"{parser.description or ''}\n\n"
+            "For deeper reference:\n"
+            "  config source --help              precedence chain reference\n"
+            "  appinfra docs show config-protocol  full guide + rationale"
+        )
+        parser.formatter_class = argparse.RawDescriptionHelpFormatter
 
-    def _flatten_dict(
-        self, data: dict[str, Any], prefix: str = ""
-    ) -> list[tuple[str, str]]:
-        """Recursively flatten a dictionary to key=value pairs."""
-        result: list[tuple[str, str]] = []
-
-        for key, value in data.items():
-            full_key = f"{prefix}.{key}" if prefix else key
-
-            if isinstance(value, dict):
-                result.extend(self._flatten_dict(value, full_key))
-            elif isinstance(value, list):
-                result.append((full_key, self._format_list_value(value)))
-            elif value is None:
-                result.append((full_key, ""))
-            elif isinstance(value, bool):
-                result.append((full_key, str(value).lower()))
-            else:
-                result.append((full_key, str(value)))
-
-        return result
-
-    def _format_list_value(self, value: list[Any]) -> str:
-        """Format a list value for flat output."""
-        if all(isinstance(v, (str, int, float, bool)) for v in value):
-            return ",".join(str(v) for v in value)
-        return json.dumps(value)
+    def run(self, **kwargs: Any) -> int:
+        """Dispatch to the selected sub-tool (defaults to `dump`)."""
+        return self.group.run(**kwargs)

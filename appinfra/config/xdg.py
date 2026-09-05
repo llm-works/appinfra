@@ -131,7 +131,7 @@ def resolve_config_source(
         etc = Path(str(custom_etc_dir)).expanduser().resolve()
         return (etc / f"{package}.yaml", etc)
 
-    project_local = _find_project_local(base_config)
+    project_local = find_project_local(base_config)
     if project_local is not None:
         return (project_local, project_local.parent)
 
@@ -143,7 +143,7 @@ def resolve_config_source(
     return (base, include_root_for(base_config))
 
 
-def _find_project_local(base_config: Path | str) -> Path | None:
+def find_project_local(base_config: Path | str) -> Path | None:
     """Walk up from cwd looking for ``etc/<base_config.name>``.
 
     Returns the first hit as an absolute path, or ``None`` if none found.

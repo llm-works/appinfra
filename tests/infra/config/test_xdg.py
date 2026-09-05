@@ -614,7 +614,7 @@ class TestProjectLocalResolution:
 
     def test_empty_filename_short_circuits(self, tmp_path, monkeypatch, clean_xdg_env):
         """A base_config whose .name is empty (e.g. Path('/')) must not probe."""
-        from appinfra.config.xdg import _find_project_local
+        from appinfra.config.xdg import find_project_local
 
         home = tmp_path / "home"
         home.mkdir()
@@ -622,7 +622,7 @@ class TestProjectLocalResolution:
         (home / "project").mkdir()
         monkeypatch.chdir(home / "project")
         # Path('/').name == '' — guard hits, returns None without any probe
-        assert _find_project_local(Path("/")) is None
+        assert find_project_local(Path("/")) is None
 
     def test_project_local_uses_base_config_name_not_package(
         self, tmp_path, monkeypatch, clean_xdg_env
@@ -651,21 +651,21 @@ class TestProjectLocalResolution:
 
     def test_returns_none_when_cwd_raises_oserror(self, monkeypatch):
         """OSError from Path.cwd() → None, no crash (matches 'Never raises' contract)."""
-        from appinfra.config.xdg import _find_project_local
+        from appinfra.config.xdg import find_project_local
 
         def raise_oserror():
             raise OSError("cwd deleted")
 
         monkeypatch.setattr(Path, "cwd", raise_oserror)
-        assert _find_project_local(Path("/pkg/etc/app.yaml")) is None
+        assert find_project_local(Path("/pkg/etc/app.yaml")) is None
 
     def test_returns_none_when_home_raises_runtimeerror(self, monkeypatch, tmp_path):
         """RuntimeError from Path.home() → None, no crash."""
-        from appinfra.config.xdg import _find_project_local
+        from appinfra.config.xdg import find_project_local
 
         def raise_runtimeerror():
             raise RuntimeError("HOME unset")
 
         monkeypatch.chdir(tmp_path)
         monkeypatch.setattr(Path, "home", raise_runtimeerror)
-        assert _find_project_local(Path("/pkg/etc/app.yaml")) is None
+        assert find_project_local(Path("/pkg/etc/app.yaml")) is None
