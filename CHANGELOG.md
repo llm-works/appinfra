@@ -21,6 +21,10 @@ For API stability guarantees and deprecation policy, see
   (stops before `$HOME`) and loads the first hit. Restores the `./etc/`
   auto-detection that predates the discovery helper; a checkout's config
   wins over XDG. See [Config Protocol](appinfra/docs/guides/config-protocol.md).
+- `Config.from_spec(namespace, package_module)`: library-mode constructor for
+  packages that ship `<package_module>/etc/<package>.yaml` (default filename:
+  module name with `_→-`). Chains `resolve_config_source` + `Config`. See
+  [Library-Mode Bootstrap](appinfra/docs/guides/library-mode-bootstrap.md).
 
 ### Changed
 - `pgserver` defaults: `name` `infra-pg` → `llm-works-pg`, `port` `7432` →
