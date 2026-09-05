@@ -2085,9 +2085,13 @@ class TestConfigProjectRootOverride:
 
 @pytest.fixture
 def clean_xdg_env(monkeypatch):
-    """Ensure no XDG_* env vars leak in from the host."""
+    """Ensure no XDG_* or INFRA_* env vars leak in from the host."""
     monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
     monkeypatch.delenv("XDG_CONFIG_DIRS", raising=False)
+    # CI sets INFRA_* vars that would fail against minimal test configs
+    for key in list(os.environ):
+        if key.startswith("INFRA_"):
+            monkeypatch.delenv(key, raising=False)
 
 
 def _make_pkg_module(tmp_path: Path, module_name: str) -> ModuleType:
@@ -2165,7 +2169,7 @@ class TestConfigFromSpec:
         cfg = Config.from_spec("myorg", mod, config_file=str(direct))
         assert cfg.app == "direct"
 
-    def test_xdg_overlay_wins_over_bundled(self, tmp_path, monkeypatch):
+    def test_xdg_overlay_wins_over_bundled(self, tmp_path, clean_xdg_env, monkeypatch):
         """When no overrides, an existing XDG overlay wins over the bundled base."""
         mod = _make_pkg_module(tmp_path, "mypkg")
         bundled_etc = tmp_path / "mypkg" / "etc"
