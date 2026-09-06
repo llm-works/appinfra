@@ -41,6 +41,12 @@ class ThreadRunner(Runner):
         super().__init__(service, policy)
         self._thread: threading.Thread | None = None
         self._exception: BaseException | None = None
+        # Set by _run() once execute() has returned. Thread.is_alive() on
+        # Python 3.13+ stays True until the OS thread handle is marked done,
+        # which happens after the GIL is released; polling it alone lets
+        # wait_healthy() observe a finished thread as alive and report
+        # RUNNING for a service that exited during startup.
+        self._exited = False
 
     def start(self) -> None:
         """Start the service in a background thread."""
@@ -65,6 +71,7 @@ class ThreadRunner(Runner):
 
         # Execute phase
         self._exception = None
+        self._exited = False
         self._thread = threading.Thread(
             target=self._run,
             name=f"svc-{self.name}",
@@ -96,6 +103,10 @@ class ThreadRunner(Runner):
                     self._transition(State.FAILED)
             except InvalidTransitionError:
                 pass  # Already transitioned by stop()
+        finally:
+            # Last, so _exception and the state are settled before is_alive()
+            # reports the exit.
+            self._exited = True
 
     def stop(self, timeout: float = 5.0) -> None:
         """Stop the service."""
@@ -128,7 +139,7 @@ class ThreadRunner(Runner):
 
     def is_alive(self) -> bool:
         """Check if thread is running."""
-        return self._thread is not None and self._thread.is_alive()
+        return self._thread is not None and not self._exited and self._thread.is_alive()
 
     def is_healthy(self) -> bool:
         """Check if service is healthy."""

@@ -13,12 +13,17 @@
 #   INFRA_PYTEST_COVERAGE_THRESHOLD - Coverage threshold for make check (default: 95.0)
 #                                     Set to 0 to disable coverage checking entirely
 #   INFRA_PYTEST_TESTS_DIR          - Tests directory (default: tests)
+#   INFRA_PYTEST_WORKERS            - pytest-xdist worker count, auto or N (default: empty = no -n flag)
+#                                     Never applied to test.perf targets. Not read by check.sh
+#                                     (make check), which runs suites concurrently with its own
+#                                     per-suite worker heuristic
 #   INFRA_PYTEST_ARGS               - Additional pytest arguments (default: empty)
 #   INFRA_DEV_SKIP_TARGETS          - Space-separated list of targets to skip (project provides own)
 #                                     Supported: test.unit test.integration test.e2e test.perf test.security
 
 # Configuration (defaults set in Makefile.config)
 INFRA_PYTEST_TESTS_DIR ?= tests
+INFRA_PYTEST_WORKERS ?=
 INFRA_PYTEST_ARGS ?=
 
 # Coverage output directory (under project root)
@@ -41,9 +46,20 @@ define _check_pytest
 }
 endef
 
+# pytest-xdist worker argument (empty when INFRA_PYTEST_WORKERS is unset)
+_PYTEST_WORKERS_ARG := $(if $(INFRA_PYTEST_WORKERS),-n $(INFRA_PYTEST_WORKERS),)
+
 # Helper to run pytest, treating "no tests collected" (exit 5) as success
 # Usage: $(call run_pytest,args)
 define run_pytest
+$(PYTHON) -m pytest $(_PYTEST_WORKERS_ARG) $(1) || { ec=$$?; [ $$ec -eq 5 ] && exit 0 || exit $$ec; }
+endef
+
+# Same, ignoring INFRA_PYTEST_WORKERS. Performance targets always run
+# in-process: test.perf.v passes -s, and xdist workers do not relay
+# uncaptured output.
+# Usage: $(call run_pytest_serial,args)
+define run_pytest_serial
 $(PYTHON) -m pytest $(1) || { ec=$$?; [ $$ec -eq 5 ] && exit 0 || exit $$ec; }
 endef
 
@@ -78,12 +94,12 @@ endif # skip test.integration
 ifeq ($(filter test.perf,$(INFRA_DEV_SKIP_TARGETS)),)
 test.perf:: ## runs performance tests (benchmarks, load tests)
 	@echo "* running performance tests..."
-	@$(call run_pytest,tests/ -m performance -qq --tb=short)
+	@$(call run_pytest_serial,tests/ -m performance -qq --tb=short)
 	@echo "* performance tests done"
 
 test.perf.v:: ## runs performance tests (verbose)
 	@echo "* running performance tests... (verbose)"
-	@$(call run_pytest,tests/ -m performance -v -s)
+	@$(call run_pytest_serial,tests/ -m performance -v -s)
 	@echo "* performance tests done"
 endif # skip test.perf
 .PHONY: test.perf test.perf.v

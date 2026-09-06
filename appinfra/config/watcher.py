@@ -21,6 +21,9 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from ..log import Logger
 
+# Bound on Observer.stop() and Observer.join(); see ConfigWatcher._stop_observer.
+_OBSERVER_STOP_TIMEOUT_S = 2.0
+
 
 class ConfigWatcher:
     """
@@ -80,6 +83,14 @@ class ConfigWatcher:
         self._debounce_timer: threading.Timer | None = None
         self._lock = threading.RLock()
         self._running = False
+        # Bumped by start() and stop(). A reload carries the generation it
+        # began under and stops writing state or calling callbacks once the
+        # watcher has moved past it.
+        self._generation = 0
+        # Thread idents of reloads currently running outside the lock, and the
+        # condition stop() waits on until they finish.
+        self._reloads_in_flight: set[int] = set()
+        self._reload_done = threading.Condition(self._lock)
         self._on_change: Callable[[dict[str, Any]], None] | None = None
         self._watched_files: set[Path] = set()  # All files to watch (main + includes)
         self._watched_dirs: set[Path] = set()  # Directories being watched
@@ -154,10 +165,20 @@ class ConfigWatcher:
                 self._config_paths.append(path)
         return self
 
-    def _is_watched_file(self, path: Path) -> bool:
-        """Thread-safe check if a path is in the watched files set."""
+    def _handle_file_event(self, handler: Any, path: Path) -> None:
+        """Schedule a reload for a file event, if it is still relevant.
+
+        The handler identity check, the watched-file check, and the
+        scheduling run under one lock acquisition, so a handler from a run
+        that stop() ended cannot pass the check, pause across a restart, and
+        then schedule a reload against the next run's state.
+        """
         with self._lock:
-            return path in self._watched_files
+            if handler is not self._file_handler:
+                return
+            if path not in self._watched_files:
+                return
+            self._on_file_changed()
 
     def _create_file_handler(self) -> Any:  # pragma: no cover
         """Create watchdog event handler for config file changes."""
@@ -169,10 +190,8 @@ class ConfigWatcher:
             def on_modified(self, event: Any) -> None:
                 if event.is_directory:
                     return
-                modified_path = Path(event.src_path).resolve()
-                # Trigger reload if ANY watched file changes (main or includes)
-                if watcher._is_watched_file(modified_path):
-                    watcher._on_file_changed()
+                # Reload if ANY watched file changes (main or includes)
+                watcher._handle_file_event(self, Path(event.src_path).resolve())
 
         return ConfigFileHandler()
 
@@ -216,8 +235,9 @@ class ConfigWatcher:
 
         self._watched_dirs = new_dirs
 
-    def start(self) -> None:
-        """Start watching for file changes."""
+    @staticmethod
+    def _observer_class() -> Callable[[], Any]:
+        """Import watchdog's Observer, with an install hint when it is missing."""
         try:
             from watchdog.observers import Observer
         except ImportError:
@@ -225,6 +245,14 @@ class ConfigWatcher:
                 "watchdog is required for hot-reload. "
                 "Install with: pip install appinfra[hotreload]"
             ) from None
+        # Typed here so mypy sees the same return type whether or not the
+        # watchdog stubs are installed.
+        observer_cls: Callable[[], Any] = Observer
+        return observer_cls
+
+    def start(self) -> None:
+        """Start watching for file changes."""
+        observer_cls = self._observer_class()
 
         with self._lock:  # pragma: no cover
             if self._running:
@@ -235,7 +263,7 @@ class ConfigWatcher:
             # Get all source files (main config + includes)
             self._watched_files = self._get_source_files_from_config()
 
-            self._observer = Observer()
+            self._observer = observer_cls()
             # Create single shared handler instance
             self._file_handler = self._create_file_handler()
             # Watch all directories containing source files
@@ -247,6 +275,7 @@ class ConfigWatcher:
                 )
                 self._dir_watches[dir_path] = watch
             self._observer.start()
+            self._generation += 1
             self._running = True
 
     def stop(self) -> None:
@@ -256,16 +285,49 @@ class ConfigWatcher:
             if self._debounce_timer is not None:
                 self._debounce_timer.cancel()
                 self._debounce_timer = None
-            if self._observer is not None:  # pragma: no cover
-                self._observer.stop()
-                self._observer.join(timeout=2.0)
-                self._observer = None
+            observer, self._observer = self._observer, None
             self._running = False
+            self._generation += 1
             self._watched_files = set()
             self._watched_dirs = set()
             self._dir_watches = {}
             self._file_handler = None
             self._last_config_hash = None
+            # A reload that began before this stop() may still be running its
+            # callbacks outside the lock. Wait for it, so no callback outlives
+            # stop(). The current thread is excluded so a callback that calls
+            # stop() does not wait on itself.
+            me = threading.get_ident()
+            while self._reloads_in_flight - {me}:
+                self._reload_done.wait()
+        # Outside the lock: the observer's dispatcher may be inside the file
+        # handler waiting for it, and Observer.stop() cannot complete until
+        # that dispatcher releases the observer's own lock.
+        if observer is not None:
+            self._stop_observer(observer)
+
+    def _stop_observer(self, observer: Any) -> None:
+        """Stop the watchdog observer without letting it block the caller.
+
+        Observer.stop() joins every emitter thread with no timeout. The
+        FSEvents emitter on macOS registers its run loop from its own
+        thread; a stop() that lands before that registration is a silent
+        no-op, the emitter then blocks in CFRunLoopRun for good, and the
+        join never returns. Upstream report:
+        https://github.com/gorakhargosh/watchdog/issues/64
+        """
+        stopper = threading.Thread(
+            target=observer.stop, name="config-watcher-stop", daemon=True
+        )
+        stopper.start()
+        stopper.join(timeout=_OBSERVER_STOP_TIMEOUT_S)
+        if stopper.is_alive():
+            self._lg.warning(
+                "file observer did not stop in time; abandoning its threads",
+                extra={"timeout_s": _OBSERVER_STOP_TIMEOUT_S},
+            )
+            return
+        observer.join(timeout=_OBSERVER_STOP_TIMEOUT_S)
 
     def is_running(self) -> bool:
         """Check if watcher is active."""
@@ -280,6 +342,9 @@ class ConfigWatcher:
         final state after rapid changes (e.g., editor save-all).
         """
         with self._lock:
+            if not self._running:
+                return  # late event from an observer that stop() has released
+
             # Cancel any pending timer
             if self._debounce_timer is not None:
                 self._debounce_timer.cancel()
@@ -287,10 +352,33 @@ class ConfigWatcher:
             # Schedule reload after debounce period
             self._debounce_timer = threading.Timer(
                 self._debounce_ms / 1000.0,  # Convert ms to seconds
-                self._reload_config,
+                self._debounced_reload,
             )
             self._debounce_timer.daemon = True
             self._debounce_timer.start()
+
+    def _debounced_reload(self) -> None:
+        """Timer target: reload unless stop() ran while the timer was pending.
+
+        The reload and its callbacks run outside the watcher lock. The
+        reload is tracked as in flight so stop() can wait for it, and it
+        carries the generation it began under so it stops writing state or
+        calling callbacks once stop() or start() has moved the watcher on.
+        reload_now() bypasses this on purpose; it is an explicit manual
+        trigger.
+        """
+        me = threading.get_ident()
+        with self._lock:
+            if not self._running:
+                return
+            generation = self._generation
+            self._reloads_in_flight.add(me)
+        try:
+            self._reload_config(generation)
+        finally:
+            with self._lock:
+                self._reloads_in_flight.discard(me)
+                self._reload_done.notify_all()
 
     def _compute_config_hash(self, config_dict: dict[str, Any]) -> str:
         """Compute stable hash of config dict for change detection."""
@@ -327,8 +415,14 @@ class ConfigWatcher:
                 )
         return merged_dict, last_config
 
-    def _reload_config(self) -> None:
-        """Reload configuration from file(s) and notify callbacks."""
+    def _reload_config(self, generation: int) -> None:
+        """Reload configuration from file(s) and notify callbacks.
+
+        Args:
+            generation: the watcher generation this reload belongs to. State
+                writes and callbacks are skipped once start() or stop() has
+                moved the watcher past it.
+        """
         if not self._config_paths:
             return
 
@@ -340,21 +434,41 @@ class ConfigWatcher:
             # Content-based change detection: skip if unchanged
             new_hash = self._compute_config_hash(merged_dict)
             with self._lock:
+                if self._generation != generation:
+                    return
                 if new_hash == self._last_config_hash:
                     self._lg.debug("config unchanged, skipping reload")
                     return
                 self._last_config_hash = new_hash
 
-            self._invoke_on_change_callback(merged_dict)
-            if last_config is not None:
-                self._update_watched_sources(last_config)
-            self._notify_section_callbacks_from_dict(merged_dict)
+            self._apply_reload(merged_dict, last_config, generation)
 
         except Exception as e:
             self._lg.error(
                 "failed to reload config, keeping previous config",
                 extra={"exception": e},
             )
+
+    def _apply_reload(
+        self, merged_dict: dict[str, Any], last_config: Any, generation: int
+    ) -> None:
+        """Run the callbacks and refresh watched sources for a loaded config.
+
+        Callbacks run outside the watcher lock. Each step re-checks the
+        generation, so a stop() or start() that lands mid-reload ends the
+        reload at the next step.
+        """
+        if self._stale(generation):
+            return
+        self._invoke_on_change_callback(merged_dict)
+        if last_config is not None:
+            self._update_watched_sources(last_config, generation)
+        self._notify_section_callbacks_from_dict(merged_dict, generation)
+
+    def _stale(self, generation: int) -> bool:
+        """Whether start() or stop() has moved the watcher past generation."""
+        with self._lock:
+            return self._generation != generation
 
     def _invoke_on_change_callback(self, config_dict: dict[str, Any]) -> None:
         """Invoke the on_change callback with error handling."""
@@ -366,19 +480,25 @@ class ConfigWatcher:
         except Exception as e:
             self._lg.error("on_change callback failed", extra={"exception": e})
 
-    def _update_watched_sources(self, config: Any) -> None:
+    def _update_watched_sources(self, config: Any, generation: int) -> None:
         """Update watched files in case includes changed."""
         # Get source files from all configs (handles includes)
         new_source_files = self._get_source_files_from_config()
         with self._lock:
+            if self._generation != generation:
+                return
             self._watched_files = new_source_files
             self._update_watched_directories()
 
-    def _notify_section_callbacks_from_dict(self, config_dict: dict[str, Any]) -> None:
+    def _notify_section_callbacks_from_dict(
+        self, config_dict: dict[str, Any], generation: int
+    ) -> None:
         """Notify section callbacks using a merged config dict."""
         from ..dot_dict import DotDict
 
         with self._lock:
+            if self._generation != generation:
+                return
             section_callbacks = {
                 section: list(callbacks)
                 for section, callbacks in self._section_callbacks.items()
@@ -459,4 +579,6 @@ class ConfigWatcher:
 
         Useful for testing or manual trigger without file modification.
         """
-        self._reload_config()
+        with self._lock:
+            generation = self._generation
+        self._reload_config(generation)

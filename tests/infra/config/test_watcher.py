@@ -139,6 +139,7 @@ class TestConfigWatcherDebounce:
         config_file.write_text("logging:\n  level: info\n")
 
         watcher.configure("test.yaml", debounce_ms=500)
+        watcher._running = True
 
         # Simulate rapid file changes
         watcher._last_reload = time.time() * 1000  # Set last reload to now
@@ -147,10 +148,10 @@ class TestConfigWatcherDebounce:
 
         original_reload = watcher._reload_config
 
-        def counting_reload():
+        def counting_reload(generation):
             nonlocal reload_count
             reload_count += 1
-            original_reload()
+            original_reload(generation)
 
         watcher._reload_config = counting_reload
 
@@ -454,21 +455,25 @@ class TestConfigWatcherIntegration:
 
         watcher = ConfigWatcher(mock_logger, etc_dir=tmp_path)
         watcher.configure("test.yaml", debounce_ms=0)  # No debounce
+        watcher._running = True
 
         reload_count = 0
+        reloaded = threading.Event()
 
         original_reload = watcher._reload_config
 
-        def counting_reload():
+        def counting_reload(generation):
             nonlocal reload_count
             reload_count += 1
-            original_reload()
+            original_reload(generation)
+            reloaded.set()
 
         watcher._reload_config = counting_reload
 
-        # Should not be debounced with debounce_ms=0
+        # Should not be debounced with debounce_ms=0; the timer runs on its own thread
         watcher._on_file_changed()
 
+        assert reloaded.wait(timeout=1.0), "reload not called within timeout"
         assert reload_count == 1
 
 
@@ -486,15 +491,16 @@ class TestConfigWatcherReloadPaths:
 
         watcher = ConfigWatcher(mock_logger, etc_dir=tmp_path)
         watcher.configure("test.yaml", debounce_ms=0)  # No debounce
+        watcher._running = True
         watcher._last_reload = 0  # Reset last reload time to distant past
 
         reload_called = []
         reload_event = threading.Event()
         original_reload = watcher._reload_config
 
-        def tracking_reload():
+        def tracking_reload(generation):
             reload_called.append(True)
-            original_reload()
+            original_reload(generation)
             reload_event.set()
 
         watcher._reload_config = tracking_reload
@@ -512,7 +518,7 @@ class TestConfigWatcherReloadPaths:
         # Don't configure, so _config_path is None
 
         # Should not raise - just return early
-        watcher._reload_config()
+        watcher._reload_config(watcher._generation)
 
         # No error means success
 
@@ -647,7 +653,7 @@ class TestConfigWatcherIncludedFiles:
         config_file.write_text('logging: !include "./new_logging.yaml"\n')
 
         # Trigger reload
-        watcher._reload_config()
+        watcher._reload_config(watcher._generation)
 
         # _watched_files should now include the new file
         assert new_logging_file.resolve() in watcher._watched_files
@@ -666,16 +672,24 @@ class TestConfigWatcherIncludedFiles:
 
         watcher = ConfigWatcher(mock_logger, etc_dir=tmp_path)
         watcher.configure("config.yaml", debounce_ms=0)
+        watcher._running = True
         watcher._watched_files = {config_file.resolve(), logging_file.resolve()}
         watcher._last_reload = 0
 
         # Mock the reload method
         reload_calls = []
+        reloaded = threading.Event()
         original_reload = watcher._reload_config
-        watcher._reload_config = lambda: reload_calls.append(True)
+
+        def recording_reload(generation):
+            reload_calls.append(True)
+            reloaded.set()
+
+        watcher._reload_config = recording_reload
 
         try:
             handler = watcher._create_file_handler()
+            watcher._file_handler = handler
 
             # Create mock event for included file modification
             mock_event = MagicMock()
@@ -685,7 +699,8 @@ class TestConfigWatcherIncludedFiles:
             # Trigger handler
             handler.on_modified(mock_event)
 
-            # Should have triggered reload
+            # Should have triggered reload; the debounce timer runs on its own thread
+            assert reloaded.wait(timeout=1.0), "reload not called within timeout"
             assert len(reload_calls) == 1
         finally:
             watcher._reload_config = original_reload
@@ -956,6 +971,245 @@ app:
 
         # Callback should not be called (path goes through non-dict)
         assert results == []
+
+
+@pytest.mark.unit
+@pytest.mark.usefixtures("clean_env")
+class TestConfigWatcherStopBounded:
+    """stop() returns even when the observer's own stop() never does."""
+
+    def test_stop_returns_when_observer_stop_blocks(
+        self, tmp_path, mock_logger, monkeypatch
+    ):
+        """A blocking Observer.stop() is abandoned after the bound, with a warning."""
+        import time
+
+        import appinfra.config.watcher as watcher_mod
+
+        release = threading.Event()
+
+        class BlockingObserver:
+            def stop(self) -> None:
+                release.wait()
+
+            def join(self, timeout: float | None = None) -> None:
+                raise AssertionError("join() must not run after an abandoned stop()")
+
+        monkeypatch.setattr(watcher_mod, "_OBSERVER_STOP_TIMEOUT_S", 0.2)
+        watcher = ConfigWatcher(mock_logger, etc_dir=tmp_path)
+        watcher._observer = BlockingObserver()
+        watcher._running = True
+
+        try:
+            started = time.monotonic()
+            watcher.stop()
+            elapsed = time.monotonic() - started
+        finally:
+            release.set()
+
+        assert elapsed < 1.0
+        assert watcher.is_running() is False
+        assert watcher._observer is None
+        mock_logger.warning.assert_called_once()
+
+    def test_stop_joins_observer_that_stops_promptly(self, tmp_path, mock_logger):
+        """A cooperative observer is stopped and joined, with no warning."""
+        import appinfra.config.watcher as watcher_mod
+
+        calls: list[object] = []
+
+        class PromptObserver:
+            def stop(self) -> None:
+                calls.append("stop")
+
+            def join(self, timeout: float | None = None) -> None:
+                calls.append(("join", timeout))
+
+        watcher = ConfigWatcher(mock_logger, etc_dir=tmp_path)
+        watcher._observer = PromptObserver()
+        watcher._running = True
+
+        watcher.stop()
+
+        assert calls == ["stop", ("join", watcher_mod._OBSERVER_STOP_TIMEOUT_S)]
+        assert watcher._observer is None
+        mock_logger.warning.assert_not_called()
+
+    def test_stop_releases_watcher_lock_while_observer_stops(
+        self, tmp_path, mock_logger
+    ):
+        """Observer.stop() runs with the watcher lock free.
+
+        watchdog's dispatcher holds the observer lock while calling the file
+        handler, which needs the watcher lock; Observer.stop() needs the
+        observer lock back. Holding the watcher lock across the stop would
+        stall every stop that races with an in-flight event.
+        """
+        watcher = ConfigWatcher(mock_logger, etc_dir=tmp_path)
+        acquired: list[bool] = []
+
+        class LockProbingObserver:
+            def stop(self) -> None:
+                got = watcher._lock.acquire(timeout=0.5)
+                acquired.append(got)
+                if got:
+                    watcher._lock.release()
+
+            def join(self, timeout: float | None = None) -> None:
+                pass
+
+        watcher._observer = LockProbingObserver()
+        watcher._running = True
+
+        watcher.stop()
+
+        assert acquired == [True]
+        mock_logger.warning.assert_not_called()
+
+    def test_late_event_after_stop_schedules_nothing(self, tmp_path, mock_logger):
+        """A handler that fires after stop() must not schedule a reload."""
+        watcher = ConfigWatcher(mock_logger, etc_dir=tmp_path)
+        watcher._running = True
+        watcher._debounce_ms = 10_000
+        watcher.stop()
+
+        watcher._on_file_changed()
+
+        assert watcher._debounce_timer is None
+
+    def test_debounced_reload_skips_when_not_running(self, tmp_path, mock_logger):
+        """A timer callback that outlives stop() must not reload."""
+        watcher = ConfigWatcher(mock_logger, etc_dir=tmp_path)
+        reloads: list[bool] = []
+        watcher._reload_config = lambda generation: reloads.append(True)
+
+        watcher._running = False
+        watcher._debounced_reload()
+        assert reloads == []
+
+        watcher._running = True
+        watcher._debounced_reload()
+        assert reloads == [True]
+
+    def test_handler_from_ended_run_ignores_events(self, tmp_path, mock_logger):
+        """A handler that is no longer the watcher's current one schedules nothing."""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("logging: {}\n")
+        watcher = ConfigWatcher(mock_logger, etc_dir=tmp_path)
+        watcher.configure("config.yaml")
+        watcher._running = True
+        watcher._watched_files = {config_file.resolve()}
+        calls: list[bool] = []
+        watcher._on_file_changed = lambda: calls.append(True)
+
+        stale = watcher._create_file_handler()
+        watcher._file_handler = watcher._create_file_handler()  # a newer run's handler
+        event = MagicMock(is_directory=False, src_path=str(config_file))
+
+        stale.on_modified(event)
+        assert calls == []
+
+        watcher._file_handler.on_modified(event)
+        assert calls == [True]
+
+    def test_stop_waits_for_in_flight_debounced_reload(self, tmp_path, mock_logger):
+        """stop() cannot return while a debounced reload is executing."""
+        watcher = ConfigWatcher(mock_logger, etc_dir=tmp_path)
+        watcher._running = True
+        entered = threading.Event()
+        release = threading.Event()
+        order: list[str] = []
+
+        def slow_reload(generation: int) -> None:
+            entered.set()
+            release.wait(timeout=2.0)
+            order.append("reload")
+
+        watcher._reload_config = slow_reload
+        reloader = threading.Thread(target=watcher._debounced_reload, daemon=True)
+        reloader.start()
+        assert entered.wait(timeout=1.0), "reload did not start"
+
+        def stop_and_record() -> None:
+            watcher.stop()
+            order.append("stop")
+
+        stopper = threading.Thread(target=stop_and_record, daemon=True)
+        stopper.start()
+        stopper.join(timeout=0.2)
+        assert stopper.is_alive(), "stop() returned while the reload was in flight"
+
+        release.set()
+        reloader.join(timeout=1.0)
+        stopper.join(timeout=1.0)
+        assert order == ["reload", "stop"]
+        assert watcher.is_running() is False
+
+    def test_handler_stale_after_restart_schedules_nothing(self, tmp_path, mock_logger):
+        """A handler from a run ended by stop() cannot schedule into the next run."""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("logging: {}\n")
+        watcher = ConfigWatcher(mock_logger, etc_dir=tmp_path)
+        watcher.configure("config.yaml", debounce_ms=10_000)
+        watcher._running = True
+        watcher._watched_files = {config_file.resolve()}
+        old_handler = watcher._create_file_handler()
+        watcher._file_handler = old_handler
+        event = MagicMock(is_directory=False, src_path=str(config_file))
+
+        # stop() ends the old run; a new run installs its own handler and files.
+        watcher.stop()
+        watcher._running = True
+        watcher._watched_files = {config_file.resolve()}
+        new_handler = watcher._create_file_handler()
+        watcher._file_handler = new_handler
+
+        try:
+            old_handler.on_modified(event)
+            assert watcher._debounce_timer is None
+
+            new_handler.on_modified(event)
+            assert watcher._debounce_timer is not None
+        finally:
+            watcher.stop()
+
+    def test_callback_may_wait_on_another_thread_using_the_watcher(
+        self, tmp_path, mock_logger
+    ):
+        """Reload callbacks run outside the watcher lock."""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("logging:\n  level: info\n")
+        seen_running: list[bool] = []
+
+        def on_change(_config: dict) -> None:
+            probe = threading.Thread(
+                target=lambda: seen_running.append(watcher.is_running()), daemon=True
+            )
+            probe.start()
+            probe.join(timeout=1.0)
+
+        watcher = ConfigWatcher(mock_logger, etc_dir=tmp_path)
+        watcher.configure("config.yaml", on_change=on_change)
+        watcher._running = True
+
+        watcher._debounced_reload()
+
+        assert seen_running == [True]
+
+    def test_stale_generation_reload_writes_and_calls_nothing(
+        self, tmp_path, mock_logger
+    ):
+        """A reload from a run that stop() or start() ended has no effect."""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("logging:\n  level: info\n")
+        calls: list[dict] = []
+        watcher = ConfigWatcher(mock_logger, etc_dir=tmp_path)
+        watcher.configure("config.yaml", on_change=calls.append)
+
+        watcher._reload_config(watcher._generation - 1)
+
+        assert calls == []
+        assert watcher._last_config_hash is None
 
 
 @pytest.mark.unit

@@ -301,7 +301,9 @@ lint::
 ### Example: Custom Test Configuration
 
 Projects with special test requirements (e.g., GPU tests that OOM when run in parallel) can skip
-framework test targets and provide their own:
+framework test targets and provide their own. Two helper macros are available: `run_pytest`
+honors `INFRA_PYTEST_WORKERS`, while `run_pytest_serial` never passes `-n` and always runs
+pytest in-process. Both treat "no tests collected" (exit 5) as success.
 
 ```makefile
 # Skip the built-in test.e2e target
@@ -309,15 +311,15 @@ INFRA_DEV_SKIP_TARGETS := test.e2e
 
 include $(infra)/make/Makefile.pytest
 
-# Define custom e2e target with sequential execution (-n 0)
+# Define custom e2e target that always runs in-process
 test.e2e:: ## runs e2e tests (sequential for GPU)
 	@echo "* running e2e tests (sequential)..."
-	@$(call run_pytest,tests/ -m e2e -n 0 -qq --tb=short)
+	@$(call run_pytest_serial,tests/ -m e2e -qq --tb=short)
 	@echo "* e2e tests done"
 
 test.e2e.v:: ## runs e2e tests (verbose, sequential)
 	@echo "* running e2e tests (verbose, sequential)..."
-	@$(call run_pytest,tests/ -m e2e -n 0 -v)
+	@$(call run_pytest_serial,tests/ -m e2e -v)
 	@echo "* e2e tests done"
 ```
 
@@ -448,6 +450,7 @@ All configuration variables follow the `INFRA_<MODULE>_<VAR>` naming convention.
 | `INFRA_PYTEST_COVERAGE_PKG` | `$(INFRA_DEV_PKG_NAME)` | Package to measure coverage |
 | `INFRA_PYTEST_COVERAGE_THRESHOLD` | `80` | Coverage threshold for `make check` (0 to disable) |
 | `INFRA_PYTEST_TESTS_DIR` | `tests` | Tests directory |
+| `INFRA_PYTEST_WORKERS` | (empty) | pytest-xdist worker count (`auto` or N) for `test.*` targets; empty runs pytest in-process. Never applied to `test.perf*`. `make check` ignores it: `check.sh` runs suites concurrently with its own per-suite worker heuristic |
 | `INFRA_PYTEST_ARGS` | (empty) | Additional pytest arguments |
 
 **Documentation (DOCS):**

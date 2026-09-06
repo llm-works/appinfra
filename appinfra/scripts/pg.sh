@@ -387,8 +387,12 @@ _pg_wait_container_up() {
     local runtime i
     runtime="$(_pg_container_runtime)"
 
+    # Probe over TCP, not the unix socket. On a fresh volume the image
+    # entrypoint runs a socket-only temporary server (listen_addresses='')
+    # for init scripts; it answers a socket probe seconds before the real
+    # server accepts TCP connections, so a socket probe reports ready early.
     for i in $(seq 1 "${timeout}"); do
-        if ${runtime} exec "${target}" psql -U "${_INFRA_PG_USER}" -c "SELECT 1" >/dev/null 2>&1; then
+        if ${runtime} exec "${target}" psql -h 127.0.0.1 -U "${_INFRA_PG_USER}" -c "SELECT 1" >/dev/null 2>&1; then
             return 0
         fi
         if [ $((i % 5)) -eq 0 ]; then

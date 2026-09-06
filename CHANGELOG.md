@@ -25,6 +25,8 @@ For API stability guarantees and deprecation policy, see
   packages that ship `<package_module>/etc/<package>.yaml` (default filename:
   module name with `_→-`). Chains `resolve_config_source` + `Config`. See
   [Library-Mode Bootstrap](appinfra/docs/guides/library-mode-bootstrap.md).
+- `INFRA_PYTEST_WORKERS` Makefile variable (default empty): pytest-xdist worker count for
+  `make test.*` targets. `run_pytest_serial` macro for custom targets that must stay in-process.
 
 ### Changed
 - `pgserver` defaults: `name` `infra-pg` → `llm-works-pg`, `port` `7432` →
@@ -45,6 +47,13 @@ For API stability guarantees and deprecation policy, see
 ### Fixed
 - `appinfra pg` and `make pg.*` targets exit with install guidance when
   no container runtime is on `PATH`.
+- `make pg.server.up` readiness wait probes over TCP. On a fresh volume the
+  socket probe reported ready against the image's temporary init server.
+- `ThreadRunner.wait_healthy()` reliably raises `RunError` for a service that
+  exits during startup on Python 3.13+, instead of sometimes reporting RUNNING.
+- `ConfigWatcher.stop()` returns within 2s on macOS when called right after
+  `start()`; watchdog's FSEvents emitter could otherwise block it forever
+  (https://github.com/gorakhargosh/watchdog/issues/64).
 
 ## [0.10.5] - 2026-09-03
 
