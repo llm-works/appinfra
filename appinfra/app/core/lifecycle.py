@@ -140,7 +140,7 @@ class LifecycleManager:
             if self._lifecycle_logger:
                 self._lifecycle_logger.warning(
                     "hot-reload enabled but no config path available - "
-                    "use with_config_file() to set config path"
+                    "declare a config spec (config.with_spec) to set it"
                 )
             return
 

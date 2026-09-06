@@ -190,7 +190,8 @@ loading:
 ```python
 app = (
     AppBuilder("myapp")
-    .with_config_file("app.yaml")  # Load YAML
+    .config.with_spec("myorg", "myapp")  # Load YAML (etc/myapp.yaml)
+    .done()
     .logging.with_level("debug")  # Overrides YAML logging.level
     .with_topic_level("/db/*", "trace")  # Priority=10, highest
     .done()

@@ -11,18 +11,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from . import db, net
 
-from .config import (
-    DEFAULT_CONFIG_FILE,
-    DEFAULT_CONFIG_FILENAME,
-    ETC_DIR,
-    PROJECT_ROOT,
-    Config,
-    get_config_file_path,
-    get_default_config,
-    get_etc_dir,
-    get_project_root,
-    resolve_etc_dir,
-)
+from .config import Config
 from .deprecation import deprecated
 from .dict import DictInterface
 from .dot_dict import DotDict
@@ -74,16 +63,6 @@ __all__ = [
     "EWMA",
     "RateLimiter",
     "Config",
-    # Config utilities
-    "get_project_root",
-    "get_etc_dir",
-    "resolve_etc_dir",
-    "get_config_file_path",
-    "get_default_config",
-    "PROJECT_ROOT",
-    "ETC_DIR",
-    "DEFAULT_CONFIG_FILE",
-    "DEFAULT_CONFIG_FILENAME",
     # Utils
     "pretty",
     "is_int",

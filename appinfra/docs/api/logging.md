@@ -264,8 +264,8 @@ from appinfra.app.builder import AppBuilder
 
 app = (
     AppBuilder("my-service")
-    .with_config_file("config.yaml")
-    .config.with_hot_reload(True)  # Enable hot-reload
+    .config.with_spec("myorg", "my-service")
+    .with_hot_reload(True)  # Enable hot-reload
     .done()
     .build()
 )

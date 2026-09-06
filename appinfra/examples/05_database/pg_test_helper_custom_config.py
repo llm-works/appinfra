@@ -113,12 +113,12 @@ class TestPGHelperCustomConfig(PGTestCaseHelper):
     @classmethod
     def setUpClass(cls):
         """Set up with custom config file."""
-        # Set custom config path (in this case, we'll use the default for demo)
+        # Set custom config path (in this case, appinfra's own config for demo)
         # In real usage, you would point to your custom config file
-        # Use the default config file constant
-        from appinfra import DEFAULT_CONFIG_FILE
+        from appinfra.config import ConfigSpec
 
-        cls.set_config_path(str(DEFAULT_CONFIG_FILE))  # Using default for demo
+        spec = ConfigSpec("llm-works", "appinfra", filename="infra.yaml")
+        cls.set_config_path(str(spec.resolve().path))
         super().setUpClass()
 
     def _create_config_test_table(self, session, table_name):

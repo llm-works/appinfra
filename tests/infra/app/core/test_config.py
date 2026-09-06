@@ -6,22 +6,13 @@ Tests for app/core/config.py.
 
 Tests key functionality including:
 - ConfigLoader class methods
-- create_config function
 """
 
 import argparse
-import os
-import tempfile
-from pathlib import Path
-from unittest.mock import Mock
 
 import pytest
 
-from appinfra.app.core.config import (
-    LOG_LEVEL_QUIET,
-    ConfigLoader,
-    create_config,
-)
+from appinfra.app.core.config import LOG_LEVEL_QUIET, ConfigLoader
 from appinfra.dot_dict import DotDict
 
 # =============================================================================
@@ -264,163 +255,6 @@ class TestDefault:
 
 
 # =============================================================================
-# Test create_config function
-# =============================================================================
-
-
-@pytest.mark.unit
-@pytest.mark.usefixtures("clean_env")
-class TestCreateConfig:
-    """Test create_config function (lines 168-224)."""
-
-    def test_with_file_path(self):
-        """Test loading config from specific file path (lines 172-176)."""
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
-            f.write("key: value\n")
-            f.flush()
-            temp_path = f.name
-
-        try:
-            config = create_config(file_path=temp_path)
-            assert config.key == "value"
-        finally:
-            os.unlink(temp_path)
-
-    def test_with_nonexistent_file_path_raises(self):
-        """Test raises FileNotFoundError for nonexistent path (lines 174-175)."""
-        with pytest.raises(FileNotFoundError, match="Config file not found"):
-            create_config(file_path="/nonexistent/path/config.yaml")
-
-    def test_uses_default_dir_name(self):
-        """Test uses default etc dir when dir_name is None (lines 168-169)."""
-        # This test just verifies the code path is executed
-        # We expect FileNotFoundError because the default file likely doesn't exist
-        with pytest.raises(FileNotFoundError):
-            create_config(file_name="nonexistent.yaml")
-
-    def test_load_all_yaml_files(self):
-        """Test loading all YAML files from directory (lines 179-214)."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            # Create two YAML files
-            (Path(tmpdir) / "config1.yaml").write_text("key1: value1\n")
-            (Path(tmpdir) / "config2.yaml").write_text("key2: value2\n")
-
-            config = create_config(dir_name=tmpdir, load_all=True)
-
-            assert config.key1 == "value1"
-            assert config.key2 == "value2"
-
-    def test_load_all_merges_configs(self):
-        """Test load_all merges configurations."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            (Path(tmpdir) / "first.yaml").write_text(
-                "shared: first\nonly_first: value1\n"
-            )
-            (Path(tmpdir) / "second.yaml").write_text(
-                "shared: second\nonly_second: value2\n"
-            )
-
-            config = create_config(dir_name=tmpdir, load_all=True)
-
-            # Both configs should be merged
-            assert config.only_first == "value1"
-            assert config.only_second == "value2"
-
-    def test_load_all_nonexistent_dir_raises(self):
-        """Test load_all raises for nonexistent directory (lines 181-182)."""
-        with pytest.raises(FileNotFoundError, match="Config directory not found"):
-            create_config(dir_name="/nonexistent/dir", load_all=True)
-
-    def test_load_all_empty_dir_raises(self):
-        """Test load_all raises for empty directory (lines 186-187)."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            with pytest.raises(FileNotFoundError, match="No YAML files found"):
-                create_config(dir_name=tmpdir, load_all=True)
-
-    def test_load_all_handles_failed_files(self):
-        """Test load_all continues on failed files with logger (lines 209-211)."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            # Create one valid and one invalid YAML file
-            (Path(tmpdir) / "valid.yaml").write_text("key: value\n")
-            (Path(tmpdir) / "invalid.yaml").write_text(
-                "invalid: yaml: content: [unclosed\n"
-            )
-
-            lg = Mock()
-            config = create_config(dir_name=tmpdir, load_all=True, lg=lg)
-
-            # Should have loaded valid config
-            assert config.key == "value"
-            # Should have logged warning
-            lg.warning.assert_called()
-
-    def test_load_all_without_logger_silently_continues(self):
-        """Test load_all continues without logger on failed files."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            (Path(tmpdir) / "valid.yaml").write_text("key: value\n")
-            (Path(tmpdir) / "invalid.yaml").write_text("invalid: yaml: [unclosed\n")
-
-            # Should not raise, just skip invalid file
-            config = create_config(dir_name=tmpdir, load_all=True)
-            assert config.key == "value"
-
-    def test_uses_default_file_name(self):
-        """Test uses default file name when not specified (lines 217-218)."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            # Create infra.yaml (default name)
-            # Use "loaded" instead of "default" to avoid collision with
-            # INFRA_DEFAULT_CONFIG_FILE env var (would be interpreted as
-            # config.default.config.file override)
-            (Path(tmpdir) / "infra.yaml").write_text("loaded: true\n")
-
-            config = create_config(dir_name=tmpdir)
-
-            assert config.loaded is True
-
-    def test_with_file_name_in_dir(self):
-        """Test loading specific file from directory (lines 220-224)."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            (Path(tmpdir) / "custom.yaml").write_text("custom: config\n")
-
-            config = create_config(dir_name=tmpdir, file_name="custom.yaml")
-
-            assert config.custom == "config"
-
-    def test_nonexistent_file_in_dir_raises(self):
-        """Test raises for nonexistent file in directory (lines 221-222)."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            with pytest.raises(FileNotFoundError, match="Config file not found"):
-                create_config(dir_name=tmpdir, file_name="missing.yaml")
-
-    def test_load_all_with_yml_extension(self):
-        """Test load_all finds .yml files too (line 184)."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            (Path(tmpdir) / "config.yml").write_text("yml_key: yml_value\n")
-
-            config = create_config(dir_name=tmpdir, load_all=True)
-
-            assert config.yml_key == "yml_value"
-
-    def test_load_all_nested_dict_conversion(self):
-        """Test load_all converts nested structures (lines 196-204)."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            yaml_content = """
-nested:
-  level1:
-    level2: value
-list_item:
-  - item1
-  - item2
-"""
-            (Path(tmpdir) / "nested.yaml").write_text(yaml_content)
-
-            config = create_config(dir_name=tmpdir, load_all=True)
-
-            assert config.nested["level1"]["level2"] == "value"
-            assert config.list_item == ["item1", "item2"]
-
-
-# =============================================================================
 # Test Integration Scenarios
 # =============================================================================
 
@@ -430,31 +264,25 @@ list_item:
 class TestConfigIntegration:
     """Test configuration integration scenarios."""
 
-    def test_full_config_workflow(self):
+    def test_full_config_workflow(self, tmp_path):
         """Test complete configuration workflow."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            # Create config file
-            config_content = """
-logging:
-  level: warning
-  location: 1
-app:
-  name: test_app
-"""
-            (Path(tmpdir) / "app.yaml").write_text(config_content)
+        from appinfra.config import Config
 
-            # Load config
-            config = create_config(dir_name=tmpdir, file_name="app.yaml")
+        config_file = tmp_path / "app.yaml"
+        config_file.write_text(
+            "logging:\n  level: warning\n  location: 1\napp:\n  name: test_app\n"
+        )
+        config = Config(str(config_file))
 
-            # Apply args
-            args = argparse.Namespace(log_level="debug", log_micros=True)
-            final_config = ConfigLoader.from_args(args, config)
+        # Apply args
+        args = argparse.Namespace(log_level="debug", log_micros=True)
+        final_config = ConfigLoader.from_args(args, config)
 
-            # Args should override file config
-            assert final_config.logging.level == "debug"
-            assert final_config.logging.micros is True
-            # File config preserved
-            assert final_config.app.name == "test_app"
+        # Args should override file config
+        assert final_config.logging.level == "debug"
+        assert final_config.logging.micros is True
+        # File config preserved
+        assert final_config.app.name == "test_app"
 
     def test_quiet_mode_overrides_all(self):
         """Test quiet mode overrides all logging settings."""

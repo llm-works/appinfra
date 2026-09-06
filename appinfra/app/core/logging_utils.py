@@ -344,10 +344,11 @@ def setup_logging_from_config(
     2. Setting up logger with command-line level overrides
     3. Adding handlers from configuration
 
-    Use create_config() or App.setup_config() to load configuration from files.
+    Load configuration from a file with ``Config(path)``.
 
     Args:
-        config: Configuration object (from create_config() or setup_config())
+        config: Configuration object (a ``Config`` or ``DotDict`` with a
+            ``logging`` section)
         args: Command-line arguments - can be dict (e.g., vars(args)) or object (e.g., self.args)
         **kwargs: Additional override values (for backward compatibility)
 

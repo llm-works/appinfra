@@ -268,6 +268,13 @@ class TestStopHotReloadWatcher:
 class TestHotReloadYamlOnlyIntegration:
     """Integration tests for hot-reload with YAML-only configuration."""
 
+    @pytest.fixture(autouse=True)
+    def isolate_resolution(self, tmp_path, monkeypatch):
+        """Keep the spec's base the winning file: no XDG overlay, no walk-up hit."""
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "no-xdg"))
+        monkeypatch.setenv("XDG_CONFIG_DIRS", str(tmp_path / "no-xdg-sys"))
+        monkeypatch.chdir(tmp_path)
+
     def test_yaml_only_hot_reload_detects_config(self, tmp_path):
         """
         Hot-reload should work with YAML configuration alone.
@@ -289,10 +296,11 @@ logging:
 """
         )
 
-        # Build app with just with_config_file(), no with_hot_reload()
+        # Build app with just a spec, no with_hot_reload()
         app = (
             AppBuilder("test-app")
-            .with_config_file(str(config_file), from_etc_dir=False)
+            .config.with_spec("test-org", "config", path=config_file)
+            .done()
             .build()
         )
 
@@ -349,8 +357,8 @@ logging:
         # Build app with programmatic hot-reload
         app = (
             AppBuilder("test-app")
-            .with_config_file(str(config_file), from_etc_dir=False)
-            .config.with_hot_reload(True)
+            .config.with_spec("test-org", "config", path=config_file)
+            .with_hot_reload(True)
             .done()
             .build()
         )
@@ -398,7 +406,8 @@ logging:
         # Build app with config file
         app = (
             AppBuilder("test-app")
-            .with_config_file(str(config_file), from_etc_dir=False)
+            .config.with_spec("test-org", "config", path=config_file)
+            .done()
             .build()
         )
 
@@ -428,7 +437,7 @@ logging:
         )
 
     def test_yaml_only_with_etc_dir_hot_reload(self, tmp_path):
-        """Test YAML-only hot-reload with from_etc_dir=True (default behavior)."""
+        """Test YAML-only hot-reload with the file selected via --etc-dir."""
         from appinfra.app.builder import AppBuilder
 
         # Create etc directory with config
@@ -445,10 +454,14 @@ logging:
 """
         )
 
-        # Build app with from_etc_dir=True (default)
+        # The spec's base lives elsewhere; --etc-dir redirects the load.
         app = (
             AppBuilder("test-app")
-            .with_config_file("config.yaml")  # Default: from_etc_dir=True
+            .with_standard_args(etc_dir=True)
+            .config.with_spec(
+                "test-org", "config", path=tmp_path / "pkg" / "config.yaml"
+            )
+            .done()
             .build()
         )
 

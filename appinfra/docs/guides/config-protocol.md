@@ -258,8 +258,8 @@ app = (
 )
 ```
 
-An app declaring a spec does not call `with_config_file`; the two loading modes are mutually
-exclusive per builder.
+An app built without a spec loads no file; its config is the programmatic layer plus CLI
+arguments.
 
 Full API contract in [Config Spec](../api/config.md#config-spec) and
 [AppBuilder.config](../api/config.md#appbuilderconfig).

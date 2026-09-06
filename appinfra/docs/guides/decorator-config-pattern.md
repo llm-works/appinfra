@@ -4,7 +4,7 @@ keywords:
   - decorator
   - config file
   - builder
-  - with_config_file
+  - config.with_spec
   - tool decorator
   - YAML config
   - etc-dir
@@ -17,8 +17,8 @@ aliases:
 
 # Decorator API with Config Files
 
-How to use the decorator API (`@app.tool`, `@app.argument`) with YAML config files loaded from
-`--etc-dir`.
+How to use the decorator API (`@app.tool`, `@app.argument`) with a YAML config file declared
+through the builder's config block.
 
 ## Pattern
 
@@ -27,8 +27,8 @@ Build the app with `AppBuilder`, then define tools via decorators on the built a
 ```python
 from appinfra.app.builder import AppBuilder
 
-# 1. Build app (config file resolved from --etc-dir at runtime)
-app = AppBuilder().with_name("myapp").with_config_file("myapp.yaml").build()
+# 1. Build app (etc/myapp.yaml resolved at setup: --etc-dir, project-local etc/, packaged base)
+app = AppBuilder("myapp").config.with_spec("myorg", "myapp").done().build()
 
 
 # 2. Define tools on the built app
@@ -55,7 +55,7 @@ Config isn't needed when decorators run — only when tools execute:
 | Phase | What happens | Config available? |
 |-------|-------------|-------------------|
 | **Module load** | `build()` runs, decorators register tools | No |
-| **`app.main()` → `setup()`** | `--etc-dir` resolved, YAML loaded, env vars merged | Yes |
+| **`app.main()` → `setup()`** | spec resolved, YAML loaded, env vars merged | Yes |
 | **Tool execution** | `self.app.config` has all sources merged | Yes |
 
 ## Accessing Config
@@ -110,9 +110,9 @@ class ServerTool(Tool):
 
 # Class-based tools go through the builder
 app = (
-    AppBuilder()
-    .with_name("hybrid")
-    .with_config_file("hybrid.yaml")
+    AppBuilder("hybrid")
+    .config.with_spec("myorg", "hybrid")
+    .done()
     .tools.with_tool(ServerTool())
     .done()
     .build()

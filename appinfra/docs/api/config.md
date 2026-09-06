@@ -40,13 +40,13 @@ class Config(DotDict):
 **Basic Usage:**
 
 ```python
-from appinfra.config import Config, get_config_file_path
+from appinfra.config import Config, ConfigSpec
 
 # Load from explicit path
 config = Config("etc/config.yaml")
 
-# Load using path resolution
-config = Config(get_config_file_path())
+# Load the file a spec resolves to (see Config Spec below)
+config = Config(ConfigSpec("myorg", "myapp").resolve())
 
 # Access with dot notation (inherits from DotDict)
 print(config.logging.level)
@@ -390,105 +390,42 @@ else:
 pip install appinfra[validation]
 ```
 
-## Path Utilities
+## Reading `app.etc_dir`
 
-```python
-from appinfra.config import (
-    get_project_root,  # Find project root (contains etc/)
-    get_etc_dir,  # Get etc directory path (project root only)
-    resolve_etc_dir,  # Resolve etc dir with four-tier fallback
-    get_config_file_path,  # Get path to config file
-    get_default_config,  # Lazy-load default config
-)
-
-# Get paths
-root = get_project_root()  # /path/to/project
-etc = get_etc_dir()  # /path/to/project/etc
-config_path = get_config_file_path()  # /path/to/project/etc/infra.yaml
-config_path = get_config_file_path("app.yaml")  # /path/to/project/etc/app.yaml
-
-# Resolve etc dir the way the framework does (custom path → ./etc → project root → package etc)
-etc = resolve_etc_dir()  # auto-detect
-etc = resolve_etc_dir("/srv/etc")  # explicit, validated strictly
-
-# Lazy-load default config (for scripts/examples)
-config = get_default_config()
-if config:
-    db_host = config.database.host
-```
-
-### Reading `app.etc_dir`
-
-`App.etc_dir` returns the framework's resolved etc directory for the current
-run. It is available no later than the start of `Tool.setup()` — sometimes set
-earlier (at build time for absolute `with_config_file()` paths) — so tools can
-read it directly:
+`App.etc_dir` is the etc directory in effect for the current run. It is set
+during `setup()`, before any `Tool.setup()` runs, so tools can read it directly:
 
 ```python
 class MyTool(Tool):
     def configure(self) -> None:
         # Inside Tool.configure(), self.app.etc_dir is the resolved path
-        # (or None if etc_dir was not opted into).
+        # (or None if no spec is declared and --etc-dir was not passed).
         with open(Path(self.app.etc_dir) / "mytool.yaml") as f:
             self._settings = yaml.safe_load(f)
 ```
 
 Resolution rules:
 
-- **`with_config_file("/abs/x.yaml")`** — `app.etc_dir` is the parent of the absolute
-  path.
-- **Deferred configs or `-c <path>`** — `app.etc_dir` is the etc directory used to
-  load that file.
-- **`with_standard_args(etc_dir=True)` only** (no config file registered):
+- **Spec declared** — `app.etc_dir` is the directory of the file the spec resolved to
+  (`app.config_path.parent`), whichever precedence rule chose it.
+- **`with_standard_args(etc_dir=True)` only** (no spec):
   - `--etc-dir /foo` valid → `app.etc_dir` is `/foo` (resolved).
   - `--etc-dir /bad` missing → raises `FileNotFoundError` at setup (fail-fast).
-  - flag omitted → falls back through `./etc` → project root → bundled
-    `appinfra/etc/`. In practice `app.etc_dir` almost always resolves to *some*
-    path; `None` only if every fallback (including the bundled package etc) is
-    absent.
-- **`etc_dir` not opted in** — `app.etc_dir` is always `None`.
-
-For on-demand resolution outside the App lifecycle (e.g. standalone CLI tools),
-call `resolve_etc_dir()` directly.
+  - flag omitted → `None`; there is no default directory without a spec.
+- **`etc_dir` not opted in and no spec** — `app.etc_dir` is always `None`.
 
 See
 [`examples/04_configuration/etc_dir_only_example.py`](../../examples/04_configuration/etc_dir_only_example.py)
 for a runnable app that loads its own YAML files from `app.etc_dir` without
-using `with_config_file()`.
+declaring a spec.
 
 ## Constants
 
 ```python
-from appinfra.config import (
-    PROJECT_ROOT,  # Resolved project root or None
-    ETC_DIR,  # Resolved etc dir or None
-    DEFAULT_CONFIG_FILE,  # Resolved default config path or None
-    MAX_CONFIG_SIZE_BYTES,  # Maximum config file size (security limit)
-)
+from appinfra.config import MAX_CONFIG_SIZE_BYTES  # security size limit
 ```
 
 ## Integration with AppBuilder
-
-Two loading modes; pick one per builder — they are mutually exclusive.
-
-### `AppBuilder.with_config_file`
-
-Loads one or more YAML files by name. Under `with_standard_args(etc_dir=True)` the deferred load
-resolves the path against `--etc-dir` at runtime; absolute paths load immediately at build time.
-Pre-v1 shape; `--etc-dir` here uses the `resolve_etc_dir` fallback chain (cwd/etc → walk-up →
-package etc/).
-
-```python
-from appinfra.app import AppBuilder
-
-app = (
-    AppBuilder("myapp")
-    .with_config_file("config.yaml")  # Resolved from --etc-dir at runtime
-    .config.with_hot_reload(True)
-    .done()
-    .build()
-)
-```
 
 ### `AppBuilder.config`
 
@@ -538,8 +475,8 @@ Flag exposure is orthogonal. To expose the `--etc-dir` and `--config` escape hat
 with `.with_standard_args(etc_dir=True, config_file=True)`; a locked-down CLI skips that call
 and the loader reads a missing flag as `None`.
 
-An app declaring a spec must not call `with_config_file`; the two modes conflict and calling
-both raises `ValueError` at build time.
+An app built without a spec loads no file: its config is the programmatic layer plus CLI
+arguments, and `--config` / `--etc-dir` select nothing.
 
 See [Config Protocol §6](../guides/config-protocol.md#6-etc-dir-is-user-authoritative) for the
 full `--etc-dir` semantics, and [`ConfigSpec`](#config-spec) for the resolution chain.

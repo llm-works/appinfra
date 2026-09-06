@@ -14,7 +14,6 @@ class AppBuilder:
 - `with_description(desc)` - Set description
 - `with_version(version)` - Set version string
 - `config` - Config-source block: `with_spec`, `with_overrides`, `with_value`, `with_hot_reload`; see [Config](config.md#appbuilderconfig)
-- `with_config_file(path=None, from_etc_dir=True, optional=False)` - Load config from file (default: `infra.yaml` or `INFRA_DEFAULT_CONFIG_FILE`)
 - `with_main_cls(cls)` - Use custom App subclass
 - `with_main_tool(tool)` - Set main tool (runs when no subcommand specified)
 - `with_standard_args(**kwargs)` - Enable/disable standard CLI args
@@ -125,59 +124,38 @@ if __name__ == "__main__":
 
 ## Config File Loading
 
-Use `with_config_file()` to load configuration from a YAML file:
+Declare the config source with the `config` block. The App resolves it at setup under the
+[config protocol](../guides/config-protocol.md): `--config`, `--etc-dir`, a project-local
+`etc/`, XDG overlays, then the packaged base.
 
 ```python
-# Load default config (infra.yaml or INFRA_DEFAULT_CONFIG_FILE env var)
+# Packaged base: etc/inference.yaml beside the `inference` module
+app = AppBuilder("inference").config.with_spec("myorg", "inference").done().build()
+
+# Base that deviates from the etc/<name>.yaml layout
 app = (
     AppBuilder("myapp")
-    .with_config_file()  # loads {etc-dir}/infra.yaml
-    .build()
-)
-
-# Load specific file from etc-dir
-app = (
-    AppBuilder("inference")
-    .with_config_file("inference.yaml")  # loads {etc-dir}/inference.yaml
-    .build()
-)
-
-# Load from absolute path (immediately, not deferred)
-app = AppBuilder("myapp").with_config_file("/path/to/config.yaml").build()
-
-# Load relative to current directory (not etc-dir)
-app = AppBuilder("myapp").with_config_file("config.yaml", from_etc_dir=False).build()
-
-# Layered config: base + optional environment overlay (both from etc-dir)
-app = (
-    AppBuilder("myapp")
-    .with_config_file("config.yaml")  # Required base from etc-dir
-    .with_config_file(".env.yaml", optional=True)  # Optional overlay from etc-dir
+    .config.with_spec("myorg", "myapp", filename="infra.yaml")
+    .done()
     .build()
 )
 ```
 
-**Layered Configuration:** Multiple `with_config_file()` calls are merged in order, with later
-files overriding earlier ones (deep merge). Programmatic config via builder methods takes
-precedence over all file configs.
+Programmatic config via builder methods takes precedence over the loaded file. A resolved file
+that does not exist raises `FileNotFoundError` at setup.
 
-**Note:** By default, `with_config_file()` raises `FileNotFoundError` if the file is missing.
-Use `optional=True` to silently skip missing files.
-
-This respects the `--etc-dir` CLI argument:
+With `with_standard_args(etc_dir=True)`, the `--etc-dir` CLI argument redirects the load:
 ```bash
 ./cli.py --etc-dir /custom/path serve
 # → loads /custom/path/inference.yaml
 ```
 
-Without `with_config_file()`, no automatic config loading occurs:
+Without a spec, no file is loaded; config comes from `.config.with_overrides()` and CLI args:
 ```python
-app = (
-    AppBuilder("myapp")
-    # No with_config_file() - manual config only via .config.with_overrides()
-    .build()
-)
+app = AppBuilder("myapp").config.with_overrides({"logging": {"level": "info"}}).build()
 ```
+
+See [AppBuilder.config](config.md#appbuilderconfig) for the full block.
 
 ## Standard Arguments
 
@@ -216,9 +194,6 @@ AppBuilder("myapp").without_standard_args().build()
 - `log=True` enables all 7 log-related args (`log_level`, `log_location`, `log_micros`, `log_topic`,
   `log_colors`, `log_json`, `quiet`)
 
-**Auto-enabled args:**
-- `with_config_file(from_etc_dir=True)` automatically enables `etc_dir`
-
 **Overriding framework defaults:**
 
 Use `with_standard_arg(name, **argparse_kwargs)` to override any argparse parameter
@@ -233,11 +208,11 @@ AppBuilder("myapp").with_standard_args(log_level=True).with_standard_arg(
 ).build()
 ```
 
-> The framework already resolves the etc directory when `etc_dir` is opted in
-> via `with_standard_args(etc_dir=True)` — read `app.etc_dir` from inside
-> `Tool.configure()`. There is no need to override the default to `"./etc"` to
-> "get a non-None string"; doing so would short-circuit the four-tier fallback
-> chain (the path is then validated strictly and errors if `./etc` is missing).
+> The framework populates `app.etc_dir` when `etc_dir` is opted in via
+> `with_standard_args(etc_dir=True)` — read it from inside `Tool.configure()`.
+> With a spec it is the resolved file's directory; overriding the flag's default
+> to `"./etc"` would bypass that resolution (the path is then validated strictly
+> and errors if `./etc` is missing).
 > See [config docs](config.md#reading-appetc_dir) for the full resolution table.
 
 Restrictions:
@@ -251,8 +226,8 @@ Restrictions:
 > Overriding shape-changing kwargs (`action`, `nargs`, `required`) is allowed but the consumer
 > takes on the responsibility of keeping framework assumptions intact. For example, flipping
 > `--no-log-colors` from `store_false` to `store_true` inverts the flag's user-visible meaning;
-> setting `required=True` on `--etc-dir` defeats the four-tier fallback because argparse will
-> reject runs without the flag. Prefer overriding `default`, `help`, `metavar`, `type`, and
+> setting `required=True` on `--etc-dir` makes argparse reject runs that rely on the spec's own
+> resolution. Prefer overriding `default`, `help`, `metavar`, `type`, and
 > `choices` unless the shape-change is deliberate.
 
 **Precedence:** CLI args override environment variables, which override YAML config values.
@@ -260,29 +235,26 @@ See [Configuration Precedence](../guides/configuration-precedence.md) for the fu
 
 ## Config File CLI Argument
 
-The `-c/--config` argument provides runtime config file selection:
+The `-c/--config` argument selects the config file at runtime for an app with a spec:
 
 ```bash
-# Direct path (absolute or ./ prefix)
+# Direct path (absolute, or ./, ../, ~/ prefix)
 myapp -c /etc/myapp/prod.yaml
 myapp -c ./local-config.yaml
 
-# Filename within etc-dir (when with_config_file() is used)
-myapp -c custom.yaml                    # loads {etc_dir}/custom.yaml
+# Bare filename: under --etc-dir when given, otherwise the current directory
+myapp -c custom.yaml                    # loads ./custom.yaml
 myapp --etc-dir /app/etc -c prod.yaml   # loads /app/etc/prod.yaml
 ```
 
 Enable via `with_standard_args(config_file=True)`:
 
 ```python
-# Standalone -c (direct path loading, no with_config_file needed)
-app = AppBuilder("myapp").with_standard_args(config_file=True).build()
-
-# With etc-dir (both --etc-dir and -c available)
 app = (
     AppBuilder("myapp")
-    .with_config_file("default.yaml")  # auto-enables etc_dir
-    .with_standard_args(config_file=True)  # enables -c to override filename
+    .config.with_spec("myorg", "myapp")
+    .done()
+    .with_standard_args(etc_dir=True, config_file=True)
     .build()
 )
 ```
@@ -321,8 +293,8 @@ appinfra[hotreload]`):
 ```python
 app = (
     AppBuilder("my-service")
-    .with_config_file("config.yaml")
-    .config.with_hot_reload(True)  # Enable watching
+    .config.with_spec("myorg", "my-service")
+    .with_hot_reload(True)  # Watch the resolved config file
     .done()
     .build()
 )

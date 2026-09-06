@@ -3,34 +3,32 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright 2026 The appinfra Authors
 
+# ci-run: --etc-dir appinfra/examples/04_configuration/etc greet
+
 """
-etc_dir without with_config_file()
+--etc-dir without a config spec
 
-Demonstrates the recommended pattern for apps that:
+Demonstrates the pattern for apps that:
 - Opt into the `--etc-dir` CLI flag via `with_standard_args(etc_dir=True)`.
-- Manage their own YAML files (no `with_config_file()` registration).
-- Need the resolved etc directory inside `Tool.configure()`.
+- Manage their own YAML files (no config spec declared).
+- Need the etc directory inside `Tool.configure()`.
 
-The framework resolves `etc_dir` during `app.setup()` (after parse_args, before
-any `Tool.setup()` runs) and exposes the result on `app.etc_dir`. There is no
-need to call `resolve_etc_dir()` from inside the tool, mutate args, or override
-the property.
+The framework validates `--etc-dir` during `app.setup()` (after parse_args, before
+any `Tool.setup()` runs) and exposes it on `app.etc_dir`. There is no need to
+read `args.etc_dir` from inside the tool or override the property.
 
 Running:
-    # Uses the fallback chain (./etc next to the example, then project root)
-    ~/.venv/bin/python examples/04_configuration/etc_dir_only_example.py greet
-
-    # Or pass an explicit dir
     ~/.venv/bin/python examples/04_configuration/etc_dir_only_example.py \\
         --etc-dir examples/04_configuration/etc greet
 
 Key points:
-- `with_standard_args(etc_dir=True)` is the single opt-in; no `with_config_file()`.
+- `with_standard_args(etc_dir=True)` is the single opt-in.
 - Read `self.app.etc_dir` inside `Tool.configure()` — populated by the framework.
-- Explicit bad `--etc-dir /missing` raises `FileNotFoundError` at setup (fail-fast).
-- Missing flag falls back through `./etc` → project root → bundled `appinfra/etc/`,
-  so `app.etc_dir` almost always resolves to *something* — the realistic failure
-  is the wrong dir lacking your YAML, caught at `open()` time.
+- A bad `--etc-dir /missing` raises `FileNotFoundError` at setup (fail-fast).
+- Without a spec there is no default directory: omit the flag and `app.etc_dir`
+  is `None`. Apps that ship a config file declare a spec instead
+  (`.config.with_spec(...)`), and `app.etc_dir` becomes the directory of the
+  file the spec resolved to.
 """
 
 from __future__ import annotations
@@ -59,17 +57,10 @@ class GreetTool(Tool):
         )
 
     def configure(self) -> None:
-        """Load YAML from the framework-resolved etc directory."""
-        # app.etc_dir is populated by the framework. The narrow `is None` check
-        # is mostly a type guard — the fallback chain ends at the bundled
-        # appinfra/etc/, so None only occurs in degenerate environments.
-        # The realistic failure is the YAML missing from the resolved dir,
-        # handled by the try/except below.
+        """Load YAML from the etc directory the framework validated."""
         etc_dir = self.app.etc_dir
         if etc_dir is None:
-            raise RuntimeError(
-                "app.etc_dir is None; pass --etc-dir or ensure ./etc/ exists"
-            )
+            raise RuntimeError("app.etc_dir is None; pass --etc-dir <dir>")
 
         config_path = pathlib.Path(etc_dir) / "etc_dir_only_greeter.yaml"
         try:
@@ -78,8 +69,7 @@ class GreetTool(Tool):
         except FileNotFoundError as e:
             raise RuntimeError(
                 f"etc_dir_only_greeter.yaml not found in {etc_dir}; "
-                "pass --etc-dir <dir-containing-the-yaml> or place the file "
-                "in ./etc/ next to the cwd"
+                "pass --etc-dir <dir-containing-the-yaml>"
             ) from e
 
         self._greeting = settings["greeting"]

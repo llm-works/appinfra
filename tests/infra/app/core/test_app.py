@@ -16,7 +16,6 @@ import argparse
 import logging
 import os
 import sys
-import tempfile
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -274,42 +273,6 @@ class TestAddLogDefaultArgs:
         args = app.parser.parse_args(["-l", "warning", "-q"])
         assert args.log_level == "warning"
         assert args.quiet is True
-
-
-# =============================================================================
-# Test Setup Config
-# =============================================================================
-
-
-@pytest.mark.unit
-class TestSetupConfig:
-    """Test setup_config method (lines 154-156)."""
-
-    def test_setup_config_with_file_path(self, clean_env):
-        """Test setup_config loads from file path."""
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
-            f.write("key: value\n")
-            f.flush()
-            temp_path = f.name
-
-        try:
-            app = App()
-            app._parsed_args = argparse.Namespace()  # Set args to avoid AttributeError
-            config = app.setup_config(file_path=temp_path)
-            assert config.key == "value"
-        finally:
-            Path(temp_path).unlink()
-
-    def test_setup_config_with_load_all(self, clean_env):
-        """Test setup_config with load_all."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            (Path(tmpdir) / "config.yaml").write_text("loaded: true\n")
-
-            app = App()
-            app._parsed_args = argparse.Namespace()
-            config = app.setup_config(dir_name=tmpdir, load_all=True)
-
-            assert config.loaded is True
 
 
 # =============================================================================
@@ -928,351 +891,6 @@ class TestEtcDirArgument:
         assert app.config.etc_dir == "/custom/etc"
 
 
-# =============================================================================
-# Test Deferred Config Loading
-# =============================================================================
-
-
-@pytest.mark.unit
-class TestDeferredConfigLoading:
-    """Test _load_deferred_config method for config file loading from etc-dir."""
-
-    def test_load_deferred_config_returns_none_when_no_config_path(self):
-        """Test that _load_deferred_config returns None when no _config_path is set."""
-        app = App()
-        app.create_args()
-
-        with patch.object(sys, "argv", ["test"]):
-            app._parsed_args = app.parser.parse_args()
-
-        # No _config_path set, should return None
-        result = app._load_deferred_configs()
-        assert result is None
-
-    def test_load_deferred_config_raises_for_missing_required_file(self):
-        """Test that _load_deferred_config raises FileNotFoundError for missing required file."""
-        from appinfra.app.builder.app import ConfigFileSpec
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            etc_dir = Path(tmpdir) / "etc"
-            etc_dir.mkdir()
-            # Don't create the config file
-
-            app = App()
-            app._standard_args["etc_dir"] = True
-            app._config_files = [  # type: ignore[attr-defined]
-                ConfigFileSpec(
-                    path="nonexistent.yaml", from_etc_dir=True, optional=False
-                )
-            ]
-            app.create_args()
-
-            with patch.object(sys, "argv", ["test", "--etc-dir", str(etc_dir)]):
-                app._parsed_args = app.parser.parse_args()
-                with pytest.raises(FileNotFoundError, match="nonexistent.yaml"):
-                    app._load_deferred_configs()
-
-    def test_load_deferred_config_returns_none_for_missing_optional_file(self):
-        """Test that _load_deferred_config returns None for missing optional file."""
-        from appinfra.app.builder.app import ConfigFileSpec
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            etc_dir = Path(tmpdir) / "etc"
-            etc_dir.mkdir()
-            # Don't create the config file
-
-            app = App()
-            app._standard_args["etc_dir"] = True
-            app._config_files = [  # type: ignore[attr-defined]
-                ConfigFileSpec(
-                    path="nonexistent.yaml", from_etc_dir=True, optional=True
-                )
-            ]
-            app.create_args()
-
-            with patch.object(sys, "argv", ["test", "--etc-dir", str(etc_dir)]):
-                app._parsed_args = app.parser.parse_args()
-                result = app._load_deferred_configs()
-
-            # Should return None, not raise
-            assert result is None
-            # Warning should be stored for later logging
-            assert hasattr(app, "_config_load_warnings")
-            assert len(app._config_load_warnings) == 1
-
-    def test_load_deferred_config_raises_for_required_yaml_error(self):
-        """Test that _load_deferred_config raises for required configs with YAML errors."""
-        import yaml
-
-        from appinfra.app.builder.app import ConfigFileSpec
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            etc_dir = Path(tmpdir) / "etc"
-            etc_dir.mkdir()
-            # Create an invalid YAML file
-            (etc_dir / "invalid.yaml").write_text("invalid: yaml: content: [")
-
-            app = App()
-            app._standard_args["etc_dir"] = True
-            app._config_files = [  # type: ignore[attr-defined]
-                ConfigFileSpec(path="invalid.yaml", from_etc_dir=True, optional=False)
-            ]
-            app.create_args()
-
-            with patch.object(sys, "argv", ["test", "--etc-dir", str(etc_dir)]):
-                app._parsed_args = app.parser.parse_args()
-                # Required configs should raise on YAML errors
-                with pytest.raises(yaml.YAMLError):
-                    app._load_deferred_configs()
-
-    def test_load_deferred_config_stores_error_for_optional_yaml_error(self):
-        """Test that _load_deferred_config stores errors for optional configs."""
-        from appinfra.app.builder.app import ConfigFileSpec
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            etc_dir = Path(tmpdir) / "etc"
-            etc_dir.mkdir()
-            # Create an invalid YAML file
-            (etc_dir / "invalid.yaml").write_text("invalid: yaml: content: [")
-
-            app = App()
-            app._standard_args["etc_dir"] = True
-            app._config_files = [  # type: ignore[attr-defined]
-                ConfigFileSpec(path="invalid.yaml", from_etc_dir=True, optional=True)
-            ]
-            app.create_args()
-
-            with patch.object(sys, "argv", ["test", "--etc-dir", str(etc_dir)]):
-                app._parsed_args = app.parser.parse_args()
-                result = app._load_deferred_configs()
-
-            # Should return None, not raise (optional)
-            assert result is None
-
-            # Error should be stored for later logging
-            assert hasattr(app, "_config_load_errors")
-            assert len(app._config_load_errors) == 1
-            filename, error = app._config_load_errors[0]
-            assert filename == "invalid.yaml"
-            assert isinstance(error, Exception)
-
-    def test_load_deferred_config_loads_and_merges_config(self, clean_env):
-        """Test that _load_deferred_config loads and returns config info."""
-        from appinfra.app.builder.app import ConfigFileSpec
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            etc_dir = Path(tmpdir) / "etc"
-            etc_dir.mkdir()
-            (etc_dir / "app.yaml").write_text("test_key: test_value\n")
-
-            app = App()
-            app._standard_args["etc_dir"] = True
-            app._config_files = [  # type: ignore[attr-defined]
-                ConfigFileSpec(path="app.yaml", from_etc_dir=True, optional=False)
-            ]
-            app.create_args()
-
-            with patch.object(sys, "argv", ["test", "--etc-dir", str(etc_dir)]):
-                app._parsed_args = app.parser.parse_args()
-                result = app._load_deferred_configs()
-
-            # Should return config info
-            assert result is not None
-            assert result["files"] == ["app.yaml"]
-            # Use realpath for comparison (macOS /var is symlink to /private/var)
-            assert os.path.realpath(result["etc_dir"]) == os.path.realpath(str(etc_dir))
-            # Config should be loaded
-            assert hasattr(app.config, "test_key")
-            assert app.config.test_key == "test_value"
-
-    def test_is_direct_path_absolute(self):
-        """Test _is_direct_path returns True for absolute paths."""
-        app = App()
-        assert app._is_direct_path("/etc/app/config.yaml") is True
-        assert app._is_direct_path("/config.yaml") is True
-
-    def test_is_direct_path_explicit_relative(self):
-        """Test _is_direct_path returns True for ./ and ../ paths."""
-        app = App()
-        assert app._is_direct_path("./config.yaml") is True
-        assert app._is_direct_path("../config.yaml") is True
-        assert app._is_direct_path("./subdir/config.yaml") is True
-
-    def test_is_direct_path_plain_filename(self):
-        """Test _is_direct_path returns False for plain filenames."""
-        app = App()
-        assert app._is_direct_path("config.yaml") is False
-        assert app._is_direct_path("subdir/config.yaml") is False
-
-    def test_is_direct_path_tilde(self):
-        """Test _is_direct_path returns True for tilde-prefixed paths."""
-        app = App()
-        assert app._is_direct_path("~/config.yaml") is True
-        assert app._is_direct_path("~/.config/app.yaml") is True
-        assert app._is_direct_path("~/subdir/config.yaml") is True
-
-    def test_is_direct_path_tilde_in_middle_is_absolute(self):
-        """Tilde in middle of absolute path is not a home-dir reference."""
-        app = App()
-        # /a/b/~/c is absolute (starts with /), tilde is literal dirname
-        assert app._is_direct_path("/a/b/~/c") is True  # absolute path
-        # ../~/config.yaml starts with ../, tilde is literal
-        assert app._is_direct_path("../~/config.yaml") is True  # explicit relative
-
-    def test_is_direct_path_tilde_no_slash_is_bare_filename(self):
-        """~config.yaml is NOT a valid home-dir reference, it's a bare filename.
-
-        expanduser() raises RuntimeError for ~username when the user doesn't exist,
-        so we must not recognize ~config.yaml as a direct path — only ~/... or ~.
-        """
-        app = App()
-        # ~config.yaml looks like it starts with ~ but is NOT a valid home expansion
-        assert app._is_direct_path("~config.yaml") is False
-        assert app._is_direct_path("~foo") is False
-        # But bare ~ alone is valid (expands to home directory)
-        assert app._is_direct_path("~") is True
-
-    def test_load_direct_config_absolute_path(self, clean_env):
-        """Test _load_direct_config loads from absolute path."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            config_path = Path(tmpdir) / "config.yaml"
-            config_path.write_text("direct_key: direct_value\n")
-
-            app = App()
-            result = app._load_direct_config(str(config_path))
-
-            assert result is not None
-            assert result["files"] == ["config.yaml"]
-            assert hasattr(app.config, "direct_key")
-            assert app.config.direct_key == "direct_value"
-
-    def test_load_direct_config_relative_path(self, clean_env):
-        """Test _load_direct_config loads from relative path (resolved to cwd)."""
-        import os
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            config_path = Path(tmpdir) / "config.yaml"
-            config_path.write_text("relative_key: relative_value\n")
-
-            # Change to tmpdir so relative path works
-            old_cwd = os.getcwd()
-            try:
-                os.chdir(tmpdir)
-                app = App()
-                result = app._load_direct_config("./config.yaml")
-
-                assert result is not None
-                assert hasattr(app.config, "relative_key")
-                assert app.config.relative_key == "relative_value"
-            finally:
-                os.chdir(old_cwd)
-
-    def test_load_direct_config_tilde_path(self, clean_env, monkeypatch, tmp_path):
-        """Test _load_direct_config expands tilde and loads from home directory."""
-        monkeypatch.setenv("HOME", str(tmp_path))
-        config_path = tmp_path / "config.yaml"
-        config_path.write_text("tilde_key: tilde_value\n")
-
-        app = App()
-        result = app._load_direct_config("~/config.yaml")
-
-        assert result is not None
-        assert hasattr(app.config, "tilde_key")
-        assert app.config.tilde_key == "tilde_value"
-
-    def test_load_direct_config_dot_tilde_normalized(
-        self, clean_env, monkeypatch, tmp_path
-    ):
-        """./~/config.yaml normalizes to ~/config.yaml, then expands."""
-        monkeypatch.setenv("HOME", str(tmp_path))
-        config_path = tmp_path / "config.yaml"
-        config_path.write_text("dot_tilde_key: dot_tilde_value\n")
-
-        app = App()
-        # Path('./~/config.yaml') normalizes to '~/config.yaml'
-        result = app._load_direct_config("./~/config.yaml")
-
-        assert result is not None
-        assert hasattr(app.config, "dot_tilde_key")
-        assert app.config.dot_tilde_key == "dot_tilde_value"
-
-    def test_load_direct_config_tilde_in_middle_is_literal(self, clean_env, tmp_path):
-        """Tilde in middle of path is a literal directory name, not expanded."""
-        # Create /tmp.../a/~/config.yaml (literal ~ directory)
-        tilde_dir = tmp_path / "a" / "~"
-        tilde_dir.mkdir(parents=True)
-        config_path = tilde_dir / "config.yaml"
-        config_path.write_text("literal_tilde_key: literal_value\n")
-
-        app = App()
-        result = app._load_direct_config(str(config_path))
-
-        assert result is not None
-        assert hasattr(app.config, "literal_tilde_key")
-        assert app.config.literal_tilde_key == "literal_value"
-
-    def test_load_direct_config_dot_tilde_filename(
-        self, clean_env, monkeypatch, tmp_path
-    ):
-        """./~config.yaml is literal, not expanded as ~username.
-
-        expanduser() raises RuntimeError for ~username when user doesn't exist.
-        The ./ prefix makes it a direct path, but we must not call expanduser()
-        on paths that don't start with ~.
-        """
-        monkeypatch.chdir(tmp_path)
-        config_path = tmp_path / "~config.yaml"
-        config_path.write_text("dot_tilde_key: dot_tilde_value\n")
-
-        app = App()
-        result = app._load_direct_config("./~config.yaml")
-
-        assert result is not None
-        assert hasattr(app.config, "dot_tilde_key")
-        assert app.config.dot_tilde_key == "dot_tilde_value"
-
-    def test_load_direct_config_missing_file_raises(self):
-        """Test _load_direct_config raises for missing file."""
-        app = App()
-        with pytest.raises(FileNotFoundError, match="Config file not found"):
-            app._load_direct_config("/nonexistent/config.yaml")
-
-    def test_log_config_loading_logs_stored_errors(self):
-        """Test that _log_config_loading logs errors stored during deferred loading."""
-        from unittest.mock import MagicMock
-
-        app = App()
-        # Simulate stored errors from failed config loading
-        app._config_load_errors = [
-            ("config.yaml", ValueError("test error")),
-            ("other.yaml", RuntimeError("another error")),
-        ]
-
-        # Mock the logger
-        mock_logger = MagicMock()
-        app.lifecycle._logger = mock_logger
-
-        # Call _log_config_loading
-        app._log_config_loading(None)
-
-        # Verify warnings were logged for each error
-        assert mock_logger.warning.call_count == 2
-        calls = mock_logger.warning.call_args_list
-
-        # First error
-        assert calls[0][0][0] == "failed to load config file"
-        assert calls[0][1]["extra"]["file"] == "config.yaml"
-        assert isinstance(calls[0][1]["extra"]["exception"], ValueError)
-
-        # Second error
-        assert calls[1][0][0] == "failed to load config file"
-        assert calls[1][1]["extra"]["file"] == "other.yaml"
-        assert isinstance(calls[1][1]["extra"]["exception"], RuntimeError)
-
-        # Errors should be cleared after logging
-        assert app._config_load_errors == []
-
-
 @pytest.mark.unit
 class TestConfigWatcherProperty:
     """Test App.config_watcher property."""
@@ -1474,13 +1092,14 @@ class TestSubprocessContextMethod:
         ctx._lg.handlers.clear()
 
     def test_subprocess_context_passes_config_files(self):
-        """Test that subprocess_context() passes config_files."""
+        """Test that subprocess_context() passes the resolved config file."""
+        from appinfra.config import ConfigFile
+
         app = App()
         app.config = DotDict(logging=DotDict(level="info", location=0))
-        # Simulate loaded config paths
-        app._loaded_config_paths = [  # type: ignore[attr-defined]
-            ("/etc/myapp", "config.yaml", "/etc/myapp/config.yaml")
-        ]
+        app._config_source = ConfigFile(
+            Path("/etc/myapp/config.yaml"), Path("/etc/myapp"), rule=6
+        )
 
         ctx = app.subprocess_context()
 
@@ -1489,10 +1108,9 @@ class TestSubprocessContextMethod:
         ctx._lg.handlers.clear()
 
     def test_subprocess_context_handles_missing_config(self):
-        """Test subprocess_context() works without loaded config paths."""
+        """Test subprocess_context() works without a resolved config file."""
         app = App()
         app.config = DotDict(logging=DotDict(level="info", location=0))
-        # No _loaded_config_paths set
 
         ctx = app.subprocess_context()
 
@@ -1528,59 +1146,46 @@ class TestSubprocessContextMethod:
 class TestCreateConfigWatcherMethod:
     """Test App.create_config_watcher() helper method."""
 
-    def test_create_config_watcher_returns_watcher_when_configured(self):
-        """Test that create_config_watcher() returns a ConfigWatcher."""
+    def _resolved(self, app: App, tmp_path: Path) -> Path:
+        """Point the app at a resolved config file under tmp_path."""
+        from appinfra.config import ConfigFile
+
+        path = tmp_path / "etc" / "config.yaml"
+        path.parent.mkdir()
+        path.write_text("logging:\n  level: info\n")
+        app._config_source = ConfigFile(path, path.parent, rule=6)
+        app._project_root = path.parent
+        return path
+
+    def test_create_config_watcher_returns_watcher_when_configured(self, tmp_path):
+        """Test that create_config_watcher() watches the resolved file."""
         from appinfra.config import ConfigWatcher
 
         app = App()
         app.lifecycle._logger = Mock()
-        # Simulate loaded config paths
-        app._loaded_config_paths = [  # type: ignore[attr-defined]
-            ("/etc/myapp", "config.yaml", "/etc/myapp/config.yaml")
-        ]
+        path = self._resolved(app, tmp_path)
 
         watcher = app.create_config_watcher()
 
         assert isinstance(watcher, ConfigWatcher)
+        assert watcher._etc_dir == path.parent.resolve()
+        assert watcher._config_paths == [path.resolve()]
 
-    def test_create_config_watcher_returns_none_when_no_loaded_paths(self):
-        """Test that create_config_watcher() returns None without loaded paths."""
+    def test_create_config_watcher_returns_none_without_resolved_file(self):
+        """Test that create_config_watcher() returns None before resolution."""
         app = App()
         app.lifecycle._logger = Mock()
-        # No _loaded_config_paths
 
         watcher = app.create_config_watcher()
 
         assert watcher is None
 
-    def test_create_config_watcher_returns_none_when_empty_loaded_paths(self):
-        """Test that create_config_watcher() returns None with empty loaded paths."""
-        app = App()
-        app.lifecycle._logger = Mock()
-        app._loaded_config_paths = []  # type: ignore[attr-defined]
-
-        watcher = app.create_config_watcher()
-
-        assert watcher is None
-
-    def test_create_config_watcher_returns_none_when_no_paths(self):
-        """Test that create_config_watcher() returns None when paths are missing."""
-        app = App()
-        app.lifecycle._logger = Mock()
-        # No _loaded_config_paths
-
-        watcher = app.create_config_watcher()
-
-        assert watcher is None
-
-    def test_create_config_watcher_uses_app_logger(self):
+    def test_create_config_watcher_uses_app_logger(self, tmp_path):
         """Test that create_config_watcher() uses the app's logger."""
         app = App()
         mock_logger = Mock()
         app.lifecycle._logger = mock_logger
-        app._loaded_config_paths = [  # type: ignore[attr-defined]
-            ("/etc/myapp", "config.yaml", "/etc/myapp/config.yaml")
-        ]
+        self._resolved(app, tmp_path)
 
         watcher = app.create_config_watcher()
 
@@ -1624,9 +1229,8 @@ class TestAppEtcDirProperty:
 
 @pytest.mark.unit
 class TestEtcDirResolutionOnOptIn:
-    """Verify _resolve_etc_dir_if_opted_in populates _etc_dir from --etc-dir or
-    the fallback chain when the standard arg is enabled — even without any
-    registered config files."""
+    """Verify _resolve_etc_dir_if_opted_in populates _etc_dir from an explicit
+    --etc-dir when the standard arg is enabled on an app without a spec."""
 
     def test_explicit_etc_dir_resolves_and_sets(self, tmp_path):
         custom = tmp_path / "myetc"
@@ -1648,9 +1252,22 @@ class TestEtcDirResolutionOnOptIn:
         with pytest.raises(FileNotFoundError):
             app._resolve_etc_dir_if_opted_in()
 
-    def test_fallback_resolves_when_flag_omitted(self, monkeypatch, tmp_path):
-        cwd_etc = tmp_path / "etc"
-        cwd_etc.mkdir()
+    def test_explicit_etc_dir_file_raises(self, tmp_path):
+        """A path that exists but is not a directory is rejected too."""
+        not_a_dir = tmp_path / "file.yaml"
+        not_a_dir.write_text("")
+
+        app = App()
+        app._standard_args = {"etc_dir": True}
+        app._parsed_args = argparse.Namespace(etc_dir=str(not_a_dir))
+
+        with pytest.raises(FileNotFoundError):
+            app._resolve_etc_dir_if_opted_in()
+
+    def test_flag_omitted_leaves_none(self, monkeypatch, tmp_path):
+        """Without --etc-dir there is no default: _etc_dir stays unset even
+        when a ./etc directory exists beside the cwd."""
+        (tmp_path / "etc").mkdir()
         monkeypatch.chdir(tmp_path)
 
         app = App()
@@ -1658,31 +1275,6 @@ class TestEtcDirResolutionOnOptIn:
         app._parsed_args = argparse.Namespace(etc_dir=None)
 
         app._resolve_etc_dir_if_opted_in()
-
-        assert Path(app.etc_dir).resolve() == cwd_etc.resolve()
-
-    def test_fallback_miss_is_tolerant(self, monkeypatch, tmp_path):
-        """When the user didn't pass --etc-dir and no fallback exists, leave
-        _etc_dir unset (app.etc_dir returns None) — don't raise."""
-        empty = tmp_path / "empty"
-        empty.mkdir()
-        monkeypatch.chdir(empty)
-
-        app = App()
-        app._standard_args = {"etc_dir": True}
-        app._parsed_args = argparse.Namespace(etc_dir=None)
-
-        # Force the project-root and package-etc fallbacks to also fail.
-        from appinfra.config import config as _config_mod
-
-        monkeypatch.setattr(
-            _config_mod,
-            "get_etc_dir",
-            lambda: (_ for _ in ()).throw(FileNotFoundError("no project root")),
-        )
-        monkeypatch.setattr(_config_mod, "_get_package_etc_dir", lambda: None)
-
-        app._resolve_etc_dir_if_opted_in()  # must not raise
 
         assert app.etc_dir is None
 
@@ -1705,23 +1297,6 @@ class TestEtcDirResolutionOnOptIn:
         app._resolve_etc_dir_if_opted_in()
 
         assert app.etc_dir == "/loaded/by/config/file"
-
-
-@pytest.mark.unit
-class TestResolveEtcDirReExport:
-    """Verify resolve_etc_dir is reachable from the public import paths."""
-
-    def test_appinfra_root_namespace(self):
-        from appinfra import resolve_etc_dir as r1
-        from appinfra.config import resolve_etc_dir as r2
-
-        assert r1 is r2
-
-    def test_appinfra_app_namespace(self):
-        from appinfra.app import resolve_etc_dir as r1
-        from appinfra.config import resolve_etc_dir as r2
-
-        assert r1 is r2
 
 
 @pytest.mark.unit
@@ -1887,54 +1462,37 @@ class TestConfigSpecLoading:
         assert app.config.origin == "cli-absolute"
         assert app._project_root == target.parent.resolve()
 
-    def test_load_and_merge_config_dispatches_to_spec_branch(
-        self, monkeypatch, tmp_path
-    ):
-        """When a spec is set, _load_and_merge_config takes the v1 branch and
-        never touches the deferred/direct file-loading path."""
+    def test_load_and_merge_config_uses_spec(self, monkeypatch, tmp_path):
+        """With a spec set, _load_and_merge_config loads the resolved file
+        and layers CLI args over it."""
         monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "nonexistent"))
         monkeypatch.setenv("XDG_CONFIG_DIRS", str(tmp_path / "nonexistent-sys"))
         spec = self._make_spec(tmp_path)
 
         app = App()
         app._config_spec = spec
-        app._parsed_args = argparse.Namespace(config=None, etc_dir=None)
-
-        # Deferred/direct paths would raise if invoked with these args.
-        called = {"deferred": False, "direct": False}
-        monkeypatch.setattr(
-            app,
-            "_load_deferred_configs",
-            lambda: called.__setitem__("deferred", True),
-        )
-        monkeypatch.setattr(
-            app,
-            "_load_direct_config",
-            lambda *a, **kw: called.__setitem__("direct", True),
+        app._parsed_args = argparse.Namespace(
+            config=None, etc_dir=None, log_level="debug"
         )
 
-        app._load_and_merge_config()
+        result = app._load_and_merge_config()
 
-        assert called == {"deferred": False, "direct": False}
+        assert result is not None
         assert app.config.origin == "bundled"
+        assert app.config.logging.level == "debug"
+        assert app.config_path == spec.base_config
 
-    def test_populates_loaded_config_paths(self, monkeypatch, tmp_path):
-        """_load_config_spec populates _loaded_config_paths for API parity."""
-        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "nonexistent"))
-        monkeypatch.setenv("XDG_CONFIG_DIRS", str(tmp_path / "nonexistent-sys"))
-        spec = self._make_spec(tmp_path)
+    def test_load_and_merge_config_without_spec_loads_nothing(self, tmp_path):
+        """An app without a spec ignores --config and --etc-dir for loading."""
+        etc = tmp_path / "etc"
+        etc.mkdir()
+        (etc / "myapp.yaml").write_text("origin: should-not-load\n")
 
         app = App()
-        app._config_spec = spec
-        app._parsed_args = argparse.Namespace(etc_dir=None)
+        app._parsed_args = argparse.Namespace(config="myapp.yaml", etc_dir=str(etc))
 
-        app._load_config_spec()
+        result = app._load_and_merge_config()
 
-        assert hasattr(app, "_loaded_config_paths")
-        assert len(app._loaded_config_paths) == 1
-        etc_dir, config_file, full_path = app._loaded_config_paths[0]
-        assert etc_dir == str(spec.base_config.parent.resolve())
-        assert config_file == "myapp.yaml"
-        assert full_path == str(spec.base_config.resolve())
-        # Public API should also work
-        assert app.loaded_config_paths == app._loaded_config_paths
+        assert result is None
+        assert not hasattr(app.config, "origin")
+        assert app.config_path is None
