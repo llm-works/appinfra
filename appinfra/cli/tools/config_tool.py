@@ -24,8 +24,7 @@ import yaml  # type: ignore[import-untyped]
 
 from ...app.tools import Tool, ToolConfig
 from ...app.tracing.traceable import Traceable
-from ...config import Config, find_project_local, xdg_candidates
-from ...config.xdg import _is_direct_path
+from ...config import Config, ConfigFile, ConfigSpec
 
 _PRECEDENCE_EPILOG = """\
 config-source precedence (v1, checked top-down; first match wins):
@@ -37,7 +36,7 @@ config-source precedence (v1, checked top-down; first match wins):
      resolves to /foo/bare.yaml; without --etc-dir, to cwd/bare.yaml.
 
   3. --etc-dir /foo alone                          (etc-dir default)
-     resolves to /foo/<package>.yaml.
+     resolves to /foo/<base-filename>.
 
   4. Project-local walk-up                         (repo checkout)
      walks up from cwd looking for etc/<base-filename>; first hit wins.
@@ -46,11 +45,11 @@ config-source precedence (v1, checked top-down; first match wins):
 
   5. First existing XDG candidate                  (user overlay)
      searched in $XDG_CONFIG_HOME then $XDG_CONFIG_DIRS, per-file first:
-       <dir>/<namespace>/<package>.yaml
+       <dir>/<namespace>/<name>.yaml
        <dir>/<namespace>/config.yaml
 
   6. Packaged base                                 (fallback)
-     the file registered via .with_config_spec(...).
+     the file the app's ConfigSpec points at.
 
 --config always bypasses project-local, XDG discovery, and the packaged base.
 
@@ -240,13 +239,14 @@ class ConfigSourceTool(Tool):
     def _render_source_report(self) -> str:
         """Report what config was loaded and which precedence rule matched.
 
-        Uses the App's tracked ``_config_spec`` + ``_loaded_config_paths``
-        to name the rule; falls back to a bare loaded-paths listing when
-        the App wasn't built with ``.with_config_spec(...)``.
+        Reads the App's ``_config_spec`` and the ``ConfigFile`` its
+        ``resolve()`` produced; falls back to a bare loaded-paths listing
+        when the App was built without a spec.
         """
         app = self.app
         loaded = getattr(app, "_loaded_config_paths", [])
         spec = getattr(app, "_config_spec", None)
+        source = getattr(app, "_config_source", None)
 
         lines: list[str] = []
         if loaded:
@@ -255,62 +255,25 @@ class ConfigSourceTool(Tool):
         else:
             lines.append("loaded: <none>")
 
-        custom_etc = getattr(app, "_parsed_args", None)
-        custom_etc = getattr(custom_etc, "etc_dir", None) if custom_etc else None
-        custom_cfg = getattr(app, "_parsed_args", None)
-        custom_cfg = getattr(custom_cfg, "config", None) if custom_cfg else None
-        loaded_path = Path(loaded[0][2]) if loaded else None
+        if spec is None or source is None:
+            lines.append("rule:   (app built without a config spec — no chain)")
+            return "\n".join(lines)
 
-        if spec is not None:
-            winning = self._determine_winner(spec, custom_etc, custom_cfg, loaded_path)
-            lines.append(f"rule:   {winning}")
-            lines.append("")
-            lines.append("precedence chain (v1):")
-            lines.extend(
-                self._render_chain(spec, custom_etc, custom_cfg, loaded_path, winning)
-            )
-        else:
-            lines.append("rule:   (app built without .with_config_spec — no chain)")
+        args = getattr(app, "_parsed_args", None)
+        custom_etc = getattr(args, "etc_dir", None) if args else None
+        custom_cfg = getattr(args, "config", None) if args else None
+        lines.append(f"rule:   {_rule_label(source.rule, custom_etc)}")
+        lines.append("")
+        lines.append("precedence chain (v1):")
+        lines.extend(self._render_chain(spec, source, custom_etc, custom_cfg))
         return "\n".join(lines)
-
-    def _determine_winner(
-        self,
-        spec: Any,
-        custom_etc: str | None,
-        custom_cfg: str | None,
-        loaded_path: Path | None,
-    ) -> str:
-        """Identify which precedence rule (1-6) produced the loaded path."""
-        if loaded_path is None:
-            return "none (no config loaded)"
-        if custom_cfg is not None:
-            if _is_direct_path(custom_cfg):
-                return "1 (--config direct path)"
-            where = "--etc-dir" if custom_etc else "cwd"
-            return f"2 (--config bare + {where})"
-        if custom_etc is not None:
-            return "3 (--etc-dir alone)"
-        project_local = find_project_local(spec.base_config)
-        if (
-            loaded_path is not None
-            and project_local is not None
-            and str(project_local) == str(loaded_path)
-        ):
-            return "4 (project-local)"
-        candidates = xdg_candidates(spec.namespace, spec.package)
-        if loaded_path is not None and any(
-            str(c) == str(loaded_path) for c in candidates
-        ):
-            return "5 (XDG overlay)"
-        return "6 (packaged base)"
 
     def _render_chain(
         self,
-        spec: Any,
+        spec: ConfigSpec,
+        source: ConfigFile,
         custom_etc: str | None,
         custom_cfg: str | None,
-        loaded_path: Path | None,
-        winning: str,
     ) -> list[str]:
         """Format the checkbox-style precedence chain lines.
 
@@ -319,44 +282,56 @@ class ConfigSourceTool(Tool):
         existing-but-not-chosen entries get ``[·]``, missing entries stay
         ``[ ]``.
         """
-        won = {str(i): False for i in range(1, 7)}
-        won[winning[:1]] = True
-        mark = lambda r: "[x]" if won[r] else "[ ]"  # noqa: E731
+        won = source.rule
+        mark = lambda r: "[x]" if won == r else "[ ]"  # noqa: E731
         cfg = custom_cfg or ""
         etc = custom_etc or ""
-        loaded_str = str(loaded_path) if loaded_path else ""
+        loaded_str = str(source.path)
 
         out = [
-            f"  {mark('1')} 1. --config direct path"
-            + (f" ({cfg})" if won["1"] else ""),
-            f"  {mark('2')} 2. --config bare filename"
-            + (f" ({cfg})" if won["2"] else ""),
-            f"  {mark('3')} 3. --etc-dir alone"
-            + (f" ({etc}/{spec.package}.yaml)" if won["3"] else ""),
-            self._project_local_line(spec, won["4"], loaded_str),
+            f"  {mark(1)} 1. --config direct path" + (f" ({cfg})" if won == 1 else ""),
+            f"  {mark(2)} 2. --config bare filename"
+            + (f" ({cfg})" if won == 2 else ""),
+            f"  {mark(3)} 3. --etc-dir alone"
+            + (f" ({etc}/{spec.base_config.name})" if won == 3 else ""),
+            self._project_local_line(spec, won == 4, loaded_str),
             "  5. XDG candidates:",
         ]
-        out.extend(self._xdg_lines(spec, won["5"], loaded_str))
-        base = Path(str(spec.base_config)).expanduser().resolve()
-        out.append(f"  {mark('6')} 6. packaged base ({base})")
+        out.extend(self._xdg_lines(spec, won == 5, loaded_str))
+        out.append(f"  {mark(6)} 6. packaged base ({spec.base_config})")
         return out
 
-    def _project_local_line(self, spec: Any, won: bool, loaded_str: str) -> str:
+    def _project_local_line(self, spec: ConfigSpec, won: bool, loaded_str: str) -> str:
         """Format the rule-4 project-local line for the chain rendering."""
-        project_local = find_project_local(spec.base_config)
+        if Path(spec.etc_dir).is_absolute():
+            return f"  [-] 4. project-local (n/a: {spec.etc_dir} is absolute)"
+        project_local = spec.project_local()
         if project_local is None:
-            return "  [ ] 4. project-local (no etc/<base-filename> above cwd)"
+            return f"  [ ] 4. project-local (no {spec.etc_dir}/<filename> above cwd)"
         glyph = "[x]" if (won and str(project_local) == loaded_str) else "[·]"
         return f"  {glyph} 4. project-local ({project_local})"
 
-    def _xdg_lines(self, spec: Any, won: bool, loaded_str: str) -> list[str]:
+    def _xdg_lines(self, spec: ConfigSpec, won: bool, loaded_str: str) -> list[str]:
         """Format the rule-5 XDG candidate lines for the chain rendering."""
         lines: list[str] = []
-        for c in xdg_candidates(spec.namespace, spec.package):
+        for c in spec.xdg_candidates():
             matched = won and str(c) == loaded_str
             glyph = "[x]" if matched else ("[·]" if c.exists() else "[ ]")
             lines.append(f"       {glyph} {c}")
         return lines
+
+
+def _rule_label(rule: int, custom_etc: str | None) -> str:
+    """Human-readable label for the precedence rule that picked the file."""
+    if rule == 2:
+        return f"2 (--config bare + {'--etc-dir' if custom_etc else 'cwd'})"
+    return {
+        1: "1 (--config direct path)",
+        3: "3 (--etc-dir alone)",
+        4: "4 (project-local)",
+        5: "5 (XDG overlay)",
+        6: "6 (packaged base)",
+    }[rule]
 
 
 class ConfigTool(Tool):

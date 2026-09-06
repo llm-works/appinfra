@@ -37,8 +37,9 @@ from appinfra.app.builder import AppBuilder
 app = (
     AppBuilder("my-service")
     .with_config_file("config.yaml")
+    .config.with_hot_reload(True)  # Watch the resolved config file
+    .done()
     .logging.with_level("info")
-    .with_hot_reload(True)  # Enable hot-reload using config path
     .done()
     .build()
 )
@@ -89,8 +90,8 @@ logging:
 ```python
 app = (
     AppBuilder("my-service")
-    .with_config_file("config.yaml")  # Must set config path first
-    .logging.with_hot_reload(True, debounce_ms=1000)
+    .with_config_file("config.yaml")  # A config source must be declared first
+    .config.with_hot_reload(True, debounce_ms=1000)
     .done()
     .build()
 )
@@ -348,7 +349,7 @@ from appinfra.app.builder import AppBuilder
 app = (
     AppBuilder("my-service")
     .with_config_file("config.yaml")
-    .logging.with_hot_reload(True)
+    .config.with_hot_reload(True)
     .done()
     .build()
 )

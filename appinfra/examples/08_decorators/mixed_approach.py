@@ -190,11 +190,12 @@ app = (
     AppBuilder()
     .with_name("mixed-app")
     .with_version("1.0.0")
-    .with_config(
+    .config.with_overrides(
         DotDict(
             logging=DotDict(level="info"), server=DotDict(host="0.0.0.0", port=8080)
         )
     )
+    .done()
     .tools.with_tool(ServerTool())
     .with_tool(ProcessorTool())
     .done()

@@ -25,13 +25,8 @@ from .config import (
     resolve_etc_dir,
 )
 from .constants import MAX_CONFIG_SIZE_BYTES
+from .spec import AUTO, Auto, ConfigFile, ConfigSpec
 from .watcher import ConfigWatcher
-from .xdg import (
-    find_project_local,
-    include_root_for,
-    resolve_config_source,
-    xdg_candidates,
-)
 
 try:
     from .schemas import (
@@ -67,11 +62,11 @@ __all__ = [
     "DEFAULT_CONFIG_FILENAME",
     # Watcher
     "ConfigWatcher",
-    # XDG discovery + v1 config-protocol composition helpers
-    "xdg_candidates",
-    "include_root_for",
-    "resolve_config_source",
-    "find_project_local",
+    # Config-protocol identity and resolution
+    "ConfigSpec",
+    "ConfigFile",
+    "AUTO",
+    "Auto",
     # Constants
     "MAX_CONFIG_SIZE_BYTES",
     # Validation (optional)

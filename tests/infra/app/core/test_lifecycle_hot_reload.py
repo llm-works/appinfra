@@ -332,7 +332,7 @@ logging:
         """
         Test programmatic-only hot-reload (no hot_reload in YAML).
 
-        This tests whether .logging.with_hot_reload(True) works when YAML
+        This tests whether .config.with_hot_reload(True) works when YAML
         doesn't have the hot_reload section.
         """
         from appinfra.app.builder import AppBuilder
@@ -350,7 +350,7 @@ logging:
         app = (
             AppBuilder("test-app")
             .with_config_file(str(config_file), from_etc_dir=False)
-            .logging.with_hot_reload(True)
+            .config.with_hot_reload(True)
             .done()
             .build()
         )

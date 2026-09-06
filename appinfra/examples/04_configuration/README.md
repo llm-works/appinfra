@@ -106,19 +106,21 @@ port: 5432
 
 ---
 
-### library_mode_from_spec.py
-Library-mode bootstrap via `Config.from_spec` for a package that ships
+### library_mode_config_spec.py
+Library-mode bootstrap via `ConfigSpec` for a package that ships
 `<pkg>/etc/<pkg>.yaml`.
 
 **What's demonstrated:**
-- One-line config load: `Config.from_spec("example-org", example_pkg)`
-- Default filename derivation (`example_pkg` → `example-pkg.yaml`)
+- Resolve then load: `Config(ConfigSpec("example-org", "example-pkg").resolve())`
+- Module and filename derived from the config name (`example-pkg` → `example_pkg`,
+  `etc/example-pkg.yaml`)
+- The winning precedence rule, read off the resolved file
 - Pairing with `create_root_lg` for the root logger
 - No CLI shell — headless entry point
 
 **Run:**
 ```bash
-python appinfra/examples/04_configuration/library_mode_from_spec.py
+python appinfra/examples/04_configuration/library_mode_config_spec.py
 ```
 
 **See also:** [Library-Mode Bootstrap](../../docs/guides/library-mode-bootstrap.md)

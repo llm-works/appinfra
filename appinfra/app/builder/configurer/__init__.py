@@ -9,12 +9,14 @@ of AppBuilder configuration using the composition pattern.
 """
 
 from .advanced import AdvancedConfigurer
+from .config import ConfigConfigurer
 from .logging import LoggingConfigurer
 from .server import ServerConfigurer
 from .tool import ToolConfigurer
 from .version import VersionConfigurer
 
 __all__ = [
+    "ConfigConfigurer",
     "ToolConfigurer",
     "ServerConfigurer",
     "LoggingConfigurer",

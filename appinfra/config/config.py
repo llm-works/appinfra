@@ -12,7 +12,6 @@ file inclusion support via !include tags.
 import os
 import re
 from pathlib import Path
-from types import ModuleType
 from typing import Any, Self
 
 import yaml  # type: ignore[import-untyped]
@@ -20,7 +19,7 @@ import yaml  # type: ignore[import-untyped]
 from ..dot_dict import DotDict
 from ..errors import UndeclaredConfigPathError
 from .constants import MAX_CONFIG_SIZE_BYTES
-from .xdg import resolve_config_source
+from .spec import ConfigFile
 
 # Inventory of `INFRA_*` env vars consumed by appinfra's own tooling (shell
 # scripts, Makefiles, pytest fixtures) rather than as yaml config overrides.
@@ -236,7 +235,7 @@ class Config(DotDict):
 
     def __init__(
         self,
-        fname: str,
+        fname: str | Path | ConfigFile,
         enable_env_overrides: bool = True,
         env_prefix: str = "INFRA_",
         merge_strategy: str = "replace",
@@ -247,7 +246,9 @@ class Config(DotDict):
         Initialize configuration from a YAML file with optional environment variable overrides.
 
         Args:
-            fname: Path to the YAML configuration file
+            fname: Path to the YAML configuration file, or a `ConfigFile` from
+                `ConfigSpec.resolve()`. A `ConfigFile` carries its own
+                `project_root`; passing both raises `ValueError`.
             enable_env_overrides: Whether to apply environment variable overrides
             env_prefix: Prefix for environment variables (default: 'INFRA_')
             merge_strategy: Strategy for handling includes - "replace" or "merge" (default: "replace")
@@ -270,16 +271,23 @@ class Config(DotDict):
                 `$XDG_CONFIG_HOME` that `!include`s a base config shipped
                 inside a package's `etc/` directory, whose sibling
                 `!include './...'` directives would otherwise be rejected
-                as path traversal). Pass the package install directory
-                (`BASE_CONFIG.parent.parent` under the v1 config protocol)
-                to authorize the base and all its siblings. `~`-expanded
-                and resolved once.
+                as path traversal). A `ConfigFile` from `ConfigSpec.resolve()`
+                carries the right value; pass a wider ancestor explicitly only
+                when the base's includes reach files outside its `etc/`.
+                `~`-expanded and resolved once.
 
         Note:
             Path resolution is handled explicitly via the !path YAML tag. Use !path for paths
             that should be resolved relative to the config file or for tilde (~) expansion.
         """
         super().__init__()  # Initialize DotDict first
+        if isinstance(fname, ConfigFile):
+            if project_root is not None:
+                raise ValueError(
+                    "project_root is carried by the ConfigFile; do not pass both"
+                )
+            project_root = fname.project_root
+            fname = fname.path
         self._enable_env_overrides = enable_env_overrides
         self._env_prefix = env_prefix
         self._merge_strategy = merge_strategy
@@ -287,74 +295,7 @@ class Config(DotDict):
         self._project_root_override = (
             Path(str(project_root)).expanduser().resolve() if project_root else None
         )
-        self._load(fname)
-
-    @classmethod
-    def from_spec(
-        cls,
-        namespace: str,
-        package_module: ModuleType,
-        *,
-        package: str | None = None,
-        etc_dir: str | None = None,
-        config_file: str | None = None,
-    ) -> Self:
-        """
-        Load a Config for library-mode use.
-
-        Derives the base config path from ``package_module.__file__`` per v1
-        config protocol rule 2 (``<package_module>/etc/<package>.yaml``), runs
-        ``resolve_config_source`` with the given namespace + package identity,
-        and returns a Config with ``project_root`` scoped to the resulting
-        include-authorization boundary.
-
-        Downstream code collapses to::
-
-            import my_package
-            config = Config.from_spec("myorg", my_package)
-
-        Args:
-            namespace: XDG namespace (e.g. ``"llm-works"``).
-            package_module: the Python module whose ``__file__`` locates the
-                packaged ``etc/`` directory.
-            package: package name as it appears in the config filename
-                (e.g. ``"llm-kelt"``). Defaults to
-                ``package_module.__name__.replace("_", "-")``, matching the
-                convention where the PyPI/protocol package name uses hyphens
-                and the Python module name uses underscores (PEP 8). Pass
-                explicitly when the config filename does not follow the
-                convention.
-            etc_dir: caller-provided ``--etc-dir`` equivalent. Library callers
-                surface this via their own kwarg; must not be read from the
-                ambient environment (protocol rule 5).
-            config_file: caller-provided ``--config`` equivalent. Same rule.
-
-        Returns:
-            Config loaded from the resolved file.
-
-        Raises:
-            ValueError: if ``package_module.__file__`` is None.
-        """
-        module_file = package_module.__file__
-        if module_file is None:
-            raise ValueError(
-                f"package_module {package_module.__name__!r} has no __file__; "
-                f"pass a top-level package module rather than a namespace package"
-            )
-        resolved_package = (
-            package
-            if package is not None
-            else package_module.__name__.replace("_", "-")
-        )
-        base = Path(module_file).parent / "etc" / f"{resolved_package}.yaml"
-        cfg_path, project_root = resolve_config_source(
-            namespace,
-            resolved_package,
-            base,
-            custom_etc_dir=etc_dir,
-            custom_config=config_file,
-        )
-        return cls(str(cfg_path), project_root=project_root)
+        self._load(str(fname))
 
     def __setattr__(self, key: str, value: Any) -> None:
         """
@@ -996,7 +937,7 @@ except FileNotFoundError:
 # 3. Returns None gracefully if no config file exists
 # 4. Tests create fresh Config() instances, so no test isolation issues
 #
-# Production code should use: Config(path) or AppBuilder().with_config(...)
+# Production code should use: Config(path) or AppBuilder().config.with_overrides(...)
 _default_config: Config | None = None
 
 

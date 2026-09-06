@@ -17,7 +17,6 @@ Tests the Config class functionality including:
 import os
 import tempfile
 from pathlib import Path
-from types import ModuleType
 from unittest.mock import MagicMock, Mock, patch
 
 import pytest
@@ -25,6 +24,8 @@ import pytest
 from appinfra.config import (
     MAX_CONFIG_SIZE_BYTES,
     Config,
+    ConfigFile,
+    ConfigSpec,
     get_config_file_path,
     get_default_config,
     get_etc_dir,
@@ -2094,128 +2095,87 @@ def clean_xdg_env(monkeypatch):
             monkeypatch.delenv(key, raising=False)
 
 
-def _make_pkg_module(tmp_path: Path, module_name: str) -> ModuleType:
-    """Build a synthetic package module rooted at tmp_path/<module_name>."""
-    module_dir = tmp_path / module_name
-    module_dir.mkdir()
-    init_file = module_dir / "__init__.py"
-    init_file.write_text("")
-    mod = ModuleType(module_name)
-    mod.__file__ = str(init_file)
-    return mod
+def _bundled(
+    tmp_path: Path, package: str = "mypkg", body: str = "app: bundled\n"
+) -> Path:
+    """Write a packaged base config at tmp_path/<package>/etc/<package>.yaml."""
+    etc = tmp_path / package / "etc"
+    etc.mkdir(parents=True)
+    base = etc / f"{package}.yaml"
+    base.write_text(body)
+    return base
 
 
 @pytest.mark.unit
-class TestConfigFromSpec:
-    """Library-mode alternative constructor.
+class TestConfigFromConfigFile:
+    """``Config`` accepts a ``ConfigFile`` as its source.
 
-    Derives base config path from ``package_module.__file__`` per protocol
-    rule 2 and chains ``resolve_config_source`` + ``Config`` in one call.
+    The located file carries its own include-authorization root, so the
+    two-step ``ConfigSpec.resolve()`` then ``Config(...)`` needs no other
+    argument to agree with the resolver.
     """
 
-    def test_derives_package_from_module_name(
-        self, tmp_path, clean_xdg_env, monkeypatch
-    ):
-        """Module ``llm_kelt`` → package ``llm-kelt`` → loads etc/llm-kelt.yaml."""
-        monkeypatch.chdir(tmp_path)
-        mod = _make_pkg_module(tmp_path, "llm_kelt")
-        etc = tmp_path / "llm_kelt" / "etc"
-        etc.mkdir()
-        (etc / "llm-kelt.yaml").write_text("app: kelt\n")
-        cfg = Config.from_spec("llm-works", mod)
-        assert cfg.app == "kelt"
+    def test_loads_from_config_file(self, tmp_path, clean_xdg_env):
+        base = _bundled(tmp_path)
+        cfg = Config(ConfigFile(base, base.parent, 6))
+        assert cfg.app == "bundled"
 
-    def test_explicit_package_overrides_derivation(
-        self, tmp_path, clean_xdg_env, monkeypatch
-    ):
-        """Explicit ``package`` kwarg overrides the module-name derivation."""
-        monkeypatch.chdir(tmp_path)
-        mod = _make_pkg_module(tmp_path, "some_module")
-        etc = tmp_path / "some_module" / "etc"
-        etc.mkdir()
-        (etc / "custom-name.yaml").write_text("app: custom\n")
-        cfg = Config.from_spec("myorg", mod, package="custom-name")
-        assert cfg.app == "custom"
+    def test_config_file_supplies_project_root(self, tmp_path, clean_xdg_env):
+        """An overlay outside the base's directory loads under the base's root."""
+        base = _bundled(tmp_path)
+        overlay = tmp_path / "xdg" / "myorg" / "mypkg.yaml"
+        overlay.parent.mkdir(parents=True)
+        overlay.write_text(f"!include {base}\nextra: 1\n")
+        cfg = Config(ConfigFile(overlay, base.parent, 5))
+        assert cfg.app == "bundled"
+        assert cfg.extra == 1
 
-    def test_module_without_underscore(self, tmp_path, clean_xdg_env, monkeypatch):
-        """Module name without underscore → replace is a no-op."""
-        monkeypatch.chdir(tmp_path)
-        mod = _make_pkg_module(tmp_path, "simple")
-        etc = tmp_path / "simple" / "etc"
-        etc.mkdir()
-        (etc / "simple.yaml").write_text("app: simple\n")
-        cfg = Config.from_spec("myorg", mod)
-        assert cfg.app == "simple"
+    def test_rejects_project_root_alongside_config_file(self, tmp_path):
+        base = _bundled(tmp_path)
+        with pytest.raises(ValueError, match="do not pass both"):
+            Config(ConfigFile(base, base.parent, 6), project_root=tmp_path)
 
-    def test_etc_dir_passthrough(self, tmp_path, clean_xdg_env, monkeypatch):
-        """``etc_dir`` kwarg reaches resolve_config_source as custom_etc_dir."""
-        monkeypatch.chdir(tmp_path)
-        mod = _make_pkg_module(tmp_path, "mypkg")
-        bundled_etc = tmp_path / "mypkg" / "etc"
-        bundled_etc.mkdir()
-        (bundled_etc / "mypkg.yaml").write_text("app: bundled\n")
-        user_etc = tmp_path / "user_etc"
-        user_etc.mkdir()
-        (user_etc / "mypkg.yaml").write_text("app: user\n")
-        cfg = Config.from_spec("myorg", mod, etc_dir=str(user_etc))
-        assert cfg.app == "user"
+    def test_accepts_path_object(self, tmp_path, clean_xdg_env):
+        base = _bundled(tmp_path)
+        assert Config(base).app == "bundled"
 
-    def test_config_file_passthrough(self, tmp_path, clean_xdg_env, monkeypatch):
-        """``config_file`` kwarg reaches resolve_config_source as custom_config."""
-        monkeypatch.chdir(tmp_path)
-        mod = _make_pkg_module(tmp_path, "mypkg")
-        direct = tmp_path / "direct.yaml"
-        direct.write_text("app: direct\n")
-        cfg = Config.from_spec("myorg", mod, config_file=str(direct))
-        assert cfg.app == "direct"
+    def test_end_to_end_bundled_base(self, tmp_path, clean_xdg_env, monkeypatch):
+        """No overrides, no XDG overlay, no project-local: the bundled base loads."""
+        base = _bundled(tmp_path)
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "empty_xdg"))
+        neutral = tmp_path / "neutral"
+        neutral.mkdir()
+        monkeypatch.chdir(neutral)
+        cfg = Config(ConfigSpec("myorg", "mypkg", path=base).resolve())
+        assert cfg.app == "bundled"
 
-    def test_xdg_overlay_wins_over_bundled(self, tmp_path, clean_xdg_env, monkeypatch):
-        """When no overrides, an existing XDG overlay wins over the bundled base."""
-        mod = _make_pkg_module(tmp_path, "mypkg")
-        bundled_etc = tmp_path / "mypkg" / "etc"
-        bundled_etc.mkdir()
-        (bundled_etc / "mypkg.yaml").write_text("app: bundled\n")
+    def test_end_to_end_xdg_overlay_wins(self, tmp_path, clean_xdg_env, monkeypatch):
+        base = _bundled(tmp_path)
         xdg_home = tmp_path / "xdg"
         (xdg_home / "myorg").mkdir(parents=True)
         (xdg_home / "myorg" / "mypkg.yaml").write_text("app: overlay\n")
         monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg_home))
-        monkeypatch.delenv("XDG_CONFIG_DIRS", raising=False)
-        # Neutralize project-local walk-up
         neutral = tmp_path / "neutral"
         neutral.mkdir()
         monkeypatch.chdir(neutral)
-        cfg = Config.from_spec("myorg", mod)
+        cfg = Config(ConfigSpec("myorg", "mypkg", path=base).resolve())
         assert cfg.app == "overlay"
 
-    def test_falls_back_to_bundled_base(self, tmp_path, clean_xdg_env, monkeypatch):
-        """No overrides, no XDG overlay, no project-local → bundled base loads."""
-        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "empty_xdg"))
-        monkeypatch.delenv("XDG_CONFIG_DIRS", raising=False)
-        neutral = tmp_path / "neutral"
-        neutral.mkdir()
-        monkeypatch.chdir(neutral)
-        mod = _make_pkg_module(tmp_path, "mypkg")
-        etc = tmp_path / "mypkg" / "etc"
-        etc.mkdir()
-        (etc / "mypkg.yaml").write_text("app: bundled\n")
-        cfg = Config.from_spec("myorg", mod)
-        assert cfg.app == "bundled"
+    def test_end_to_end_etc_dir_override(self, tmp_path, clean_xdg_env, monkeypatch):
+        base = _bundled(tmp_path)
+        user_etc = tmp_path / "user_etc"
+        user_etc.mkdir()
+        (user_etc / "mypkg.yaml").write_text("app: user\n")
+        monkeypatch.chdir(tmp_path)
+        spec = ConfigSpec("myorg", "mypkg", path=base)
+        assert Config(spec.resolve(etc_dir=str(user_etc))).app == "user"
 
     def test_missing_base_raises_at_load(self, tmp_path, clean_xdg_env, monkeypatch):
-        """When nothing exists at the derived path, Config load fails cleanly."""
+        """Resolution never probes the packaged base; the load raises instead."""
         monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "empty_xdg"))
-        monkeypatch.delenv("XDG_CONFIG_DIRS", raising=False)
         neutral = tmp_path / "neutral"
         neutral.mkdir()
         monkeypatch.chdir(neutral)
-        mod = _make_pkg_module(tmp_path, "missing")
-        # No etc/ dir under the module → base path does not exist.
+        spec = ConfigSpec("myorg", "missing", path=tmp_path / "etc" / "missing.yaml")
         with pytest.raises(FileNotFoundError):
-            Config.from_spec("myorg", mod)
-
-    def test_module_without_file_raises(self):
-        """Namespace package edge case: ``__file__`` is None → clear ValueError."""
-        mod = ModuleType("phantom_pkg")
-        mod.__file__ = None
-        with pytest.raises(ValueError, match="has no __file__"):
-            Config.from_spec("myorg", mod)
+            Config(spec.resolve())

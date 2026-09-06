@@ -35,8 +35,6 @@ from appinfra.cli.tools.scaffold_tool import ScaffoldTool
 from appinfra.cli.tools.scripts_path_tool import ScriptsPathTool
 from appinfra.cli.tools.version_tool import VersionTool
 
-_BASE_CONFIG = Path(appinfra.__file__).parent / "etc" / "infra.yaml"
-
 # All CLI tools
 _TOOLS = [
     CodeQualityTool,
@@ -61,7 +59,9 @@ def _build_app() -> App:
         .with_standard_args(
             help=True, log_level=True, quiet=True, etc_dir=True, config_file=True
         )
-        .with_config_spec("llm-works", "appinfra", _BASE_CONFIG)
+        # appinfra's base ships as etc/infra.yaml, the one exception to rule 2.
+        .config.with_spec("llm-works", "appinfra", filename="infra.yaml")
+        .done()
         .version.with_semver(appinfra.__version__)
         .with_build_info()
         .done()

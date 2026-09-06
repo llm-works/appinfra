@@ -11,20 +11,13 @@ For API stability guarantees and deprecation policy, see
 ## [Unreleased]
 
 ### Added
-- `resolve_config_source(..., custom_config=...)`: extends precedence with
-  `--config` — direct paths load directly, bare filenames compose with
-  `--etc-dir` or fall to cwd. Bypasses XDG and the packaged base. Framework
-  mode wires the flag via `.with_standard_args(config_file=True)`. See
-  [Config Protocol](appinfra/docs/guides/config-protocol.md).
-- `resolve_config_source`: project-local step. When neither `--config` nor
-  `--etc-dir` is set, walks up from cwd looking for `etc/<base_config.name>`
-  (stops before `$HOME`) and loads the first hit. Restores the `./etc/`
-  auto-detection that predates the discovery helper; a checkout's config
-  wins over XDG. See [Config Protocol](appinfra/docs/guides/config-protocol.md).
-- `Config.from_spec(namespace, package_module)`: library-mode constructor for
-  packages that ship `<package_module>/etc/<package>.yaml` (default filename:
-  module name with `_→-`). Chains `resolve_config_source` + `Config`. See
-  [Library-Mode Bootstrap](appinfra/docs/guides/library-mode-bootstrap.md).
+- `ConfigSpec(namespace, name, ...)` and `ConfigFile`: declare where a config's packaged
+  base lives and resolve the file to load under the protocol chain, `--config` and a
+  project-local walk-up included; `Config` accepts the resolved file. See
+  [Config Spec](appinfra/docs/api/config.md#config-spec).
+- `AppBuilder.config` block: `with_spec`, `with_overrides`, `with_value`,
+  `with_hot_reload`, and a keyword form `.config(namespace=..., name=..., hot_reload=True)`.
+  See [AppBuilder.config](appinfra/docs/api/config.md#appbuilderconfig).
 - `INFRA_PYTEST_WORKERS` Makefile variable (default empty): pytest-xdist worker count for
   `make test.*` targets. `run_pytest_serial` macro for custom targets that must stay in-process.
 - `make examples.check`: runs every script under `examples/` (or `<pkg>/examples/`) and
@@ -32,6 +25,13 @@ For API stability guarantees and deprecation policy, see
   `# ci-skip:` comments declare the cases. CI runs it in the container lane.
 
 ### Changed
+- `AppBuilder.with_config_spec(namespace, package, base_config)` is
+  `.config.with_spec(namespace, name)`; the packaged base is derived from the name and
+  each layout deviation is a keyword (`origin`, `etc_dir`, `filename`, `path`).
+- `AppBuilder.with_config(obj)` is `.config.with_overrides(mapping)`;
+  `.logging.with_hot_reload` is `.config.with_hot_reload`, and works with a declared spec.
+- `--etc-dir` resolves `<etc-dir>/<base filename>` instead of `<package>.yaml`; identical
+  for packages whose base follows rule 2.
 - `pgserver` defaults: `name` `infra-pg` → `llm-works-pg`, `port` `7432` →
   `25432`, `replica.port` `7433` → `25433`. Shared `pgserver.name` lets
   multiple consumers attach to one running container instead of colliding on
@@ -46,6 +46,14 @@ For API stability guarantees and deprecation policy, see
   a post-erase note on manual reclaim.
 - `appinfra pg erase` shows a preview and prompts for typed confirmation;
   `--yes` skips (required in non-interactive contexts).
+
+### Removed
+- `appinfra.config.resolve_config_source`, `xdg_candidates`, `include_root_for` and
+  `find_project_local`: folded into `ConfigSpec` as `resolve()`, `xdg_candidates()`,
+  `include_root` and `project_local()`.
+- `Config.from_spec(namespace, package_module, ...)`: use
+  `Config(ConfigSpec(namespace, name, ...).resolve())` — the module is now located from
+  the config name, and resolution is explicit.
 
 ### Fixed
 - `appinfra pg` and `make pg.*` targets exit with install guidance when
