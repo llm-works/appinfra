@@ -122,6 +122,7 @@ class TestOverrides:
 
 
 @pytest.mark.unit
+@pytest.mark.usefixtures("clean_env")
 class TestWithHotReload:
     """Hot reload needs a declared source and writes logging.hot_reload."""
 
