@@ -245,7 +245,10 @@ class ConfigWatcher:
                 "watchdog is required for hot-reload. "
                 "Install with: pip install appinfra[hotreload]"
             ) from None
-        return Observer
+        # Typed here so mypy sees the same return type whether or not the
+        # watchdog stubs are installed.
+        observer_cls: Callable[[], Any] = Observer
+        return observer_cls
 
     def start(self) -> None:
         """Start watching for file changes."""
