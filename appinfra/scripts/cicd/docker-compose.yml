@@ -67,7 +67,7 @@ services:
       - POSTGRES_HOST_AUTH_METHOD=trust
 
     ports:
-      - "25432:25432"
+      - "127.0.0.1:25432:25432"
 
     volumes:
       # Mount one level above PGDATA for pg18+ compatibility (see docker-compose.single.yaml).

@@ -160,7 +160,9 @@ jobs:
         run: /tmp/smoke/bin/appinfra docs list
 
       - name: README quick-start against installed wheel
-        run: /tmp/smoke/bin/python examples/quickstart.py --help
+        run: |
+          /tmp/smoke/bin/python examples/quickstart.py --help
+          /tmp/smoke/bin/python examples/quickstart.py sync
 
       - name: Extras metadata install
         if: matrix.python-version == '3.12'
