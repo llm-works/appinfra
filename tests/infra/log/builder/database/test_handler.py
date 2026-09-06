@@ -75,7 +75,6 @@ class TestDatabaseHandlerInit:
         assert handler.batch == []
         assert isinstance(handler.last_flush, datetime)
         assert handler._sql_cache == {}
-        assert handler._table_metadata is None
 
     def test_sets_handler_level_from_config(
         self, mock_logger, handler_config, log_config
@@ -466,68 +465,22 @@ class TestCriticalFlush:
 
 
 @pytest.mark.unit
-class TestGetTableMetadata:
-    """Test table metadata caching."""
-
-    def test_caches_table_metadata(self, handler):
-        """Test metadata is cached after first load."""
-        session = Mock()
-        session.bind = Mock()
-
-        with patch("sqlalchemy.Table") as mock_table:
-            mock_table.return_value = "table_obj"
-
-            meta1 = handler._get_table_metadata(session)
-            meta2 = handler._get_table_metadata(session)
-
-            assert meta1 == meta2  # Same cached object
-            mock_table.assert_called_once()  # Only called once
-
-    def test_handles_metadata_load_failure(self, handler):
-        """Test gracefully handles metadata load failure."""
-        session = Mock()
-        session.bind = Mock()
-
-        with patch("sqlalchemy.Table", side_effect=Exception("Table not found")):
-            meta = handler._get_table_metadata(session)
-
-            assert meta is False  # Marker for fallback
-
-
-@pytest.mark.unit
 class TestInsertBatch:
-    """Test batch insertion with optimization strategies."""
+    """Test batch insertion."""
 
-    def test_uses_bulk_operations_when_metadata_available(self, handler):
-        """Test uses bulk_insert_mappings for performance."""
+    def test_executes_one_statement_per_batch(self, handler):
+        """A batch goes to the database as a single executemany call."""
         session = Mock()
         batch_data = [
             {"timestamp": datetime.now(), "message": "Test 1"},
             {"timestamp": datetime.now(), "message": "Test 2"},
         ]
-
-        # Mock successful metadata retrieval
-        handler._table_metadata = Mock()
-        handler._table_metadata.__class__ = Mock()
-
-        handler._insert_batch(session, batch_data)
-
-        session.bulk_insert_mappings.assert_called_once()
-
-    def test_falls_back_to_executemany(self, handler):
-        """Test falls back to executemany when bulk operations fail."""
-        session = Mock()
-        batch_data = [
-            {"timestamp": datetime.now(), "message": "Test 1"},
-            {"timestamp": datetime.now(), "message": "Test 2"},
-        ]
-
-        # Simulate bulk operations unavailable
-        handler._table_metadata = False
 
         handler._insert_batch(session, batch_data)
 
         session.execute.assert_called_once()
+        _, rows = session.execute.call_args.args
+        assert len(rows) == 2
 
     def test_handles_empty_batch(self, handler):
         """Test does nothing for empty batch."""
@@ -535,7 +488,6 @@ class TestInsertBatch:
 
         handler._insert_batch(session, [])
 
-        session.bulk_insert_mappings.assert_not_called()
         session.execute.assert_not_called()
 
 
@@ -611,16 +563,3 @@ class TestPerformanceOptimizations:
 
         # Only one entry in cache
         assert len(handler._sql_cache) == 1
-
-    def test_metadata_caching_reduces_queries(self, handler):
-        """Test table metadata caching reduces database queries."""
-        session = Mock()
-        session.bind = Mock()
-
-        with patch("sqlalchemy.Table", return_value="cached_table") as mock_table:
-            # Call multiple times
-            for _ in range(10):
-                handler._get_table_metadata(session)
-
-            # Metadata should only be loaded once
-            mock_table.assert_called_once()

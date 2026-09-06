@@ -69,9 +69,8 @@ class DatabaseHandler(logging.Handler):
         self.batch: list[dict[str, Any]] = []
         self.last_flush = datetime.now()
 
-        # Performance optimizations: cache SQL statements and metadata
-        self._sql_cache: dict[tuple, str] = {}  # Cache prepared statements
-        self._table_metadata: Any = None  # Cache table metadata for bulk operations
+        # Cache INSERT statements per column set
+        self._sql_cache: dict[tuple, str] = {}
 
         # Set handler level with proper resolution
         level = handler_config.level or log_config.level
@@ -194,48 +193,18 @@ class DatabaseHandler(logging.Handler):
             self.batch.clear()
             self.last_flush = datetime.now()
 
-    def _get_table_metadata(self, session: Any) -> Any:
-        """Get cached table metadata for bulk operations."""
-        if self._table_metadata is None:
-            try:
-                metadata = sqlalchemy.MetaData()
-                self._table_metadata = sqlalchemy.Table(
-                    self.handler_config.table_name, metadata, autoload_with=session.bind
-                )
-            except Exception:
-                # If we can't get metadata, we'll fall back to executemany
-                self._table_metadata = False
-        return self._table_metadata
-
     def _insert_batch(self, session: Any, batch_data: list[dict[str, Any]]) -> None:
-        """Insert batch data using optimized bulk operations."""
+        """Insert a batch with one executemany statement."""
         if not batch_data:
             return
 
-        try:
-            # Try to use SQLAlchemy bulk operations for best performance
-            table = self._get_table_metadata(session)
-            if table is not False:
-                # Use bulk_insert_mappings for maximum performance
-                session.bulk_insert_mappings(table.__class__, batch_data)
-                return
-        except Exception:
-            # Fall back to executemany if bulk operations fail
-            pass
-
-        # Fallback: Use executemany which is still much faster than individual executes
-        if batch_data:
-            # Rows differ in optional columns (extra, exception); executemany
-            # needs one parameter set, so insert the union and fill gaps with
-            # NULL.
-            columns = sorted({key for row in batch_data for key in row})
-            insert_sql = self._get_insert_sql(tuple(columns))
-            rows = [
-                {column: row.get(column) for column in columns} for row in batch_data
-            ]
-
-            # Use executemany for better performance than individual execute calls
-            session.execute(sqlalchemy.text(insert_sql), rows)
+        # Rows differ in optional columns (extra, exception); executemany
+        # needs one parameter set, so insert the union and fill gaps with
+        # NULL.
+        columns = sorted({key for row in batch_data for key in row})
+        insert_sql = self._get_insert_sql(tuple(columns))
+        rows = [{column: row.get(column) for column in columns} for row in batch_data]
+        session.execute(sqlalchemy.text(insert_sql), rows)
 
     def close(self) -> None:
         """Close the handler and flush any remaining data."""

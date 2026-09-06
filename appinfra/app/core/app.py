@@ -851,8 +851,10 @@ class App(Traceable):
             self.lg.error("no parsed arguments available")
             return 1
 
-        # Resolve tool name (handle aliases)
-        tool_name = self._parsed_args.tool
+        # Resolve tool name (handle aliases). The `tool` dest only exists when
+        # subparsers were created, which CommandHandler skips for an empty
+        # registry.
+        tool_name = getattr(self._parsed_args, "tool", None)
         if tool_name in self.registry.list_aliases():
             tool_name = self.registry.list_aliases()[tool_name]
 

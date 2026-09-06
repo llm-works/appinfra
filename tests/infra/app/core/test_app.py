@@ -586,6 +586,39 @@ class TestMain:
 
         mock_log_error.assert_called()
 
+    def test_bare_run_without_tools_reaches_run_no_tool(self):
+        """A bare run of an app with no tools ends in run_no_tool, not a crash.
+
+        argparse only creates the ``tool`` dest when subparsers exist, and
+        CommandHandler skips them for an empty registry.
+        """
+        app = App()
+
+        with (
+            patch.object(sys, "argv", ["zero-tool-app"]),
+            patch("appinfra.app.core.shutdown.signal.signal"),
+        ):
+            result = app.main()
+
+        assert result == 1
+
+    def test_bare_run_without_tools_uses_run_no_tool_override(self):
+        """run_no_tool is the override hook for an app that registers no tools."""
+
+        class NoToolApp(App):
+            def run_no_tool(self) -> int:
+                return 0
+
+        app = NoToolApp()
+
+        with (
+            patch.object(sys, "argv", ["zero-tool-app"]),
+            patch("appinfra.app.core.shutdown.signal.signal"),
+        ):
+            result = app.main()
+
+        assert result == 0
+
 
 # =============================================================================
 # Test Run
