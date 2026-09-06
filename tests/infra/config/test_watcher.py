@@ -148,10 +148,10 @@ class TestConfigWatcherDebounce:
 
         original_reload = watcher._reload_config
 
-        def counting_reload():
+        def counting_reload(generation):
             nonlocal reload_count
             reload_count += 1
-            original_reload()
+            original_reload(generation)
 
         watcher._reload_config = counting_reload
 
@@ -462,10 +462,10 @@ class TestConfigWatcherIntegration:
 
         original_reload = watcher._reload_config
 
-        def counting_reload():
+        def counting_reload(generation):
             nonlocal reload_count
             reload_count += 1
-            original_reload()
+            original_reload(generation)
             reloaded.set()
 
         watcher._reload_config = counting_reload
@@ -498,9 +498,9 @@ class TestConfigWatcherReloadPaths:
         reload_event = threading.Event()
         original_reload = watcher._reload_config
 
-        def tracking_reload():
+        def tracking_reload(generation):
             reload_called.append(True)
-            original_reload()
+            original_reload(generation)
             reload_event.set()
 
         watcher._reload_config = tracking_reload
@@ -518,7 +518,7 @@ class TestConfigWatcherReloadPaths:
         # Don't configure, so _config_path is None
 
         # Should not raise - just return early
-        watcher._reload_config()
+        watcher._reload_config(watcher._generation)
 
         # No error means success
 
@@ -653,7 +653,7 @@ class TestConfigWatcherIncludedFiles:
         config_file.write_text('logging: !include "./new_logging.yaml"\n')
 
         # Trigger reload
-        watcher._reload_config()
+        watcher._reload_config(watcher._generation)
 
         # _watched_files should now include the new file
         assert new_logging_file.resolve() in watcher._watched_files
@@ -681,7 +681,7 @@ class TestConfigWatcherIncludedFiles:
         reloaded = threading.Event()
         original_reload = watcher._reload_config
 
-        def recording_reload():
+        def recording_reload(generation):
             reload_calls.append(True)
             reloaded.set()
 
@@ -1080,7 +1080,7 @@ class TestConfigWatcherStopBounded:
         """A timer callback that outlives stop() must not reload."""
         watcher = ConfigWatcher(mock_logger, etc_dir=tmp_path)
         reloads: list[bool] = []
-        watcher._reload_config = lambda: reloads.append(True)
+        watcher._reload_config = lambda generation: reloads.append(True)
 
         watcher._running = False
         watcher._debounced_reload()
@@ -1119,7 +1119,7 @@ class TestConfigWatcherStopBounded:
         release = threading.Event()
         order: list[str] = []
 
-        def slow_reload() -> None:
+        def slow_reload(generation: int) -> None:
             entered.set()
             release.wait(timeout=2.0)
             order.append("reload")
@@ -1171,6 +1171,44 @@ class TestConfigWatcherStopBounded:
             assert watcher._debounce_timer is not None
         finally:
             watcher.stop()
+
+    def test_callback_may_wait_on_another_thread_using_the_watcher(
+        self, tmp_path, mock_logger
+    ):
+        """Reload callbacks run outside the watcher lock."""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("logging:\n  level: info\n")
+        seen_running: list[bool] = []
+
+        def on_change(_config: dict) -> None:
+            probe = threading.Thread(
+                target=lambda: seen_running.append(watcher.is_running()), daemon=True
+            )
+            probe.start()
+            probe.join(timeout=1.0)
+
+        watcher = ConfigWatcher(mock_logger, etc_dir=tmp_path)
+        watcher.configure("config.yaml", on_change=on_change)
+        watcher._running = True
+
+        watcher._debounced_reload()
+
+        assert seen_running == [True]
+
+    def test_stale_generation_reload_writes_and_calls_nothing(
+        self, tmp_path, mock_logger
+    ):
+        """A reload from a run that stop() or start() ended has no effect."""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("logging:\n  level: info\n")
+        calls: list[dict] = []
+        watcher = ConfigWatcher(mock_logger, etc_dir=tmp_path)
+        watcher.configure("config.yaml", on_change=calls.append)
+
+        watcher._reload_config(watcher._generation - 1)
+
+        assert calls == []
+        assert watcher._last_config_hash is None
 
 
 @pytest.mark.unit
