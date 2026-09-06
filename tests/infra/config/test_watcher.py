@@ -974,6 +974,7 @@ app:
 
 
 @pytest.mark.unit
+@pytest.mark.usefixtures("clean_env")
 class TestConfigWatcherStopBounded:
     """stop() returns even when the observer's own stop() never does."""
 
