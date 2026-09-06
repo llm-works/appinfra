@@ -163,17 +163,36 @@ class DatabaseHandler(logging.Handler):
         escaped = name.replace('"', '""')
         return f'"{escaped}"'
 
+    @staticmethod
+    def _normalize_bind_name(name: str) -> str:
+        """Normalize a column name into a valid SQLAlchemy bind parameter name.
+
+        SQLAlchemy's text() parses :name and stops at non-alphanumeric characters,
+        so `event-type` would be parsed as just `event`. Replace any character
+        that is not alphanumeric or underscore with an underscore.
+        """
+        import re
+
+        return re.sub(r"[^a-zA-Z0-9_]", "_", name)
+
     def _get_insert_sql(self, columns_tuple: tuple) -> str:
         """Get cached INSERT SQL statement for given columns."""
         if columns_tuple not in self._sql_cache:
             columns = list(columns_tuple)
             quoted_table = self._quote_identifier(self.handler_config.table_name)
             quoted_cols = ", ".join(self._quote_identifier(c) for c in columns)
-            placeholders = ", ".join([f":{col}" for col in columns])
+            # Use normalized bind names to avoid SQLAlchemy parsing issues
+            placeholders = ", ".join(
+                f":{self._normalize_bind_name(c)}" for c in columns
+            )
             self._sql_cache[columns_tuple] = (
                 f"INSERT INTO {quoted_table} ({quoted_cols}) VALUES ({placeholders})"
             )
         return self._sql_cache[columns_tuple]
+
+    def _remap_row_keys(self, row: dict[str, Any]) -> dict[str, Any]:
+        """Remap row keys to normalized bind parameter names."""
+        return {self._normalize_bind_name(k): v for k, v in row.items()}
 
     def _insert_single_record(self, session: Any, row_data: dict[str, Any]) -> None:
         """Insert a single record into the database table."""
@@ -183,7 +202,8 @@ class DatabaseHandler(logging.Handler):
         # Use cached SQL statement
         columns_tuple = tuple(sorted(row_data.keys()))
         insert_sql = self._get_insert_sql(columns_tuple)
-        session.execute(sqlalchemy.text(insert_sql), row_data)
+        # Remap keys to normalized bind parameter names
+        session.execute(sqlalchemy.text(insert_sql), self._remap_row_keys(row_data))
 
     def _flush_batch(self) -> None:
         """Flush the current batch to the database."""
@@ -221,7 +241,9 @@ class DatabaseHandler(logging.Handler):
 
         for columns_tuple, rows in groups.items():
             insert_sql = self._get_insert_sql(columns_tuple)
-            session.execute(sqlalchemy.text(insert_sql), rows)
+            # Remap keys to normalized bind parameter names
+            remapped = [self._remap_row_keys(row) for row in rows]
+            session.execute(sqlalchemy.text(insert_sql), remapped)
 
     def close(self) -> None:
         """Close the handler and flush any remaining data."""
