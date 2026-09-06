@@ -69,9 +69,8 @@ class DatabaseHandler(logging.Handler):
         self.batch: list[dict[str, Any]] = []
         self.last_flush = datetime.now()
 
-        # Performance optimizations: cache SQL statements and metadata
-        self._sql_cache: dict[tuple, str] = {}  # Cache prepared statements
-        self._table_metadata: Any = None  # Cache table metadata for bulk operations
+        # Cache INSERT statements per column set
+        self._sql_cache: dict[tuple, str] = {}
 
         # Set handler level with proper resolution
         level = handler_config.level or log_config.level
@@ -154,17 +153,46 @@ class DatabaseHandler(logging.Handler):
                 self._lg.critical(f"CRITICAL ERROR (DB flush failed): {row_data}")
             raise
 
+    @staticmethod
+    def _quote_identifier(name: str) -> str:
+        """Quote an identifier to handle reserved words and special characters.
+
+        Uses ANSI SQL double-quote delimiters. Internal double-quotes are escaped
+        by doubling them.
+        """
+        escaped = name.replace('"', '""')
+        return f'"{escaped}"'
+
+    @staticmethod
+    def _normalize_bind_name(name: str) -> str:
+        """Normalize a column name into a valid SQLAlchemy bind parameter name.
+
+        SQLAlchemy's text() parses :name and stops at non-alphanumeric characters,
+        so `event-type` would be parsed as just `event`. Replace any character
+        that is not alphanumeric or underscore with an underscore.
+        """
+        import re
+
+        return re.sub(r"[^a-zA-Z0-9_]", "_", name)
+
     def _get_insert_sql(self, columns_tuple: tuple) -> str:
         """Get cached INSERT SQL statement for given columns."""
         if columns_tuple not in self._sql_cache:
             columns = list(columns_tuple)
-            column_names = ", ".join(columns)
-            placeholders = ", ".join([f":{col}" for col in columns])
-            table_name = self.handler_config.table_name
+            quoted_table = self._quote_identifier(self.handler_config.table_name)
+            quoted_cols = ", ".join(self._quote_identifier(c) for c in columns)
+            # Use normalized bind names to avoid SQLAlchemy parsing issues
+            placeholders = ", ".join(
+                f":{self._normalize_bind_name(c)}" for c in columns
+            )
             self._sql_cache[columns_tuple] = (
-                f"INSERT INTO {table_name} ({column_names}) VALUES ({placeholders})"
+                f"INSERT INTO {quoted_table} ({quoted_cols}) VALUES ({placeholders})"
             )
         return self._sql_cache[columns_tuple]
+
+    def _remap_row_keys(self, row: dict[str, Any]) -> dict[str, Any]:
+        """Remap row keys to normalized bind parameter names."""
+        return {self._normalize_bind_name(k): v for k, v in row.items()}
 
     def _insert_single_record(self, session: Any, row_data: dict[str, Any]) -> None:
         """Insert a single record into the database table."""
@@ -174,7 +202,8 @@ class DatabaseHandler(logging.Handler):
         # Use cached SQL statement
         columns_tuple = tuple(sorted(row_data.keys()))
         insert_sql = self._get_insert_sql(columns_tuple)
-        session.execute(sqlalchemy.text(insert_sql), row_data)
+        # Remap keys to normalized bind parameter names
+        session.execute(sqlalchemy.text(insert_sql), self._remap_row_keys(row_data))
 
     def _flush_batch(self) -> None:
         """Flush the current batch to the database."""
@@ -194,48 +223,27 @@ class DatabaseHandler(logging.Handler):
             self.batch.clear()
             self.last_flush = datetime.now()
 
-    def _get_table_metadata(self, session: Any) -> Any:
-        """Get cached table metadata for bulk operations."""
-        if self._table_metadata is None:
-            try:
-                metadata = sqlalchemy.MetaData()
-                self._table_metadata = sqlalchemy.Table(
-                    self.handler_config.table_name, metadata, autoload_with=session.bind
-                )
-            except Exception:
-                # If we can't get metadata, we'll fall back to executemany
-                self._table_metadata = False
-        return self._table_metadata
-
     def _insert_batch(self, session: Any, batch_data: list[dict[str, Any]]) -> None:
-        """Insert batch data using optimized bulk operations."""
+        """Insert a batch, grouping rows by column set.
+
+        Rows with the same columns are inserted together via executemany.
+        Grouping by column set avoids sending NULL for absent columns, which
+        would bypass server defaults.
+        """
         if not batch_data:
             return
 
-        try:
-            # Try to use SQLAlchemy bulk operations for best performance
-            table = self._get_table_metadata(session)
-            if table is not False:
-                # Use bulk_insert_mappings for maximum performance
-                session.bulk_insert_mappings(table.__class__, batch_data)
-                return
-        except Exception:
-            # Fall back to executemany if bulk operations fail
-            pass
+        # Group rows by their column set so omitted columns stay omitted
+        groups: dict[tuple[str, ...], list[dict[str, Any]]] = {}
+        for row in batch_data:
+            key = tuple(sorted(row.keys()))
+            groups.setdefault(key, []).append(row)
 
-        # Fallback: Use executemany which is still much faster than individual executes
-        if batch_data:
-            # Rows differ in optional columns (extra, exception); executemany
-            # needs one parameter set, so insert the union and fill gaps with
-            # NULL.
-            columns = sorted({key for row in batch_data for key in row})
-            insert_sql = self._get_insert_sql(tuple(columns))
-            rows = [
-                {column: row.get(column) for column in columns} for row in batch_data
-            ]
-
-            # Use executemany for better performance than individual execute calls
-            session.execute(sqlalchemy.text(insert_sql), rows)
+        for columns_tuple, rows in groups.items():
+            insert_sql = self._get_insert_sql(columns_tuple)
+            # Remap keys to normalized bind parameter names
+            remapped = [self._remap_row_keys(row) for row in rows]
+            session.execute(sqlalchemy.text(insert_sql), remapped)
 
     def close(self) -> None:
         """Close the handler and flush any remaining data."""

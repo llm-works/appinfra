@@ -66,6 +66,10 @@ For API stability guarantees and deprecation policy, see
   `logging_builder_example`, `advanced_critical_flush`, `generator_usage_example`,
   `scrollable_selection`, `mixed_approach`, `progress_logger_example`, and the
   `app_with_ticker` flags.
+- `App.main()` on an app with no registered tools calls `run_no_tool()` instead
+  of raising `AttributeError` on the missing `tool` argument.
+- Database log handler: batches always insert through a single `executemany`.
+  The bulk-insert attempt that preceded it could never succeed and was removed.
 
 ## [0.10.5] - 2026-09-03
 

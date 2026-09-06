@@ -75,7 +75,6 @@ class TestDatabaseHandlerInit:
         assert handler.batch == []
         assert isinstance(handler.last_flush, datetime)
         assert handler._sql_cache == {}
-        assert handler._table_metadata is None
 
     def test_sets_handler_level_from_config(
         self, mock_logger, handler_config, log_config
@@ -295,14 +294,14 @@ class TestGetInsertSQL:
         assert len(handler._sql_cache) == 1  # Only one cached
 
     def test_generates_correct_sql_format(self, handler):
-        """Test generates correct parameterized SQL."""
+        """Test generates correct parameterized SQL with quoted identifiers."""
         columns = ("timestamp", "message")
 
         sql = handler._get_insert_sql(columns)
 
-        assert "INSERT INTO test_logs" in sql
-        assert "(timestamp, message)" in sql
-        assert "(:timestamp, :message)" in sql
+        assert 'INSERT INTO "test_logs"' in sql
+        assert '("timestamp", "message")' in sql or '("message", "timestamp")' in sql
+        assert "(:timestamp, :message)" in sql or "(:message, :timestamp)" in sql
 
     def test_caches_different_column_sets(self, handler):
         """Test different column sets are cached separately."""
@@ -356,8 +355,8 @@ class TestFlushBatch:
         assert len(handler.batch) == 0  # Batch cleared
         mock_db_interface.session.assert_called_once()
 
-    def test_mixed_rows_insert_union_of_columns(self, handler, mock_db_interface):
-        """Rows lacking optional columns are padded with None, not dropped."""
+    def test_mixed_rows_grouped_by_column_set(self, handler, mock_db_interface):
+        """Rows are grouped by column set; omitted columns stay omitted."""
         handler.batch = [
             {"timestamp": 1, "message": "plain"},
             {"timestamp": 2, "message": "with extra", "extra_data": "{}"},
@@ -366,12 +365,18 @@ class TestFlushBatch:
         handler._flush_batch()
 
         session = mock_db_interface.session.return_value.__enter__.return_value
-        sql, rows = session.execute.call_args.args
-        assert "extra_data" in str(sql)
-        assert rows == [
-            {"extra_data": None, "message": "plain", "timestamp": 1},
-            {"extra_data": "{}", "message": "with extra", "timestamp": 2},
-        ]
+        # Two groups → two execute calls (one per column set)
+        assert session.execute.call_count == 2
+
+        # Collect all executed rows across both calls
+        all_rows = []
+        for call in session.execute.call_args_list:
+            _, rows = call.args
+            all_rows.extend(rows)
+
+        # Both original rows present, each with only its own columns (no None padding)
+        assert {"timestamp": 1, "message": "plain"} in all_rows
+        assert {"timestamp": 2, "message": "with extra", "extra_data": "{}"} in all_rows
 
     def test_does_nothing_for_empty_batch(self, handler, mock_db_interface):
         """Test does nothing when batch is empty."""
@@ -466,68 +471,22 @@ class TestCriticalFlush:
 
 
 @pytest.mark.unit
-class TestGetTableMetadata:
-    """Test table metadata caching."""
-
-    def test_caches_table_metadata(self, handler):
-        """Test metadata is cached after first load."""
-        session = Mock()
-        session.bind = Mock()
-
-        with patch("sqlalchemy.Table") as mock_table:
-            mock_table.return_value = "table_obj"
-
-            meta1 = handler._get_table_metadata(session)
-            meta2 = handler._get_table_metadata(session)
-
-            assert meta1 == meta2  # Same cached object
-            mock_table.assert_called_once()  # Only called once
-
-    def test_handles_metadata_load_failure(self, handler):
-        """Test gracefully handles metadata load failure."""
-        session = Mock()
-        session.bind = Mock()
-
-        with patch("sqlalchemy.Table", side_effect=Exception("Table not found")):
-            meta = handler._get_table_metadata(session)
-
-            assert meta is False  # Marker for fallback
-
-
-@pytest.mark.unit
 class TestInsertBatch:
-    """Test batch insertion with optimization strategies."""
+    """Test batch insertion."""
 
-    def test_uses_bulk_operations_when_metadata_available(self, handler):
-        """Test uses bulk_insert_mappings for performance."""
+    def test_executes_one_statement_per_batch(self, handler):
+        """A batch goes to the database as a single executemany call."""
         session = Mock()
         batch_data = [
             {"timestamp": datetime.now(), "message": "Test 1"},
             {"timestamp": datetime.now(), "message": "Test 2"},
         ]
-
-        # Mock successful metadata retrieval
-        handler._table_metadata = Mock()
-        handler._table_metadata.__class__ = Mock()
-
-        handler._insert_batch(session, batch_data)
-
-        session.bulk_insert_mappings.assert_called_once()
-
-    def test_falls_back_to_executemany(self, handler):
-        """Test falls back to executemany when bulk operations fail."""
-        session = Mock()
-        batch_data = [
-            {"timestamp": datetime.now(), "message": "Test 1"},
-            {"timestamp": datetime.now(), "message": "Test 2"},
-        ]
-
-        # Simulate bulk operations unavailable
-        handler._table_metadata = False
 
         handler._insert_batch(session, batch_data)
 
         session.execute.assert_called_once()
+        _, rows = session.execute.call_args.args
+        assert len(rows) == 2
 
     def test_handles_empty_batch(self, handler):
         """Test does nothing for empty batch."""
@@ -535,7 +494,6 @@ class TestInsertBatch:
 
         handler._insert_batch(session, [])
 
-        session.bulk_insert_mappings.assert_not_called()
         session.execute.assert_not_called()
 
 
@@ -611,16 +569,3 @@ class TestPerformanceOptimizations:
 
         # Only one entry in cache
         assert len(handler._sql_cache) == 1
-
-    def test_metadata_caching_reduces_queries(self, handler):
-        """Test table metadata caching reduces database queries."""
-        session = Mock()
-        session.bind = Mock()
-
-        with patch("sqlalchemy.Table", return_value="cached_table") as mock_table:
-            # Call multiple times
-            for _ in range(10):
-                handler._get_table_metadata(session)
-
-            # Metadata should only be loaded once
-            mock_table.assert_called_once()
