@@ -184,11 +184,11 @@ class PGTestCaseHelper(unittest.TestCase):
     def _setup_logger(cls) -> Logger:
         """Create a framework logger at the configured test level.
 
-        `test.logging.level` is false by default (quiet tests); anything that is
-        not a level name falls back to warning.
+        `test.logging.level` accepts str (level name), int (numeric level), or
+        False (disable logging). Unset or other types fall back to warning.
         """
         level = cls.config.get("test.logging.level")
-        if not isinstance(level, str):
+        if not isinstance(level, (str, int, bool)):
             level = "warning"
         return LoggerFactory.create_root(LogConfig.from_params(level=level))
 

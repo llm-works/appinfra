@@ -115,11 +115,16 @@ def run_case(spec: Spec, args: str) -> Result:
     try:
         status, detail = _wait_case(spec, proc)
     finally:
-        # Servers and demos may fork workers; leave nothing behind. This also
-        # closes the pipes, so the readers finish.
+        # Servers and demos may fork workers; leave nothing behind.
         _kill_group(proc)
+        # Close pipes so readers see EOF even if a detached descendant still
+        # holds a copy; then join with a timeout as a safety net.
+        if proc.stdout:
+            proc.stdout.close()
+        if proc.stderr:
+            proc.stderr.close()
         for reader in readers:
-            reader.join()
+            reader.join(timeout=2.0)
     if status == "FAIL":
         output = "".join(err_chunks) or "".join(out_chunks)
         tail = "\n".join(output.splitlines()[-_OUTPUT_TAIL_LINES:])
