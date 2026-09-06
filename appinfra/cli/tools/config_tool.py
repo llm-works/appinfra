@@ -303,9 +303,11 @@ class ConfigSourceTool(Tool):
 
     def _project_local_line(self, spec: ConfigSpec, won: bool, loaded_str: str) -> str:
         """Format the rule-4 project-local line for the chain rendering."""
+        if Path(spec.etc_dir).is_absolute():
+            return f"  [-] 4. project-local (n/a: {spec.etc_dir} is absolute)"
         project_local = spec.project_local()
         if project_local is None:
-            return "  [ ] 4. project-local (no etc/<base-filename> above cwd)"
+            return f"  [ ] 4. project-local (no {spec.etc_dir}/<filename> above cwd)"
         glyph = "[x]" if (won and str(project_local) == loaded_str) else "[·]"
         return f"  {glyph} 4. project-local ({project_local})"
 

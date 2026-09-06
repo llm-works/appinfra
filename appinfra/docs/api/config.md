@@ -12,7 +12,7 @@ include support.
 class Config(DotDict):
     def __init__(
         self,
-        fname: str,
+        fname: str | Path | ConfigFile,
         enable_env_overrides: bool = True,
         env_prefix: str = "INFRA_",
         merge_strategy: str = "replace",
@@ -30,7 +30,7 @@ class Config(DotDict):
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `fname` | required | Path to YAML configuration file |
+| `fname` | required | Path to a YAML configuration file, or a `ConfigFile` from `ConfigSpec.resolve()` |
 | `enable_env_overrides` | `True` | Apply environment variable overrides |
 | `env_prefix` | `"INFRA_"` | Prefix for environment variables |
 | `merge_strategy` | `"replace"` | Strategy for handling `!include` directives: `"replace"` (included content replaces target key) or `"merge"` (deep merge with existing). Note: only `"replace"` is currently fully supported |
@@ -212,7 +212,8 @@ wins: the directory of the module named after the config (`"-"` mapped to `"_"`,
 Neither existing raises `ValueError` naming both. Explicit `origin` and `path` never probe.
 `origin=None` is a `TypeError`; the absent value is `AUTO`.
 
-**Resolution** (see [rule 6](../guides/config-protocol.md#6-etc-dir-is-user-authoritative)).
+**Resolution** (see [rule
+6](../guides/config-protocol.md#6---config-and---etc-dir-are-user-authoritative)).
 `resolve(etc_dir=, config_file=)` takes the operator's `--etc-dir` and `--config` values for
 this run and returns the first tier that applies:
 

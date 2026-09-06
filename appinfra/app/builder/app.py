@@ -786,7 +786,7 @@ class AppBuilder:
                     .done()
                 .build())
 
-            app = AppBuilder("myapp").config(namespace="myorg", package="myapp").build()
+            app = AppBuilder("myapp").config(namespace="myorg", name="myapp").build()
 
         Returns:
             ConfigConfigurer instance for method chaining

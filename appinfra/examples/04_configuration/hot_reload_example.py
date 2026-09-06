@@ -24,7 +24,7 @@ Features shown:
 Usage:
     python hot_reload_example.py serve
 
-Then edit examples/04_configuration/etc/hot-reload.yaml while running
+Then edit etc/hot-reload.yaml (beside this script) while running
 to see changes applied automatically.
 
 Requirements:
@@ -90,7 +90,7 @@ class ServeCommand(Tool):
             "server started",
             extra={"timeout": self.timeout, "max_connections": self.max_connections},
         )
-        self.lg.info("edit etc/hot-reload.yaml to see hot-reload in action")
+        self.lg.info(f"edit {self.app.config_path} to see hot-reload in action")
         self.lg.info("press Ctrl+C to stop")
 
         try:
