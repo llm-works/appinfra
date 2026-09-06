@@ -294,14 +294,14 @@ class TestGetInsertSQL:
         assert len(handler._sql_cache) == 1  # Only one cached
 
     def test_generates_correct_sql_format(self, handler):
-        """Test generates correct parameterized SQL."""
+        """Test generates correct parameterized SQL with quoted identifiers."""
         columns = ("timestamp", "message")
 
         sql = handler._get_insert_sql(columns)
 
-        assert "INSERT INTO test_logs" in sql
-        assert "(timestamp, message)" in sql
-        assert "(:timestamp, :message)" in sql
+        assert 'INSERT INTO "test_logs"' in sql
+        assert '("timestamp", "message")' in sql or '("message", "timestamp")' in sql
+        assert "(:timestamp, :message)" in sql or "(:message, :timestamp)" in sql
 
     def test_caches_different_column_sets(self, handler):
         """Test different column sets are cached separately."""
@@ -355,8 +355,8 @@ class TestFlushBatch:
         assert len(handler.batch) == 0  # Batch cleared
         mock_db_interface.session.assert_called_once()
 
-    def test_mixed_rows_insert_union_of_columns(self, handler, mock_db_interface):
-        """Rows lacking optional columns are padded with None, not dropped."""
+    def test_mixed_rows_grouped_by_column_set(self, handler, mock_db_interface):
+        """Rows are grouped by column set; omitted columns stay omitted."""
         handler.batch = [
             {"timestamp": 1, "message": "plain"},
             {"timestamp": 2, "message": "with extra", "extra_data": "{}"},
@@ -365,12 +365,18 @@ class TestFlushBatch:
         handler._flush_batch()
 
         session = mock_db_interface.session.return_value.__enter__.return_value
-        sql, rows = session.execute.call_args.args
-        assert "extra_data" in str(sql)
-        assert rows == [
-            {"extra_data": None, "message": "plain", "timestamp": 1},
-            {"extra_data": "{}", "message": "with extra", "timestamp": 2},
-        ]
+        # Two groups → two execute calls (one per column set)
+        assert session.execute.call_count == 2
+
+        # Collect all executed rows across both calls
+        all_rows = []
+        for call in session.execute.call_args_list:
+            _, rows = call.args
+            all_rows.extend(rows)
+
+        # Both original rows present, each with only its own columns (no None padding)
+        assert {"timestamp": 1, "message": "plain"} in all_rows
+        assert {"timestamp": 2, "message": "with extra", "extra_data": "{}"} in all_rows
 
     def test_does_nothing_for_empty_batch(self, handler, mock_db_interface):
         """Test does nothing when batch is empty."""

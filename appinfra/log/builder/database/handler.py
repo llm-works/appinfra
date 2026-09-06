@@ -153,15 +153,25 @@ class DatabaseHandler(logging.Handler):
                 self._lg.critical(f"CRITICAL ERROR (DB flush failed): {row_data}")
             raise
 
+    @staticmethod
+    def _quote_identifier(name: str) -> str:
+        """Quote an identifier to handle reserved words and special characters.
+
+        Uses ANSI SQL double-quote delimiters. Internal double-quotes are escaped
+        by doubling them.
+        """
+        escaped = name.replace('"', '""')
+        return f'"{escaped}"'
+
     def _get_insert_sql(self, columns_tuple: tuple) -> str:
         """Get cached INSERT SQL statement for given columns."""
         if columns_tuple not in self._sql_cache:
             columns = list(columns_tuple)
-            column_names = ", ".join(columns)
+            quoted_table = self._quote_identifier(self.handler_config.table_name)
+            quoted_cols = ", ".join(self._quote_identifier(c) for c in columns)
             placeholders = ", ".join([f":{col}" for col in columns])
-            table_name = self.handler_config.table_name
             self._sql_cache[columns_tuple] = (
-                f"INSERT INTO {table_name} ({column_names}) VALUES ({placeholders})"
+                f"INSERT INTO {quoted_table} ({quoted_cols}) VALUES ({placeholders})"
             )
         return self._sql_cache[columns_tuple]
 
@@ -194,17 +204,24 @@ class DatabaseHandler(logging.Handler):
             self.last_flush = datetime.now()
 
     def _insert_batch(self, session: Any, batch_data: list[dict[str, Any]]) -> None:
-        """Insert a batch with one executemany statement."""
+        """Insert a batch, grouping rows by column set.
+
+        Rows with the same columns are inserted together via executemany.
+        Grouping by column set avoids sending NULL for absent columns, which
+        would bypass server defaults.
+        """
         if not batch_data:
             return
 
-        # Rows differ in optional columns (extra, exception); executemany
-        # needs one parameter set, so insert the union and fill gaps with
-        # NULL.
-        columns = sorted({key for row in batch_data for key in row})
-        insert_sql = self._get_insert_sql(tuple(columns))
-        rows = [{column: row.get(column) for column in columns} for row in batch_data]
-        session.execute(sqlalchemy.text(insert_sql), rows)
+        # Group rows by their column set so omitted columns stay omitted
+        groups: dict[tuple[str, ...], list[dict[str, Any]]] = {}
+        for row in batch_data:
+            key = tuple(sorted(row.keys()))
+            groups.setdefault(key, []).append(row)
+
+        for columns_tuple, rows in groups.items():
+            insert_sql = self._get_insert_sql(columns_tuple)
+            session.execute(sqlalchemy.text(insert_sql), rows)
 
     def close(self) -> None:
         """Close the handler and flush any remaining data."""
