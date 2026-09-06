@@ -169,7 +169,8 @@ def main() -> int:
     app = (
         AppBuilder("config-demo")
         .with_description("Demonstrates accessing YAML config from Tools")
-        .with_config(_create_sample_config())
+        .config.with_overrides(_create_sample_config())
+        .done()
         .tools.with_tool(ServeTool())
         .with_tool(StatusTool())
         .done()

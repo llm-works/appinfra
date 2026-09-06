@@ -8,8 +8,8 @@ This module provides the core AppBuilder class that orchestrates
 the construction of applications using a fluent API.
 
 The AppBuilder has been refactored to use focused configurers for better
-maintainability and testability. Use .tools(), .server(), .logging(),
-and .advanced() to access specialized configuration builders.
+maintainability and testability. Use .config, .tools, .server, .logging,
+and .advanced to access specialized configuration builders.
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Self
 
-from ...config import Config
+from ...config import Config, ConfigSpec
 from ...dot_dict import DotDict
 from ...yaml import deep_merge
 from ..core.app import DEFAULT_STANDARD_ARGS, App
@@ -27,6 +27,7 @@ from ..server.handlers import Middleware
 from ..tools.base import Tool, ToolConfig
 from ..tracing.traceable import Traceable
 from .configurer.advanced import AdvancedConfigurer
+from .configurer.config import ConfigConfigurer
 from .configurer.logging import LoggingConfigurer
 from .configurer.server import ServerConfigurer
 from .configurer.tool import ToolConfigurer
@@ -43,22 +44,6 @@ class ConfigFileSpec:
     path: str
     from_etc_dir: bool = True
     optional: bool = False
-
-
-@dataclass
-class ConfigSpecV1:
-    """v1 config-protocol auto-loading declaration.
-
-    Captured by ``AppBuilder.with_v1_config`` and consumed at ``App.setup``
-    time by ``resolve_config_source``. Flag exposure is optional via
-    ``.with_standard_args(etc_dir=True, config_file=True)``. Runs the
-    precedence chain (``--config`` > ``--etc-dir`` > project-local walk-up
-    > XDG overlay > packaged base) on every parse.
-    """
-
-    namespace: str
-    package: str
-    base_config: Path
 
 
 # Helper functions for AppBuilder.build()
@@ -336,7 +321,7 @@ class AppBuilder:
         self._name: str | None = name
         self._config: Config | DotDict | None = None
         self._config_files: list[ConfigFileSpec] = []  # Track all config files
-        self._config_spec: ConfigSpecV1 | None = None  # protocol auto-loading
+        self._config_spec: ConfigSpec | None = None  # protocol auto-loading
         self._server_config: ServerConfig | None = None
         self._logging_config: LoggingConfig | None = None
         self._tools: list[Tool] = []
@@ -482,7 +467,7 @@ class AppBuilder:
 
         if self._config_spec is not None:
             raise ValueError(
-                "with_config_file is mutually exclusive with with_config_spec — "
+                "with_config_file is mutually exclusive with config.with_spec — "
                 "pick one config-loading mode per builder"
             )
 
@@ -499,97 +484,6 @@ class AppBuilder:
             # Deferred loading - auto-enable etc_dir arg so user can specify directory
             self._standard_args["etc_dir"] = True
 
-        return self
-
-    def with_config_spec(
-        self,
-        namespace: str,
-        package: str,
-        base_config: Path | str,
-    ) -> Self:
-        """Enable config-protocol auto-loading (currently v1).
-
-        At setup time, resolves the config source via
-        ``appinfra.config.resolve_config_source`` — precedence:
-
-        1. ``--config /abs.yaml``, ``./rel.yaml``, ``../rel.yaml``, or
-           ``~/path.yaml`` (direct path) → load directly; ``--etc-dir``
-           ignored; ``project_root`` = file's parent.
-        2. ``--config bare.yaml`` (bare filename) →
-           ``<etc-dir>/bare.yaml`` if ``--etc-dir`` passed, else
-           ``cwd/bare.yaml``; ``project_root`` = the file's parent.
-        3. ``--etc-dir /foo`` alone → ``<foo>/<package>.yaml`` with
-           ``project_root=<foo>``.
-        4. Project-local: walk up from cwd for ``etc/<base_config.name>``.
-           First hit → load it with ``project_root`` = that ``etc/``.
-           Stops before ``$HOME`` and before filesystem root.
-        5. Else first existing XDG candidate for ``<namespace>/<package>``
-           → overlay with ``project_root=include_root_for(base_config)``.
-        6. Else the packaged ``base_config``.
-
-        ``--config`` always bypasses everything below it (project-local
-        walk-up, XDG, packaged base). No name-comparison special case.
-
-        Under an explicit ``--etc-dir`` the include-authorization boundary
-        follows the user's directory — reaching outside is the user's
-        ``allowed_paths`` problem, not the framework's. Project-local uses
-        its discovered ``etc/`` directory. On the XDG and packaged-base
-        tiers the boundary stays defensively bound to the packaged base's
-        ``etc/`` directory.
-
-        Flag exposure is orthogonal. To let end users override the source
-        with ``--etc-dir`` or ``--config``, compose with
-        ``.with_standard_args(etc_dir=True, config_file=True)``. Consumers
-        who deliberately want a locked-down CLI (XDG + bundled base only,
-        no escape hatch) skip that call — the loader safely reads a missing
-        flag as ``None``.
-
-        Args:
-            namespace: XDG namespace (e.g. ``"llm-works"``).
-            package: package name (e.g. ``"llm-infer"``); used for the
-                config filename ``<package>.yaml`` under ``--etc-dir`` and
-                inside the XDG search set.
-            base_config: absolute path to the packaged base config
-                (e.g. ``Path(__file__).parent / "etc" / "<pkg>.yaml"``).
-
-        Returns:
-            Self for method chaining.
-
-        Raises:
-            ValueError: if ``with_config_file`` has already been called on
-                this builder. The two config-loading modes are mutually
-                exclusive.
-
-        Example::
-
-            BASE_CONFIG = Path(__file__).parent / "etc" / "myapp.yaml"
-
-            # XDG + bundled base only, no escape-hatch flags exposed:
-            app = (AppBuilder("myapp")
-                .with_config_spec("myorg", "myapp", BASE_CONFIG)
-                .build())
-
-            # With --etc-dir and --config escape hatches for end users:
-            app = (AppBuilder("myapp")
-                .with_config_spec("myorg", "myapp", BASE_CONFIG)
-                .with_standard_args(etc_dir=True, config_file=True)
-                .build())
-        """
-        if self._config_files:
-            raise ValueError(
-                "with_config_spec is mutually exclusive with with_config_file — "
-                "pick one config-loading mode per builder"
-            )
-        self._config_spec = ConfigSpecV1(
-            namespace=namespace,
-            package=package,
-            base_config=Path(str(base_config)),
-        )
-        return self
-
-    def with_config(self, config: Config | DotDict) -> Self:
-        """Set the application configuration."""
-        self._config = config
         return self
 
     def with_main_cls(self, cls: type) -> Self:
@@ -874,6 +768,30 @@ class AppBuilder:
             ServerConfigurer instance for method chaining
         """
         return ServerConfigurer(self)
+
+    @property
+    def config(self) -> ConfigConfigurer:
+        """
+        Access the config-source block.
+
+        Declares the config spec, the programmatic overrides layer and hot
+        reload. Use ``.done()`` to return to the AppBuilder, or call the
+        block with keyword arguments to set everything at once.
+
+        Example:
+            app = (AppBuilder("myapp")
+                .config
+                    .with_spec("myorg", "myapp")
+                    .with_hot_reload(debounce_ms=500)
+                    .done()
+                .build())
+
+            app = AppBuilder("myapp").config(namespace="myorg", package="myapp").build()
+
+        Returns:
+            ConfigConfigurer instance for method chaining
+        """
+        return ConfigConfigurer(self)
 
     @property
     def logging(self) -> LoggingConfigurer:

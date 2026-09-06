@@ -1742,16 +1742,11 @@ class TestConfigSpecLoading:
         return base
 
     def _make_spec(self, tmp_path: Path):
-        from appinfra.app.builder.app import ConfigSpecV1
+        from appinfra.config import ConfigSpec
 
-        return ConfigSpecV1(
-            namespace="myorg",
-            package="myapp",
-            base_config=self._make_bundled_base(tmp_path),
-        )
+        return ConfigSpec("myorg", "myapp", path=self._make_bundled_base(tmp_path))
 
     def test_custom_etc_dir_loads_from_user_path(self, monkeypatch, tmp_path):
-        # Clear CI env vars that trigger UndeclaredConfigPathError on minimal test configs
         custom = tmp_path / "user_etc"
         custom.mkdir()
         (custom / "myapp.yaml").write_text("origin: user\napi:\n  port: 12345\n")
@@ -1769,6 +1764,15 @@ class TestConfigSpecLoading:
         assert app._config_file == "myapp.yaml"
         assert app._project_root == custom.resolve()
         assert result["etc_dir"] == str(custom.resolve())
+        assert app.config_spec is spec
+        assert app.config_path == custom.resolve() / "myapp.yaml"
+        assert app._config_source is not None
+        assert app._config_source.rule == 3
+
+    def test_config_path_is_none_before_setup(self):
+        app = App()
+        assert app.config_spec is None
+        assert app.config_path is None
 
     def test_xdg_overlay_loads_when_no_custom(self, monkeypatch, tmp_path):
         xdg_home = tmp_path / "xdg"

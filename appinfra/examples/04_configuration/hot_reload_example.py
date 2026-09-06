@@ -24,14 +24,13 @@ Features shown:
 Usage:
     python hot_reload_example.py serve
 
-Then edit examples/04_configuration/etc/hot_reload.yaml while running
+Then edit examples/04_configuration/etc/hot-reload.yaml while running
 to see changes applied automatically.
 
 Requirements:
     pip install appinfra[hotreload]
 """
 
-import pathlib
 import sys
 import time
 from pathlib import Path
@@ -91,7 +90,7 @@ class ServeCommand(Tool):
             "server started",
             extra={"timeout": self.timeout, "max_connections": self.max_connections},
         )
-        self.lg.info("edit etc/hot_reload.yaml to see hot-reload in action")
+        self.lg.info("edit etc/hot-reload.yaml to see hot-reload in action")
         self.lg.info("press Ctrl+C to stop")
 
         try:
@@ -157,17 +156,16 @@ class StatusCommand(Tool):
             return 0
 
 
-BASE_CONFIG = pathlib.Path(__file__).parent / "etc" / "hot_reload.yaml"
-
-
 def create_app():
     """Create app with hot-reload enabled."""
     return (
         AppBuilder("hot-reload-demo")
-        # Absolute path anchored on __file__ so the example runs from any cwd
-        .with_config_file(str(BASE_CONFIG), from_etc_dir=False)
+        # The config named "hot-reload" has no module of that name, so its
+        # base is located beside this script: ./etc/hot-reload.yaml.
+        .config.with_spec("example-org", "hot-reload")
+        .with_hot_reload(debounce_ms=500)
+        .done()
         .logging.with_level("debug")
-        .with_hot_reload(enabled=True, debounce_ms=500)
         .done()
         .tools.with_tools(ServeCommand(), ReloadCommand(), StatusCommand())
         .done()

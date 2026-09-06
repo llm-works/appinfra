@@ -6,7 +6,7 @@ keywords:
   - script
   - Config
   - create_root_lg
-  - Config.from_spec
+  - ConfigSpec
 aliases:
   - library-mode
   - headless-bootstrap
@@ -18,10 +18,10 @@ Guide to wiring appinfra into any Python entry point that is not a CLI: standalo
 notebooks, embedded clients, in-process factory calls, and full libraries that ship a wheel with
 their own default config.
 
-Framework mode (`AppBuilder.with_config_spec(...).build().setup()`) owns `sys.argv` and adds a
-CLI shell on top of the same primitives — see the
-[framework-wired discovery helper](config-protocol.md#discovery-helper) for that side. This guide
-covers everywhere argv is not the entry point.
+Framework mode (`AppBuilder(...).config.with_spec(...).done().build().setup()`) owns `sys.argv`
+and adds a CLI shell on top of the same primitives — see
+[framework mode](config-protocol.md#declaring-the-source) for that side. This guide covers
+everywhere argv is not the entry point.
 
 ## The spectrum at a glance
 
@@ -30,7 +30,7 @@ covers everywhere argv is not the entry point.
 | Script, no config file                    | None — logger only                    | [Case A](#case-a--script-no-config-file) |
 | Script with a config file next to it      | `Config(str(Path(__file__).parent / "config.yaml"))` | [Case B](#case-b--script-with-a-config-file) |
 | Script with `App`/`Tool` shape            | `AppBuilder(...)` — framework mode    | [Case C](#case-c--script-with-app-shape) |
-| Library that ships a packaged base config | `Config.from_spec(namespace, module)` | [Case D](#case-d--library-with-a-packaged-base-config) |
+| Library that ships a packaged base config | `Config(ConfigSpec(namespace, name).resolve())` | [Case D](#case-d--library-with-a-packaged-base-config) |
 
 Cases are ordered simplest first. A caller reaching the guide starts at the top and stops when
 the shape matches.
@@ -72,8 +72,8 @@ config = Config(str(Path(__file__).parent / "config.yaml"))
 lg = create_root_lg(level="warning")
 ```
 
-`Config.from_spec` does not fit here — no package module, no namespace identity, no XDG
-overlay chain to walk. Plain `Config(path)` is the right primitive.
+`ConfigSpec` does not fit here — no config identity, no XDG overlay chain to walk. Plain
+`Config(path)` is the right primitive.
 
 ## Case C — Script with `App` shape
 
@@ -82,31 +82,29 @@ is framework mode, not library mode — `App.setup()` parses `sys.argv`, resolve
 via the v1 protocol, and drives the tool lifecycle.
 
 ```python
-from pathlib import Path
-
 from appinfra.app import AppBuilder
-
-BASE_CONFIG = Path(__file__).parent / "etc" / "myapp.yaml"
 
 app = (
     AppBuilder("myapp")
-    .with_config_spec("myorg", "myapp", BASE_CONFIG)
+    .config.with_spec("myorg", "myapp")
+    .done()
     .with_standard_args(etc_dir=True, config_file=True)
     .build()
 )
 app.setup()
 ```
 
-Full detail lives in
-[config-protocol.md § Discovery helper](config-protocol.md#discovery-helper). This guide does
-not duplicate that surface — reach for library mode only when the entry point does not own
-argv.
+A script that is not a package works the same way: with no module named after the config, the
+base is looked up beside the script, `./etc/myapp.yaml`. Full detail lives in
+[config-protocol.md § Declaring the source](config-protocol.md#declaring-the-source). This
+guide does not duplicate that surface — reach for library mode only when the entry point does
+not own argv.
 
 ## Case D — Library with a packaged base config
 
 A library shipped as a wheel with its default config at `<pkg>/etc/<pkg>.yaml`
 (per [protocol rule 2](config-protocol.md#2-base-config-ships-in-the-wheel)) is the canonical
-target for `Config.from_spec`.
+target for `ConfigSpec`.
 
 ```
 my_package/
@@ -119,58 +117,56 @@ my_package/
 Downstream construction:
 
 ```python
-import my_package
-from appinfra.config import Config
+from appinfra.config import Config, ConfigSpec
 from appinfra.log import create_root_lg
 
-config = Config.from_spec("myorg", my_package)
+config = Config(ConfigSpec("myorg", "my-package").resolve())
 lg = create_root_lg(level="warning")
 ```
 
-Two positional arguments — `namespace` (XDG scope) and `package_module` (the imported top-level
-module). Everything else — deriving the config filename, running the precedence chain, choosing
-the include-authorization root — happens inside `from_spec`.
+Two strings: `namespace` (XDG scope) and the config's `name`. Locating the packaged base,
+running the precedence chain and choosing the include-authorization root all happen inside the
+spec; `Config` loads the file it resolved to. A spec resolves, it never loads.
 
-### D1 — Filename convention
+### D1 — Module and filename convention
 
-The default config filename is derived as
-`package_module.__name__.replace("_", "-") + ".yaml"`. Under the standard PEP 8 / packaging
-convention (dashed distribution name → underscored module name), this produces the right
-filename automatically: a module named `my_package` looks up `etc/my-package.yaml`, a module
-named `simple` looks up `etc/simple.yaml`.
+The module shipping the base is found by mapping the name's hyphens to underscores and
+locating it with `importlib.util.find_spec`, without importing it: name `my-package` finds
+module `my_package`. The base filename is `<name>.yaml`. Under the standard PEP 8 / packaging
+convention (dashed distribution name, underscored module name), both derive from the name with
+no further input.
 
-### D2 — Non-conventional filename
+### D2 — Non-conventional layout
 
-When the config filename does not follow the convention (e.g. a legacy layout, or a package
-whose identity carries multiple words that do not map cleanly), pass `package=` explicitly:
+Each deviation from the rule-2 layout is one keyword on the spec:
 
 ```python
-config = Config.from_spec("myorg", my_package, package="legacy-name")
-# Looks up: <my_package.__file__>/../etc/legacy-name.yaml
+ConfigSpec("myorg", "my-package", filename="legacy-name.yaml")  # different file name
+ConfigSpec("myorg", "my-package", etc_dir="conf")  # different directory
+ConfigSpec("myorg", "my-package", origin=__file__)  # anchored on this file's directory
+ConfigSpec("myorg", "my-package", path="/opt/cfg/base.yaml")  # the file outright
 ```
 
-The explicit form also flows through to XDG discovery — `$XDG_CONFIG_HOME/myorg/legacy-name.yaml`
-is what the overlay chain probes.
+`name` still drives XDG discovery: `$XDG_CONFIG_HOME/myorg/my-package.yaml` is what the overlay
+chain probes regardless of the base filename.
 
 ### D3 — Accepting user overrides
 
 A library that wants to let its own callers point at an alternate config location surfaces
-`etc_dir` and `config_file` as parameters on its own API. `Config.from_spec` takes them as
-keyword-only kwargs and threads them into the precedence chain, equivalent to the framework's
-`--etc-dir` / `--config` flags.
+`etc_dir` and `config_file` as parameters on its own API. `resolve()` takes them as keyword
+arguments and threads them into the precedence chain, equivalent to the framework's `--etc-dir`
+/ `--config` flags.
 
 ```python
+SPEC = ConfigSpec("myorg", "my-package")
+
+
 def load_config(
     *,
     etc_dir: str | None = None,
     config_file: str | None = None,
 ) -> Config:
-    return Config.from_spec(
-        "myorg",
-        my_package,
-        etc_dir=etc_dir,
-        config_file=config_file,
-    )
+    return Config(SPEC.resolve(etc_dir=etc_dir, config_file=config_file))
 ```
 
 These values MUST come from the caller — a function parameter, a host-application setting, a
@@ -204,20 +200,22 @@ lg = LoggerFactory.create_root(log_config)
 This mirrors what `AppBuilder` does at framework setup time. Reach for it when the config file
 is authoritative for logging shape; stay with `create_root_lg` otherwise.
 
-`Config.from_spec` deliberately does not fuse the logger into its return value — the YAML-driven
-path above is a real branch, and a `(config, logger)` return would hide it.
+Neither `ConfigSpec` nor `Config` fuses the logger into its result — the YAML-driven path above
+is a real branch, and a `(config, logger)` return would hide it.
 
 ## Packaging as a helper
 
 Library authors typically lift the bootstrap into a package-level function so downstream code
-reduces to one call:
+reduces to one call. The helper discovers on the host's behalf, so its docstring says so per
+[protocol rule 5](config-protocol.md#5-library-vs-cli-split):
 
 ```python
 # in my_package/__init__.py
 
-import my_package
-from appinfra.config import Config
+from appinfra.config import Config, ConfigSpec
 from appinfra.log import create_root_lg
+
+SPEC = ConfigSpec("myorg", "my-package")
 
 
 def quickstart(
@@ -226,12 +224,8 @@ def quickstart(
     config_file: str | None = None,
     log_level: str = "warning",
 ) -> "Client":
-    config = Config.from_spec(
-        "myorg",
-        my_package,
-        etc_dir=etc_dir,
-        config_file=config_file,
-    )
+    """Build a client from the resolved config (project-local, XDG, packaged base)."""
+    config = Config(SPEC.resolve(etc_dir=etc_dir, config_file=config_file))
     lg = create_root_lg(level=log_level)
     return ClientFactory(lg).create_from_config(config=config)
 ```
@@ -250,7 +244,7 @@ factory signatures, sensible default log levels, additional wiring).
 
 ## When to graduate to framework mode
 
-Migrate to `AppBuilder.with_config_spec(...)` when any of these become true:
+Migrate to `AppBuilder.config.with_spec(...)` when any of these become true:
 
 - The entry point runs from a terminal and end users expect `--etc-dir` / `--config` /
   `--log-level` on the CLI surface.
@@ -263,6 +257,6 @@ and imposes no argv contract on the caller.
 ## See also
 
 - [Config Protocol](config-protocol.md) — v1 spec, precedence rules, XDG search
-- [Config API](../api/config.md) — `Config`, `resolve_config_source`, `xdg_candidates`
+- [Config API](../api/config.md) — `Config`, `ConfigSpec`, `ConfigFile`
 - [Logging API](../api/logging.md) — `LoggerFactory`, `LogConfig`, `create_root_lg`
 - [Configuration Precedence](configuration-precedence.md) — CLI vs env vs file

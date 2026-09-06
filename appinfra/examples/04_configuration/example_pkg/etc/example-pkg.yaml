@@ -1,6 +1,6 @@
 # Packaged base config for example_pkg.
 #
-# Loaded by ../../library_mode_from_spec.py via Config.from_spec.
+# Resolved by ../../library_mode_config_spec.py via ConfigSpec.
 # In a real package this file ships inside the wheel; here it lives
 # under an examples subtree that plays the same role.
 

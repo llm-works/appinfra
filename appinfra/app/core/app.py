@@ -17,7 +17,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from ...config import Config, resolve_config_source, resolve_etc_dir
+from ...config import Config, ConfigFile, ConfigSpec, resolve_etc_dir
 from ...dot_dict import DotDict
 
 if TYPE_CHECKING:
@@ -90,9 +90,11 @@ class App(Traceable):
         self._config_watcher: ConfigWatcher | None = None  # Hot-reload watcher
         # Loaded config paths: list of (etc_dir, filename, full_path) tuples.
         self._loaded_config_paths: list[tuple[str, str, str]] = []
-        # v1 config-protocol spec (set by AppBuilder.with_config_spec); loaded
+        # Config-protocol spec (set by the builder's config block); resolved
         # in _load_and_merge_config after arg parsing.
-        self._config_spec: Any = None
+        self._config_spec: ConfigSpec | None = None
+        # The file the spec resolved to for this run: path, include root, rule.
+        self._config_source: ConfigFile | None = None
         # Include-authorization root for the loaded config; forwarded to
         # ConfigWatcher so reloads use the same boundary as the initial load.
         self._project_root: Path | None = None
@@ -118,6 +120,20 @@ class App(Traceable):
             or iterate over this list to set up watchers for all config files.
         """
         return getattr(self, "_loaded_config_paths", [])
+
+    @property
+    def config_spec(self) -> ConfigSpec | None:
+        """The config-protocol spec this app was built with, if any."""
+        return self._config_spec
+
+    @property
+    def config_path(self) -> Path | None:
+        """The config file the spec resolved to for this run, if any.
+
+        Set during ``setup()``; ``None`` before setup and for apps built
+        without a spec.
+        """
+        return self._config_source.path if self._config_source else None
 
     @property
     def etc_dir(self) -> str | None:
@@ -505,40 +521,37 @@ class App(Traceable):
         return load_result
 
     def _load_config_spec(self) -> dict:
-        """Load config via the v1 protocol precedence chain.
+        """Load config via the protocol precedence chain.
 
-        See ``appinfra.config.resolve_config_source``. Populates
-        ``self.config``, ``self._etc_dir``, ``self._config_file`` and
+        See ``ConfigSpec.resolve``. Populates ``self.config``,
+        ``self._config_source``, ``self._etc_dir``, ``self._config_file`` and
         ``self._project_root`` (forwarded to ``ConfigWatcher`` on hot-reload
         so the reload boundary matches the initial load).
         """
         spec = self._config_spec
+        assert spec is not None  # Only reached from the spec branch
         programmatic_config = self.config  # preserve builder-supplied config
-        custom_etc = getattr(self._parsed_args, "etc_dir", None)
-        custom_cfg = getattr(self._parsed_args, "config", None)
-        config_path, project_root = resolve_config_source(
-            spec.namespace,
-            spec.package,
-            spec.base_config,
-            custom_etc_dir=custom_etc,
-            custom_config=custom_cfg,
+        source = spec.resolve(
+            etc_dir=getattr(self._parsed_args, "etc_dir", None),
+            config_file=getattr(self._parsed_args, "config", None),
         )
-        loaded_config = Config(str(config_path), project_root=project_root)
+        loaded_config = Config(source)
         # Re-apply programmatic config (highest precedence after CLI args)
         if programmatic_config and dict(programmatic_config):
             self.config = self._merge_config_layers(loaded_config, programmatic_config)
         else:
             self.config = loaded_config
-        self._etc_dir = str(config_path.parent)
-        self._config_file = config_path.name
-        self._project_root = project_root
+        self._config_source = source
+        self._etc_dir = str(source.path.parent)
+        self._config_file = source.path.name
+        self._project_root = source.project_root
         # Populate for API parity (loaded_config_paths, create_config_watcher, etc.)
         self._loaded_config_paths.append(
-            (self._etc_dir, self._config_file, str(config_path))
+            (self._etc_dir, self._config_file, str(source.path))
         )
         return {
             "etc_dir": self._etc_dir,
-            "files": [{"path": str(config_path), "name": config_path.name}],
+            "files": [{"path": str(source.path), "name": source.path.name}],
         }
 
     def _resolve_etc_dir_if_opted_in(self) -> None:

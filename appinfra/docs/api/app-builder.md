@@ -13,7 +13,7 @@ class AppBuilder:
 - `with_name(name)` - Set application name
 - `with_description(desc)` - Set description
 - `with_version(version)` - Set version string
-- `with_config(config)` - Set Config or DotDict configuration
+- `config` - Config-source block: `with_spec`, `with_overrides`, `with_value`, `with_hot_reload`; see [Config](config.md#appbuilderconfig)
 - `with_config_file(path=None, from_etc_dir=True, optional=False)` - Load config from file (default: `infra.yaml` or `INFRA_DEFAULT_CONFIG_FILE`)
 - `with_main_cls(cls)` - Use custom App subclass
 - `with_main_tool(tool)` - Set main tool (runs when no subcommand specified)
@@ -23,6 +23,7 @@ class AppBuilder:
 - `build()` - Build and return the App instance
 
 **Sub-builders (accessed via properties):**
+- `.config` - ConfigConfigurer for the config source: spec, overrides, hot reload
 - `.tools` - ToolConfigurer for adding tools
 - `.logging` - LoggingConfigurer for log settings
 - `.server` - ServerConfigurer for HTTP server
@@ -54,7 +55,6 @@ app = (
     .with_micros(True)  # Microsecond timestamps
     .with_colors(True)  # Enable colored output
     .with_format("%(msg)s")  # Custom format string
-    .with_hot_reload(True)  # Enable config hot-reload (requires watchdog)
     .done()
     .build()
 )
@@ -174,7 +174,7 @@ Without `with_config_file()`, no automatic config loading occurs:
 ```python
 app = (
     AppBuilder("myapp")
-    # No with_config_file() - manual config only via with_config()
+    # No with_config_file() - manual config only via .config.with_overrides()
     .build()
 )
 ```
@@ -322,7 +322,7 @@ appinfra[hotreload]`):
 app = (
     AppBuilder("my-service")
     .with_config_file("config.yaml")
-    .logging.with_hot_reload(True)  # Enable watching
+    .config.with_hot_reload(True)  # Enable watching
     .done()
     .build()
 )

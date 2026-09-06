@@ -604,14 +604,13 @@ class TestAppBuilderFluentMethods:
         assert builder._version == "1.0.0"
         assert result is builder
 
-    def test_with_config(self):
-        """Test with_config sets config and returns self."""
+    def test_config_block_with_overrides(self):
+        """The config block's overrides layer lands on the builder."""
         builder = AppBuilder()
-        config = Mock()
 
-        result = builder.with_config(config)
+        result = builder.config.with_overrides({"a": 1}).done()
 
-        assert builder._config is config
+        assert builder._config.a == 1
         assert result is builder
 
     def test_with_config_file_uses_default_when_none(self):
@@ -641,7 +640,6 @@ class TestAppBuilderFluentMethods:
     def test_with_config_file_multiple_immediate_merges(self, clean_env):
         """Test that multiple immediate config files are merged correctly."""
         import tempfile
-        from pathlib import Path
 
         with tempfile.TemporaryDirectory() as tmpdir:
             # Create base config
@@ -725,70 +723,30 @@ class TestAppBuilderFluentMethods:
 
 
 # =============================================================================
-# Test AppBuilder.with_config_spec (v1 config protocol)
+# Test AppBuilder.config block reaches the App
 # =============================================================================
 
 
 @pytest.mark.unit
-class TestAppBuilderWithConfigSpec:
-    """`with_config_spec` opts into v1 config-protocol auto-loading."""
+class TestAppBuilderConfigBlock:
+    """The config block's spec is handed to the built App."""
 
-    def test_stores_spec(self, tmp_path):
+    def test_built_app_carries_the_spec(self, tmp_path):
         base = tmp_path / "pkg" / "etc" / "myapp.yaml"
         base.parent.mkdir(parents=True)
         base.write_text("")
 
-        builder = AppBuilder("test")
-        result = builder.with_config_spec("myorg", "myapp", base)
+        app = (
+            AppBuilder("test")
+            .config.with_spec("myorg", "myapp", path=base)
+            .done()
+            .build()
+        )
 
-        assert result is builder
-        assert builder._config_spec is not None
-        assert builder._config_spec.namespace == "myorg"
-        assert builder._config_spec.package == "myapp"
-        assert builder._config_spec.base_config == base
-
-    def test_does_not_auto_register_etc_dir_flag(self, tmp_path):
-        """Flag exposure is orthogonal — spec alone must not force the flag on.
-
-        Consumers who want the escape hatch compose with
-        `.with_standard_args(etc_dir=True)` explicitly; consumers building a
-        locked-down CLI (XDG + bundled base only) call the spec alone.
-        """
-        base = tmp_path / "pkg" / "etc" / "myapp.yaml"
-        base.parent.mkdir(parents=True)
-        base.write_text("")
-
-        builder = AppBuilder("test").with_config_spec("myorg", "myapp", base)
-
-        assert builder._standard_args["etc_dir"] is False
-
-    def test_accepts_string_path(self, tmp_path):
-        base = tmp_path / "etc" / "myapp.yaml"
-        base.parent.mkdir(parents=True)
-        base.write_text("")
-
-        builder = AppBuilder("test").with_config_spec("ns", "myapp", str(base))
-
-        assert isinstance(builder._config_spec.base_config, Path)
-        assert builder._config_spec.base_config == Path(str(base))
-
-    def test_rejects_when_with_config_file_already_used(self, tmp_path):
-        base = tmp_path / "etc" / "myapp.yaml"
-        base.parent.mkdir(parents=True)
-        base.write_text("")
-
-        builder = AppBuilder("test").with_config_file("some.yaml")
-        with pytest.raises(ValueError, match="mutually exclusive"):
-            builder.with_config_spec("ns", "myapp", base)
-
-    def test_rejects_config_file_after_spec(self, tmp_path):
-        base = tmp_path / "etc" / "myapp.yaml"
-        base.parent.mkdir(parents=True)
-        base.write_text("")
-
-        builder = AppBuilder("test").with_config_spec("ns", "myapp", base)
-        with pytest.raises(ValueError, match="mutually exclusive"):
-            builder.with_config_file("some.yaml")
+        assert app.config_spec is not None
+        assert app.config_spec.name == "myapp"
+        assert app.config_spec.base_config == base.resolve()
+        assert app.config_path is None  # resolved at setup, not at build
 
 
 # =============================================================================

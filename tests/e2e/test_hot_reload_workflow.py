@@ -47,7 +47,7 @@ class TestHotReloadWorkflow:
                 "    debounce_ms: 100\n"
             )
 
-            # Build app WITHOUT calling .logging.with_hot_reload()
+            # Build app WITHOUT calling .config.with_hot_reload()
             app = AppBuilder("test-app").with_config_file("app.yaml").build()
 
             # Mock the ConfigWatcher to verify it's called
@@ -84,7 +84,7 @@ class TestHotReloadWorkflow:
             app = (
                 AppBuilder("test-app")
                 .with_config_file("app.yaml")
-                .logging.with_hot_reload(True, debounce_ms=200)
+                .config.with_hot_reload(True, debounce_ms=200)
                 .done()
                 .build()
             )
@@ -124,7 +124,7 @@ class TestHotReloadWorkflow:
             app = (
                 AppBuilder("test-app")
                 .with_config_file("app.yaml")
-                .logging.with_hot_reload(True, debounce_ms=100)  # Different debounce
+                .config.with_hot_reload(True, debounce_ms=100)  # Different debounce
                 .done()
                 .build()
             )
@@ -194,7 +194,7 @@ class TestHotReloadWorkflow:
             app = (
                 AppBuilder("test-app")
                 .with_config_file("app.yaml")
-                .logging.with_hot_reload(False)
+                .config.with_hot_reload(False)
                 .done()
                 .build()
             )
@@ -213,11 +213,10 @@ class TestHotReloadWorkflow:
                         if app.lifecycle.logger:
                             app.lifecycle.logger.handlers.clear()
 
-    def test_hot_reload_without_config_file_raises(self):
-        """Test that hot-reload without config file raises ValueError."""
-        # Trying to enable hot-reload without calling with_config_file() should fail
-        with pytest.raises(ValueError, match="with_config_file.*must be called"):
-            AppBuilder("test-app").logging.with_hot_reload(True).done().build()
+    def test_hot_reload_without_config_source_raises(self):
+        """Hot reload needs a declared config source on the builder."""
+        with pytest.raises(ValueError, match="requires a config source"):
+            AppBuilder("test-app").config.with_hot_reload(True).done().build()
 
     def test_hot_reload_watcher_uses_correct_config(self):
         """Test that the watcher monitors the correct config file path."""

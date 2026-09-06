@@ -708,16 +708,21 @@ class TestConfigToolIntegration:
 class TestSourceReport:
     """Test --source output: loaded path, winning rule, chain rendering."""
 
-    def _tool_with_app(self, spec, loaded_paths, parsed_args):
-        """Build a ConfigSourceTool with a stub App carrying spec + loaded paths."""
+    def _tool_with_app(self, spec, source, parsed_args, loaded_paths=None):
+        """Build a ConfigSourceTool with a stub App carrying spec + resolved source."""
         from types import SimpleNamespace
         from unittest.mock import patch
 
+        if loaded_paths is None and source is not None:
+            loaded_paths = [
+                (str(source.path.parent), source.path.name, str(source.path))
+            ]
         tool = ConfigSourceTool()
         tool._logger = Mock()
         fake_app = SimpleNamespace(
             _config_spec=spec,
-            _loaded_config_paths=loaded_paths,
+            _config_source=source,
+            _loaded_config_paths=loaded_paths or [],
             _parsed_args=parsed_args,
         )
         return tool, patch.object(
@@ -725,19 +730,23 @@ class TestSourceReport:
         )
 
     def _spec(self, base):
-        from types import SimpleNamespace
+        from appinfra.config import ConfigSpec
 
-        return SimpleNamespace(
-            namespace="llm-works", package="appinfra", base_config=Path(base)
-        )
+        return ConfigSpec("llm-works", "appinfra", path=base)
+
+    def _source(self, path, rule):
+        from appinfra.config import ConfigFile
+
+        return ConfigFile(Path(path), Path(path).parent, rule)
 
     def test_no_spec_reports_bare_loaded(self, capsys, tmp_path):
         f = tmp_path / "x.yaml"
         f.write_text("k: v")
         tool, ctx = self._tool_with_app(
             spec=None,
-            loaded_paths=[(str(tmp_path), "x.yaml", str(f))],
+            source=None,
             parsed_args=Mock(etc_dir=None, config=None),
+            loaded_paths=[(str(tmp_path), "x.yaml", str(f))],
         )
         with ctx:
             assert tool.run() == 0
@@ -752,7 +761,7 @@ class TestSourceReport:
         base.write_text("k: v")
         tool, ctx = self._tool_with_app(
             spec=self._spec(base),
-            loaded_paths=[(str(tmp_path), "base.yaml", str(base.resolve()))],
+            source=self._source(base.resolve(), 6),
             parsed_args=Mock(etc_dir=None, config=None),
         )
         with ctx:
@@ -774,13 +783,13 @@ class TestSourceReport:
         sub.mkdir()
         monkeypatch.chdir(sub)
         # spec.base_config is the packaged base (elsewhere on disk);
-        # loaded_paths reflects what resolve_config_source picked.
+        # the source reflects what resolve() picked.
         packaged_base = tmp_path / "pkg" / "base.yaml"
         packaged_base.parent.mkdir()
         packaged_base.write_text("k: v")
         tool, ctx = self._tool_with_app(
             spec=self._spec(packaged_base),
-            loaded_paths=[(str(etc), "base.yaml", str(project_hit))],
+            source=self._source(project_hit, 4),
             parsed_args=Mock(etc_dir=None, config=None),
         )
         with ctx:
@@ -797,7 +806,7 @@ class TestSourceReport:
         custom.write_text("k: v")
         tool, ctx = self._tool_with_app(
             spec=self._spec(base),
-            loaded_paths=[(str(tmp_path), "custom.yaml", str(custom))],
+            source=self._source(custom, 1),
             parsed_args=Mock(etc_dir=None, config=str(custom)),
         )
         with ctx:
@@ -813,7 +822,7 @@ class TestSourceReport:
         base.write_text("k: v")
         tool, ctx = self._tool_with_app(
             spec=self._spec(base),
-            loaded_paths=[(str(tmp_path), "bare.yaml", str(tmp_path / "bare.yaml"))],
+            source=self._source(tmp_path / "bare.yaml", 2),
             parsed_args=Mock(etc_dir=str(tmp_path), config="bare.yaml"),
         )
         with ctx:
@@ -821,18 +830,29 @@ class TestSourceReport:
         out = capsys.readouterr().out
         assert "rule:   2 (--config bare + --etc-dir)" in out
 
+    def test_rule_2_bare_filename_cwd(self, capsys, tmp_path):
+        base = tmp_path / "base.yaml"
+        base.write_text("k: v")
+        tool, ctx = self._tool_with_app(
+            spec=self._spec(base),
+            source=self._source(tmp_path / "bare.yaml", 2),
+            parsed_args=Mock(etc_dir=None, config="bare.yaml"),
+        )
+        with ctx:
+            tool.run()
+        out = capsys.readouterr().out
+        assert "rule:   2 (--config bare + cwd)" in out
+
     def test_rule_3_etc_dir_alone(self, capsys, tmp_path):
         base = tmp_path / "base.yaml"
         base.write_text("k: v")
         tool, ctx = self._tool_with_app(
             spec=self._spec(base),
-            loaded_paths=[
-                (str(tmp_path), "appinfra.yaml", str(tmp_path / "appinfra.yaml"))
-            ],
+            source=self._source(tmp_path / "base.yaml", 3),
             parsed_args=Mock(etc_dir=str(tmp_path), config=None),
         )
         with ctx:
             tool.run()
         out = capsys.readouterr().out
         assert "rule:   3 (--etc-dir alone)" in out
-        assert "[x] 3. --etc-dir alone" in out
+        assert f"[x] 3. --etc-dir alone ({tmp_path}/base.yaml)" in out
