@@ -215,6 +215,16 @@ Consumers declare identity, not paths. One `ConfigSpec` serves both entry points
 ### Library mode (appinfra ≥ 0.11.0)
 
 ```python
+from appinfra.config import Config
+
+config = Config.from_spec(
+    "myorg", "myapp"
+)  # no operator input: the chain with defaults
+```
+
+A library that surfaces `--etc-dir` / `--config` on its own API resolves explicitly:
+
+```python
 from appinfra.config import Config, ConfigSpec
 
 SPEC = ConfigSpec("myorg", "myapp")

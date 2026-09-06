@@ -20,6 +20,21 @@ class Config(DotDict):
         project_root: Path | str | None = None,
     ): ...
 
+    @classmethod
+    def from_path(cls, path: str | Path, **options) -> Config: ...
+    @classmethod
+    def from_spec(
+        cls,
+        namespace: str,
+        name: str,
+        *,
+        origin=AUTO,
+        etc_dir="etc",
+        filename=AUTO,
+        path=None,
+        **options,
+    ) -> Config: ...
+
     def reload(self) -> Config: ...
     def validate(self, raise_on_error: bool = True) -> bool | Any: ...
     def get_env_overrides(self) -> dict[str, Any]: ...
@@ -37,16 +52,29 @@ class Config(DotDict):
 | `allowed_paths` | `None` | Explicit list of specific paths (e.g. `["~/.myapp.yaml"]`) that absolute `!include*` directives may reach even when outside `project_root`. Each entry is `~`-expanded and resolved once; an include path bypasses the guard only if it resolves to an exact match. Applies to absolute / tilde-expanded includes only — relative includes stay bound to `project_root`. Use for narrow user-overlay patterns. See [YAML custom tags](utilities.md#custom-tags) for the overlay-pattern example. |
 | `project_root` | `None` | Override for the include-authorization boundary. When set, replaces the auto-derived `project_root` for every include check in the load — both relative and absolute. Auto-derivation walks the config file's ancestry for an `etc/*.yaml` marker and falls back to the file's parent directory; a user overlay under `$XDG_CONFIG_HOME` has no such marker and cannot reach a base config shipped inside a package's `etc/`. A `ConfigFile` from `ConfigSpec.resolve()` carries the right value, the base's own directory; pass a wider ancestor explicitly only when the base's includes reach files outside it. `~`-expanded and resolved once. See [Config Protocol](../guides/config-protocol.md) for the overlay pattern. |
 
+**Constructors:**
+
+- `Config.from_path(path, **options)`: one file, nothing else consulted. The no-spec entry
+  point.
+- `Config.from_spec(namespace, name, **layout, **options)`: the identity and layout keywords of
+  [`ConfigSpec`](#config-spec); resolves with no operator input (project-local `etc/`, XDG
+  overlays, packaged base) and loads. It takes no `--etc-dir` / `--config` passthrough: a host
+  that parses those builds the spec and passes `resolve(...)` to the constructor.
+- `Config(fname | ConfigFile, ...)`: the low-level entry, used by the App and by the flags case.
+
+`**options` are the constructor's keyword parameters; `from_spec` omits `project_root`, which
+the resolved file carries.
+
 **Basic Usage:**
 
 ```python
-from appinfra.config import Config, ConfigSpec
+from appinfra.config import Config
 
-# Load from explicit path
-config = Config("etc/config.yaml")
+# One file by path
+config = Config.from_path("etc/config.yaml")
 
-# Load the file a spec resolves to (see Config Spec below)
-config = Config(ConfigSpec("myorg", "myapp").resolve())
+# The file the protocol resolves to (see Config Spec below)
+config = Config.from_spec("myorg", "myapp")
 
 # Access with dot notation (inherits from DotDict)
 print(config.logging.level)
@@ -69,7 +97,7 @@ export INFRA_SERVER_HOST=0.0.0.0
 ```
 
 ```python
-config = Config("etc/config.yaml")
+config = Config.from_path("etc/config.yaml")
 print(config.logging.level)  # "debug" (from env, not file)
 ```
 
@@ -233,7 +261,16 @@ this run and returns the first tier that applies:
 `$XDG_CONFIG_DIRS` entry) without touching the filesystem; `project_local()` is tier 4 on its
 own.
 
-**Library-mode pattern:**
+**Library-mode pattern.** With no operator input, `Config.from_spec` does the whole thing:
+
+```python
+from appinfra.config import Config
+
+config = Config.from_spec("myorg", "myapp")
+```
+
+A library that surfaces `--etc-dir` / `--config` on its own API builds the spec and resolves
+explicitly; the factory takes no operator flags:
 
 ```python
 from appinfra.config import Config, ConfigSpec

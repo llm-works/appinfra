@@ -36,7 +36,9 @@ from appinfra.app.builder import AppBuilder
 
 app = (
     AppBuilder("my-service")
-    .config.with_spec("myorg", "my-service")  # Packaged base: etc/my-service.yaml
+    .config.with_spec(
+        "myorg", "my-service"
+    )  # etc/my-service.yaml beside the module or script
     .with_hot_reload(True)  # Watch the resolved config file
     .done()
     .logging.with_level("info")

@@ -19,7 +19,7 @@ import yaml  # type: ignore[import-untyped]
 from ..dot_dict import DotDict
 from ..errors import UndeclaredConfigPathError
 from .constants import MAX_CONFIG_SIZE_BYTES
-from .spec import ConfigFile
+from .spec import AUTO, Auto, ConfigFile, ConfigSpec
 
 # Inventory of `INFRA_*` env vars consumed by appinfra's own tooling (shell
 # scripts, Makefiles, pytest fixtures) rather than as yaml config overrides.
@@ -228,7 +228,8 @@ class Config(DotDict):
         # Detects circular includes
 
     Example:
-        config = Config('config.yaml')
+        config = Config.from_path("etc/config.yaml")  # one file, nothing else consulted
+        config = Config.from_spec("myorg", "myapp")  # protocol chain, see ConfigSpec
         # Access configuration values like dictionary keys
         value = config.get('database.host')
     """
@@ -296,6 +297,72 @@ class Config(DotDict):
             Path(str(project_root)).expanduser().resolve() if project_root else None
         )
         self._load(str(fname))
+
+    @classmethod
+    def from_path(
+        cls,
+        path: str | Path,
+        *,
+        enable_env_overrides: bool = True,
+        env_prefix: str = "INFRA_",
+        merge_strategy: str = "replace",
+        allowed_paths: list[Path | str] | None = None,
+        project_root: Path | str | None = None,
+    ) -> Self:
+        """Load one YAML file by path; nothing else is consulted.
+
+        The no-spec entry point: no base lookup, no project-local walk-up,
+        no XDG overlay. The keyword options are the constructor's.
+        """
+        return cls(
+            path,
+            enable_env_overrides=enable_env_overrides,
+            env_prefix=env_prefix,
+            merge_strategy=merge_strategy,
+            allowed_paths=allowed_paths,
+            project_root=project_root,
+        )
+
+    @classmethod
+    def from_spec(
+        cls,
+        namespace: str,
+        name: str,
+        *,
+        origin: str | Path | Auto = AUTO,
+        etc_dir: str = "etc",
+        filename: str | Auto = AUTO,
+        path: str | Path | None = None,
+        enable_env_overrides: bool = True,
+        env_prefix: str = "INFRA_",
+        merge_strategy: str = "replace",
+        allowed_paths: list[Path | str] | None = None,
+    ) -> Self:
+        """Locate a config under the config protocol and load the file it resolves to.
+
+        Takes the identity and layout arguments of ``ConfigSpec`` and resolves
+        with no operator input: project-local ``<etc_dir>/<filename>`` above
+        cwd, then XDG overlays, then the base beside the module named after
+        the config or beside the calling script. A host that parses
+        ``--etc-dir`` or ``--config`` builds the ``ConfigSpec`` itself and
+        passes ``spec.resolve(etc_dir=..., config_file=...)`` to the
+        constructor. The include root comes from the resolved file.
+        """
+        spec = ConfigSpec(
+            namespace,
+            name,
+            origin=origin,
+            etc_dir=etc_dir,
+            filename=filename,
+            path=path,
+        )
+        return cls(
+            spec.resolve(),
+            enable_env_overrides=enable_env_overrides,
+            env_prefix=env_prefix,
+            merge_strategy=merge_strategy,
+            allowed_paths=allowed_paths,
+        )
 
     def __setattr__(self, key: str, value: Any) -> None:
         """

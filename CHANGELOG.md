@@ -18,6 +18,9 @@ For API stability guarantees and deprecation policy, see
 - `AppBuilder.config` block: `with_spec`, `with_overrides`, `with_value`,
   `with_hot_reload`, and a keyword form `.config(namespace=..., name=..., hot_reload=True)`.
   See [AppBuilder.config](appinfra/docs/api/config.md#appbuilderconfig).
+- `Config.from_path(path)` and `Config.from_spec(namespace, name, **layout)`: load one file
+  by path, or resolve under the protocol with `ConfigSpec`'s identity and layout keywords and
+  load. Neither takes `--etc-dir` / `--config`; build the spec and `resolve()` for that.
 - `INFRA_PYTEST_WORKERS` Makefile variable (default empty): pytest-xdist worker count for
   `make test.*` targets. `run_pytest_serial` macro for custom targets that must stay in-process.
 - `make examples.check`: runs every script under `examples/` (or `<pkg>/examples/`) and
@@ -65,9 +68,6 @@ For API stability guarantees and deprecation policy, see
 - `appinfra.config.resolve_config_source`, `xdg_candidates`, `include_root_for` and
   `find_project_local`: folded into `ConfigSpec` as `resolve()`, `xdg_candidates()`,
   `include_root` and `project_local()`.
-- `Config.from_spec(namespace, package_module, ...)`: use
-  `Config(ConfigSpec(namespace, name, ...).resolve())` — the module is now located from
-  the config name, and resolution is explicit.
 
 ### Fixed
 - `appinfra pg` and `make pg.*` targets exit with install guidance when

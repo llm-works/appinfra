@@ -1935,3 +1935,96 @@ class TestConfigFromConfigFile:
         spec = ConfigSpec("myorg", "missing", path=tmp_path / "etc" / "missing.yaml")
         with pytest.raises(FileNotFoundError):
             Config(spec.resolve())
+
+
+@pytest.mark.unit
+@pytest.mark.usefixtures("clean_env")
+class TestConfigFactories:
+    """`Config.from_path` loads one file; `Config.from_spec` resolves under the protocol."""
+
+    @pytest.fixture(autouse=True)
+    def isolate(self, tmp_path, monkeypatch):
+        """No XDG overlay and no project-local hit unless a test creates one."""
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "no-xdg"))
+        monkeypatch.setenv("XDG_CONFIG_DIRS", str(tmp_path / "no-xdg-sys"))
+        monkeypatch.chdir(tmp_path)
+
+    def _base(self, tmp_path: Path) -> Path:
+        base = tmp_path / "pkg" / "etc" / "myapp.yaml"
+        base.parent.mkdir(parents=True)
+        base.write_text("app:\n  name: base\nlogging:\n  level: info\n")
+        return base
+
+    def test_from_path_loads_the_file(self, tmp_path):
+        f = tmp_path / "x.yaml"
+        f.write_text("app:\n  name: direct\n")
+
+        config = Config.from_path(f)
+
+        assert config.app.name == "direct"
+        assert f.resolve() in config.get_source_files()
+
+    def test_from_path_forwards_options(self, tmp_path, monkeypatch):
+        f = tmp_path / "x.yaml"
+        f.write_text("logging:\n  level: info\n")
+        monkeypatch.setenv("MYAPP_LOGGING_LEVEL", "debug")
+        monkeypatch.setenv("INFRA_LOGGING_LEVEL", "warning")
+
+        assert Config.from_path(f, env_prefix="MYAPP_").logging.level == "debug"
+        assert Config.from_path(f, enable_env_overrides=False).logging.level == "info"
+
+    def test_from_spec_loads_the_resolved_base(self, tmp_path):
+        base = self._base(tmp_path)
+
+        config = Config.from_spec("myorg", "myapp", path=base)
+
+        assert config.app.name == "base"
+        assert base.resolve() in config.get_source_files()
+        # include root comes from the resolved ConfigFile, the base's directory
+        assert config._project_root_override == base.parent.resolve()
+
+    def test_from_spec_applies_xdg_overlay(self, tmp_path, monkeypatch):
+        base = self._base(tmp_path)
+        xdg = tmp_path / "xdg"
+        (xdg / "myorg").mkdir(parents=True)
+        (xdg / "myorg" / "myapp.yaml").write_text("app:\n  name: overlay\n")
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg))
+
+        assert Config.from_spec("myorg", "myapp", path=base).app.name == "overlay"
+
+    def test_from_spec_forwards_layout_and_options(self, tmp_path, monkeypatch):
+        base = tmp_path / "conf" / "legacy.yaml"
+        base.parent.mkdir()
+        base.write_text("logging:\n  level: info\n")
+        monkeypatch.setenv("MYAPP_LOGGING_LEVEL", "debug")
+
+        config = Config.from_spec(
+            "myorg",
+            "myapp",
+            origin=tmp_path,
+            etc_dir="conf",
+            filename="legacy.yaml",
+            env_prefix="MYAPP_",
+        )
+
+        assert config.logging.level == "debug"
+
+    def test_from_spec_takes_no_operator_flags(self, tmp_path):
+        """--etc-dir / --config belong to ConfigSpec.resolve(), not the factory."""
+        with pytest.raises(TypeError):
+            Config.from_spec("myorg", "myapp", config_file="x.yaml")  # type: ignore[call-arg]
+
+    def test_from_spec_rejects_module_object(self):
+        """The second positional is the config name, not a module."""
+        import types
+
+        with pytest.raises(TypeError, match="module object"):
+            Config.from_spec("myorg", types.ModuleType("myapp"))  # type: ignore[arg-type]
+
+    def test_from_spec_matches_explicit_resolve(self, tmp_path):
+        base = self._base(tmp_path)
+
+        via_factory = Config.from_spec("myorg", "myapp", path=base)
+        explicit = Config(ConfigSpec("myorg", "myapp", path=base).resolve())
+
+        assert dict(via_factory) == dict(explicit)

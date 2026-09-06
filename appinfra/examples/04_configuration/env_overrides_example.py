@@ -8,8 +8,8 @@ Environment Variable Overrides Example
 
 This example demonstrates how to use environment variables to override
 configuration values from etc/env-overrides.yaml without modifying the YAML
-file. The file is located through a ConfigSpec, the same way an app finds its
-packaged base config.
+file. Config.from_spec locates the file under the config protocol, the same
+way an app finds its base config.
 
 What This Example Demonstrates:
 - Basic environment variable overrides
@@ -49,17 +49,16 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 from appinfra import Config
-from appinfra.config import ConfigSpec
 from appinfra.log import LogConfig, LoggerFactory
-
-# etc/env-overrides.yaml beside this script is the base; resolve() applies the
-# protocol chain (project-local etc/, user overlay, base) as an app would.
-CONFIG_FILE = ConfigSpec("example-org", "env-overrides").resolve().path
 
 
 def load_config(**kwargs):
-    """Fresh Config from the resolved file; env overrides are applied at load time."""
-    return Config(str(CONFIG_FILE), **kwargs)
+    """Fresh Config per demo; env overrides are applied at load time.
+
+    etc/env-overrides.yaml beside this script is the base; from_spec applies the
+    protocol chain (project-local etc/, user overlay, base) as an app would.
+    """
+    return Config.from_spec("example-org", "env-overrides", **kwargs)
 
 
 def demo_basic_overrides():
@@ -319,7 +318,7 @@ def main():
     """Main function to run the environment variable overrides demos."""
     print("=== Environment Variable Overrides Example ===")
     print("This example demonstrates how to override configuration values")
-    print(f"from {CONFIG_FILE} using environment variables.\n")
+    print("from etc/env-overrides.yaml using environment variables.\n")
 
     try:
         _run_all_env_demos()

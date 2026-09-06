@@ -63,7 +63,8 @@ def demo_handler_registry_generators():
     """Demonstrate HandlerRegistry generator methods."""
     print("\n=== HandlerRegistry Generators ===")
 
-    config = Config(str(Path(__file__).resolve().parents[2] / "etc" / "infra.yaml"))
+    # appinfra's packaged base is etc/infra.yaml (its one deviation from rule 2)
+    config = Config.from_spec("llm-works", "appinfra", filename="infra.yaml")
     handlers_config = config.logging.handlers
     print(f"\n2. Loading {len(handlers_config)} handlers from configuration...")
 

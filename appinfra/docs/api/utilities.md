@@ -26,7 +26,7 @@ class Config(DotDict):
 ```python
 from appinfra.config import Config
 
-config = Config("etc/myapp.yaml")
+config = Config.from_path("etc/myapp.yaml")
 
 # Access with dot notation
 print(config.logging.level)
@@ -44,7 +44,7 @@ export INFRA_DATABASE_PORT=5433
 ```
 
 ```python
-config = Config("etc/myapp.yaml")
+config = Config.from_path("etc/myapp.yaml")
 print(config.logging.level)  # "debug" (from env)
 ```
 
@@ -720,7 +720,7 @@ cache:
 ```python
 from appinfra.config import Config
 
-config = Config("/app/etc/config.yaml")
+config = Config.from_path("/app/etc/config.yaml")
 print(config.logging.file)  # "./logs/app.log" (literal)
 print(config.logging.resolved)  # "/app/etc/logs/app.log" (absolute)
 ```

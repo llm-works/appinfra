@@ -66,7 +66,7 @@ class ConfigConfigurer:
     ) -> Self:
         """Declare the config source per the config protocol.
 
-        Builds a ``ConfigSpec`` from the same arguments: the packaged base is
+        Builds a ``ConfigSpec`` from the same arguments: the base is
         ``<origin dir>/<etc_dir>/<filename>``, each part defaulting to rule 2
         (the module named after the config or the calling script, ``etc``,
         ``<name>.yaml``); ``path`` names the file outright. At setup the App

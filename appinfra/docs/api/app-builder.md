@@ -129,7 +129,7 @@ Declare the config source with the `config` block. The App resolves it at setup 
 `etc/`, XDG overlays, then the packaged base.
 
 ```python
-# Packaged base: etc/inference.yaml beside the `inference` module
+# Base: etc/inference.yaml beside the `inference` module, or beside the calling script
 app = AppBuilder("inference").config.with_spec("myorg", "inference").done().build()
 
 # Base that deviates from the etc/<name>.yaml layout

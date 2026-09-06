@@ -84,7 +84,7 @@ from appinfra.app import AppBuilder
 app = (
     AppBuilder("myapp")
     .with_description("Data processing tool")
-    .config.with_spec("myorg", "myapp")  # etc/myapp.yaml beside the module
+    .config.with_spec("myorg", "myapp")  # etc/myapp.yaml beside the module or script
     .done()
     .logging.with_level("info")
     .with_location(1)

@@ -19,11 +19,13 @@ Layout:
         etc/
             example-pkg.yaml            <- the packaged base config
 
-ConfigSpec("example-org", "example-pkg") locates the module `example_pkg`
-(config name with "-" mapped to "_") without importing it and derives the
-base as <example_pkg>/etc/example-pkg.yaml. resolve() then walks the
-precedence chain (project-local, XDG overlay, packaged base) and Config
-loads the file it picked.
+Config.from_spec("example-org", "example-pkg") builds the ConfigSpec, which
+locates the module `example_pkg` (config name with "-" mapped to "_") without
+importing it and derives the base as <example_pkg>/etc/example-pkg.yaml; the
+spec's resolve() walks the precedence chain (project-local, XDG overlay,
+packaged base) and Config loads the file it picked. The explicit two-step,
+Config(ConfigSpec(...).resolve(etc_dir=..., config_file=...)), is for hosts
+that surface --etc-dir / --config on their own API.
 
 Running (assumes appinfra is installed in the active environment):
 
@@ -31,7 +33,7 @@ Running (assumes appinfra is installed in the active environment):
 
 Expected output (assumes no XDG override at example-org/example-pkg.yaml):
 
-    bootstrap ok  app[example-pkg] port[8080] rule[6]
+    bootstrap ok  app[example-pkg] port[8080]
     hello from the packaged base config
 """
 
@@ -41,18 +43,14 @@ from pathlib import Path
 # Allow running from a source checkout without installing the package.
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
-from appinfra.config import Config, ConfigSpec  # noqa: E402
+from appinfra.config import Config  # noqa: E402
 from appinfra.log import create_root_lg  # noqa: E402
 
 
 def main() -> None:
-    source = ConfigSpec("example-org", "example-pkg").resolve()
-    config = Config(source)
+    config = Config.from_spec("example-org", "example-pkg")
     lg = create_root_lg(level="info")
-    lg.info(
-        "bootstrap ok",
-        extra={"app": config.app.name, "port": config.app.port, "rule": source.rule},
-    )
+    lg.info("bootstrap ok", extra={"app": config.app.name, "port": config.app.port})
     lg.info(config.app.greeting)
 
 
