@@ -40,17 +40,15 @@ simple, readable, and maintainable.
 
 import json
 import os
-import pathlib
 import sys
 import time
+from pathlib import Path
 
 # Log directory for examples (hidden to keep project root clean)
 LOG_DIR = ".logs"
 
-# Add the project root to the path (examples/03_logging/file.py -> project root is 2 levels up)
-project_root = str(pathlib.Path(__file__).resolve().parents[3])
-if project_root not in sys.path:
-    sys.path.insert(0, project_root)
+# Allow running from a source checkout without installing the package.
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 from appinfra.log.builder import (
     ConsoleLoggingBuilder,
@@ -104,19 +102,18 @@ def _demo_multiple_handler_types():
 
 
 def _demo_custom_configuration():
-    """Demonstrate custom logger configuration with separator."""
+    """Demonstrate custom logger configuration with extra fields."""
     print("\n3. Custom Configuration:")
     logger3 = (
         LoggingBuilder("demo.custom")
         .with_level("warning")
         .with_colors(False)
-        .with_separator()
         .with_file_handler(f"{LOG_DIR}/custom_demo.log")
         .with_extra(service="demo", version="1.0.0")
         .build()
     )
     logger3.warning("Custom configuration applied", extra={"example": "custom_config"})
-    print("   -> Created logger with custom configuration and separator support")
+    print("   -> Created logger with custom configuration and extra fields")
 
 
 def demo_base_logging_builder():
@@ -534,6 +531,8 @@ def _get_log_files_to_cleanup():
         f"{LOG_DIR}/multi_files1.log",
         f"{LOG_DIR}/multi_files2.log",
         f"{LOG_DIR}/multi_files3.log",
+        f"{LOG_DIR}/multiple_info.log",
+        f"{LOG_DIR}/multiple_debug.log",
         f"{LOG_DIR}/quick_multi_demo.log",
         f"{LOG_DIR}/json_demo.json",
         f"{LOG_DIR}/json_custom_demo.json",
@@ -611,8 +610,12 @@ def main():
         _print_completion_summary()
         _display_json_examples()
 
-        # Ask user if they want to keep the log files
-        keep_files = input("\nKeep log files for inspection? (y/N): ").lower().strip()
+        # Ask whether to keep the log files; without a terminal, clean up.
+        keep_files = "n"
+        if sys.stdin.isatty():
+            keep_files = (
+                input("\nKeep log files for inspection? (y/N): ").lower().strip()
+            )
         if keep_files != "y":
             cleanup_log_files()
         else:

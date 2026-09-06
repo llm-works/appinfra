@@ -157,6 +157,12 @@ endif
 endif # skip type
 .PHONY: type
 
+examples.check:: ## Run every example script; fail on errors or timeouts
+	@if [ -d "examples" ]; then ${PYTHON} $(_MAKEFILE_DEV_DIR)../run_examples.py examples; \
+	elif [ -d "$(INFRA_DEV_PKG_NAME)/examples" ]; then ${PYTHON} $(_MAKEFILE_DEV_DIR)../run_examples.py $(INFRA_DEV_PKG_NAME)/examples; \
+	else echo "No examples directory found"; fi
+.PHONY: examples.check
+
 ifeq ($(filter cq,$(INFRA_DEV_SKIP_TARGETS)),)
 cq:: ## Check function sizes (reports violations, does not fail)
 	@echo "* checking function sizes..."

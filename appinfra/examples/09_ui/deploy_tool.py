@@ -3,6 +3,9 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright 2026 The appinfra Authors
 
+# ci-run: --help
+# ci-run: status
+
 """
 Complete Deploy Tool Example
 
@@ -23,8 +26,8 @@ import sys
 import time
 from pathlib import Path
 
-# Add parent to path for development
-sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
+# Allow running from a source checkout without installing the package.
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 from appinfra.app import AppBuilder
 from appinfra.app.tools import Tool, ToolConfig

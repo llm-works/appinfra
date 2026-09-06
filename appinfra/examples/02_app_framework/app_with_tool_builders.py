@@ -3,12 +3,15 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright 2026 The appinfra Authors
 
-import pathlib
-import sys
+# ci-run: --help
+# ci-run: status
+# ci-run: info
 
-# Add the project root to the path
-project_root = str(pathlib.Path(__file__).resolve().parents[3])
-sys.path.append(project_root) if project_root not in sys.path else None
+import sys
+from pathlib import Path
+
+# Allow running from a source checkout without installing the package.
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 from appinfra.app.builder.app import AppBuilder
 from appinfra.app.builder.tool import ToolBuilder

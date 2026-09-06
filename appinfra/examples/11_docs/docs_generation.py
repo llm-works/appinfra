@@ -3,6 +3,10 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright 2026 The appinfra Authors
 
+# ci-run: --help
+# ci-run: status
+# ci-run: generate
+
 """
 Example: Auto-Generated Documentation
 
@@ -20,8 +24,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
-# Allow running without package installation
-sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
+# Allow running from a source checkout without installing the package.
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 from appinfra.app.builder import AppBuilder
 from appinfra.app.docs import DocsGenerator

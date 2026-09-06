@@ -225,11 +225,17 @@ class DatabaseHandler(logging.Handler):
 
         # Fallback: Use executemany which is still much faster than individual executes
         if batch_data:
-            columns_tuple = tuple(sorted(batch_data[0].keys()))
-            insert_sql = self._get_insert_sql(columns_tuple)
+            # Rows differ in optional columns (extra, exception); executemany
+            # needs one parameter set, so insert the union and fill gaps with
+            # NULL.
+            columns = sorted({key for row in batch_data for key in row})
+            insert_sql = self._get_insert_sql(tuple(columns))
+            rows = [
+                {column: row.get(column) for column in columns} for row in batch_data
+            ]
 
             # Use executemany for better performance than individual execute calls
-            session.execute(sqlalchemy.text(insert_sql), batch_data)
+            session.execute(sqlalchemy.text(insert_sql), rows)
 
     def close(self) -> None:
         """Close the handler and flush any remaining data."""

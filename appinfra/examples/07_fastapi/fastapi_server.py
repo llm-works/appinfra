@@ -3,6 +3,11 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright 2026 The appinfra Authors
 
+# ci-run:
+# ci-run: --subprocess
+# ci-run: --cli serve
+# ci-stop: 4
+
 """
 FastAPI Server Framework Examples.
 
@@ -26,15 +31,14 @@ from __future__ import annotations
 
 import argparse
 import multiprocessing as mp
-import pathlib
 import sys
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
-# Add the project root to the path
-project_root = str(pathlib.Path(__file__).resolve().parents[3])
-sys.path.append(project_root) if project_root not in sys.path else None
+# Allow running from a source checkout without installing the package.
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 from appinfra.app.builder.app import AppBuilder
 from appinfra.app.fastapi import ServerBuilder, ServerPlugin

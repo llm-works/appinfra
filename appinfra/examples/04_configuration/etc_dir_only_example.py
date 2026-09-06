@@ -37,13 +37,13 @@ from __future__ import annotations
 
 import pathlib
 import sys
+from pathlib import Path
 from typing import Any
 
 import yaml
 
-project_root = str(pathlib.Path(__file__).resolve().parents[3])
-if project_root not in sys.path:
-    sys.path.insert(0, project_root)
+# Allow running from a source checkout without installing the package.
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 from appinfra.app.builder import AppBuilder
 from appinfra.app.tools.base import Tool, ToolConfig

@@ -4,15 +4,14 @@
 # SPDX-FileCopyrightText: Copyright 2026 The appinfra Authors
 
 import json
-import pathlib
 import random
 import sys
 import time
 from datetime import datetime
+from pathlib import Path
 
-# Add the project root to the path
-project_root = str(pathlib.Path(__file__).resolve().parents[3])
-sys.path.append(project_root) if project_root not in sys.path else None
+# Allow running from a source checkout without installing the package.
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 import sqlalchemy
 

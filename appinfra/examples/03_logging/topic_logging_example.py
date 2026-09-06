@@ -24,12 +24,11 @@ Priority: API (10) > CLI (5) > YAML (1)
 """
 
 import logging
-import pathlib
 import sys
+from pathlib import Path
 
-# Add the project root to the path
-project_root = str(pathlib.Path(__file__).resolve().parents[3])
-sys.path.insert(0, project_root)
+# Allow running from a source checkout without installing the package.
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 from appinfra.app.builder import AppBuilder
 from appinfra.log import LogConfig, LoggerFactory

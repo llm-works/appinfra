@@ -31,6 +31,8 @@ from appinfra.app.builder.app import (
     _register_tools_and_commands,
     _set_app_metadata,
 )
+from appinfra.app.builder.plugin import Plugin
+from appinfra.app.builder.tool import ToolBuilder
 from appinfra.yaml import deep_merge
 
 # =============================================================================
@@ -934,3 +936,23 @@ class TestAppBuilderIntegration:
 
         advanced_configurer = builder.advanced
         assert advanced_configurer.done() is builder
+
+
+@pytest.mark.unit
+class TestPluginContributedTools:
+    """Tools a plugin adds in configure() must reach the tool registry."""
+
+    def test_tool_added_in_configure_is_registered(self):
+        """Plugins are configured before the registry is populated."""
+
+        class ToolPlugin(Plugin):
+            def configure(self, builder):
+                builder.tools.with_tool_builder(
+                    ToolBuilder("from-plugin")
+                    .with_help("added by a plugin")
+                    .with_run_function(lambda tool, **kwargs: 0)
+                )
+
+        app = AppBuilder("myapp").tools.with_plugin(ToolPlugin()).done().build()
+
+        assert app.registry.get_tool("from-plugin") is not None

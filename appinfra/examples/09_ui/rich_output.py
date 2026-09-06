@@ -19,8 +19,8 @@ import sys
 import time
 from pathlib import Path
 
-# Add parent to path for development
-sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
+# Allow running from a source checkout without installing the package.
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 from appinfra.ui import RICH_AVAILABLE, Panel, Progress, Table, console
 

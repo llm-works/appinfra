@@ -39,13 +39,12 @@ services:
     working_dir: /workspace
 
     # Environment variables for CI/testing
-    # Override PostgreSQL config to use docker-compose postgres service
     environment:
       - HOME=/home/testuser
-      - INFRA_PGSERVER_PORT=5432
-      - INFRA_PGSERVER_USER=postgres
-      - INFRA_PGSERVER_PASS=postgres
       - COVERAGE_FILE=.cover/data
+      # Override pgserver.host to reach postgres via docker network (tests only;
+      # examples run with --network host and use the default 127.0.0.1:25432)
+      - INFRA_PGSERVER_HOST=postgres
       # pytest-xdist workers for lanes that override the command with make test.*
       # targets (test.all, test.coverage). check.summary goes through check.sh,
       # which has its own per-suite worker heuristic. test.perf always runs serial.
@@ -61,13 +60,14 @@ services:
   postgres:
     container_name: infra-cicd-pg-1
     image: postgres:18
+    command: -p 25432
     environment:
-      - POSTGRES_PASSWORD=postgres
       - POSTGRES_USER=postgres
       - POSTGRES_DB=postgres
+      - POSTGRES_HOST_AUTH_METHOD=trust
 
     ports:
-      - "5432:5432"
+      - "127.0.0.1:25432:25432"
 
     volumes:
       # Mount one level above PGDATA for pg18+ compatibility (see docker-compose.single.yaml).
@@ -75,7 +75,7 @@ services:
 
     # Health check ensures postgres is ready before tests start
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: ["CMD-SHELL", "pg_isready -U postgres -p 25432"]
       interval: 5s
       timeout: 5s
       retries: 10
