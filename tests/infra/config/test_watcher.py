@@ -1144,6 +1144,34 @@ class TestConfigWatcherStopBounded:
         assert order == ["reload", "stop"]
         assert watcher.is_running() is False
 
+    def test_handler_stale_after_restart_schedules_nothing(self, tmp_path, mock_logger):
+        """A handler from a run ended by stop() cannot schedule into the next run."""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("logging: {}\n")
+        watcher = ConfigWatcher(mock_logger, etc_dir=tmp_path)
+        watcher.configure("config.yaml", debounce_ms=10_000)
+        watcher._running = True
+        watcher._watched_files = {config_file.resolve()}
+        old_handler = watcher._create_file_handler()
+        watcher._file_handler = old_handler
+        event = MagicMock(is_directory=False, src_path=str(config_file))
+
+        # stop() ends the old run; a new run installs its own handler and files.
+        watcher.stop()
+        watcher._running = True
+        watcher._watched_files = {config_file.resolve()}
+        new_handler = watcher._create_file_handler()
+        watcher._file_handler = new_handler
+
+        try:
+            old_handler.on_modified(event)
+            assert watcher._debounce_timer is None
+
+            new_handler.on_modified(event)
+            assert watcher._debounce_timer is not None
+        finally:
+            watcher.stop()
+
 
 @pytest.mark.unit
 @pytest.mark.usefixtures("clean_env")

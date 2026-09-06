@@ -157,10 +157,20 @@ class ConfigWatcher:
                 self._config_paths.append(path)
         return self
 
-    def _is_watched_file(self, path: Path) -> bool:
-        """Thread-safe check if a path is in the watched files set."""
+    def _handle_file_event(self, handler: Any, path: Path) -> None:
+        """Schedule a reload for a file event, if it is still relevant.
+
+        The handler identity check, the watched-file check, and the
+        scheduling run under one lock acquisition, so a handler from a run
+        that stop() ended cannot pass the check, pause across a restart, and
+        then schedule a reload against the next run's state.
+        """
         with self._lock:
-            return path in self._watched_files
+            if handler is not self._file_handler:
+                return
+            if path not in self._watched_files:
+                return
+            self._on_file_changed()
 
     def _create_file_handler(self) -> Any:  # pragma: no cover
         """Create watchdog event handler for config file changes."""
@@ -172,12 +182,8 @@ class ConfigWatcher:
             def on_modified(self, event: Any) -> None:
                 if event.is_directory:
                     return
-                if watcher._file_handler is not self:
-                    return  # handler from a run that stop() has ended
-                modified_path = Path(event.src_path).resolve()
-                # Trigger reload if ANY watched file changes (main or includes)
-                if watcher._is_watched_file(modified_path):
-                    watcher._on_file_changed()
+                # Reload if ANY watched file changes (main or includes)
+                watcher._handle_file_event(self, Path(event.src_path).resolve())
 
         return ConfigFileHandler()
 
