@@ -51,6 +51,9 @@ For API stability guarantees and deprecation policy, see
 - `appinfra.config.resolve_config_source`, `xdg_candidates`, `include_root_for` and
   `find_project_local`: folded into `ConfigSpec` as `resolve()`, `xdg_candidates()`,
   `include_root` and `project_local()`.
+- `Config.from_spec(namespace, package_module, ...)`: use
+  `Config(ConfigSpec(namespace, name, ...).resolve())` — the module is now located from
+  the config name, and resolution is explicit.
 
 ### Fixed
 - `appinfra pg` and `make pg.*` targets exit with install guidance when
