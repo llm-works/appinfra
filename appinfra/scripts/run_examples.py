@@ -128,14 +128,21 @@ def run_case(spec: Spec, args: str) -> Result:
 
 
 def _spawn(cmd: list[str]) -> subprocess.Popen[str]:
-    """Start a case in its own session with stdin closed and output piped."""
+    """Start a case in its own session with stdin closed and output piped.
+
+    Env vars that the CI container sets for the test postgres (INFRA_PGSERVER_*)
+    are stripped so examples that load their own YAML configs don't fail on
+    undeclared config paths.
+    """
+    env = {k: v for k, v in os.environ.items() if not k.startswith("INFRA_PGSERVER_")}
+    env["PYTHONUNBUFFERED"] = "1"
     return subprocess.Popen(
         cmd,
         stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
-        env=dict(os.environ, PYTHONUNBUFFERED="1"),
+        env=env,
         start_new_session=True,
     )
 
