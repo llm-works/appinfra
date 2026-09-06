@@ -38,12 +38,15 @@ jobs:
                         -f docker-compose.override.py3.12.yml \
                         build
 
-      - name: Run examples
+      - name: Start postgres
         working-directory: appinfra/scripts/cicd
         run: |
-          docker compose -f docker-compose.yml \
-                        -f docker-compose.override.py3.12.yml \
-                        run --rm cicd-test make examples.check
+          docker compose -f docker-compose.yml up -d postgres
+          until docker compose exec postgres pg_isready -U postgres -p 25432; do sleep 1; done
+
+      - name: Run examples
+        run: |
+          docker run --rm --network host infra-test:py3.12 make examples.check
 
       - name: Cleanup Docker resources
         if: always()
