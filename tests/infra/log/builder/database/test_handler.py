@@ -356,6 +356,23 @@ class TestFlushBatch:
         assert len(handler.batch) == 0  # Batch cleared
         mock_db_interface.session.assert_called_once()
 
+    def test_mixed_rows_insert_union_of_columns(self, handler, mock_db_interface):
+        """Rows lacking optional columns are padded with None, not dropped."""
+        handler.batch = [
+            {"timestamp": 1, "message": "plain"},
+            {"timestamp": 2, "message": "with extra", "extra_data": "{}"},
+        ]
+
+        handler._flush_batch()
+
+        session = mock_db_interface.session.return_value.__enter__.return_value
+        sql, rows = session.execute.call_args.args
+        assert "extra_data" in str(sql)
+        assert rows == [
+            {"extra_data": None, "message": "plain", "timestamp": 1},
+            {"extra_data": "{}", "message": "with extra", "timestamp": 2},
+        ]
+
     def test_does_nothing_for_empty_batch(self, handler, mock_db_interface):
         """Test does nothing when batch is empty."""
         handler.batch = []

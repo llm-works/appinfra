@@ -3,6 +3,12 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright 2026 The appinfra Authors
 
+# ci-run: --help
+# ci-run: status
+# ci-run: reload
+# ci-run: serve
+# ci-stop: 4
+
 """
 Hot-Reload Configuration Example
 
@@ -28,11 +34,11 @@ Requirements:
 import pathlib
 import sys
 import time
+from pathlib import Path
 from typing import Any
 
-# Add the project root to the path
-project_root = str(pathlib.Path(__file__).resolve().parents[3])
-sys.path.insert(0, project_root)
+# Allow running from a source checkout without installing the package.
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 from appinfra.app.builder import AppBuilder
 from appinfra.app.tools import Tool, ToolConfig
@@ -49,6 +55,7 @@ class ServeCommand(Tool):
 
     def setup(self, **kwargs: Any) -> None:
         """Register section callbacks on startup."""
+        super().setup(**kwargs)  # creates the logger; must come first
         self.request_count = 0
         self.timeout = 30
         self.max_connections = 100

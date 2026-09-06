@@ -19,9 +19,15 @@ Usage:
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
+# Allow running from a source checkout without installing the package.
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
-from appinfra.ui import INQUIRER_AVAILABLE, select_scrollable, select_table
+from appinfra.ui import (
+    INQUIRER_AVAILABLE,
+    NonInteractiveError,
+    select_scrollable,
+    select_table,
+)
 
 # Sample process data for table demo
 SAMPLE_PROCESSES = [
@@ -140,9 +146,13 @@ def main() -> None:
         print("Falling back to basic numbered selection.\n")
 
     try:
-        demo_scrollable_list()
-        demo_table_selection()
-        demo_custom_styling()
+        for demo in (demo_scrollable_list, demo_table_selection, demo_custom_styling):
+            try:
+                demo()
+            except NonInteractiveError as e:
+                # No terminal (piped, CI): report and move on, like the other
+                # prompt examples.
+                print(f"Non-interactive mode: {e}")
     except KeyboardInterrupt:
         print("\n\nExited")
 

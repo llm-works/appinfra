@@ -35,12 +35,11 @@ Expected output (assumes no XDG override at example-org/example-pkg.yaml):
     hello from the packaged base config
 """
 
-import pathlib
 import sys
+from pathlib import Path
 
-project_root = str(pathlib.Path(__file__).resolve().parents[3])
-if project_root not in sys.path:
-    sys.path.insert(0, project_root)
+# Allow running from a source checkout without installing the package.
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 import example_pkg  # noqa: E402
 

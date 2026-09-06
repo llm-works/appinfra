@@ -230,11 +230,13 @@ def _initialize_foundation(app: App, builder: AppBuilder) -> None:
 
 
 def _register_components(app: App, builder: AppBuilder) -> None:
-    """Register all app components: tools, plugins, lifecycle."""
+    """Register all app components: plugins, tools, lifecycle."""
+    # Plugins first: configure() may add tools and hooks to the builder, and
+    # those must exist before the tool registry is populated from it.
+    builder._plugins.configure_all(builder)
     _register_tools_and_commands(app, builder._tools, builder._commands)
     if builder._main_tool:
         app.set_main_tool(builder._main_tool)
-    builder._plugins.configure_all(builder)
     _register_lifecycle_managers(app, builder._hooks, builder._plugins)
     _configure_arguments_and_validation(
         app, builder._custom_args, builder._validation_rules

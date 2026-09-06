@@ -8,16 +8,13 @@ This module provides a base test class for PostgreSQL testing with automatic deb
 It handles common setup tasks like configuration loading, database connection, and debug table management.
 """
 
-import logging
 import unittest
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import Any
 
 from appinfra.config import Config
 from appinfra.db.pg import PG
-
-if TYPE_CHECKING:
-    from appinfra.log import Logger
+from appinfra.log import LogConfig, Logger, LoggerFactory
 
 from .helper_core import PGTestHelperCore
 
@@ -100,7 +97,7 @@ class PGTestCaseHelper(unittest.TestCase):
     _skip_reason: str
     config: Config
     test_config: Any
-    lg: "Logger"
+    lg: Logger
     pg: PG
 
     @classmethod
@@ -184,44 +181,16 @@ class PGTestCaseHelper(unittest.TestCase):
             return False
 
     @classmethod
-    def _setup_logger(cls) -> "Logger":
-        """Set up logger with fallback to mock logger."""
-        try:
-            from tests.test_helpers import create_test_logger_with_fallback
+    def _setup_logger(cls) -> Logger:
+        """Create a framework logger at the configured test level.
 
-            return cast("Logger", create_test_logger_with_fallback("pg_test_helper"))
-        except ImportError:
-            return cast("Logger", cls._create_mock_logger())
-
-    @classmethod
-    def _create_mock_logger(cls) -> logging.Logger:
-        """Create a mock logger for testing when test_helpers not available."""
-
-        class MockLogger(logging.Logger):
-            def __init__(self, name, config=None, callback_registry=None, extra=None):
-                super().__init__(name)
-                self.location = 0
-                self.micros = False
-                self.config = config or type("MockConfig", (), {"colors": False})()
-                self._callbacks = (
-                    callback_registry
-                    or type(
-                        "MockCallbackRegistry",
-                        (),
-                        {"inherit_to": lambda self, other: None},
-                    )()
-                )
-
-            def trace(self, msg, extra=None):
-                self.debug(f"TRACE: {msg}", extra=extra)
-
-            def trace2(self, msg, extra=None):
-                self.debug(f"TRACE2: {msg}", extra=extra)
-
-            def get_level(self):
-                return logging.DEBUG
-
-        return MockLogger("pg_test_helper")
+        `test.logging.level` is false by default (quiet tests); anything that is
+        not a level name falls back to warning.
+        """
+        level = cls.config.get("test.logging.level")
+        if not isinstance(level, str):
+            level = "warning"
+        return LoggerFactory.create_root(LogConfig.from_params(level=level))
 
     @classmethod
     def _test_database_connection(cls) -> None:

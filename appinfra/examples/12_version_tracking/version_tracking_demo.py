@@ -3,6 +3,10 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright 2026 The appinfra Authors
 
+# ci-run: --help
+# ci-run: info
+# ci-run: list
+
 """
 Version Tracking Demo
 
@@ -24,8 +28,8 @@ Run with:
 import sys
 from pathlib import Path
 
-# Add parent directory to path for running examples directly
-sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
+# Allow running from a source checkout without installing the package.
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 from appinfra.app import AppBuilder
 from appinfra.app.tools.base import Tool, ToolConfig

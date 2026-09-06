@@ -27,6 +27,9 @@ For API stability guarantees and deprecation policy, see
   [Library-Mode Bootstrap](appinfra/docs/guides/library-mode-bootstrap.md).
 - `INFRA_PYTEST_WORKERS` Makefile variable (default empty): pytest-xdist worker count for
   `make test.*` targets. `run_pytest_serial` macro for custom targets that must stay in-process.
+- `make examples.check`: runs every script under `examples/` (or `<pkg>/examples/`) and
+  fails on errors or timeouts. Per-file `# ci-run:` / `# ci-stop:` / `# ci-timeout:` /
+  `# ci-skip:` comments declare the cases. CI runs it in the container lane.
 
 ### Changed
 - `pgserver` defaults: `name` `infra-pg` → `llm-works-pg`, `port` `7432` →
@@ -54,6 +57,15 @@ For API stability guarantees and deprecation policy, see
 - `ConfigWatcher.stop()` returns within 2s on macOS when called right after
   `start()`; watchdog's FSEvents emitter could otherwise block it forever
   (https://github.com/gorakhargosh/watchdog/issues/64).
+- `AppBuilder.build()` configures plugins before registering tools, so tools a
+  plugin adds in `configure()` (e.g. `ServerPlugin`'s `serve`) are available.
+- Database log handler: batched inserts with rows that differ in optional
+  columns (`extra_data`, `exception_info`) no longer fail on a missing bind
+  parameter.
+- Examples run again on the current API: `hello_world_with_cfg`,
+  `logging_builder_example`, `advanced_critical_flush`, `generator_usage_example`,
+  `scrollable_selection`, `mixed_approach`, `progress_logger_example`, and the
+  `app_with_ticker` flags.
 
 ## [0.10.5] - 2026-09-03
 

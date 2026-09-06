@@ -378,6 +378,7 @@ These targets can be extended by defining them again in your Makefile:
 - `fmt::` - Add formatting steps
 - `lint::` - Add linting steps
 - `type::` - Add type checking steps
+- `examples.check::` - Add example checks (runs every script under `examples/`)
 - `check::` - Add quality checks
 - `check.quick::` - Add quick checks
 

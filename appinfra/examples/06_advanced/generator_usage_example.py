@@ -15,9 +15,8 @@ This example shows how to use the generators for:
 import sys
 from pathlib import Path
 
-# Add the infra package to the path
-root = str(Path(__file__).resolve().parents[3])
-sys.path.append(root)
+# Allow running from a source checkout without installing the package.
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 from appinfra import Config
 from appinfra.log.handler_factory import HandlerFactory, HandlerRegistry
@@ -64,12 +63,12 @@ def demo_handler_registry_generators():
     """Demonstrate HandlerRegistry generator methods."""
     print("\n=== HandlerRegistry Generators ===")
 
-    config = Config("etc/infra.yaml")
+    config = Config(str(Path(__file__).resolve().parents[2] / "etc" / "infra.yaml"))
     handlers_config = config.logging.handlers
     print(f"\n2. Loading {len(handlers_config)} handlers from configuration...")
 
     registry = HandlerRegistry()
-    for handler_config in handlers_config:
+    for handler_config in handlers_config.values():
         registry.add_handler_from_config(handler_config)
 
     _iterate_all_handlers(registry)

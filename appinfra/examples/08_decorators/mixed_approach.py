@@ -3,6 +3,12 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright 2026 The appinfra Authors
 
+# ci-run: --help
+# ci-run: server
+# ci-run: analyze --file data.csv
+# ci-run: export --output /tmp/appinfra-example-export.json
+# ci-run: process --input data.csv --output /tmp/appinfra-example-out.csv --pipeline filter transform
+
 """
 Mixed approach example.
 
@@ -13,12 +19,11 @@ Pattern: Build app with AppBuilder (infrastructure + class-based tools),
 then define simple tools via @app.tool() decorators on the built app.
 """
 
-import pathlib
 import sys
+from pathlib import Path
 
-# Add project root to path
-project_root = str(pathlib.Path(__file__).resolve().parents[3])
-sys.path.insert(0, project_root) if project_root not in sys.path else None
+# Allow running from a source checkout without installing the package.
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 from appinfra.app import AppBuilder, Tool, ToolConfig
 from appinfra.dot_dict import DotDict
@@ -55,22 +60,23 @@ class ServerTool(Tool):
 
     def setup(self, **kwargs):
         """Initialize server components."""
-        self.lg.info("Initializing server components...")
-
-        # Complex initialization
+        # State first: super().setup() creates the logger and calls configure().
         self.routes = {}
         self.middleware = []
-        self.load_routes()
-
         super().setup(**kwargs)
+        self.lg.info("Initializing server components...")
+        self.load_routes()
 
     def configure(self):
         """Configure server after initialization."""
         self.lg.info("Configuring server...")
 
-        # Get port from args or config
-        self.port = self.args.port or self.config.server.port
-        self.host = self.config.server.host
+        # Port from args, else the app's YAML config, else a default.
+        # self.config is this tool's ToolConfig; the YAML lives on self.app.
+        app_config = self.app.config
+        server_cfg = app_config.get("server", {}) if app_config else {}
+        self.port = self.args.port or server_cfg.get("port", 8080)
+        self.host = server_cfg.get("host", "127.0.0.1")
 
         # More complex configuration
         self.setup_middleware()
@@ -126,10 +132,10 @@ class ProcessorTool(Tool):
         parser.add_argument("--pipeline", nargs="+", required=True)
 
     def setup(self, **kwargs):
+        super().setup(**kwargs)  # creates the logger; must come first
         self.lg.info("Setting up processing pipeline...")
         self.processors = {}
         self.load_processors()
-        super().setup(**kwargs)
 
     def load_processors(self):
         """Load available processors."""

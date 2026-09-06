@@ -25,15 +25,18 @@ Requirements:
     - Database table created (see setup_database function)
 """
 
+# ci-timeout: 20
+
 import logging
-import pathlib
 import sys
 import time
 from datetime import datetime
+from pathlib import Path
 
-# Add the project root to the path
-project_root = str(pathlib.Path(__file__).resolve().parents[3])
-sys.path.insert(0, project_root)
+import sqlalchemy
+
+# Allow running from a source checkout without installing the package.
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 from appinfra.config import Config
 from appinfra.log.builder.database import DatabaseLoggingBuilder
@@ -62,12 +65,16 @@ class CriticalFlushDemo:
         """Set up the database connection and create required tables."""
         print("🔧 Setting up database...")
 
-        # Use the test helper to create a temporary database
+        # Use the test helper's connection; setUpClass() probes the database
+        # and setUp() raises SkipTest when it is unavailable.
+        PGTestCaseHelper.setUpClass()
         self.pg_helper = PGTestCaseHelper()
         self.pg_helper.setUp()
-        self.db_interface = self.pg_helper.db_interface
+        self.db_interface = self.pg_helper.pg
 
-        # Create the error_logs table
+        # Recreate the error_logs table so a leftover from an aborted run
+        # cannot carry an old schema into this one.
+        self.drop_error_logs_table()
         self.create_error_logs_table()
         print("✅ Database setup complete")
 
@@ -80,11 +87,11 @@ class CriticalFlushDemo:
             level VARCHAR(20) NOT NULL,
             logger_name VARCHAR(100),
             message TEXT NOT NULL,
-            module_name VARCHAR(100),
-            function_name VARCHAR(100),
+            module VARCHAR(100),
+            function VARCHAR(100),
             line_number INTEGER,
             process_id INTEGER,
-            thread_id INTEGER,
+            thread_id BIGINT,
             extra_data JSONB,
             exception_info TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -92,7 +99,13 @@ class CriticalFlushDemo:
         """
 
         with self.db_interface.session() as session:
-            session.execute(create_table_sql)
+            session.execute(sqlalchemy.text(create_table_sql))
+            session.commit()
+
+    def drop_error_logs_table(self):
+        """Drop the demonstration table so repeated runs start clean."""
+        with self.db_interface.session() as session:
+            session.execute(sqlalchemy.text("DROP TABLE IF EXISTS error_logs"))
             session.commit()
 
     def _add_console_handler(self):
@@ -249,7 +262,7 @@ class CriticalFlushDemo:
         """
 
         with self.db_interface.session() as session:
-            result = session.execute(query_sql)
+            result = session.execute(sqlalchemy.text(query_sql))
             rows = result.fetchall()
 
             if not rows:
@@ -307,8 +320,11 @@ class CriticalFlushDemo:
             print(f"❌ Demo failed: {e}")
             raise
         finally:
-            # Clean up
+            # Flush pending batches before the table goes away, then clean up.
             if hasattr(self, "pg_helper"):
+                for handler in list(self.logger.handlers):
+                    handler.close()
+                self.drop_error_logs_table()
                 self.pg_helper.tearDown()
 
 

@@ -3,6 +3,8 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright 2026 The appinfra Authors
 
+# ci-stop: 4
+
 """
 Non-blocking Ticker API example for mixed event sources.
 
@@ -10,15 +12,13 @@ Demonstrates using try_tick() and time_until_next_tick() for event loops
 that need to multiplex between message handling and scheduled tasks.
 """
 
-import pathlib
 import queue
 import sys
 import time
+from pathlib import Path
 
-# Add the project root to the path
-project_root = str(pathlib.Path(__file__).resolve().parents[3])
-if project_root not in sys.path:
-    sys.path.append(project_root)
+# Allow running from a source checkout without installing the package.
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 from appinfra.log import LogConfig, LoggerFactory
 from appinfra.time import Ticker, TickerMode

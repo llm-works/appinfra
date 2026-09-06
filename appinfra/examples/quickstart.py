@@ -3,6 +3,9 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright 2026 The appinfra Authors
 
+# ci-run: --help
+# ci-run: sync
+
 # Minimal quick-start that mirrors the AppBuilder + @app.tool pattern shown
 # in README.md. Runs against an installed wheel (no sys.path shim). Exercised
 # by the smoke-wheel CI job to catch README-vs-installed API drift, broken

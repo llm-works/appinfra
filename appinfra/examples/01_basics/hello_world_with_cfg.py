@@ -29,12 +29,11 @@ Expected output:
 - No print statements - all output through proper logging
 """
 
-import pathlib
 import sys
+from pathlib import Path
 
-# Add the project root to the path
-project_root = str(pathlib.Path(__file__).resolve().parents[3])
-sys.path.append(project_root) if project_root not in sys.path else None
+# Allow running from a source checkout without installing the package.
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 from appinfra.app import App, AppBuilder
 
@@ -74,6 +73,7 @@ def create_application() -> App:
         .with_description(
             "Hello World example using appinfra.app.App class with config-based logging"
         )
+        .with_standard_args()
         .build()
     )
     return app

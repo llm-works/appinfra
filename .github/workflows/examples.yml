@@ -1,0 +1,51 @@
+# Runs every example script under appinfra/examples/ inside the same container
+# image the test lanes use, with the compose Postgres service available, and
+# fails on any non-zero exit or timeout. Each example declares its own cases in
+# `# ci-run:` header comments; see appinfra/scripts/run_examples.py.
+#
+# Reusable workflow: the job body lives here so the main CI file stays focused
+# on the test matrix. test-docker.yml calls it with `uses:`, which gates it on
+# Lint and lists it in the summary like every other lane.
+name: Examples
+
+on:
+  workflow_call:
+
+jobs:
+  run:
+    name: Run
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Docker layer caching
+        uses: actions/cache@v4
+        with:
+          path: /tmp/.buildx-cache
+          key: docker-${{ runner.os }}-py3.12-${{ hashFiles('pyproject.toml', 'appinfra/scripts/cicd/Dockerfile') }}
+          restore-keys: |
+            docker-${{ runner.os }}-py3.12-
+
+      - name: Build Docker image
+        working-directory: appinfra/scripts/cicd
+        run: |
+          docker compose -f docker-compose.yml \
+                        -f docker-compose.override.py3.12.yml \
+                        build
+
+      - name: Run examples
+        working-directory: appinfra/scripts/cicd
+        run: |
+          docker compose -f docker-compose.yml \
+                        -f docker-compose.override.py3.12.yml \
+                        run --rm cicd-test make examples.check
+
+      - name: Cleanup Docker resources
+        if: always()
+        working-directory: appinfra/scripts/cicd
+        run: docker compose down -v

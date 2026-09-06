@@ -3,6 +3,11 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright 2026 The appinfra Authors
 
+# ci-run: --help
+# ci-run: greet
+# ci-run: analyze --file data.csv
+# ci-run: process --input data.csv --output /tmp/appinfra-example-out.csv
+
 """
 Simple decorator example.
 
@@ -10,12 +15,11 @@ Demonstrates the basic decorator API for creating simple CLI tools.
 This is the recommended approach for straightforward tools.
 """
 
-import pathlib
 import sys
+from pathlib import Path
 
-# Add project root to path
-project_root = str(pathlib.Path(__file__).resolve().parents[3])
-sys.path.insert(0, project_root) if project_root not in sys.path else None
+# Allow running from a source checkout without installing the package.
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 from appinfra.app import App
 from appinfra.dot_dict import DotDict
