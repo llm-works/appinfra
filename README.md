@@ -84,16 +84,15 @@ from appinfra.app import AppBuilder
 app = (
     AppBuilder("myapp")
     .with_description("Data processing tool")
+    .with_standard_args(etc_dir=True, config_file=True)
     .config.with_spec("myorg", "myapp")  # etc/myapp.yaml beside the module or script
-    .done()
-    .cli.with_flags(etc_dir=True, config_file=True)
     .done()
     .logging.with_level("info")
     .with_location(1)
     .done()
     .tools.with_tool(ProcessorTool())
-    .with_main(MainTool())
     .done()
+    .with_main_tool(MainTool())
     .advanced.with_hook("startup", init_database)
     .done()
     .build()

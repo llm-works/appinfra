@@ -1107,6 +1107,22 @@ class TestSubprocessContextMethod:
         # Clean up
         ctx._lg.handlers.clear()
 
+    def test_subprocess_context_forwards_project_root(self, tmp_path):
+        """Test that subprocess_context() forwards the resolved include root."""
+        from appinfra.config import ConfigFile
+
+        etc = tmp_path / "etc"
+        app = App()
+        app.config = DotDict(logging=DotDict(level="info", location=0))
+        app._config_source = ConfigFile(etc / "config.yaml", etc, rule=6)
+        app._project_root = etc
+
+        ctx = app.subprocess_context()
+
+        assert ctx._project_root == etc.resolve()
+        # Clean up
+        ctx._lg.handlers.clear()
+
     def test_subprocess_context_handles_missing_config(self):
         """Test subprocess_context() works without a resolved config file."""
         app = App()
