@@ -27,7 +27,7 @@ Build the app with `AppBuilder`, then define tools via decorators on the built a
 ```python
 from appinfra.app.builder import AppBuilder
 
-# 1. Build app (etc/myapp.yaml resolved at setup: --etc-dir, project-local etc/, packaged base)
+# 1. Build app (etc/myapp.yaml resolved at setup: --config, --etc-dir, project-local, XDG, packaged base)
 app = AppBuilder("myapp").config.with_spec("myorg", "myapp").done().build()
 
 

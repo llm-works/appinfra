@@ -86,6 +86,8 @@ app = (
     .with_description("Data processing tool")
     .config.with_spec("myorg", "myapp")  # etc/myapp.yaml beside the module or script
     .done()
+    .cli.with_flags(etc_dir=True, config_file=True)
+    .done()
     .logging.with_level("info")
     .with_location(1)
     .done()

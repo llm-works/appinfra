@@ -715,6 +715,7 @@ class App(Traceable):
             lg=lg,
             config_files=[str(config_path)] if config_path else [],
             handle_signals=handle_signals,
+            project_root=self._project_root,
         )
 
     def create_config_watcher(self) -> ConfigWatcher | None:

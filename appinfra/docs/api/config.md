@@ -437,7 +437,10 @@ class MyTool(Tool):
     def configure(self) -> None:
         # Inside Tool.configure(), self.app.etc_dir is the resolved path
         # (or None if no spec is declared and --etc-dir was not passed).
-        with open(Path(self.app.etc_dir) / "mytool.yaml") as f:
+        etc_dir = self.app.etc_dir
+        if etc_dir is None:
+            raise RuntimeError("MyTool requires a config spec or --etc-dir")
+        with open(Path(etc_dir) / "mytool.yaml") as f:
             self._settings = yaml.safe_load(f)
 ```
 
@@ -513,7 +516,9 @@ with `.with_standard_args(etc_dir=True, config_file=True)`; a locked-down CLI sk
 and the loader reads a missing flag as `None`.
 
 An app built without a spec loads no file: its config is the programmatic layer plus CLI
-arguments, and `--config` / `--etc-dir` select nothing.
+arguments. With `--etc-dir` opted in, the flag still populates `app.etc_dir` (validated at
+setup), but no config is loaded from it. With `--config` opted in, the value is accessible
+via `app.args.config` for manual loading.
 
 See [Config Protocol §6](../guides/config-protocol.md#6-etc-dir-is-user-authoritative) for the
 full `--etc-dir` semantics, and [`ConfigSpec`](#config-spec) for the resolution chain.

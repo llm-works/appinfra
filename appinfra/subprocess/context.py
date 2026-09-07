@@ -9,6 +9,7 @@ Provides signal handling, config hot-reload, and graceful shutdown for child pro
 from __future__ import annotations
 
 import signal
+from pathlib import Path
 from types import FrameType
 from typing import TYPE_CHECKING
 
@@ -49,6 +50,8 @@ class SubprocessContext:
         handle_signals: Whether to install signal handlers (default: True).
             Set to False when the subprocess runs a framework that handles
             its own signals (e.g., uvicorn).
+        project_root: Include-authorization boundary for config hot-reload.
+            Required when the config includes a bundled base via !include.
     """
 
     def __init__(
@@ -56,10 +59,14 @@ class SubprocessContext:
         lg: Logger,
         config_files: list[str] | None = None,
         handle_signals: bool = True,
+        project_root: Path | str | None = None,
     ) -> None:
         self._lg = lg
         self._config_files = config_files or []
         self._handle_signals = handle_signals
+        self._project_root = (
+            Path(str(project_root)).expanduser().resolve() if project_root else None
+        )
         self._running = True
         self._watcher: ConfigWatcher | None = None
 
@@ -108,14 +115,16 @@ class SubprocessContext:
             return
 
         try:
-            from pathlib import Path
-
             from ..config import ConfigWatcher
             from ..log import LogConfigReloader
 
             first_path = Path(self._config_files[0])
             reloader = LogConfigReloader(self._lg, section="logging")
-            self._watcher = ConfigWatcher(lg=self._lg, etc_dir=str(first_path.parent))
+            self._watcher = ConfigWatcher(
+                lg=self._lg,
+                etc_dir=str(first_path.parent),
+                project_root=self._project_root,
+            )
 
             for config_path in self._config_files:
                 self._watcher.add_config_file(config_path)
