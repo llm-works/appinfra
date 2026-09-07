@@ -392,6 +392,7 @@ class TestSubprocessContextUnit:
             finally:
                 lg.handlers.clear()
 
+    @pytest.mark.usefixtures("clean_env")
     def test_project_root_forwarded_to_watcher(self, tmp_path):
         """Reload honors the include boundary the parent app resolved.
 

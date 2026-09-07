@@ -53,6 +53,12 @@ def pytest_configure(config):
     # One-shot PG reachability probe. Stashed so pytest_collection_modifyitems
     # and the pg_available fixture read the same result.
     host, port = resolve_pgserver_endpoint()
+    # Mirror the CI container, which exports INFRA_PGSERVER_HOST for every
+    # test. Config applies INFRA_* overrides on load and raises on a path the
+    # yaml does not declare, so a test loading a minimal yaml without
+    # clean_env fails here the same way it fails in CI. The value is the host
+    # the suite resolved anyway, so DB-backed tests are unaffected.
+    os.environ.setdefault("INFRA_PGSERVER_HOST", host)
     available = probe(host, port)
     config.stash[PG_STATUS_KEY] = {
         "host": host,
