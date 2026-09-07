@@ -75,8 +75,8 @@ appinfra docs show <topic>  # Read a specific guide
 ### App Framework
 
 **AppBuilder for CLI tools** - Build production CLI applications with lifecycle management, config,
-logging, and tools. Focused configurers provide clean separation of concerns. Config files are
-resolved from `--etc-dir` (default: `./etc`):
+logging, and tools. Focused configurers provide clean separation of concerns. The config file is
+resolved at setup under the config protocol (`--etc-dir`, project-local `etc/`, packaged base):
 
 ```python
 from appinfra.app import AppBuilder
@@ -84,13 +84,15 @@ from appinfra.app import AppBuilder
 app = (
     AppBuilder("myapp")
     .with_description("Data processing tool")
-    .with_config_file("config.yaml")  # Resolved from --etc-dir
+    .with_standard_args(etc_dir=True, config_file=True)
+    .config.with_spec("myorg", "myapp")  # etc/myapp.yaml beside the module or script
+    .done()
     .logging.with_level("info")
     .with_location(1)
     .done()
     .tools.with_tool(ProcessorTool())
-    .with_main(MainTool())
     .done()
+    .with_main_tool(MainTool())
     .advanced.with_hook("startup", init_database)
     .done()
     .build()

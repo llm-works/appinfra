@@ -74,15 +74,16 @@ class TestPathCommands:
         assert "etc" in captured.out
 
     def test_etc_path_local_fallback_to_package(self, capsys, tmp_path, monkeypatch):
-        """Test etc-path --local falls back to package etc when local not found."""
+        """Test etc-path --local falls back to package etc when nothing local exists."""
         from appinfra.cli.cli import main
 
-        # Change to a temp directory with no etc/
+        # No etc/ above cwd and no XDG overlay: the spec resolves to the packaged base
         monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "no-xdg"))
+        monkeypatch.setenv("XDG_CONFIG_DIRS", str(tmp_path / "no-xdg-sys"))
 
         with patch.object(sys, "argv", ["cli.py", "etc-path", "--local"]):
             result = main()
-            # resolve_etc_dir() falls back to package etc, so should succeed
             assert result == 0
 
         captured = capsys.readouterr()
@@ -108,29 +109,31 @@ class TestEtcPathTool:
         assert "appinfra" in captured.out
 
     def test_run_local(self, capsys):
-        """Test EtcPathTool.run(local=True) returns local etc."""
+        """Test EtcPathTool.run(local=True) prints the app's etc_dir."""
+        from types import SimpleNamespace
+
         from appinfra.cli.tools.etc_path_tool import EtcPathTool
 
         tool = EtcPathTool()
-        result = tool.run(local=True)
+        fake_app = SimpleNamespace(etc_dir="/srv/myapp/etc")
+        with patch.object(EtcPathTool, "app", new=property(lambda s: fake_app)):
+            result = tool.run(local=True)
         assert result == 0
 
         captured = capsys.readouterr()
-        assert "etc" in captured.out
+        assert captured.out.strip() == "/srv/myapp/etc"
 
-    def test_run_local_with_mock_error(self, capsys):
-        """Test EtcPathTool.run(local=True) handles FileNotFoundError."""
+    def test_run_local_without_etc_dir_errors(self, capsys):
+        """Test EtcPathTool.run(local=True) fails when no etc dir resolved."""
+        from types import SimpleNamespace
+
         from appinfra.cli.tools.etc_path_tool import EtcPathTool
 
         tool = EtcPathTool()
-
-        # Mock resolve_etc_dir to raise FileNotFoundError
-        with patch(
-            "appinfra.config.resolve_etc_dir",
-            side_effect=FileNotFoundError("No etc found"),
-        ):
+        fake_app = SimpleNamespace(etc_dir=None)
+        with patch.object(EtcPathTool, "app", new=property(lambda s: fake_app)):
             result = tool.run(local=True)
-            assert result == 1
+        assert result == 1
 
         captured = capsys.readouterr()
         assert "Error" in captured.err

@@ -8,10 +8,9 @@ This module provides configuration classes and loaders for the application frame
 """
 
 import argparse
-from pathlib import Path
 from typing import Any
 
-from ...config import Config, get_etc_dir
+from ...config import Config
 from ...dot_dict import DotDict
 
 # Logging level constant for quiet mode (suppresses all logging)
@@ -137,109 +136,3 @@ class ConfigLoader:
     def default() -> DotDict:
         """Create default configuration with logging section."""
         return DotDict(logging=DotDict(level="info", location=0, micros=False))
-
-
-def create_config(
-    file_path: str | None = None,
-    file_name: str | None = None,
-    dir_name: str | None = None,
-    load_all: bool = False,
-    lg: Any | None = None,
-) -> Config | DotDict:
-    """
-    Create configuration from YAML files with flexible path resolution.
-
-    This function handles loading configuration from various sources:
-    - Single file by full path (file_path parameter)
-    - Single file by name in a specific directory (file_name + dir_name)
-    - Multiple files merged together (load_all=True)
-
-    Args:
-        file_path: Full path to a specific config file (takes precedence if provided)
-        file_name: Name of config file (e.g., "infra.yaml", "app.yaml")
-        dir_name: Directory to search for config files (defaults to "etc" directory)
-        load_all: If True, loads and merges all YAML files from dir_name
-        lg: Optional logger instance. If provided, will log warnings for failed config files.
-            If None, no logging will occur.
-
-    Returns:
-        Config object or DotDict with loaded configuration
-
-    Raises:
-        FileNotFoundError: If specified config file not found
-        ValueError: If neither file_path nor file_name is provided when load_all=False
-    """
-    if dir_name is None:
-        dir_name = str(get_etc_dir())
-
-    # Mode 1: Load single file by full path
-    if file_path is not None:
-        return _load_config_by_path(file_path)
-
-    # Mode 2: Load and merge all YAML files from directory
-    if load_all:
-        return _load_all_configs(dir_name, lg)
-
-    # Mode 3: Load single file by name in directory
-    return _load_config_by_name(file_name, dir_name)
-
-
-def _load_config_by_path(file_path: str) -> Config:
-    """Load config from a specific file path."""
-    config_path = Path(file_path)
-    if not config_path.exists():
-        raise FileNotFoundError(f"Config file not found: {config_path}")
-    return Config(str(config_path))
-
-
-def _load_all_configs(dir_name: str, lg: Any | None) -> DotDict:
-    """Load and merge all YAML files from a directory."""
-    config_dir = Path(dir_name)
-    if not config_dir.exists():
-        raise FileNotFoundError(f"Config directory not found: {config_dir}")
-
-    yaml_files = list(config_dir.glob("*.yaml")) + list(config_dir.glob("*.yml"))
-
-    if not yaml_files:
-        raise FileNotFoundError(f"No YAML files found in directory: {config_dir}")
-
-    # Merge all configurations
-    final_config = {}
-    for yaml_file in yaml_files:
-        try:
-            file_config = Config(str(yaml_file))
-            config_dict = _convert_to_dict(file_config)
-            # Merge configurations (later files can override earlier ones)
-            final_config.update(config_dict)
-        except Exception as e:
-            if lg:
-                lg.warning(
-                    "failed to load config file",
-                    extra={"file": str(yaml_file), "exception": e},
-                )
-
-    return DotDict(**final_config)
-
-
-def _convert_to_dict(obj: Any) -> Any:
-    """Recursively convert config objects to plain dictionaries."""
-    if hasattr(obj, "to_dict"):
-        return obj.to_dict()
-    elif isinstance(obj, dict):
-        return {k: _convert_to_dict(v) for k, v in obj.items()}
-    elif isinstance(obj, list):
-        return [_convert_to_dict(item) for item in obj]
-    else:
-        return obj
-
-
-def _load_config_by_name(file_name: str | None, dir_name: str) -> Config:
-    """Load config by file name in a directory."""
-    if file_name is None:
-        file_name = "infra.yaml"  # Default config file name
-
-    config_path = Path(dir_name) / file_name
-    if not config_path.exists():
-        raise FileNotFoundError(f"Config file not found: {config_path}")
-
-    return Config(str(config_path))

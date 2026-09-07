@@ -27,6 +27,20 @@ import pytest
 from appinfra.app.builder import AppBuilder
 
 
+def _spec_app(etc_dir: Path, filename: str = "app.yaml") -> AppBuilder:
+    """Builder whose spec names ``<etc_dir>/<filename>`` and exposes ``--etc-dir``.
+
+    Passing ``--etc-dir <etc_dir>`` at parse time selects that file under
+    precedence rule 3, independent of cwd and XDG state.
+    """
+    return (
+        AppBuilder("test-app")
+        .with_standard_args(etc_dir=True)
+        .config.with_spec("test-org", "app", path=etc_dir / filename)
+        .done()
+    )
+
+
 @pytest.mark.e2e
 @pytest.mark.usefixtures("clean_env")
 class TestHotReloadWorkflow:
@@ -48,7 +62,7 @@ class TestHotReloadWorkflow:
             )
 
             # Build app WITHOUT calling .config.with_hot_reload()
-            app = AppBuilder("test-app").with_config_file("app.yaml").build()
+            app = _spec_app(etc_dir).build()
 
             # Mock the ConfigWatcher to verify it's called
             with patch("appinfra.config.ConfigWatcher") as mock_watcher_class:
@@ -82,8 +96,7 @@ class TestHotReloadWorkflow:
 
             # Build app WITH programmatic hot-reload
             app = (
-                AppBuilder("test-app")
-                .with_config_file("app.yaml")
+                _spec_app(etc_dir)
                 .config.with_hot_reload(True, debounce_ms=200)
                 .done()
                 .build()
@@ -122,8 +135,7 @@ class TestHotReloadWorkflow:
 
             # Override with programmatic config
             app = (
-                AppBuilder("test-app")
-                .with_config_file("app.yaml")
+                _spec_app(etc_dir)
                 .config.with_hot_reload(True, debounce_ms=100)  # Different debounce
                 .done()
                 .build()
@@ -163,7 +175,7 @@ class TestHotReloadWorkflow:
                 "logging:\n  level: info\n  hot_reload:\n    enabled: false\n"
             )
 
-            app = AppBuilder("test-app").with_config_file("app.yaml").build()
+            app = _spec_app(etc_dir).build()
 
             with patch("appinfra.config.ConfigWatcher") as mock_watcher_class:
                 mock_watcher = MagicMock()
@@ -191,13 +203,7 @@ class TestHotReloadWorkflow:
             )
 
             # Disable programmatically
-            app = (
-                AppBuilder("test-app")
-                .with_config_file("app.yaml")
-                .config.with_hot_reload(False)
-                .done()
-                .build()
-            )
+            app = _spec_app(etc_dir).config.with_hot_reload(False).done().build()
 
             with patch("appinfra.config.ConfigWatcher") as mock_watcher_class:
                 mock_watcher = MagicMock()
@@ -229,7 +235,7 @@ class TestHotReloadWorkflow:
                 "logging:\n  level: info\n  hot_reload:\n    enabled: true\n"
             )
 
-            app = AppBuilder("test-app").with_config_file("custom-config.yaml").build()
+            app = _spec_app(etc_dir, "custom-config.yaml").build()
 
             with patch("appinfra.config.ConfigWatcher") as mock_watcher_class:
                 mock_watcher = MagicMock()
@@ -254,46 +260,48 @@ class TestHotReloadWorkflow:
                         if app.lifecycle.logger:
                             app.lifecycle.logger.handlers.clear()
 
-    def test_hot_reload_with_absolute_path_config(self):
-        """Test hot-reload with absolute path config file (from_etc_dir=False)."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            config_file = Path(tmpdir) / "absolute-config.yaml"
-            config_file.write_text(
-                "logging:\n"
-                "  level: debug\n"
-                "  hot_reload:\n"
-                "    enabled: true\n"
-                "    debounce_ms: 250\n"
-            )
+    def test_hot_reload_with_packaged_base(self, tmp_path, monkeypatch):
+        """Hot reload watches the packaged base when no override is in play."""
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "no-xdg"))
+        monkeypatch.setenv("XDG_CONFIG_DIRS", str(tmp_path / "no-xdg-sys"))
+        monkeypatch.chdir(tmp_path)
+        base = tmp_path / "pkg" / "etc" / "base-config.yaml"
+        base.parent.mkdir(parents=True)
+        base.write_text(
+            "logging:\n"
+            "  level: debug\n"
+            "  hot_reload:\n"
+            "    enabled: true\n"
+            "    debounce_ms: 250\n"
+        )
 
-            # Use absolute path with from_etc_dir=False - should load immediately
-            app = (
-                AppBuilder("test-app")
-                .with_config_file(str(config_file), from_etc_dir=False)
-                .build()
-            )
+        app = (
+            AppBuilder("test-app")
+            .config.with_spec("test-org", "app", path=base)
+            .done()
+            .build()
+        )
 
-            with patch("appinfra.config.ConfigWatcher") as mock_watcher_class:
-                mock_watcher = MagicMock()
-                mock_watcher_class.return_value = mock_watcher
+        with patch("appinfra.config.ConfigWatcher") as mock_watcher_class:
+            mock_watcher = MagicMock()
+            mock_watcher_class.return_value = mock_watcher
 
-                with patch.object(sys, "argv", ["test"]):
-                    try:
-                        app.setup()
+            with patch.object(sys, "argv", ["test"]):
+                try:
+                    app.setup()
 
-                        # For absolute paths, etc_dir is the parent directory
-                        # and config_file is the filename
-                        # Use realpath to normalize symlinks (macOS /var -> /private/var)
-                        constructor_call = mock_watcher_class.call_args
-                        etc_dir_arg = constructor_call.kwargs["etc_dir"]
-                        assert os.path.realpath(etc_dir_arg) == os.path.realpath(tmpdir)
+                    # etc_dir is the base's directory, config_file its name
+                    constructor_call = mock_watcher_class.call_args
+                    etc_dir_arg = constructor_call.kwargs["etc_dir"]
+                    assert os.path.realpath(etc_dir_arg) == os.path.realpath(
+                        str(base.parent)
+                    )
 
-                        configure_call = mock_watcher.configure.call_args
-                        config_file_arg = configure_call[0][0]
-                        assert config_file_arg == "absolute-config.yaml"
-                    finally:
-                        if app.lifecycle.logger:
-                            app.lifecycle.logger.handlers.clear()
+                    configure_call = mock_watcher.configure.call_args
+                    assert configure_call[0][0] == "base-config.yaml"
+                finally:
+                    if app.lifecycle.logger:
+                        app.lifecycle.logger.handlers.clear()
 
     def test_hot_reload_watcher_stops_on_shutdown(self):
         """Test that the watcher is properly stopped during app shutdown."""
@@ -305,7 +313,7 @@ class TestHotReloadWorkflow:
                 "logging:\n  level: info\n  hot_reload:\n    enabled: true\n"
             )
 
-            app = AppBuilder("test-app").with_config_file("app.yaml").build()
+            app = _spec_app(etc_dir).build()
 
             with patch("appinfra.config.ConfigWatcher") as mock_watcher_class:
                 mock_watcher = MagicMock()
@@ -346,13 +354,7 @@ class TestHotReloadWorkflow:
             )
 
             # Programmatic config sets additional logging options but NOT hot_reload
-            app = (
-                AppBuilder("test-app")
-                .with_config_file("app.yaml")
-                .logging.with_level("info")  # Override level only
-                .done()
-                .build()
-            )
+            app = _spec_app(etc_dir).logging.with_level("info").done().build()
 
             with patch.object(sys, "argv", ["test", "--etc-dir", str(etc_dir)]):
                 app.create_args()
@@ -406,7 +408,7 @@ class TestHotReloadRealWatcher:
                 "    debounce_ms: 100\n"
             )
 
-            app = AppBuilder("test-app").with_config_file("app.yaml").build()
+            app = _spec_app(etc_dir).build()
 
             with patch.object(sys, "argv", ["test", "--etc-dir", str(etc_dir)]):
                 try:
@@ -439,7 +441,7 @@ class TestHotReloadRealWatcher:
                 "    debounce_ms: 50\n"  # Short debounce for test
             )
 
-            app = AppBuilder("test-app").with_config_file("app.yaml").build()
+            app = _spec_app(etc_dir).build()
 
             with patch.object(sys, "argv", ["test", "--etc-dir", str(etc_dir)]):
                 try:
@@ -486,7 +488,7 @@ class TestHotReloadRealWatcher:
                 "    debounce_ms: 50\n"
             )
 
-            app = AppBuilder("test-app").with_config_file("app.yaml").build()
+            app = _spec_app(etc_dir).build()
 
             with patch.object(sys, "argv", ["test", "--etc-dir", str(etc_dir)]):
                 try:
@@ -540,7 +542,7 @@ class TestHotReloadRealWatcher:
                 "    debounce_ms: 50\n"
             )
 
-            app = AppBuilder("test-app").with_config_file("app.yaml").build()
+            app = _spec_app(etc_dir).build()
 
             with patch.object(sys, "argv", ["test", "--etc-dir", str(etc_dir)]):
                 try:

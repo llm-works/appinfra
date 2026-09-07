@@ -19,7 +19,7 @@ import yaml  # type: ignore[import-untyped]
 from ..dot_dict import DotDict
 from ..errors import UndeclaredConfigPathError
 from .constants import MAX_CONFIG_SIZE_BYTES
-from .spec import ConfigFile
+from .spec import AUTO, Auto, ConfigFile, ConfigSpec
 
 # Inventory of `INFRA_*` env vars consumed by appinfra's own tooling (shell
 # scripts, Makefiles, pytest fixtures) rather than as yaml config overrides.
@@ -228,7 +228,8 @@ class Config(DotDict):
         # Detects circular includes
 
     Example:
-        config = Config('config.yaml')
+        config = Config.from_path("etc/config.yaml")  # one file, nothing else consulted
+        config = Config.from_spec("myorg", "myapp")  # protocol chain, see ConfigSpec
         # Access configuration values like dictionary keys
         value = config.get('database.host')
     """
@@ -296,6 +297,72 @@ class Config(DotDict):
             Path(str(project_root)).expanduser().resolve() if project_root else None
         )
         self._load(str(fname))
+
+    @classmethod
+    def from_path(
+        cls,
+        path: str | Path,
+        *,
+        enable_env_overrides: bool = True,
+        env_prefix: str = "INFRA_",
+        merge_strategy: str = "replace",
+        allowed_paths: list[Path | str] | None = None,
+        project_root: Path | str | None = None,
+    ) -> Self:
+        """Load one YAML file by path; nothing else is consulted.
+
+        The no-spec entry point: no base lookup, no project-local walk-up,
+        no XDG overlay. The keyword options are the constructor's.
+        """
+        return cls(
+            path,
+            enable_env_overrides=enable_env_overrides,
+            env_prefix=env_prefix,
+            merge_strategy=merge_strategy,
+            allowed_paths=allowed_paths,
+            project_root=project_root,
+        )
+
+    @classmethod
+    def from_spec(
+        cls,
+        namespace: str,
+        name: str,
+        *,
+        origin: str | Path | Auto = AUTO,
+        etc_dir: str = "etc",
+        filename: str | Auto = AUTO,
+        path: str | Path | None = None,
+        enable_env_overrides: bool = True,
+        env_prefix: str = "INFRA_",
+        merge_strategy: str = "replace",
+        allowed_paths: list[Path | str] | None = None,
+    ) -> Self:
+        """Locate a config under the config protocol and load the file it resolves to.
+
+        Takes the identity and layout arguments of ``ConfigSpec`` and resolves
+        with no operator input: project-local ``<etc_dir>/<filename>`` above
+        cwd, then XDG overlays, then the base beside the module named after
+        the config or beside the calling script. A host that parses
+        ``--etc-dir`` or ``--config`` builds the ``ConfigSpec`` itself and
+        passes ``spec.resolve(etc_dir=..., config_file=...)`` to the
+        constructor. The include root comes from the resolved file.
+        """
+        spec = ConfigSpec(
+            namespace,
+            name,
+            origin=origin,
+            etc_dir=etc_dir,
+            filename=filename,
+            path=path,
+        )
+        return cls(
+            spec.resolve(),
+            enable_env_overrides=enable_env_overrides,
+            env_prefix=env_prefix,
+            merge_strategy=merge_strategy,
+            allowed_paths=allowed_paths,
+        )
 
     def __setattr__(self, key: str, value: Any) -> None:
         """
@@ -767,209 +834,3 @@ class Config(DotDict):
         if hasattr(self, "_source_map") and self._source_map:
             files.update(p.resolve() for p in self._source_map.values() if p)
         return files
-
-
-# Project path utilities
-def get_project_root() -> Path:
-    """
-    Get the project root directory by looking for the etc/infra.yaml file.
-
-    This function searches upward from the current file's location until it finds
-    a directory containing etc/infra.yaml, which indicates the project root.
-
-    Returns:
-        Path to the project root directory
-
-    Raises:
-        FileNotFoundError: If the project root cannot be found
-    """
-    current_path = Path(__file__).resolve()
-
-    # Search upward from the current file's location
-    for parent in current_path.parents:
-        if (parent / "etc" / "infra.yaml").exists():
-            return parent
-
-    raise FileNotFoundError(
-        "Could not find project root with etc/infra.yaml. "
-        "Make sure you're running from within the infra project directory."
-    )
-
-
-def get_etc_dir() -> Path:
-    """
-    Get the etc directory path relative to the project root.
-
-    Returns:
-        Path to the etc directory (project_root/etc)
-
-    Raises:
-        FileNotFoundError: If the project root cannot be found
-    """
-    return get_project_root() / "etc"
-
-
-def _validate_custom_etc_path(custom_path: str) -> Path:
-    """Validate and return custom etc directory path."""
-    path = Path(custom_path).resolve()
-    if not path.exists():
-        raise FileNotFoundError(
-            f"Specified etc directory does not exist: {custom_path}"
-        )
-    if not path.is_dir():
-        raise FileNotFoundError(f"Specified etc path is not a directory: {custom_path}")
-    return path
-
-
-def _get_package_etc_dir() -> Path | None:
-    """Try to get etc directory bundled inside the appinfra package."""
-    # appinfra/config/config.py -> appinfra/config -> appinfra -> appinfra/etc
-    package_etc = Path(__file__).parent.parent / "etc"
-    if package_etc.exists() and package_etc.is_dir():
-        return package_etc
-    return None
-
-
-def resolve_etc_dir(custom_path: str | None = None) -> Path:
-    """
-    Resolve the etc directory with intelligent fallback.
-
-    Resolution order:
-    1. If custom_path provided, use it (from --etc-dir)
-    2. Try ./etc/ in current working directory
-    3. Try project root etc/ (walk up to find etc/infra.yaml)
-    4. Fall back to infra package etc/ directory
-
-    Args:
-        custom_path: Custom etc directory path from --etc-dir argument
-
-    Returns:
-        Path to etc directory
-
-    Raises:
-        FileNotFoundError: If no etc directory can be found
-
-    Example:
-        # With custom path
-        etc_dir = resolve_etc_dir("/path/to/custom/etc")
-
-        # Auto-detection
-        etc_dir = resolve_etc_dir()  # Uses fallback chain
-    """
-    # Priority 1: Custom path from --etc-dir
-    if custom_path:
-        return _validate_custom_etc_path(custom_path)
-
-    # Priority 2: Current working directory ./etc/
-    cwd_etc = Path.cwd() / "etc"
-    if cwd_etc.exists() and cwd_etc.is_dir():
-        return cwd_etc
-
-    # Priority 3: Project root etc/ (walk up to find etc/infra.yaml)
-    try:
-        return get_etc_dir()  # Uses existing get_project_root() logic
-    except FileNotFoundError:
-        pass
-
-    # Priority 4: Infra package etc/ directory
-    package_etc = _get_package_etc_dir()
-    if package_etc:
-        return package_etc
-
-    raise FileNotFoundError(
-        "Could not find etc directory. Tried:\n"
-        f"  1. Current directory: {cwd_etc}\n"
-        f"  2. Project root (via etc/infra.yaml marker)\n"
-        f"  3. Infra package directory"
-    )
-
-
-# Default config filename - can be overridden via INFRA_DEFAULT_CONFIG_FILE env var
-DEFAULT_CONFIG_FILENAME: str = os.environ.get("INFRA_DEFAULT_CONFIG_FILE", "infra.yaml")
-
-
-def get_config_file_path(config_file: str | None = None) -> Path:
-    """
-    Get the path to a configuration file in the etc directory.
-
-    Args:
-        config_file: Name of the configuration file. If None, uses DEFAULT_CONFIG_FILENAME
-                     (which can be overridden via INFRA_DEFAULT_CONFIG_FILE env var).
-
-    Returns:
-        Path to the configuration file
-
-    Raises:
-        FileNotFoundError: If the project root cannot be found
-
-    Example:
-        # Uses default (infra.yaml or INFRA_DEFAULT_CONFIG_FILE env var)
-        path = get_config_file_path()
-
-        # Explicit filename
-        path = get_config_file_path("app.yaml")
-    """
-    filename = config_file if config_file is not None else DEFAULT_CONFIG_FILENAME
-    return get_etc_dir() / filename
-
-
-# Constants for common paths
-PROJECT_ROOT: Path | None
-ETC_DIR: Path | None
-DEFAULT_CONFIG_FILE: Path | None
-
-try:
-    PROJECT_ROOT = get_project_root()
-    ETC_DIR = get_etc_dir()
-    DEFAULT_CONFIG_FILE = get_config_file_path()
-except FileNotFoundError:
-    # Set to None if project root cannot be found (e.g., during package installation)
-    PROJECT_ROOT = None
-    ETC_DIR = None
-    DEFAULT_CONFIG_FILE = None
-
-
-# Lazy-loaded default config (convenience function for examples/scripts).
-#
-# NOTE: This global is intentional and acceptable because:
-# 1. It's lazy-loaded (no import-time side effects)
-# 2. Only used in examples/ - core library code uses explicit Config(path)
-# 3. Returns None gracefully if no config file exists
-# 4. Tests create fresh Config() instances, so no test isolation issues
-#
-# Production code should use: Config(path) or AppBuilder().config.with_overrides(...)
-_default_config: Config | None = None
-
-
-def get_default_config() -> Config | None:
-    """
-    Get the default configuration, lazily loading it on first access.
-
-    This is a convenience function for examples and quick scripts. Production code
-    should use explicit Config(path) instantiation for better control and testability.
-
-    This function avoids executing file I/O at module import time, which improves
-    test isolation and prevents issues in environments without config files.
-
-    Returns:
-        Config instance loaded from DEFAULT_CONFIG_FILE, or None if file not found
-
-    Example:
-        config = get_default_config()
-        if config:
-            db_host = config.database.host
-    """
-    global _default_config
-
-    # Return cached config if already loaded
-    if _default_config is not None:
-        return _default_config
-
-    # Load config if file exists
-    if DEFAULT_CONFIG_FILE is not None:
-        try:
-            _default_config = Config(str(DEFAULT_CONFIG_FILE))
-        except FileNotFoundError:
-            _default_config = None
-
-    return _default_config

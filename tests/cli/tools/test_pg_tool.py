@@ -361,7 +361,7 @@ def _erase_tool(yes: bool = False, cfg: DotDict = _ERASE_CFG) -> PgEraseTool:
     t = PgEraseTool()
     t._parsed_args = Namespace(yes=yes)
     t._logger = MagicMock()
-    fake_app = SimpleNamespace(config=cfg, loaded_config_paths=["/tmp/etc/infra.yaml"])
+    fake_app = SimpleNamespace(config=cfg, config_path="/tmp/etc/infra.yaml")
     patch.object(PgEraseTool, "app", new=property(lambda s: fake_app)).start()
     return t
 
@@ -474,21 +474,20 @@ class TestPgErasePreview:
             )
             assert _resource_exists("docker", "volume", "v") is False
 
-    def test_config_source_extracts_full_path_from_tuple(self):
-        """loaded_config_paths entries are (etc_dir, name, full_path)
-        tuples; the preview must show the full path, not the raw tuple."""
+    def test_config_source_uses_config_path(self):
+        """The preview shows the app's resolved config path as a string."""
+        from pathlib import Path
+
         from appinfra.cli.tools.pg_tool import _config_source_path
 
-        app = SimpleNamespace(
-            loaded_config_paths=[("/x/etc", "infra.yaml", "/x/etc/infra.yaml")]
-        )
+        app = SimpleNamespace(config_path=Path("/x/etc/infra.yaml"))
         assert _config_source_path(app) == "/x/etc/infra.yaml"
 
-    def test_config_source_empty_when_no_paths(self):
+    def test_config_source_empty_when_no_path(self):
         from appinfra.cli.tools.pg_tool import _config_source_path
 
         assert _config_source_path(SimpleNamespace()) == ""
-        assert _config_source_path(SimpleNamespace(loaded_config_paths=[])) == ""
+        assert _config_source_path(SimpleNamespace(config_path=None)) == ""
 
 
 @pytest.mark.unit

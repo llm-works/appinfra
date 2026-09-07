@@ -53,16 +53,6 @@ class TestWithSpec:
         )
         assert builder._standard_args["etc_dir"] is False
 
-    def test_rejects_when_with_config_file_already_used(self, base):
-        builder = AppBuilder("test").with_config_file("some.yaml")
-        with pytest.raises(ValueError, match="mutually exclusive"):
-            builder.config.with_spec("ns", "myapp", path=base)
-
-    def test_with_config_file_rejected_after_spec(self, base):
-        builder = AppBuilder("test").config.with_spec("ns", "myapp", path=base).done()
-        with pytest.raises(ValueError, match="mutually exclusive"):
-            builder.with_config_file("some.yaml")
-
 
 # =============================================================================
 # with_overrides / with_value
@@ -151,15 +141,6 @@ class TestWithHotReload:
             .done()
         )
         assert builder._config.logging.level == "debug"
-        assert builder._config.logging.hot_reload.enabled is True
-
-    def test_accepts_a_with_config_file_source(self, tmp_path):
-        config_file = tmp_path / "app.yaml"
-        config_file.write_text("logging:\n  level: info\n")
-        builder = AppBuilder("test").with_config_file(
-            str(config_file), from_etc_dir=False
-        )
-        builder.config.with_hot_reload()
         assert builder._config.logging.hot_reload.enabled is True
 
     def test_returns_self(self, base):

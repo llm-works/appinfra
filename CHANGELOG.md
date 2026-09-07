@@ -18,6 +18,9 @@ For API stability guarantees and deprecation policy, see
 - `AppBuilder.config` block: `with_spec`, `with_overrides`, `with_value`,
   `with_hot_reload`, and a keyword form `.config(namespace=..., name=..., hot_reload=True)`.
   See [AppBuilder.config](appinfra/docs/api/config.md#appbuilderconfig).
+- `Config.from_path(path)` and `Config.from_spec(namespace, name, **layout)`: load one file
+  by path, or resolve under the protocol with `ConfigSpec`'s identity and layout keywords and
+  load. Neither takes `--etc-dir` / `--config`; build the spec and `resolve()` for that.
 - `INFRA_PYTEST_WORKERS` Makefile variable (default empty): pytest-xdist worker count for
   `make test.*` targets. `run_pytest_serial` macro for custom targets that must stay in-process.
 - `make examples.check`: runs every script under `examples/` (or `<pkg>/examples/`) and
@@ -32,6 +35,12 @@ For API stability guarantees and deprecation policy, see
   `.logging.with_hot_reload` is `.config.with_hot_reload`, and works with a declared spec.
 - `--etc-dir` resolves `<etc-dir>/<base filename>` instead of `<package>.yaml`; identical
   for packages whose base follows rule 2.
+- Apps without a config spec load no file: `--config` selects a file only under a declared
+  spec, and `App.etc_dir` is the explicit `--etc-dir` (validated) or `None`. With a spec,
+  `App.etc_dir` is the resolved file's directory.
+- `appinfra etc-path --local` prints the directory of the config file the run resolved to.
+- `INFRA_DEFAULT_CONFIG_FILE` only affects the `pg.*` and `docs.*` Make targets; the Python
+  loader does not read it.
 - `pgserver` defaults: `name` `infra-pg` → `llm-works-pg`, `port` `7432` →
   `25432`, `replica.port` `7433` → `25433`. Shared `pgserver.name` lets
   multiple consumers attach to one running container instead of colliding on
@@ -48,12 +57,17 @@ For API stability guarantees and deprecation policy, see
   `--yes` skips (required in non-interactive contexts).
 
 ### Removed
+- `AppBuilder.with_config_file` and the etc-dir fallback chain behind it (`resolve_etc_dir`,
+  `get_etc_dir`, `get_project_root`, `get_config_file_path`, `get_default_config`,
+  `PROJECT_ROOT`, `ETC_DIR`, `DEFAULT_CONFIG_FILE`, `DEFAULT_CONFIG_FILENAME`): declare the
+  source with `.config.with_spec(namespace, name)`; the file loads under the protocol chain.
+- `App.setup_config`, `App.loaded_config_paths` and `appinfra.app.create_config`: read
+  `app.config` after setup, and `app.config_path` for the file it came from.
+- `ConfigBuilder`, `ServerConfigBuilder`, `LoggingConfigBuilder` and their `create_*_builder`
+  factories from `appinfra.app.builder`: unreferenced duplicates of the `AppBuilder` blocks.
 - `appinfra.config.resolve_config_source`, `xdg_candidates`, `include_root_for` and
   `find_project_local`: folded into `ConfigSpec` as `resolve()`, `xdg_candidates()`,
   `include_root` and `project_local()`.
-- `Config.from_spec(namespace, package_module, ...)`: use
-  `Config(ConfigSpec(namespace, name, ...).resolve())` — the module is now located from
-  the config name, and resolution is explicit.
 
 ### Fixed
 - `appinfra pg` and `make pg.*` targets exit with install guidance when

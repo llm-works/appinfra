@@ -391,3 +391,54 @@ class TestSubprocessContextUnit:
                 ctx._watcher.stop()
             finally:
                 lg.handlers.clear()
+
+    @pytest.mark.usefixtures("clean_env")
+    def test_project_root_forwarded_to_watcher(self, tmp_path):
+        """Reload honors the include boundary the parent app resolved.
+
+        An overlay outside the packaged etc dir that includes the packaged
+        base (the XDG tier) reloads only when the watcher gets the parent's
+        project_root. Without it, the walk-up from the overlay's own location
+        picks a root that rejects the include.
+        """
+        pytest.importorskip("watchdog")
+
+        import yaml
+
+        from appinfra.log import LoggerFactory
+        from appinfra.log.config import LogConfig
+        from appinfra.subprocess import SubprocessContext
+
+        etc = tmp_path / "pkg" / "etc"
+        etc.mkdir(parents=True)
+        base = etc / "base.yaml"
+        base.write_text("level: info\n")
+        overlay = tmp_path / "xdg" / "overlay.yaml"
+        overlay.parent.mkdir()
+        overlay.write_text(f'logging: !include "{base}"\n')
+
+        config = LogConfig.from_params(level="info", location=0)
+        lg = LoggerFactory.create_root(config)
+        try:
+            ctx = SubprocessContext(
+                lg=lg, config_files=[str(overlay)], project_root=etc
+            )
+            ctx._start_config_watcher()
+            assert ctx._watcher is not None
+            try:
+                assert ctx._watcher._project_root == etc.resolve()
+                merged, _ = ctx._watcher._load_and_merge_configs()
+                assert merged == {"logging": {"level": "info"}}
+            finally:
+                ctx._watcher.stop()
+
+            bare = SubprocessContext(lg=lg, config_files=[str(overlay)])
+            bare._start_config_watcher()
+            assert bare._watcher is not None
+            try:
+                with pytest.raises(yaml.YAMLError, match="outside project root"):
+                    bare._watcher._load_and_merge_configs()
+            finally:
+                bare._watcher.stop()
+        finally:
+            lg.handlers.clear()

@@ -240,21 +240,14 @@ class ConfigSourceTool(Tool):
         """Report what config was loaded and which precedence rule matched.
 
         Reads the App's ``_config_spec`` and the ``ConfigFile`` its
-        ``resolve()`` produced; falls back to a bare loaded-paths listing
-        when the App was built without a spec.
+        ``resolve()`` produced; reports no chain when the App was built
+        without a spec.
         """
         app = self.app
-        loaded = getattr(app, "_loaded_config_paths", [])
         spec = getattr(app, "_config_spec", None)
         source = getattr(app, "_config_source", None)
 
-        lines: list[str] = []
-        if loaded:
-            for _etc, _name, full in loaded:
-                lines.append(f"loaded: {full}")
-        else:
-            lines.append("loaded: <none>")
-
+        lines: list[str] = [f"loaded: {source.path if source else '<none>'}"]
         if spec is None or source is None:
             lines.append("rule:   (app built without a config spec — no chain)")
             return "\n".join(lines)

@@ -32,14 +32,15 @@ class EtcPathTool(Tool):
         parser.add_argument(
             "--local",
             action="store_true",
-            help="Find local project etc directory instead of package etc",
+            help="Print the etc directory in effect for this run instead of the packaged one",
         )
 
     def run(self, local: bool = False, **kwargs: Any) -> int:
         """Print the etc directory path.
 
         Args:
-            local: If True, find local project etc directory.
+            local: If True, print the directory of the config file this run
+                resolved to (``app.etc_dir``) instead of the packaged etc.
 
         Returns:
             Exit code (0 for success, 1 for error).
@@ -50,13 +51,11 @@ class EtcPathTool(Tool):
         except Exception:
             use_local = local
         if use_local:
-            from ...config import resolve_etc_dir
-
-            try:
-                print(resolve_etc_dir())
-            except FileNotFoundError as e:
-                print(f"Error: {e}", file=sys.stderr)
+            etc_dir = self.app.etc_dir
+            if etc_dir is None:
+                print("Error: no etc directory resolved for this run", file=sys.stderr)
                 return 1
+            print(etc_dir)
         else:
             print(files("appinfra") / "etc")
         return 0

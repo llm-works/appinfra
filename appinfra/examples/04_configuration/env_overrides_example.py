@@ -7,7 +7,9 @@
 Environment Variable Overrides Example
 
 This example demonstrates how to use environment variables to override
-configuration values from appinfra.yaml without modifying the YAML file.
+configuration values from etc/env-overrides.yaml without modifying the YAML
+file. Config.from_spec locates the file under the config protocol, the same
+way an app finds its base config.
 
 What This Example Demonstrates:
 - Basic environment variable overrides
@@ -46,10 +48,17 @@ from unittest.mock import patch
 # Allow running from a source checkout without installing the package.
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
-from appinfra import DEFAULT_CONFIG_FILE, Config, get_default_config
+from appinfra import Config
 from appinfra.log import LogConfig, LoggerFactory
 
-config = get_default_config()
+
+def load_config(**kwargs):
+    """Fresh Config per demo; env overrides are applied at load time.
+
+    etc/env-overrides.yaml beside this script is the base; from_spec applies the
+    protocol chain (project-local etc/, user overlay, base) as an app would.
+    """
+    return Config.from_spec("example-org", "env-overrides", **kwargs)
 
 
 def demo_basic_overrides():
@@ -64,7 +73,7 @@ def demo_basic_overrides():
             "INFRA_PGSERVER_USER": "myuser",
         },
     ):
-        config = get_default_config()
+        config = load_config()
 
         print(f"Logging level: {config.logging.level}")
         print(f"PostgreSQL port: {config.pgserver.port}")
@@ -118,23 +127,16 @@ def demo_nested_overrides():
     with patch.dict(
         os.environ,
         {
-            "INFRA_TEST_TIMEOUT": "120",
-            "INFRA_TEST_LOGGING_LEVEL": "info",
-            "INFRA_TEST_LOGGING_COLORS_ENABLED": "true",
+            "INFRA_WORKER_TIMEOUT": "120",
+            "INFRA_WORKER_LOGGING_LEVEL": "info",
+            "INFRA_WORKER_LOGGING_COLORS": "true",
         },
     ):
-        config = get_default_config()
+        config = load_config()
 
-        # Use get() with defaults since test config may not exist in default config
-        test_config = config.get("test", {})
-        test_timeout = test_config.get("timeout", "120 (from env)")
-        test_logging = test_config.get("logging", {})
-        test_level = test_logging.get("level", "info (from env)")
-        test_colors = test_logging.get("colors_enabled", "true (from env)")
-
-        print(f"Test timeout: {test_timeout}")
-        print(f"Test logging level: {test_level}")
-        print(f"Test logging colors: {test_colors}")
+        print(f"Worker timeout: {config.worker.timeout}")
+        print(f"Worker logging level: {config.worker.logging.level}")
+        print(f"Worker logging colors: {config.worker.logging.colors}")
         print("✓ Nested overrides demonstration complete")
 
 
@@ -150,7 +152,7 @@ def demo_custom_prefix():
             "INFRA_LOGGING_LEVEL": "debug",  # Should be ignored
         },
     ):
-        config = Config(str(DEFAULT_CONFIG_FILE), env_prefix="MYAPP_")
+        config = load_config(env_prefix="MYAPP_")
 
         print(f"Logging level: {config.logging.level}")
         print(f"PostgreSQL port: {config.pgserver.port}")
@@ -166,10 +168,10 @@ def demo_check_overrides():
         {
             "INFRA_LOGGING_LEVEL": "debug",
             "INFRA_PGSERVER_PORT": "5432",
-            "INFRA_TEST_TIMEOUT": "120",
+            "INFRA_WORKER_TIMEOUT": "120",
         },
     ):
-        config = get_default_config()
+        config = load_config()
         overrides = config.get_env_overrides()
 
         print("Applied environment variable overrides:")
@@ -186,7 +188,7 @@ def demo_disabled_overrides():
         os.environ, {"INFRA_LOGGING_LEVEL": "debug", "INFRA_PGSERVER_PORT": "5432"}
     ):
         # Overrides disabled
-        config = Config(str(DEFAULT_CONFIG_FILE), enable_env_overrides=False)
+        config = load_config(enable_env_overrides=False)
 
         print(f"Logging level: {config.logging.level} (should be 'info')")
         print(f"PostgreSQL port: {config.pgserver.port} (should be 25432)")
@@ -200,13 +202,13 @@ def demo_logging_integration():
     with patch.dict(
         os.environ,
         {
-            "INFRA_TEST_LOGGING_LEVEL": "info",
-            "INFRA_TEST_LOGGING_COLORS_ENABLED": "false",
+            "INFRA_WORKER_LOGGING_LEVEL": "info",
+            "INFRA_WORKER_LOGGING_COLORS": "false",
         },
     ):
         # Create logger using public API with config from environment
-        config = get_default_config()
-        log_config = LogConfig.from_config(config.dict(), "test.logging")
+        config = load_config()
+        log_config = LogConfig.from_config(config.dict(), "worker.logging")
         logger = LoggerFactory.create("env_override_test", log_config)
 
         print(f"Logger level: {logger.get_level()}")
@@ -225,7 +227,7 @@ def demo_variable_substitution():
     with patch.dict(
         os.environ, {"INFRA_PGSERVER_PORT": "5432", "INFRA_PGSERVER_USER": "myuser"}
     ):
-        config = get_default_config()
+        config = load_config()
 
         print(f"Database URL: {config.dbs.main.url}")
         print("✓ Variable substitution using overridden values")
@@ -233,27 +235,22 @@ def demo_variable_substitution():
 
 def _print_override_values(config):
     """Print override values from config using safe accessors."""
-    logging_cfg = config.get("logging", {})
-    pgserver_cfg = config.get("pgserver", {})
-    test_cfg = config.get("test", {})
-    test_logging_cfg = test_cfg.get("logging", {}) if isinstance(test_cfg, dict) else {}
-    print(f"  Logging level: {logging_cfg.get('level', 'N/A')}")
-    print(f"  Logging micros: {logging_cfg.get('micros', 'N/A')}")
-    print(f"  PostgreSQL port: {pgserver_cfg.get('port', 'N/A')}")
-    print(f"  PostgreSQL user: {pgserver_cfg.get('user', 'N/A')}")
-    timeout = test_cfg.get("timeout", "N/A") if isinstance(test_cfg, dict) else "N/A"
-    print(f"  Test timeout: {timeout}")
-    print(f"  Test logging level: {test_logging_cfg.get('level', 'N/A')}")
+    print(f"  Logging level: {config.logging.level}")
+    print(f"  Logging micros: {config.logging.micros}")
+    print(f"  PostgreSQL port: {config.pgserver.port}")
+    print(f"  PostgreSQL user: {config.pgserver.user}")
+    print(f"  Worker timeout: {config.worker.timeout}")
+    print(f"  Worker logging level: {config.worker.logging.level}")
 
 
 # Environment variables for multiple overrides demo
 _MULTIPLE_OVERRIDE_ENVS = {
     "INFRA_LOGGING_LEVEL": "debug",
-    "INFRA_LOGGING_MICROSECONDS": "true",
+    "INFRA_LOGGING_MICROS": "true",
     "INFRA_PGSERVER_PORT": "5432",
     "INFRA_PGSERVER_USER": "testuser",
-    "INFRA_TEST_TIMEOUT": "120",
-    "INFRA_TEST_LOGGING_LEVEL": "info",
+    "INFRA_WORKER_TIMEOUT": "120",
+    "INFRA_WORKER_LOGGING_LEVEL": "info",
 }
 
 
@@ -262,7 +259,7 @@ def demo_multiple_overrides():
     print("\n=== Multiple Environment Variable Overrides ===")
 
     with patch.dict(os.environ, _MULTIPLE_OVERRIDE_ENVS):
-        config = get_default_config()
+        config = load_config()
         print("Multiple overrides applied:")
         _print_override_values(config)
         print("✓ Multiple overrides demonstration complete")
@@ -274,14 +271,14 @@ def demo_command_line_usage():
 
     print("Development environment:")
     print("  export INFRA_LOGGING_LEVEL=debug")
-    print("  export INFRA_LOGGING_MICROSECONDS=true")
+    print("  export INFRA_LOGGING_MICROS=true")
     print("  export INFRA_PGSERVER_PORT=5432")
     print("  python my_app.py")
 
-    print("\nTesting environment:")
-    print("  export INFRA_TEST_LOGGING_LEVEL=info")
-    print("  export INFRA_TEST_LOGGING_COLORS_ENABLED=false")
-    print("  make test")
+    print("\nWorker environment:")
+    print("  export INFRA_WORKER_LOGGING_LEVEL=info")
+    print("  export INFRA_WORKER_LOGGING_COLORS=false")
+    print("  python my_worker.py")
 
     print("\nProduction environment:")
     print("  export INFRA_LOGGING_LEVEL=warning")
@@ -321,7 +318,7 @@ def main():
     """Main function to run the environment variable overrides demos."""
     print("=== Environment Variable Overrides Example ===")
     print("This example demonstrates how to override configuration values")
-    print("from appinfra.yaml using environment variables.\n")
+    print("from etc/env-overrides.yaml using environment variables.\n")
 
     try:
         _run_all_env_demos()

@@ -1,0 +1,22 @@
+# Base config for env_overrides_example.py. Every key the example overrides
+# through INFRA_* / MYAPP_* environment variables is declared here; Config
+# rejects overrides that target undeclared paths.
+
+logging:
+  level: info
+  micros: false
+
+pgserver:
+  host: 127.0.0.1
+  port: 25432
+  user: postgres
+
+dbs:
+  main:
+    url: "postgresql://${pgserver.user}@${pgserver.host}:${pgserver.port}/main"
+
+worker:
+  timeout: 30
+  logging:
+    level: warning
+    colors: false

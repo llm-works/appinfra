@@ -11,7 +11,7 @@ This module provides the fundamental building blocks for the application framewo
 """
 
 from .app import App
-from .config import ConfigLoader, create_config
+from .config import ConfigLoader
 from .lifecycle import LifecycleManager
 from .logging_utils import setup_logging_from_config
 
@@ -20,5 +20,4 @@ __all__ = [
     "LifecycleManager",
     "ConfigLoader",
     "setup_logging_from_config",
-    "create_config",
 ]

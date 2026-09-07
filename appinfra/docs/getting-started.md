@@ -118,10 +118,9 @@ Load configuration from YAML files with environment variable overrides.
 **Load configuration:**
 
 ```python
-from appinfra.config import Config, get_config_file_path
+from appinfra.config import Config
 
-# Recommended: Use get_config_file_path() for automatic etc/ resolution
-config = Config(get_config_file_path())  # Finds etc/infra.yaml automatically
+config = Config.from_path("etc/myapp.yaml")
 
 # Access with dot notation
 print(config.logging.level)
@@ -140,11 +139,13 @@ export INFRA_DATABASE_PORT=5433
 ```
 
 ```python
-config = Config(get_config_file_path())
+config = Config.from_path("etc/myapp.yaml")
 print(config.logging.level)  # Returns "debug" from environment
 ```
 
 See the [Environment Variables Guide](guides/environment-variables.md) for more details.
+Apps that ship their config use `Config.from_spec("myorg", "myapp")`, which locates the file
+under the [config protocol](api/config.md#config-spec) instead of a literal path.
 
 **Accessing config from Tools:**
 

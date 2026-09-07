@@ -66,23 +66,14 @@ class ConfigConfigurer:
     ) -> Self:
         """Declare the config source per the config protocol.
 
-        Builds a ``ConfigSpec`` from the same arguments: the packaged base is
+        Builds a ``ConfigSpec`` from the same arguments: the base is
         ``<origin dir>/<etc_dir>/<filename>``, each part defaulting to rule 2
         (the module named after the config or the calling script, ``etc``,
         ``<name>.yaml``); ``path`` names the file outright. At setup the App
         resolves the spec against ``--etc-dir`` and ``--config`` (when
         exposed via ``with_standard_args``), the project-local walk-up, XDG
         overlays and the packaged base. See ``ConfigSpec``.
-
-        Raises:
-            ValueError: if ``with_config_file`` was already used on this
-                builder; the two loading modes are mutually exclusive.
         """
-        if self._app_builder._config_files:
-            raise ValueError(
-                "with_spec is mutually exclusive with with_config_file — "
-                "pick one config-loading mode per builder"
-            )
         self._app_builder._config_spec = ConfigSpec(
             namespace,
             name,
@@ -132,7 +123,7 @@ class ConfigConfigurer:
             ValueError: if no config source has been declared.
         """
         builder = self._app_builder
-        if builder._config_spec is None and not builder._config_files:
+        if builder._config_spec is None:
             raise ValueError(
                 "with_hot_reload requires a config source: call with_spec() first"
             )

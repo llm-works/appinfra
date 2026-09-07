@@ -28,9 +28,9 @@ everywhere argv is not the entry point.
 | Shape                                     | Config surface                        | Section    |
 |-------------------------------------------|---------------------------------------|------------|
 | Script, no config file                    | None — logger only                    | [Case A](#case-a--script-no-config-file) |
-| Script with a config file next to it      | `Config(str(Path(__file__).parent / "config.yaml"))` | [Case B](#case-b--script-with-a-config-file) |
+| Script with a config file next to it      | `Config.from_path(Path(__file__).parent / "config.yaml")` | [Case B](#case-b--script-with-a-config-file) |
 | Script with `App`/`Tool` shape            | `AppBuilder(...)` — framework mode    | [Case C](#case-c--script-with-app-shape) |
-| Library that ships a packaged base config | `Config(ConfigSpec(namespace, name).resolve())` | [Case D](#case-d--library-with-a-packaged-base-config) |
+| Library that ships a packaged base config | `Config.from_spec(namespace, name)`   | [Case D](#case-d--library-with-a-packaged-base-config) |
 
 Cases are ordered simplest first. A caller reaching the guide starts at the top and stops when
 the shape matches.
@@ -53,7 +53,7 @@ load.
 ## Case B — Script with a config file
 
 The script has a YAML file next to it (or somewhere on disk) and no packaged `etc/` layout —
-typical for one-off jobs, benchmarks, or exploratory scripts. Use `Config` directly with the
+typical for one-off jobs, benchmarks, or exploratory scripts. Use `Config.from_path` with the
 file path; there is no package identity to spec.
 
 ```
@@ -68,12 +68,12 @@ from pathlib import Path
 from appinfra.config import Config
 from appinfra.log import create_root_lg
 
-config = Config(str(Path(__file__).parent / "config.yaml"))
+config = Config.from_path(Path(__file__).parent / "config.yaml")
 lg = create_root_lg(level="warning")
 ```
 
-`ConfigSpec` does not fit here — no config identity, no XDG overlay chain to walk. Plain
-`Config(path)` is the right primitive.
+`ConfigSpec` does not fit here — no config identity, no XDG overlay chain to walk.
+`Config.from_path` loads that one file and consults nothing else.
 
 ## Case C — Script with `App` shape
 
@@ -117,16 +117,17 @@ my_package/
 Downstream construction:
 
 ```python
-from appinfra.config import Config, ConfigSpec
+from appinfra.config import Config
 from appinfra.log import create_root_lg
 
-config = Config(ConfigSpec("myorg", "my-package").resolve())
+config = Config.from_spec("myorg", "my-package")
 lg = create_root_lg(level="warning")
 ```
 
-Two strings: `namespace` (XDG scope) and the config's `name`. Locating the packaged base,
-running the precedence chain and choosing the include-authorization root all happen inside the
-spec; `Config` loads the file it resolved to. A spec resolves, it never loads.
+Two strings: `namespace` (XDG scope) and the config's `name`. `from_spec` builds the
+`ConfigSpec`, which locates the packaged base, runs the precedence chain and chooses the
+include-authorization root; `Config` then loads the file it resolved to. A spec resolves, it
+never loads; the factory is that sequence in one call.
 
 ### D1 — Module and filename convention
 
@@ -138,13 +139,13 @@ no further input.
 
 ### D2 — Non-conventional layout
 
-Each deviation from the rule-2 layout is one keyword on the spec:
+Each deviation from the rule-2 layout is one keyword, the same on the spec and on the factory:
 
 ```python
-ConfigSpec("myorg", "my-package", filename="legacy-name.yaml")  # different file name
-ConfigSpec("myorg", "my-package", etc_dir="conf")  # different directory
-ConfigSpec("myorg", "my-package", origin=__file__)  # anchored on this file's directory
-ConfigSpec("myorg", "my-package", path="/opt/cfg/base.yaml")  # the file outright
+Config.from_spec("myorg", "my-package", filename="legacy-name.yaml")  # file name
+Config.from_spec("myorg", "my-package", etc_dir="conf")  # directory
+Config.from_spec("myorg", "my-package", origin=__file__)  # anchor: this file's dir
+Config.from_spec("myorg", "my-package", path="/opt/cfg/base.yaml")  # the file itself
 ```
 
 `name` still drives XDG discovery: `$XDG_CONFIG_HOME/myorg/my-package.yaml` is what the overlay
@@ -155,7 +156,7 @@ chain probes regardless of the base filename.
 A library that wants to let its own callers point at an alternate config location surfaces
 `etc_dir` and `config_file` as parameters on its own API. `resolve()` takes them as keyword
 arguments and threads them into the precedence chain, equivalent to the framework's `--etc-dir`
-/ `--config` flags.
+/ `--config` flags. `Config.from_spec` takes no such flags; this is the explicit form.
 
 ```python
 SPEC = ConfigSpec("myorg", "my-package")

@@ -15,7 +15,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 import sqlalchemy
 
-from appinfra import get_default_config
 from appinfra.app import App, AppBuilder
 from appinfra.db import Manager as DBManager
 from appinfra.log.builder import (
@@ -96,10 +95,7 @@ class DatabaseLoggingApp(App):
             self.lg.info("mock database setup completed")
             return
 
-        # Load configuration
-        self.config = get_default_config()
-
-        # Create database manager
+        # Create database manager from the config the spec resolved to at setup
         self.db_manager = DBManager(self.lg, self.config)
 
         # Set up database connections
@@ -663,6 +659,9 @@ def create_application():
         .with_description(
             "Example application demonstrating database logging capabilities"
         )
+        # appinfra's packaged base is etc/infra.yaml (its one deviation from rule 2)
+        .config.with_spec("llm-works", "appinfra", filename="infra.yaml")
+        .done()
         .build()
     )
 

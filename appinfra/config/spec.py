@@ -101,8 +101,7 @@ class ConfigSpec:
         filename: str | Auto = AUTO,
         path: str | Path | None = None,
     ) -> None:
-        if not namespace or not name:
-            raise ValueError("namespace and name must be non-empty")
+        _check_identity(namespace, name)
         if origin is None or filename is None:
             raise TypeError("origin and filename take a value or AUTO, not None")
         if path is not None:
@@ -212,6 +211,16 @@ class ConfigSpec:
             if candidate.exists():
                 return ConfigFile(candidate, self.include_root, rule=5)
         return ConfigFile(self.base_config, self.include_root, rule=6)
+
+
+def _check_identity(namespace: object, name: object) -> None:
+    """Both identity parts are non-empty strings; a module object is the classic mistake."""
+    if not isinstance(namespace, str) or not isinstance(name, str):
+        raise TypeError(
+            "namespace and name are strings; pass the config name, not a module object"
+        )
+    if not namespace or not name:
+        raise ValueError("namespace and name must be non-empty")
 
 
 def _locate_base(name: str, etc_dir: str, filename: str) -> Path:

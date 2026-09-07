@@ -215,6 +215,16 @@ Consumers declare identity, not paths. One `ConfigSpec` serves both entry points
 ### Library mode (appinfra ≥ 0.11.0)
 
 ```python
+from appinfra.config import Config
+
+config = Config.from_spec(
+    "myorg", "myapp"
+)  # no operator input: the chain with defaults
+```
+
+A library that surfaces `--etc-dir` / `--config` on its own API resolves explicitly:
+
+```python
 from appinfra.config import Config, ConfigSpec
 
 SPEC = ConfigSpec("myorg", "myapp")
@@ -258,8 +268,8 @@ app = (
 )
 ```
 
-An app declaring a spec does not call `with_config_file`; the two loading modes are mutually
-exclusive per builder.
+An app built without a spec loads no file; its config is the programmatic layer plus CLI
+arguments.
 
 Full API contract in [Config Spec](../api/config.md#config-spec) and
 [AppBuilder.config](../api/config.md#appbuilderconfig).

@@ -8,6 +8,8 @@ Hello World example using the appinfra.app.App class.
 
 This example demonstrates:
 - Using the App class for proper application framework integration
+- Declaring the config source with the builder's config block; the file is
+  loaded into ``self.config`` before ``_run``
 - Automatic logging argument parsing with add_log_default_args()
 - Command-line overrides for all config options (level, location, colors, micros)
 - Proper handler level adjustment - handlers use global level when it's more restrictive
@@ -44,10 +46,8 @@ class HelloWorldWithConfigApp(App):
     def _run(self) -> int:
         """Run the hello world application with config-based logging."""
 
-        cfg = self.setup_config(load_all=True)
-
-        # Set up logging using the App framework method
-        logger, _ = self.setup_logging_from_config(cfg)
+        # Set up logging from the config the spec resolved to during setup
+        logger, _ = self.setup_logging_from_config(self.config)
 
         # Log the greeting to demonstrate multiple handlers
         logger.info("Hello, World!")
@@ -74,6 +74,9 @@ def create_application() -> App:
             "Hello World example using appinfra.app.App class with config-based logging"
         )
         .with_standard_args()
+        # appinfra's packaged base is etc/infra.yaml (its one deviation from rule 2)
+        .config.with_spec("llm-works", "appinfra", filename="infra.yaml")
+        .done()
         .build()
     )
     return app

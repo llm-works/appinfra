@@ -501,16 +501,10 @@ def _prompt_erase_confirm() -> int | None:
 
 
 def _config_source_path(app: Any) -> str:
-    """Best-effort resolved-config path for the preview. Not fatal if
-    unavailable — the app may have been built without a config spec.
-    Entries are (etc_dir, filename, full_path) tuples; take the full path."""
-    paths = getattr(app, "loaded_config_paths", [])
-    if not paths:
-        return ""
-    last = paths[-1]
-    if isinstance(last, tuple) and len(last) >= 3:
-        return str(last[2])
-    return str(last)
+    """Best-effort resolved-config path for the preview. Empty when the app
+    was built without a config spec."""
+    path = getattr(app, "config_path", None)
+    return str(path) if path else ""
 
 
 class PgEraseTool(_PgVerbTool):

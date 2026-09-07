@@ -24,9 +24,9 @@ class Config(DotDict):
 **Usage:**
 
 ```python
-from appinfra.config import Config, get_config_file_path
+from appinfra.config import Config
 
-config = Config(get_config_file_path())  # Automatic etc/ resolution
+config = Config.from_path("etc/myapp.yaml")
 
 # Access with dot notation
 print(config.logging.level)
@@ -44,7 +44,7 @@ export INFRA_DATABASE_PORT=5433
 ```
 
 ```python
-config = Config(get_config_file_path())
+config = Config.from_path("etc/myapp.yaml")
 print(config.logging.level)  # "debug" (from env)
 ```
 
@@ -718,9 +718,9 @@ cache:
 ```
 
 ```python
-from appinfra.config import Config, get_config_file_path
+from appinfra.config import Config
 
-config = Config(get_config_file_path("config.yaml"))
+config = Config.from_path("/app/etc/config.yaml")
 print(config.logging.file)  # "./logs/app.log" (literal)
 print(config.logging.resolved)  # "/app/etc/logs/app.log" (absolute)
 ```

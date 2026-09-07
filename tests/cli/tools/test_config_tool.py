@@ -708,21 +708,16 @@ class TestConfigToolIntegration:
 class TestSourceReport:
     """Test --source output: loaded path, winning rule, chain rendering."""
 
-    def _tool_with_app(self, spec, source, parsed_args, loaded_paths=None):
+    def _tool_with_app(self, spec, source, parsed_args):
         """Build a ConfigSourceTool with a stub App carrying spec + resolved source."""
         from types import SimpleNamespace
         from unittest.mock import patch
 
-        if loaded_paths is None and source is not None:
-            loaded_paths = [
-                (str(source.path.parent), source.path.name, str(source.path))
-            ]
         tool = ConfigSourceTool()
         tool._logger = Mock()
         fake_app = SimpleNamespace(
             _config_spec=spec,
             _config_source=source,
-            _loaded_config_paths=loaded_paths or [],
             _parsed_args=parsed_args,
         )
         return tool, patch.object(
@@ -739,19 +734,14 @@ class TestSourceReport:
 
         return ConfigFile(Path(path), Path(path).parent, rule)
 
-    def test_no_spec_reports_bare_loaded(self, capsys, tmp_path):
-        f = tmp_path / "x.yaml"
-        f.write_text("k: v")
+    def test_no_spec_reports_no_chain(self, capsys):
         tool, ctx = self._tool_with_app(
-            spec=None,
-            source=None,
-            parsed_args=Mock(etc_dir=None, config=None),
-            loaded_paths=[(str(tmp_path), "x.yaml", str(f))],
+            spec=None, source=None, parsed_args=Mock(etc_dir=None, config=None)
         )
         with ctx:
             assert tool.run() == 0
         out = capsys.readouterr().out
-        assert f"loaded: {f}" in out
+        assert "loaded: <none>" in out
         assert "no chain" in out
 
     def test_rule_6_packaged_base(self, capsys, tmp_path, monkeypatch):
