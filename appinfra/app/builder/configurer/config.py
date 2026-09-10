@@ -82,7 +82,7 @@ class ConfigConfigurer:
         exposed via ``.cli(config_file=True)``), the project-local
         walk-up, XDG overlays and the packaged base. See ``ConfigSpec``.
         """
-        if not isinstance(origin, Auto):
+        if origin is not None and not isinstance(origin, Auto):
             origin = _resolve_origin(origin, frame_depth=1)
         self._app_builder._config_spec = ConfigSpec(
             namespace,
@@ -162,7 +162,7 @@ class ConfigConfigurer:
                 if "namespace" not in fields or "name" not in fields:
                     raise ValueError("namespace and name are required together")
                 origin: str | Path | Auto = fields.get("origin", AUTO)
-                if not isinstance(origin, Auto):
+                if origin is not None and not isinstance(origin, Auto):
                     origin = _resolve_origin(origin, frame_depth=1)
                 self.with_spec(
                     fields["namespace"],

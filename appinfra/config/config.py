@@ -344,7 +344,7 @@ class Config(DotDict):
         passes ``spec.resolve(etc_dir=..., config_file=...)`` to the
         constructor. The include root comes from the resolved file.
         """
-        if not isinstance(origin, Auto):
+        if origin is not None and not isinstance(origin, Auto):
             origin = _resolve_origin(origin, frame_depth=1)
         spec = ConfigSpec(
             namespace,
