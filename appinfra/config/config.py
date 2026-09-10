@@ -19,7 +19,7 @@ import yaml  # type: ignore[import-untyped]
 from ..dot_dict import DotDict
 from ..errors import UndeclaredConfigPathError
 from .constants import MAX_CONFIG_SIZE_BYTES
-from .spec import AUTO, Auto, ConfigFile, ConfigSpec
+from .spec import AUTO, Auto, ConfigFile, ConfigSpec, _resolve_origin
 
 # Inventory of `INFRA_*` env vars consumed by appinfra's own tooling (shell
 # scripts, Makefiles, pytest fixtures) rather than as yaml config overrides.
@@ -344,6 +344,8 @@ class Config(DotDict):
         passes ``spec.resolve(etc_dir=..., config_file=...)`` to the
         constructor. The include root comes from the resolved file.
         """
+        if origin is not None and not isinstance(origin, Auto):
+            origin = _resolve_origin(origin, frame_depth=1)
         spec = ConfigSpec(
             namespace,
             name,

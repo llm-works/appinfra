@@ -10,6 +10,11 @@ For API stability guarantees and deprecation policy, see
 
 ## [Unreleased]
 
+### Changed
+- `origin=` on `ConfigSpec` and `.config.with_spec()` accepts a relative path,
+  anchored to the file that literally holds the call (`origin=".."` is one dir
+  above it). Absolute paths unchanged.
+
 ## [0.11.1] - 2026-09-08
 
 ### Added
