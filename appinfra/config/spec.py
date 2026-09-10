@@ -339,7 +339,7 @@ def _resolve_origin(origin: str | Path, *, frame_depth: int) -> Path:
             "pass an absolute path (the caller frame has no __file__, "
             "e.g. an interactive interpreter)"
         )
-    return Path(caller_file).parent / path
+    return (Path(caller_file).parent / path).resolve()
 
 
 def _resolve_custom_config(config_file: str, etc_dir: str | Path | None) -> ConfigFile:
