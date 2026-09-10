@@ -59,6 +59,44 @@ class TestWithSpec:
         )
         assert builder._standard_args["etc_dir"] is False
 
+    def test_relative_origin_anchors_to_direct_caller(self, tmp_path):
+        """`.with_spec(origin='..')` anchors to the file that literally wrote the call.
+
+        The frame walk must land on the user's file, not on `with_spec` itself
+        (which internally constructs `ConfigSpec`).
+        """
+        caller = tmp_path / "app" / "cli.py"
+        caller.parent.mkdir()
+        caller.write_text("")
+        ns = {"__file__": str(caller), "AppBuilder": AppBuilder}
+        exec(
+            "builder = AppBuilder('test').config.with_spec("
+            "'ns', 'demo', origin='..', etc_dir='cfg', filename='x.yaml').done()",
+            ns,
+        )
+        # caller.parent = tmp_path/app; ".." = tmp_path.
+        assert (
+            ns["builder"]._config_spec.base_config
+            == (tmp_path / "cfg" / "x.yaml").resolve()
+        )
+
+    def test_keyword_form_relative_origin_anchors_to_direct_caller(self, tmp_path):
+        """`.config(namespace=..., origin='..')` anchors to the caller's file."""
+        caller = tmp_path / "app" / "cli.py"
+        caller.parent.mkdir()
+        caller.write_text("")
+        ns = {"__file__": str(caller), "AppBuilder": AppBuilder}
+        exec(
+            "builder = AppBuilder('test').config("
+            "namespace='ns', name='demo', origin='..', "
+            "etc_dir='cfg', filename='x.yaml')",
+            ns,
+        )
+        assert (
+            ns["builder"]._config_spec.base_config
+            == (tmp_path / "cfg" / "x.yaml").resolve()
+        )
+
 
 # =============================================================================
 # with_overrides / with_value

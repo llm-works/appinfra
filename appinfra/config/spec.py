@@ -79,6 +79,14 @@ class ConfigSpec:
     declares that shape. Left ``AUTO``, the boundary is the base's own
     directory.
 
+    ``origin`` accepts an absolute or a relative path. An absolute path
+    (or a ``~/``-prefixed one) is used as-is. A relative path is anchored
+    to the directory of the module that literally holds the
+    ``ConfigSpec(...)`` call — ``origin=".."`` reads as "one dir above
+    this file". The anchor is always the direct caller's ``__file__``;
+    wrappers get no special treatment, so a library that wraps this
+    constructor must resolve the origin to an absolute path itself.
+
     Attributes:
         namespace: XDG namespace (e.g. ``"llm-works"``).
         name: the config's name (e.g. ``"my-app"``): the base filename
@@ -124,7 +132,7 @@ class ConfigSpec:
             if isinstance(origin, Auto):
                 base = _locate_base(name, etc_dir, fname)
             else:
-                origin_dir = _origin_dir(origin)
+                origin_dir = _origin_dir(_resolve_origin(origin, frame_depth=1))
                 base = origin_dir / etc_dir / fname
         object.__setattr__(self, "namespace", namespace)
         object.__setattr__(self, "name", name)
@@ -306,6 +314,32 @@ def _origin_dir(origin: str | Path) -> Path:
     """
     resolved = Path(str(origin)).expanduser().resolve()
     return resolved.parent if resolved.is_file() else resolved
+
+
+def _resolve_origin(origin: str | Path, *, frame_depth: int) -> Path:
+    """Absolute path from ``origin``, anchoring relative paths to the caller's file.
+
+    ``frame_depth=1`` means the direct caller of the function that invokes
+    this helper (this helper's own frame is skipped). A relative ``origin``
+    is joined onto ``Path(caller __file__).parent``; an absolute path (or
+    one that becomes absolute after ``expanduser``) is returned as-is.
+
+    The anchor is always the module that literally wrote the call to the
+    surrounding entry point. Wrappers cannot shift it — a wrapper library
+    must compute an absolute path itself.
+    """
+    path = Path(str(origin)).expanduser()
+    if path.is_absolute():
+        return path
+    frame = sys._getframe(frame_depth + 1)
+    caller_file = frame.f_globals.get("__file__")
+    if caller_file is None:
+        raise ValueError(
+            "relative origin requires a caller with __file__; "
+            "pass an absolute path (the caller frame has no __file__, "
+            "e.g. an interactive interpreter)"
+        )
+    return Path(caller_file).parent / path
 
 
 def _resolve_custom_config(config_file: str, etc_dir: str | Path | None) -> ConfigFile:

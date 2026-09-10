@@ -230,7 +230,7 @@ ConfigSpec("myorg", "myapp")  # <myapp module dir>/etc/myapp.yaml
 
 | Keyword    | Decides                                                        | Default                      |
 |------------|----------------------------------------------------------------|------------------------------|
-| `origin`   | the anchor: a file's directory (`__file__`) or a directory; when explicit, also the include boundary | `AUTO`, see below |
+| `origin`   | the anchor: a file's directory (`__file__`) or a directory. Absolute (or `~/…`) used as-is; a relative path is anchored to the file that literally holds the `ConfigSpec(...)` call. When explicit, also the include boundary | `AUTO`, see below |
 | `etc_dir`  | directory under the anchor; `""` for the anchor itself; an absolute path stands alone | `"etc"` |
 | `filename` | the file inside it                                             | `<name>.yaml`                |
 | `path`     | the file outright; excludes the other three                    | none                         |
@@ -250,6 +250,17 @@ includes climb out of its own directory declares that shape this way:
 # base <repo>/etc/myapp.yaml, boundary <repo>
 spec = ConfigSpec("myorg", "myapp", origin=REPO_ROOT)
 ```
+
+For the common "one dir above my package" case, a relative path is shorter and
+self-documenting:
+
+```python
+# equivalent to origin=Path(__file__).resolve().parent.parent
+spec = ConfigSpec("myorg", "myapp", origin="..")
+```
+
+The anchor is always the file that literally holds this call; a wrapper library
+must compute an absolute path itself.
 
 Left `AUTO`, the boundary is the base's own directory, and `spec.origin` is `None`.
 
