@@ -15,6 +15,10 @@ For API stability guarantees and deprecation policy, see
   anchored to the file that literally holds the call (`origin=".."` is one dir
   above it). Absolute paths unchanged.
 
+### Fixed
+- `ChannelTimeoutError` and `HealthTimeoutError` also subclass the builtin
+  `TimeoutError`, so timeouts reach `except TimeoutError` handlers.
+
 ## [0.11.1] - 2026-09-08
 
 ### Added

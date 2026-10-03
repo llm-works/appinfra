@@ -71,7 +71,7 @@ ui = [
     "InquirerPy>=0.3.0,<1.0.0",
 ]
 sql = [
-    "sqlalchemy>=2.0.0,<3.0.0",
+    "sqlalchemy>=2.0.0,<2.1.0",
     "sqlalchemy-utils>=0.42.0,<1.0.0",
     "psycopg2-binary>=2.9.0,<3.0.0",
 ]
