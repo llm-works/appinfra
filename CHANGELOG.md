@@ -15,6 +15,11 @@ For API stability guarantees and deprecation policy, see
   anchored to the file that literally holds the call (`origin=".."` is one dir
   above it). Absolute paths unchanged.
 
+### Fixed
+- `ChannelTimeoutError` also subclasses the builtin `TimeoutError` again, so IPC
+  `submit` / `submit_stream` timeouts reach `except TimeoutError` handlers as
+  they did before the service framework.
+
 ## [0.11.1] - 2026-09-08
 
 ### Added

@@ -72,8 +72,13 @@ class ChannelError(Error):
     """Base error for channel operations."""
 
 
-class ChannelTimeoutError(ChannelError):
-    """Timeout waiting for message."""
+class ChannelTimeoutError(ChannelError, TimeoutError):
+    """
+    Timeout waiting for message.
+
+    Also a builtin TimeoutError, so generic ``except TimeoutError`` handlers
+    (and handlers registered for TimeoutError) catch channel timeouts.
+    """
 
 
 class ChannelClosedError(ChannelError):

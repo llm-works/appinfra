@@ -115,6 +115,15 @@ class TestIPCChannelSubmit:
         assert sent.data == "test"
 
     @pytest.mark.asyncio
+    async def test_submit_timeout_is_builtin_timeout_error(self, queues):
+        """Test submit timeout is caught by a plain `except TimeoutError`."""
+        request_q, response_q = queues
+        channel = IPCChannel(request_q, response_q, IPCConfig())
+
+        with pytest.raises(TimeoutError):
+            await channel.submit(MockRequest(id="req1", data="test"), timeout=0.05)
+
+    @pytest.mark.asyncio
     async def test_submit_receives_response(self, queues):
         """Test submit returns response when received."""
         request_q, response_q = queues
@@ -210,6 +219,18 @@ class TestIPCChannelStreaming:
 
         # Ensure background task completed
         await task
+
+    @pytest.mark.asyncio
+    async def test_submit_stream_timeout_is_builtin_timeout_error(self, queues):
+        """Test submit_stream timeout is caught by a plain `except TimeoutError`."""
+        request_q, response_q = queues
+        channel = IPCChannel(request_q, response_q, IPCConfig())
+
+        with pytest.raises(TimeoutError):
+            async for _ in channel.submit_stream(
+                MockRequest(id="s1", data="test"), timeout=0.05
+            ):
+                pass
 
     @pytest.mark.asyncio
     async def test_submit_stream_exceeds_max_pending(self, queues):
