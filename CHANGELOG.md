@@ -16,9 +16,8 @@ For API stability guarantees and deprecation policy, see
   above it). Absolute paths unchanged.
 
 ### Fixed
-- `ChannelTimeoutError` also subclasses the builtin `TimeoutError` again, so IPC
-  `submit` / `submit_stream` timeouts reach `except TimeoutError` handlers as
-  they did before the service framework.
+- `ChannelTimeoutError` and `HealthTimeoutError` also subclass the builtin
+  `TimeoutError`, so timeouts reach `except TimeoutError` handlers.
 
 ## [0.11.1] - 2026-09-08
 

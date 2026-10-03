@@ -37,7 +37,7 @@ class RunError(Error):
         super().__init__(f"{name}: {message}")
 
 
-class HealthTimeoutError(Error):
+class HealthTimeoutError(Error, TimeoutError):
     """Service health check timed out."""
 
     def __init__(self, name: str, timeout: float) -> None:
