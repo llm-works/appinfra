@@ -75,9 +75,14 @@ from pathlib import Path
 from typing import IO
 
 # Allow running from a source checkout without installing the package.
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+# Walk upward from the script to find the directory containing appinfra/.
+_script_dir = Path(__file__).resolve().parent
+for _ancestor in (_script_dir, *_script_dir.parents):
+    if (_ancestor / "appinfra").is_dir():
+        sys.path.insert(0, str(_ancestor))
+        break
 
-from appinfra.ui import status
+from appinfra.ui import status  # noqa: E402
 
 _MARKER_RE = re.compile(r"^#\s*ci-(run|skip|stop|timeout|requires):\s*(.*?)\s*$")
 _DEFAULT_TIMEOUT_S = 7.0
