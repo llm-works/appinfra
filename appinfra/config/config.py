@@ -46,7 +46,6 @@ APPINFRA_TOOLING_ENV_VARS: frozenset[str] = frozenset(
         "INFRA_DEV_MYPY_FLAGS",
         "INFRA_DEV_PKG_NAME",
         "INFRA_DEV_PROJECT_ROOT",
-        "INFRA_DEV_SETUP_EXTRAS",
         "INFRA_DEV_SKIP_TARGETS",
         "INFRA_DISABLE_GROUPS",
         "INFRA_DISABLE_TARGETS",

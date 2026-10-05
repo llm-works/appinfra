@@ -38,7 +38,9 @@ any other is rejected:
   interfaces and releases it; a port another process holds is unavailable.
 
 Scripts run with stdin closed and inherit the current working directory, so
-relative paths resolve the same way as under ``make``. Each case gets a
+relative paths resolve the same way as under ``make``. That directory, the
+project root, is prepended to ``PYTHONPATH``: examples import the project
+from the source tree, with or without an installed copy. Each case gets a
 private scratch directory as ``TMPDIR``, removed afterwards, so an example
 that writes files uses ``tempfile`` and lands there, never in the checkout.
 
@@ -290,6 +292,9 @@ def _spawn(cmd: list[str], scratch: Path) -> subprocess.Popen[str]:
     env = os.environ.copy()
     env["PYTHONUNBUFFERED"] = "1"
     env["TMPDIR"] = str(scratch)
+    env["PYTHONPATH"] = os.pathsep.join(
+        p for p in (os.getcwd(), env.get("PYTHONPATH")) if p
+    )
     return subprocess.Popen(
         cmd,
         stdin=subprocess.DEVNULL,
