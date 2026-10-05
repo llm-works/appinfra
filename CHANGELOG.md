@@ -14,8 +14,13 @@ For API stability guarantees and deprecation policy, see
 - `origin=` on `ConfigSpec` and `.config.with_spec()` accepts a relative path,
   anchored to the file that literally holds the call (`origin=".."` is one dir
   above it). Absolute paths unchanged.
+- **Breaking:** `make setup` installs dependencies only and never the project
+  itself, in every project including appinfra; `INFRA_DEV_SETUP_EXTRAS` is
+  removed. `make check` runs against the source tree without `make install`.
 
 ### Fixed
+- The Examples step of `make check` imports the project from the source tree,
+  as `make examples.check` does, so it passes without the project installed.
 - `make setup` no longer pulls the published package from the index for
   extras that reference the project itself (e.g. `pkg[extra]` in pkg's own
   extras); the dependencies come from the checked-out source.

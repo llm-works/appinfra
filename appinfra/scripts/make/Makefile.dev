@@ -34,11 +34,6 @@ INFRA_DEV_CHECK_SCRIPT ?= $(_MAKEFILE_DEV_DIR)../check.sh
 # Default for optional install extras (empty = base package only)
 INFRA_DEV_INSTALL_EXTRAS ?=
 
-# Default extras for setup (all dev-related extras)
-# Includes `sql` and `service` so the fallback `pip install -e .[...]` path
-# matches what install_deps.py installs (every optional-dependency group).
-INFRA_DEV_SETUP_EXTRAS ?= dev,ui,fastapi,validation,hotreload,docs,sql,service
-
 # Default PYTHON_ENVS to PYTHON if not set (backward compatibility)
 PYTHON_ENVS ?= $(PYTHON)
 
@@ -79,20 +74,17 @@ doctor:: ## Run project health checks
 
 ##@ Development
 
+# Installs dependencies only, never the project itself: `make check` and the
+# other dev targets run against the source tree, so a fresh clone needs only
+# `make setup` (no `make install`). install_deps.py is taken from the appinfra
+# copy this Makefile belongs to, so appinfra and downstream projects run the
+# same script.
 setup:: ## sets up dev environment with all dependencies for all PYTHON_ENVS
 	@echo "* setting up dev environment..."
 	@for pyenv in $(PYTHON_ENVS); do \
 		if [ -x "$$pyenv" ]; then \
 			echo "  → $$pyenv"; \
-			scripts_path=""; \
-			if command -v appinfra >/dev/null 2>&1; then \
-				scripts_path=$$(appinfra -q scripts-path 2>/dev/null); \
-			fi; \
-			if [ -n "$$scripts_path" ] && [ -f "$$scripts_path/install_deps.py" ]; then \
-				$$pyenv "$$scripts_path/install_deps.py"; \
-			else \
-				$$pyenv -m pip install -q -e ".[$(INFRA_DEV_SETUP_EXTRAS)]"; \
-			fi; \
+			$$pyenv $(_MAKEFILE_DEV_DIR)../install_deps.py || exit 1; \
 		else \
 			echo "  → $$pyenv (skipped, not found)"; \
 		fi; \
@@ -172,8 +164,8 @@ endif # skip type
 .PHONY: type
 
 examples.check:: ## Run every example script; fail on errors or timeouts
-	@if [ -d "examples" ]; then PYTHONPATH="$(CURDIR):$$PYTHONPATH" ${PYTHON} $(_MAKEFILE_DEV_DIR)../run_examples.py examples $(_INFRA_DEV_EXAMPLES_PG_FLAG); \
-	elif [ -d "$(INFRA_DEV_PKG_NAME)/examples" ]; then PYTHONPATH="$(CURDIR):$$PYTHONPATH" ${PYTHON} $(_MAKEFILE_DEV_DIR)../run_examples.py $(INFRA_DEV_PKG_NAME)/examples $(_INFRA_DEV_EXAMPLES_PG_FLAG); \
+	@if [ -d "examples" ]; then ${PYTHON} $(_MAKEFILE_DEV_DIR)../run_examples.py examples $(_INFRA_DEV_EXAMPLES_PG_FLAG); \
+	elif [ -d "$(INFRA_DEV_PKG_NAME)/examples" ]; then ${PYTHON} $(_MAKEFILE_DEV_DIR)../run_examples.py $(INFRA_DEV_PKG_NAME)/examples $(_INFRA_DEV_EXAMPLES_PG_FLAG); \
 	else echo "No examples directory found"; fi
 .PHONY: examples.check
 
