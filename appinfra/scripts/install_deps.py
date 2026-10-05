@@ -38,8 +38,8 @@ def requirement_name(requirement: str) -> str | None:
 def collect_deps(project: dict[str, Any]) -> list[str]:
     """Collect dependencies and all extras, minus requirements on the project."""
     own_name = normalize_name(project["name"])
-    deps = list(project["dependencies"])
-    for extras in project["optional-dependencies"].values():
+    deps = list(project.get("dependencies", []))
+    for extras in project.get("optional-dependencies", {}).values():
         deps.extend(extras)
     return [dep for dep in deps if requirement_name(dep) != own_name]
 
