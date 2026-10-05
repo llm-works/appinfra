@@ -28,6 +28,7 @@ from .spec import AUTO, Auto, ConfigFile, ConfigSpec, _resolve_origin
 #
 # When adding a new INFRA_* env var read directly via os.environ (not through
 # Config), add it here so Config does not try to interpret it as an override.
+# Retired tooling vars are kept so stale exports don't cause override errors.
 APPINFRA_TOOLING_ENV_VARS: frozenset[str] = frozenset(
     {
         "INFRA_CHECK_PYTEST_SUITE",
@@ -46,6 +47,7 @@ APPINFRA_TOOLING_ENV_VARS: frozenset[str] = frozenset(
         "INFRA_DEV_MYPY_FLAGS",
         "INFRA_DEV_PKG_NAME",
         "INFRA_DEV_PROJECT_ROOT",
+        "INFRA_DEV_SETUP_EXTRAS",  # retired in 0.12.0; kept for stale exports
         "INFRA_DEV_SKIP_TARGETS",
         "INFRA_DISABLE_GROUPS",
         "INFRA_DISABLE_TARGETS",
