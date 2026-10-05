@@ -16,6 +16,9 @@ For API stability guarantees and deprecation policy, see
   above it). Absolute paths unchanged.
 
 ### Fixed
+- `make setup` no longer pulls the published package from the index for
+  extras that reference the project itself (e.g. `pkg[extra]` in pkg's own
+  extras); the dependencies come from the checked-out source.
 - `ChannelTimeoutError` and `HealthTimeoutError` also subclass the builtin
   `TimeoutError`, so timeouts reach `except TimeoutError` handlers.
 
