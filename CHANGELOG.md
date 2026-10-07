@@ -17,6 +17,9 @@ For API stability guarantees and deprecation policy, see
 - **Breaking:** `make setup` installs dependencies only and never the project
   itself, in every project including appinfra; `INFRA_DEV_SETUP_EXTRAS` is
   removed. `make check` runs against the source tree without `make install`.
+- **Breaking:** log output without colors is the colored output minus ANSI codes:
+  `key[value]` instead of `[key:value]`, nested dicts nested the same way, the
+  `after` timing first, insertion order kept, and full tracebacks.
 
 ### Fixed
 - The Examples step of `make check` imports the project from the source tree,
@@ -26,6 +29,8 @@ For API stability guarantees and deprecation policy, see
   extras); the dependencies come from the checked-out source.
 - `ChannelTimeoutError` and `HealthTimeoutError` also subclass the builtin
   `TimeoutError`, so timeouts reach `except TimeoutError` handlers.
+- `extra={"exception": e}` renders the traceback of `e` itself, also when logged
+  outside its `except` block, instead of whichever exception is currently active.
 
 ## [0.11.1] - 2026-09-08
 
