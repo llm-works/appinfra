@@ -12,7 +12,6 @@ import collections
 import logging
 import os
 import re
-import sys
 import traceback
 from typing import Any, cast
 
@@ -38,28 +37,31 @@ def _visual_len(text: str) -> int:
 
 # Helper functions for FieldFormatter.format_field()
 
+_CacheKey = tuple[Any, str, str, str, str, bool, bool]
+
 
 def _get_cache_key(
-    value: Any, col: str, bold: str, name: str, quote: bool, is_timing: bool
-) -> tuple[Any, str, str, str, bool, bool] | None:
+    value: Any, col: str, bold: str, reset: str, name: str, quote: bool, is_timing: bool
+) -> _CacheKey | None:
     """Generate cache key for simple, cacheable values."""
     if isinstance(value, (str, int, float, bool)) and not isinstance(value, dict):
-        return (value, col, bold, name, quote, is_timing)
+        return (value, col, bold, reset, name, quote, is_timing)
     return None
 
 
-def _format_header(col: str, name: str, is_timing: bool = False) -> str:
+def _format_header(col: str, reset: str, name: str, is_timing: bool = False) -> str:
     """Format field header with color.
 
     Args:
         col: Color escape sequence.
+        reset: Reset escape sequence ("" without colors).
         name: Field name.
         is_timing: If True, this is the special top-level 'after' timing field,
             so omit the field name (display just the timing value in brackets).
     """
     if is_timing:
-        return ColorManager.RESET + col + "["
-    return ColorManager.RESET + col + name + "["
+        return reset + col + "["
+    return reset + col + name + "["
 
 
 def _format_value(
@@ -94,9 +96,7 @@ def _format_value(
     return bold + str(value)
 
 
-def _cache_result(
-    formatter: Any, cache_key: tuple[Any, str, str, str, bool, bool] | None, result: str
-) -> None:
+def _cache_result(formatter: Any, cache_key: _CacheKey | None, result: str) -> None:
     """Cache result with LRU eviction when cache is full."""
     if cache_key is None:
         return
@@ -112,7 +112,7 @@ def _cache_result(
         cache[cache_key] = result
 
 
-# Helper functions for LogFormatter._format_with_colors()
+# Helper functions for LogFormatter.format()
 
 
 def _escape_percent(s: str) -> str:
@@ -124,82 +124,10 @@ def _escape_percent(s: str) -> str:
     return s.replace("%", "%%")
 
 
-def _format_value_without_colors(value: Any) -> str:
-    """Format a value without colors, recursively handling nested dicts.
-
-    For nested dicts, all keys (including 'after') are treated as normal field names.
-    """
-    if isinstance(value, dict):
-        # Recursively format nested dict - no special keys at nested level
-        parts = []
-        for k, v in value.items():
-            parts.append(f"{k}:{_format_value_without_colors(v)}")
-        return "{" + ",".join(parts) + "}"
-    if isinstance(value, list):
-        return ",".join(_format_value_without_colors(v) for v in value)
-    return str(value)
-
-
-def _format_extra_without_colors(record: logging.LogRecord) -> str:
-    """Format extra fields without colors."""
-    extra = getattr(record, "__infra__extra", None)
-    if extra is None:
-        return ""
-
-    keys = extra.keys()
-    if not isinstance(extra, collections.OrderedDict):
-        keys = sorted(keys)
-
-    # Keys that get special handling at top level only
-    special_keys = {"after", "exception", "exception_formatted"}
-
-    extra_parts = []
-    for key in keys:
-        if key in special_keys:
-            continue
-        value = extra[key]
-        formatted = _format_value_without_colors(value)
-        extra_parts.append(f"[{key}:{_escape_percent(formatted)}]")
-
-    result = " " + " ".join(extra_parts) if extra_parts else ""
-
-    # Append exception info (prefer pre-formatted from queue mode)
-    if "exception_formatted" in extra:
-        result += "\n" + _escape_percent(extra["exception_formatted"])
-    elif "exception" in extra:
-        exc = extra["exception"]
-        if isinstance(exc, Exception):
-            result += f"\n{_escape_percent(f'{exc.__class__.__name__}: {exc}')}"
-
-    return result
-
-
-def _format_without_colors(
-    formatter: Any, record: logging.LogRecord, width: int
-) -> str:
-    """Format log record without colors."""
-    fmt = LogConstants.DEFAULT_FORMAT
-    rule = (
-        LogConstants.MICRO_RULE_WIDTH
-        if formatter._config.micros
-        else LogConstants.DEFAULT_RULE_WIDTH
-    )
-    fmt += " " * (max(1, rule - width))
-
-    # Handle extra fields
-    fmt += _format_extra_without_colors(record)
-
-    # Add process and logger name
-    fmt += " [%(process)d] [%(name)s]"
-
-    # Add location information
-    fmt += cast(str, formatter._location_renderer.render_location(record))
-
-    return fmt
-
-
-def _setup_level_colors(record: logging.LogRecord) -> tuple[str, str]:
-    """Setup colors for the log level."""
+def _level_colors(record: logging.LogRecord, colors: bool) -> tuple[str, str]:
+    """Return (color, bold) escape sequences for the record's level."""
+    if not colors:
+        return "", ""
     col = ColorManager.get_color_for_level(record.levelno) or ColorManager.DEFAULT
     bold = ColorManager.create_bold_color(col)
     col += "m"
@@ -214,18 +142,16 @@ def _format_extra_fields(
     if extra is None:
         return "", False
 
-    keys = extra.keys()
-    if not isinstance(extra, collections.OrderedDict):
-        keys = sorted(keys)
-
     add = formatter._field_formatter._format_fields_dict(extra, col, bold)
     return add, len(add) > 0
 
 
 def _add_metadata_section(formatter: Any, fmt: str, content: bool) -> str:
     """Add process and logger name metadata with gray color."""
-    col = ColorManager.create_gray_level(9) + "m"
-    bold = ColorManager.create_gray_level(9) + ";1m"
+    col, bold = "", ""
+    if formatter._config.colors:
+        col = ColorManager.create_gray_level(9) + "m"
+        bold = ColorManager.create_gray_level(9) + ";1m"
 
     if content:
         fmt += " "
@@ -235,9 +161,14 @@ def _add_metadata_section(formatter: Any, fmt: str, content: bool) -> str:
     return fmt
 
 
-def _format_colored(formatter: Any, record: logging.LogRecord, width: int) -> str:
-    """Format log record with colors and styling."""
-    col, bold = _setup_level_colors(record)
+def _format_record(formatter: Any, record: logging.LogRecord, width: int) -> str:
+    """Build the record's format string.
+
+    With colors disabled every escape sequence is empty, so the output is
+    the colored layout without ANSI codes.
+    """
+    colors = formatter._config.colors
+    col, bold = _level_colors(record, colors)
 
     # Format main fields
     fmt = formatter._field_formatter.format_field("%(asctime)s", col, "")
@@ -262,8 +193,9 @@ def _format_colored(formatter: Any, record: logging.LogRecord, width: int) -> st
     # Add location information
     fmt += cast(str, formatter._location_renderer.render_location(record))
 
-    fmt += ColorManager.RESET
-    return col + fmt
+    if not colors:
+        return fmt
+    return col + fmt + ColorManager.RESET
 
 
 class PreFormatter(logging.Formatter):
@@ -354,15 +286,17 @@ class FieldFormatter:
         Returns:
             Formatted field string with colors and brackets
         """
+        reset = ColorManager.RESET if self._holder.colors else ""
+
         # Check cache for simple, frequently repeated values
-        cache_key = _get_cache_key(value, col, bold, name, quote, is_timing)
+        cache_key = _get_cache_key(value, col, bold, reset, name, quote, is_timing)
         if cache_key and cache_key in self._format_cache:
             # Move to end to mark as recently used (LRU)
             self._format_cache.move_to_end(cache_key)
             return self._format_cache[cache_key]
 
         # Format the field
-        head = _format_header(col, name, is_timing=is_timing)
+        head = _format_header(col, reset, name, is_timing=is_timing)
         mid = _format_value(self, value, col, bold, name, is_timing=is_timing)
 
         # Escape % characters to prevent logging format errors.
@@ -370,7 +304,7 @@ class FieldFormatter:
         if quote and not isinstance(value, dict):
             mid = mid.replace("%", "%%")
 
-        tail = ColorManager.RESET + col + "]"
+        tail = reset + col + "]"
         result = head + mid + tail
 
         # Cache the result
@@ -424,17 +358,19 @@ class FieldFormatter:
         return s
 
     def _render_exception(self, e: Exception) -> str:
-        """Render exception traceback."""
+        """Render the exception's type, message and traceback.
+
+        Uses the exception's own __traceback__ rather than sys.exc_info(), so
+        the logged exception is rendered even outside its except block (no
+        frames if it was never raised).
+        """
         if not isinstance(e, Exception):
             raise FormatterError(f"Not an exception: {type(e)}")
 
-        exc_type, exc_value, exc_traceback = sys.exc_info()
-        if exc_type is None:
-            return str(e)
-        out = f"{exc_type.__name__}: {exc_value}"
+        out = f"{type(e).__name__}: {e}"
 
         for filename, lineno, function_name, text in traceback.extract_tb(
-            exc_traceback
+            e.__traceback__
         ):
             out += f'\n  File "{filename}", line {lineno}, in {function_name}'
             if text:
@@ -567,7 +503,7 @@ class LogFormatter(logging.Formatter):
             Formatted log message
         """
         width = self._calculate_width(record)
-        fmt = self._format_with_colors(record, width)
+        fmt = _format_record(self, record, width)
 
         # Check if micros config changed (hot-reload support)
         current_micros = self._config.micros
@@ -593,9 +529,3 @@ class LogFormatter(logging.Formatter):
         # "[" + timestamp + "] [" + level(1) + "] " + message
         #  1  +    12/16   +  4  +     1     +  2  + msg_len
         return 1 + timestamp_len + 4 + 1 + 2 + _visual_len(record.getMessage())
-
-    def _format_with_colors(self, record: logging.LogRecord, width: int) -> str:
-        """Format record with colors and styling."""
-        if not self._config.colors:
-            return _format_without_colors(self, record, width)
-        return _format_colored(self, record, width)
