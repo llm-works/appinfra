@@ -32,7 +32,7 @@ from .spec import AUTO, Auto, ConfigFile, ConfigSpec, _resolve_origin
 APPINFRA_TOOLING_ENV_VARS: frozenset[str] = frozenset(
     {
         "INFRA_CHECK_PYTEST_SUITE",
-        "INFRA_CICD_PYTHON_VERSION",
+        "INFRA_CICD_PYTHON_VERSION",  # retired in 0.12.0; kept for stale exports
         "INFRA_CLEAN_PRESERVE",
         "INFRA_COMPOSE_CMD",
         "INFRA_CONTAINER_CMD",

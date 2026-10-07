@@ -21,7 +21,7 @@
 #   include $(infra)/scripts/make/Makefile.dev
 #   include $(infra)/scripts/make/Makefile.install  # Optional: only if building a package
 #   include $(infra)/scripts/make/Makefile.pytest
-#   # Skip: Makefile.docs, Makefile.pg, Makefile.cicd if not needed
+#   # Skip: Makefile.docs, Makefile.pg if not needed
 #   include $(infra)/scripts/make/Makefile.clean
 
 # Determine the directory containing this Makefile
@@ -39,5 +39,4 @@ include $(_infra_make_dir)Makefile.install
 include $(_infra_make_dir)Makefile.pytest
 include $(_infra_make_dir)Makefile.docs
 include $(_infra_make_dir)Makefile.pg
-include $(_infra_make_dir)Makefile.cicd
 include $(_infra_make_dir)Makefile.clean

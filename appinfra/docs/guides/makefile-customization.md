@@ -96,10 +96,10 @@ Hide specific targets from `make help` and block their execution:
 
 ```makefile
 # Hide specific targets
-INFRA_DISABLE_TARGETS := pg.clean pg.clean.internal cicd.erase cicd.erase.internal
+INFRA_DISABLE_TARGETS := pg.clean pg.clean.internal pg.server.clean pg.server.clean.internal
 
 # Hide all targets with a prefix
-INFRA_DISABLE_GROUPS := pg. cicd.
+INFRA_DISABLE_GROUPS := pg. docs.
 ```
 
 `INFRA_DISABLE_TARGETS` matches names exactly. Confirm-prompt wrappers like `pg.clean` and their
@@ -399,8 +399,7 @@ These targets can be extended by defining them again in your Makefile:
   upfront; chaining destructive ops in here re-prompts.
 - `pg.clean.internal::` - The no-confirmation entry point. Use this when composing
   database cleanup into a downstream higher-level target so the user is prompted
-  once (at the top level), not once per layer. Mirrors `pg.server.clean.internal::`
-  and `cicd.erase.internal::`.
+  once (at the top level), not once per layer. Mirrors `pg.server.clean.internal::`.
 
 > **Non-interactive use:** Set `INFRA_NO_CONFIRM=1` to bypass all `areyousure` prompts
 > (intended for CI and scripts). See
@@ -474,17 +473,11 @@ All configuration variables follow the `INFRA_<MODULE>_<VAR>` naming convention.
 | `INFRA_PG_HOST` | `127.0.0.1` | PostgreSQL host |
 | `INFRA_PG_USER` | `postgres` | PostgreSQL user |
 
-**CI/CD (CICD):**
+**Container Runtime (PG):**
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `INFRA_CICD_PYTHON_VERSION` | `3.12` | Default Python version |
-
-**Container Runtime (cross-cutting: PG + CICD):**
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `INFRA_CONTAINER_CMD` | `docker` | Runtime used by `pg.*` / `cicd.*` targets (`ps`, `exec`, `volume`, ...). Also exported to helper shell scripts (`pg.sh`, `cicd-test.sh`). |
+| `INFRA_CONTAINER_CMD` | `docker` | Runtime used by `pg.*` targets (`ps`, `exec`, `volume`, ...). Also exported to the `pg.sh` helper script. |
 | `INFRA_COMPOSE_CMD` | `docker compose` | Compose orchestrator paired with `INFRA_CONTAINER_CMD`. |
 
 Set both together in `Makefile.local` to run the local-dev container layer under Podman:

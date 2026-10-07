@@ -37,19 +37,10 @@ clean:: areyousure ## restores project to original post-clone state (preserves .
 .PHONY: clean
 
 clean.full:: clean ## Complete cleanup: local files + Docker resources (if available)
-ifdef CICD_INCLUDED
-	@$(MAKE) cicd.erase.internal
-endif
 ifdef PG_INCLUDED
 	@$(MAKE) pg.server.clean.internal
-endif
-ifdef CICD_INCLUDED
-	@echo "* full cleanup complete - all files and Docker resources removed"
-else
-ifdef PG_INCLUDED
 	@echo "* full cleanup complete - all files and Docker resources removed"
 else
 	@echo "* full cleanup complete - all files removed (Docker not included, resources skipped)"
-endif
 endif
 .PHONY: clean.full

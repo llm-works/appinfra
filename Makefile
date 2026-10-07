@@ -53,5 +53,4 @@ include $(local)/scripts/make/Makefile.install
 include $(local)/scripts/make/Makefile.pytest
 include $(local)/scripts/make/Makefile.docs
 include $(local)/scripts/make/Makefile.pg
-include $(local)/scripts/make/Makefile.cicd
 include $(local)/scripts/make/Makefile.clean
