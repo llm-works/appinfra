@@ -86,7 +86,6 @@ include $(infra)/make/Makefile.install  # Optional: only if building a package
 include $(infra)/make/Makefile.pytest   # Requires: env
 include $(infra)/make/Makefile.docs     # Requires: env
 include $(infra)/make/Makefile.pg       # Requires: env, utils
-include $(infra)/make/Makefile.cicd     # Standalone
 include $(infra)/make/Makefile.clean    # Requires: utils
 ```
 
@@ -139,7 +138,7 @@ INFRA_PYTEST_TESTS_DIR := tests
 INFRA_DOCS_CONFIG_FILE := mkdocs.yaml
 
 # Hide unused features
-INFRA_DISABLE_GROUPS := pg. cicd.
+INFRA_DISABLE_GROUPS := pg.
 
 include $(infra)/make/Makefile.all
 ```
@@ -239,7 +238,7 @@ myproject/
 # Makefile
 infra := $(shell appinfra scripts-path)
 INFRA_DEV_PKG_NAME := myproject
-INFRA_DISABLE_GROUPS := pg. cicd.
+INFRA_DISABLE_GROUPS := pg.
 
 include $(infra)/make/Makefile.all
 

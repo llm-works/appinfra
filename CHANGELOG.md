@@ -21,6 +21,10 @@ For API stability guarantees and deprecation policy, see
   `key[value]` instead of `[key:value]`, nested dicts nested the same way, the
   `after` timing first, insertion order kept, and full tracebacks.
 
+### Removed
+- **Breaking:** the `cicd.*` Make targets (`Makefile.cicd`) and `test.ci`. The CI
+  workflows run the Docker image through `docker compose` directly.
+
 ### Fixed
 - The Examples step of `make check` imports the project from the source tree,
   as `make examples.check` does, so it passes without the project installed.
