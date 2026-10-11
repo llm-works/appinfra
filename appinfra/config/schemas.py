@@ -123,6 +123,9 @@ try:
         create_db: bool = Field(
             default=False, description="Create database if not exists"
         )
+        expire_on_commit: bool = Field(
+            default=False, description="Expire ORM objects when session() commits"
+        )
         # Auto-reconnect settings
         auto_reconnect: bool = Field(
             default=True, description="Enable automatic reconnection"
