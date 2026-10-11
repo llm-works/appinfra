@@ -622,7 +622,8 @@ print(user.name)  # loaded inside the block, readable after it
 
 The session closes when the block exits, so returned objects are detached:
 
-- Attributes loaded inside the block stay readable.
+- Attributes loaded inside the block stay readable, unless expired by a rollback
+  (`session.rollback()` expires objects even when `expire_on_commit` is false).
 - Lazy relationships not loaded inside the block raise `DetachedInstanceError` on access.
   Eager-load them in the block (`selectinload`, `joinedload`).
 - The exit commit does not expire objects by default. With `expire_on_commit: true` in the
