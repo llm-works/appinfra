@@ -151,6 +151,7 @@ dbs:
 | `pool_pre_ping` | bool | true | Enable connection health checks |
 | `readonly` | bool | false | Read-only mode |
 | `create_db` | bool | false | Create database if not exists |
+| `expire_on_commit` | bool | false | Expire loaded ORM objects when `session()` commits (see [Returning ORM Objects](#returning-orm-objects)) |
 | `extensions` | list | [] | PostgreSQL extensions to create |
 | `schema` | string | null | PostgreSQL schema for isolation |
 
@@ -604,6 +605,33 @@ pg = PG(lg, cfg.dbs.production)
 with pg.session() as session:
     users = session.query(User).filter(User.name == "John").all()
 ```
+
+### Returning ORM Objects
+
+Objects loaded in a `session()` block can be returned from it:
+
+```python
+def get_user(pg: PG, user_id: int) -> User | None:
+    with pg.session() as session:
+        return session.get(User, user_id)
+
+
+user = get_user(pg, 1)
+print(user.name)  # loaded inside the block, readable after it
+```
+
+The session closes when the block exits, so returned objects are detached:
+
+- Attributes loaded inside the block stay readable.
+- Lazy relationships not loaded inside the block raise `DetachedInstanceError` on access.
+  Eager-load them in the block (`selectinload`, `joinedload`).
+- The exit commit does not expire objects by default. With `expire_on_commit: true` in the
+  database config, it does, and the first attribute access on a returned object raises
+  `DetachedInstanceError`. Enable it only for code that calls `session.commit()` mid-block and
+  needs fresh values from the database afterwards.
+
+AUTOCOMMIT sessions (`autocommit=True`) never expire objects on commit. `SQLite.session()`
+behaves the same and reads the same `expire_on_commit` option.
 
 ## See Also
 
