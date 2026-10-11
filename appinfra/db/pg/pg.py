@@ -145,7 +145,10 @@ class PG(Interface):
         """Create SQLAlchemy engine and session maker, ensuring DB exists."""
         engine_kwargs = ConfigValidator.get_engine_kwargs(cfg)
         self._engine = sqlalchemy.create_engine(self._cfg.url, **engine_kwargs)
-        self._SessionCls = sqlalchemy.orm.sessionmaker(bind=self._engine)
+        self._SessionCls = sqlalchemy.orm.sessionmaker(
+            bind=self._engine,
+            expire_on_commit=getattr(cfg, "expire_on_commit", False),
+        )
         self._ensure_database_exists()
 
     def _ensure_database_exists(self) -> None:
@@ -408,6 +411,14 @@ class PG(Interface):
                         Each statement commits immediately. Use for read-heavy workloads.
                         If False (default), wraps in a transaction with auto-commit on
                         success and rollback on exception.
+
+        ORM objects loaded in the block can be returned from it. The session is
+        closed on exit, so they come back detached; attributes loaded inside the
+        block stay readable, while unloaded lazy relationships raise
+        DetachedInstanceError (eager-load them inside the block, e.g. with
+        selectinload). In transactional mode the exit commit expires objects only
+        when the config sets ``expire_on_commit: true``; detached expired objects
+        cannot be refreshed. AUTOCOMMIT sessions never expire on commit.
 
         Yields:
             SQLAlchemy session instance

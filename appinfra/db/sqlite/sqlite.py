@@ -98,7 +98,10 @@ class SQLite(Interface):
         # Create engine and session factory
         engine_kwargs = _get_engine_kwargs(cfg)
         self._engine: Engine = sqlalchemy.create_engine(cfg.url, **engine_kwargs)
-        self._SessionCls = sqlalchemy.orm.sessionmaker(bind=self._engine)
+        self._SessionCls = sqlalchemy.orm.sessionmaker(
+            bind=self._engine,
+            expire_on_commit=getattr(cfg, "expire_on_commit", False),
+        )
 
         self._lg.debug("initialized", extra={"url": self._safe_url})
 
@@ -151,6 +154,12 @@ class SQLite(Interface):
         Args:
             autocommit: If True, raises NotImplementedError (SQLite doesn't support
                         AUTOCOMMIT mode via this interface).
+
+        Commits on success, rolls back on exception, and closes on exit. ORM
+        objects returned from the block come back detached: attributes loaded
+        inside the block stay readable, while unloaded lazy relationships raise
+        DetachedInstanceError. The exit commit expires objects only when the
+        config sets ``expire_on_commit: true``.
 
         Yields:
             Database session instance

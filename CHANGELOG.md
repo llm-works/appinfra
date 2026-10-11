@@ -20,6 +20,10 @@ For API stability guarantees and deprecation policy, see
 - **Breaking:** log output without colors is the colored output minus ANSI codes:
   `key[value]` instead of `[key:value]`, nested dicts nested the same way, the
   `after` timing first, insertion order kept, and full tracebacks.
+- **Breaking:** `PG.session()` and `SQLite.session()` no longer expire ORM objects
+  when they commit, so objects returned from the block stay readable instead of
+  raising `DetachedInstanceError`. Set `expire_on_commit: true` in the database
+  config to restore expiry.
 
 ### Removed
 - **Breaking:** the `cicd.*` Make targets (`Makefile.cicd`) and `test.ci`. The CI
