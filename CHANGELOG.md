@@ -10,6 +10,8 @@ For API stability guarantees and deprecation policy, see
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-10-10
+
 ### Changed
 - `origin=` on `ConfigSpec` and `.config.with_spec()` accepts a relative path,
   anchored to the file that literally holds the call (`origin=".."` is one dir
@@ -1015,7 +1017,8 @@ as config. Affected: `ConfigValidator`, `PG.readonly`, `PG.migrate()`,
 ### Changed
 - Package renamed to `appinfra` (install and import both use `appinfra`)
 
-[Unreleased]: https://github.com/llm-works/appinfra/compare/v0.11.1...HEAD
+[Unreleased]: https://github.com/llm-works/appinfra/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/llm-works/appinfra/compare/v0.11.1...v0.12.0
 [0.11.1]: https://github.com/llm-works/appinfra/compare/v0.11.0...v0.11.1
 [0.11.0]: https://github.com/llm-works/appinfra/compare/v0.10.5...v0.11.0
 [0.10.5]: https://github.com/llm-works/appinfra/compare/v0.10.4...v0.10.5
