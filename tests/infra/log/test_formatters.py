@@ -64,6 +64,22 @@ def log_record():
     return record
 
 
+def _make_record(extra: dict) -> logging.LogRecord:
+    """Create an INFO record named 'test' carrying the given extra fields."""
+    record = logging.LogRecord(
+        name="test",
+        level=logging.INFO,
+        pathname="/test.py",
+        lineno=10,
+        msg="test message",
+        args=(),
+        exc_info=None,
+    )
+    record.created = 1234567890.5
+    setattr(record, "__infra__extra", extra)
+    return record
+
+
 # =============================================================================
 # Test Helper Functions
 # =============================================================================
@@ -75,31 +91,39 @@ class TestHelperFunctions:
 
     def test_get_cache_key_with_cacheable_value(self):
         """Test cache key generation for cacheable values."""
-        key = _get_cache_key("test", "col", "bold", "name", False, False)
-        assert key == ("test", "col", "bold", "name", False, False)
+        key = _get_cache_key("test", "col", "bold", "rst", "name", False, False)
+        assert key == ("test", "col", "bold", "rst", "name", False, False)
 
     def test_get_cache_key_with_int(self):
         """Test cache key generation for integers."""
-        key = _get_cache_key(123, "col", "bold", "name", True, False)
-        assert key == (123, "col", "bold", "name", True, False)
+        key = _get_cache_key(123, "col", "bold", "rst", "name", True, False)
+        assert key == (123, "col", "bold", "rst", "name", True, False)
 
     def test_get_cache_key_with_dict_returns_none(self):
         """Test cache key returns None for dict."""
-        key = _get_cache_key({"key": "value"}, "col", "bold", "name", False, False)
+        key = _get_cache_key(
+            {"key": "value"}, "col", "bold", "rst", "name", False, False
+        )
         assert key is None
 
     def test_get_cache_key_with_list_returns_none(self):
         """Test cache key returns None for list."""
-        key = _get_cache_key([1, 2, 3], "col", "bold", "name", False, False)
+        key = _get_cache_key([1, 2, 3], "col", "bold", "rst", "name", False, False)
         assert key is None
 
     def test_get_cache_key_includes_is_timing(self):
         """Test cache key includes is_timing to differentiate timing vs normal fields."""
-        key_normal = _get_cache_key(1.5, "col", "bold", "after", True, False)
-        key_timing = _get_cache_key(1.5, "col", "bold", "after", True, True)
+        key_normal = _get_cache_key(1.5, "col", "bold", "rst", "after", True, False)
+        key_timing = _get_cache_key(1.5, "col", "bold", "rst", "after", True, True)
         assert key_normal != key_timing
-        assert key_normal == (1.5, "col", "bold", "after", True, False)
-        assert key_timing == (1.5, "col", "bold", "after", True, True)
+        assert key_normal == (1.5, "col", "bold", "rst", "after", True, False)
+        assert key_timing == (1.5, "col", "bold", "rst", "after", True, True)
+
+    def test_get_cache_key_includes_reset(self):
+        """Colored and uncolored renderings of the same field get distinct keys."""
+        colored = _get_cache_key("v", "", "", ColorManager.RESET, "k", True, False)
+        plain = _get_cache_key("v", "", "", "", "k", True, False)
+        assert colored != plain
 
     def test_visual_len_plain_text(self):
         """Test visual length for plain text without ANSI codes."""
@@ -114,7 +138,7 @@ class TestHelperFunctions:
 
     def test_format_header_normal(self):
         """Test format header for normal fields."""
-        result = _format_header("\033[34", "test")
+        result = _format_header("\033[34", ColorManager.RESET, "test")
         assert "\x1b[0m" in result  # RESET (actual escape sequence)
         assert "\033[34" in result  # color
         assert "test[" in result
@@ -122,10 +146,14 @@ class TestHelperFunctions:
     def test_format_header_for_after_field(self):
         """Test format header for 'after' timing field (no name shown)."""
         # With is_timing=True, the field name is omitted
-        result = _format_header("\033[34", "after", is_timing=True)
+        result = _format_header("\033[34", ColorManager.RESET, "after", is_timing=True)
         assert "\x1b[0m" in result  # actual escape sequence
         assert "[" in result
         assert "after[" not in result  # Should not include 'after' text
+
+    def test_format_header_without_colors(self):
+        """Test format header with empty escape sequences."""
+        assert _format_header("", "", "test") == "test["
 
     def test_format_value_with_simple_list(self):
         """Test format value with simple list."""
@@ -606,139 +634,71 @@ class TestMissingCoverage:
         assert "," in result
 
     def test_format_without_colors_with_extra_fields(self):
-        """Test _format_without_colors with extra fields (lines 86-92, 95)."""
-        from appinfra.log.formatters import _format_without_colors
+        """Extra fields render as key[value] without colors."""
+        formatter = LogFormatter(LogConfig(location=0, micros=False, colors=False))
+        record = _make_record({"key1": "value1", "key2": "value2"})
 
-        config = LogConfig(location=0, micros=False, colors=False)
-        formatter = LogFormatter(config)
+        result = formatter.format(record)
 
-        record = logging.LogRecord(
-            name="test",
-            level=logging.INFO,
-            pathname="/test.py",
-            lineno=10,
-            msg="test message",
-            args=(),
-            exc_info=None,
-        )
-        setattr(record, "__infra__extra", {"key1": "value1", "key2": "value2"})
+        assert " key1[value1] key2[value2] " in result
+        assert f"[{record.process}] [test]" in result
+        assert "\x1b" not in result
 
-        result = _format_without_colors(formatter, record, 50)
+    def test_format_without_colors_renders_after_first(self):
+        """The 'after' timing renders first, as a time delta, without colors."""
+        from appinfra import time as infratime
 
-        # Should include extra fields in brackets
-        assert "[key1:value1]" in result
-        assert "[key2:value2]" in result
-        assert "[%(process)d]" in result
-        assert "[%(name)s]" in result
+        formatter = LogFormatter(LogConfig(location=0, micros=False, colors=False))
+        record = _make_record({"other": "value", "after": 1.5})
 
-    def test_format_without_colors_with_after_field_skipped(self):
-        """Test _format_without_colors skips 'after' field (line 86-87)."""
-        from appinfra.log.formatters import _format_without_colors
+        result = formatter.format(record)
 
-        config = LogConfig(location=0, micros=False, colors=False)
-        formatter = LogFormatter(config)
+        delta = infratime.delta.delta_str(1.5, precise=False)
+        assert f"[{delta}] other[value]" in result
+        assert "after[" not in result
 
-        record = logging.LogRecord(
-            name="test",
-            level=logging.INFO,
-            pathname="/test.py",
-            lineno=10,
-            msg="test message",
-            args=(),
-            exc_info=None,
-        )
-        setattr(record, "__infra__extra", {"after": 1.5, "other": "value"})
+    def test_format_without_colors_renders_traceback(self):
+        """An exception logged inside its handler renders its traceback."""
+        formatter = LogFormatter(LogConfig(location=0, micros=False, colors=False))
 
-        result = _format_without_colors(formatter, record, 50)
+        try:
+            raise ValueError("test error")
+        except ValueError as e:
+            record = _make_record({"exception": e, "context": "info"})
+            result = formatter.format(record)
 
-        # 'after' field should be skipped
-        assert "[after:" not in result
-        # Other fields should be included
-        assert "[other:value]" in result
+        assert "context[info]" in result
+        assert "\nValueError: test error\n  File " in result
+        assert "test_format_without_colors_renders_traceback" in result
 
-    def test_format_without_colors_with_exception_in_extra(self):
-        """Test _format_without_colors with exception in extra fields (lines 89-90)."""
-        from appinfra.log.formatters import _format_without_colors
+    def test_format_without_colors_keeps_insertion_order(self):
+        """Extra fields keep insertion order for plain dicts, as with colors."""
+        formatter = LogFormatter(LogConfig(location=0, micros=False, colors=False))
+        record = _make_record({"z_key": "z_val", "a_key": "a_val"})
 
-        config = LogConfig(location=0, micros=False, colors=False)
-        formatter = LogFormatter(config)
+        result = formatter.format(record)
 
-        record = logging.LogRecord(
-            name="test",
-            level=logging.ERROR,
-            pathname="/test.py",
-            lineno=10,
-            msg="error occurred",
-            args=(),
-            exc_info=None,
-        )
-        setattr(
-            record,
-            "__infra__extra",
-            {
-                "exception": ValueError("test error"),
-                "context": "info",
-            },
-        )
+        assert result.index("z_key[") < result.index("a_key[")
 
-        result = _format_without_colors(formatter, record, 50)
+    @pytest.mark.parametrize("location", [0, 1])
+    def test_format_without_colors_is_colored_minus_ansi(self, location):
+        """The uncolored output equals the colored output with ANSI codes removed."""
+        from appinfra.log.formatters import _ANSI_PATTERN
 
-        # Exception should be formatted on a new line
-        assert "ValueError: test error" in result
-        assert "[context:info]" in result
+        extra = {
+            "after": 0.25,
+            "count": 3,
+            "nested": {"after": "cursor", "items": [1, 2]},
+            "query": "x = %(id)s",
+            "exception_formatted": "ValueError: boom",
+        }
+        colored = LogFormatter(LogConfig(location=location, micros=False, colors=True))
+        plain = LogFormatter(LogConfig(location=location, micros=False, colors=False))
 
-    def test_format_without_colors_with_ordered_dict(self):
-        """Test _format_without_colors with OrderedDict extra fields."""
-        from appinfra.log.formatters import _format_without_colors
+        record = _make_record(extra)
 
-        config = LogConfig(location=0, micros=False, colors=False)
-        formatter = LogFormatter(config)
-
-        record = logging.LogRecord(
-            name="test",
-            level=logging.INFO,
-            pathname="/test.py",
-            lineno=10,
-            msg="test",
-            args=(),
-            exc_info=None,
-        )
-        # Use OrderedDict - keys should NOT be sorted
-        setattr(
-            record,
-            "__infra__extra",
-            collections.OrderedDict([("z_key", "z_val"), ("a_key", "a_val")]),
-        )
-
-        result = _format_without_colors(formatter, record, 50)
-
-        # Should include both keys
-        assert "z_key" in result
-        assert "a_key" in result
-
-    def test_format_without_colors_with_regular_dict_sorts_keys(self):
-        """Test _format_without_colors sorts keys for regular dicts."""
-        from appinfra.log.formatters import _format_without_colors
-
-        config = LogConfig(location=0, micros=False, colors=False)
-        formatter = LogFormatter(config)
-
-        record = logging.LogRecord(
-            name="test",
-            level=logging.INFO,
-            pathname="/test.py",
-            lineno=10,
-            msg="test",
-            args=(),
-            exc_info=None,
-        )
-        setattr(record, "__infra__extra", {"z_key": "z_val", "a_key": "a_val"})
-
-        result = _format_without_colors(formatter, record, 50)
-
-        # Both keys should be present (sorted order expected)
-        assert "z_key" in result
-        assert "a_key" in result
+        expected = _ANSI_PATTERN.sub("", colored.format(record))
+        assert plain.format(record) == expected
 
     def test_format_fields_dict_with_after_field(self, formatter_config):
         """Test _format_fields_dict handles 'after' field specially (line 250)."""
@@ -822,6 +782,32 @@ class TestMissingCoverage:
         assert "inner_function" in result
         assert "outer_function" in result
 
+    def test_render_exception_uses_own_traceback(self, formatter_config):
+        """A stored exception renders its own traceback, not the active one."""
+        formatter = FieldFormatter(formatter_config)
+
+        def fail_stored():
+            raise ValueError("stored")
+
+        try:
+            fail_stored()
+        except ValueError as e:
+            stored = e
+
+        try:
+            raise KeyError("active")
+        except KeyError:
+            result = formatter._render_exception(stored)
+
+        assert result.startswith("ValueError: stored\n")
+        assert "fail_stored" in result
+        assert "KeyError" not in result
+
+    def test_render_exception_never_raised(self, formatter_config):
+        """An exception that was never raised renders type and message only."""
+        formatter = FieldFormatter(formatter_config)
+        assert formatter._render_exception(ValueError("x")) == "ValueError: x"
+
     def test_render_exception_with_non_exception_raises(self, formatter_config):
         """Test _render_exception raises FormatterError for non-exceptions (line 270-271)."""
         from appinfra.log.errors import FormatterError
@@ -841,76 +827,32 @@ class TestMissingCoverage:
             formatter._render_exception(12345)
 
     def test_format_without_colors_empty_extra(self):
-        """Test _format_without_colors with empty _extra dict."""
-        from appinfra.log.formatters import _format_without_colors
+        """An empty extra dict still renders process and logger name."""
+        formatter = LogFormatter(LogConfig(location=0, micros=False, colors=False))
+        record = _make_record({})
 
-        config = LogConfig(location=0, micros=False, colors=False)
-        formatter = LogFormatter(config)
+        result = formatter.format(record)
 
-        record = logging.LogRecord(
-            name="test",
-            level=logging.INFO,
-            pathname="/test.py",
-            lineno=10,
-            msg="test",
-            args=(),
-            exc_info=None,
-        )
-        setattr(record, "__infra__extra", {})
-
-        result = _format_without_colors(formatter, record, 50)
-
-        # Should still work with empty extra
-        assert "[%(process)d]" in result
-        assert "[%(name)s]" in result
+        assert result.endswith(f" [{record.process}] [test]")
 
     def test_format_without_colors_with_micros(self):
-        """Test _format_without_colors with micros=True."""
-        from appinfra.log.formatters import _format_without_colors
+        """Without colors, micros=True adds the sub-millisecond digits."""
+        formatter = LogFormatter(LogConfig(location=0, micros=True, colors=False))
+        record = _make_record({})
+        record.created = 1234567890.123456
 
-        config = LogConfig(location=0, micros=True, colors=False)
-        formatter = LogFormatter(config)
+        result = formatter.format(record)
 
-        record = logging.LogRecord(
-            name="test",
-            level=logging.INFO,
-            pathname="/test.py",
-            lineno=10,
-            msg="test",
-            args=(),
-            exc_info=None,
-        )
+        assert ".456] [I] test message" in result
 
-        result = _format_without_colors(formatter, record, 50)
+    def test_format_without_colors_nested_after(self):
+        """'after' in a nested dict is a normal field name without colors."""
+        formatter = LogFormatter(LogConfig(location=0, micros=False, colors=False))
+        record = _make_record({"nested": {"after": "cursor_id", "limit": 100}})
 
-        # Should use micro rule width (different spacing)
-        assert isinstance(result, str)
+        result = formatter.format(record)
 
-    def test_format_extra_without_colors_nested_after(self):
-        """Test that 'after' in nested dicts is preserved in non-colored output."""
-        from appinfra.log.formatters import _format_extra_without_colors
-
-        record = logging.LogRecord(
-            name="test",
-            level=logging.INFO,
-            pathname="/test.py",
-            lineno=10,
-            msg="test",
-            args=(),
-            exc_info=None,
-        )
-        # Nested dict with 'after' key - should be preserved as field name
-        setattr(
-            record, "__infra__extra", {"nested": {"after": "cursor_id", "limit": 100}}
-        )
-
-        result = _format_extra_without_colors(record)
-
-        # The nested 'after' should appear as a field name, not be omitted
-        assert "after" in result
-        assert "cursor_id" in result
-        assert "limit" in result
-        assert "100" in result
+        assert "nested[after[cursor_id] limit[100]]" in result
 
     def test_format_exception_with_percent_placeholders_no_colors(self):
         """Test formatting exception with %-style placeholders doesn't crash.
@@ -919,8 +861,6 @@ class TestMissingCoverage:
         (common in SQLAlchemy errors) were being interpreted as format
         placeholders, causing KeyError during formatting.
         """
-        from appinfra.log.formatters import _format_without_colors
-
         config = LogConfig(location=0, micros=False, colors=False)
         formatter = LogFormatter(config)
 
@@ -937,11 +877,6 @@ class TestMissingCoverage:
         # Exception with %-style placeholder in message (like SQLAlchemy errors)
         exc = ValueError("Missing parameter %(context_pattern)s in query")
         setattr(record, "__infra__extra", {"exception": exc})
-
-        # Verify exception is included in format string
-        fmt = _format_without_colors(formatter, record, 50)
-        assert "ValueError" in fmt, f"Exception not in format: {fmt!r}"
-        assert "context_pattern" in fmt
 
         # This should NOT raise KeyError: 'context_pattern'
         result = formatter.format(record)
@@ -972,7 +907,6 @@ class TestMissingCoverage:
         result = formatter.format(record)
 
         # The exception message should appear in output
-        # (Note: without active traceback, _render_exception returns just str(e))
         assert "context_pattern" in result
         assert "Missing parameter" in result
 

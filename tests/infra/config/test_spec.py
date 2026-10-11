@@ -217,6 +217,102 @@ class TestExplicitParts:
     def test_auto_is_the_default_and_reprs_as_such(self):
         assert repr(AUTO) == "AUTO"
 
+
+# =============================================================================
+# Construction: relative origin
+# =============================================================================
+
+
+@pytest.mark.unit
+class TestRelativeOrigin:
+    """A relative ``origin`` anchors to the direct caller's ``__file__``.
+
+    The tests exec ConfigSpec from a synthetic module (a controlled
+    ``__file__`` in the exec globals) so the anchor can be asserted
+    independently of the test file's own path.
+    """
+
+    def test_dot_anchors_to_caller_directory(self, tmp_path):
+        caller = tmp_path / "app.py"
+        caller.write_text("")
+        ns = {"__file__": str(caller), "ConfigSpec": ConfigSpec}
+        exec(
+            "spec = ConfigSpec('ns', 'demo', origin='.', "
+            "etc_dir='cfg', filename='x.yaml')",
+            ns,
+        )
+        assert ns["spec"].base_config == (tmp_path / "cfg" / "x.yaml").resolve()
+
+    def test_dotdot_anchors_one_dir_above_caller(self, tmp_path):
+        sub = tmp_path / "pkg"
+        sub.mkdir()
+        caller = sub / "cli.py"
+        caller.write_text("")
+        ns = {"__file__": str(caller), "ConfigSpec": ConfigSpec}
+        exec(
+            "spec = ConfigSpec('ns', 'demo', origin='..', "
+            "etc_dir='cfg', filename='x.yaml')",
+            ns,
+        )
+        assert ns["spec"].base_config == (tmp_path / "cfg" / "x.yaml").resolve()
+
+    def test_relative_path_object_is_accepted(self, tmp_path):
+        caller = tmp_path / "app.py"
+        caller.write_text("")
+        ns = {
+            "__file__": str(caller),
+            "ConfigSpec": ConfigSpec,
+            "Path": Path,
+        }
+        exec(
+            "spec = ConfigSpec('ns', 'demo', origin=Path('sub'), "
+            "etc_dir='cfg', filename='x.yaml')",
+            ns,
+        )
+        assert ns["spec"].base_config == (tmp_path / "sub" / "cfg" / "x.yaml").resolve()
+
+    def test_absolute_path_is_used_as_is(self, tmp_path):
+        caller = tmp_path / "unrelated" / "app.py"
+        caller.parent.mkdir()
+        caller.write_text("")
+        anchor = tmp_path / "elsewhere"
+        anchor.mkdir()
+        ns = {
+            "__file__": str(caller),
+            "ConfigSpec": ConfigSpec,
+            "anchor": str(anchor),
+        }
+        exec(
+            "spec = ConfigSpec('ns', 'demo', origin=anchor, "
+            "etc_dir='cfg', filename='x.yaml')",
+            ns,
+        )
+        assert ns["spec"].base_config == (anchor / "cfg" / "x.yaml").resolve()
+
+    def test_wrapper_anchors_to_wrapper_file_not_outer_caller(self, tmp_path):
+        """The direct caller of ConfigSpec wins; wrappers cannot shift the anchor."""
+        project = tmp_path / "project"
+        wrapper_dir = project / "libs" / "helper"
+        wrapper_dir.mkdir(parents=True)
+        wrapper = wrapper_dir / "wrap.py"
+        wrapper.write_text(
+            "from appinfra.config import ConfigSpec\n"
+            "def make():\n"
+            "    return ConfigSpec('ns', 'demo', origin='../..', "
+            "etc_dir='cfg', filename='x.yaml')\n"
+        )
+        ns = {"__file__": str(wrapper)}
+        exec(wrapper.read_text(), ns)
+        result = ns["make"]()
+        # wrapper.parent = project/libs/helper; "../.." = project
+        assert result.base_config == (project / "cfg" / "x.yaml").resolve()
+
+    def test_no_caller_file_raises(self):
+        """A frame with no ``__file__`` (REPL, some exec forms) gets a clear error."""
+        ns = {"ConfigSpec": ConfigSpec}  # no __file__
+        with pytest.raises(ValueError, match="relative origin requires"):
+            exec("ConfigSpec('ns', 'demo', origin='..')", ns)
+
     def test_empty_identity_rejected(self):
         with pytest.raises(ValueError, match="non-empty"):
             ConfigSpec("", "pkg", path="/x.yaml")

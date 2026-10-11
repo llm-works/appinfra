@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Self, TypedDict, Unpack
 
 from ....config import AUTO, Auto, ConfigSpec
+from ....config.spec import _resolve_origin
 from ....dot_dict import DotDict
 from .block import check_fields, close_on_error
 
@@ -74,12 +75,15 @@ class ConfigConfigurer:
         (the module named after the config or the calling script, ``etc``,
         ``<name>.yaml``); ``path`` names the file outright. An explicit
         ``origin`` is also the include boundary, so a base whose includes
-        climb above its ``etc/`` passes the directory they may reach. At
-        setup the App resolves the spec against ``--etc-dir`` and
-        ``--config`` (when exposed via ``.cli(config_file=True)``), the
-        project-local walk-up, XDG overlays and the packaged base. See
-        ``ConfigSpec``.
+        climb above its ``etc/`` passes the directory they may reach. A
+        relative ``origin`` anchors to this call's own file (``".."`` is
+        one dir above it); an absolute path is used as-is. At setup the
+        App resolves the spec against ``--etc-dir`` and ``--config`` (when
+        exposed via ``.cli(config_file=True)``), the project-local
+        walk-up, XDG overlays and the packaged base. See ``ConfigSpec``.
         """
+        if origin is not None and not isinstance(origin, Auto):
+            origin = _resolve_origin(origin, frame_depth=1)
         self._app_builder._config_spec = ConfigSpec(
             namespace,
             name,
@@ -157,10 +161,13 @@ class ConfigConfigurer:
             if spec_keys & fields.keys():
                 if "namespace" not in fields or "name" not in fields:
                     raise ValueError("namespace and name are required together")
+                origin: str | Path | Auto = fields.get("origin", AUTO)
+                if origin is not None and not isinstance(origin, Auto):
+                    origin = _resolve_origin(origin, frame_depth=1)
                 self.with_spec(
                     fields["namespace"],
                     fields["name"],
-                    origin=fields.get("origin", AUTO),
+                    origin=origin,
                     etc_dir=fields.get("etc_dir", "etc"),
                     filename=fields.get("filename", AUTO),
                     path=fields.get("path"),

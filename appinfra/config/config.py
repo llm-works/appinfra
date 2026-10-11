@@ -19,7 +19,7 @@ import yaml  # type: ignore[import-untyped]
 from ..dot_dict import DotDict
 from ..errors import UndeclaredConfigPathError
 from .constants import MAX_CONFIG_SIZE_BYTES
-from .spec import AUTO, Auto, ConfigFile, ConfigSpec
+from .spec import AUTO, Auto, ConfigFile, ConfigSpec, _resolve_origin
 
 # Inventory of `INFRA_*` env vars consumed by appinfra's own tooling (shell
 # scripts, Makefiles, pytest fixtures) rather than as yaml config overrides.
@@ -28,10 +28,11 @@ from .spec import AUTO, Auto, ConfigFile, ConfigSpec
 #
 # When adding a new INFRA_* env var read directly via os.environ (not through
 # Config), add it here so Config does not try to interpret it as an override.
+# Retired tooling vars are kept so stale exports don't cause override errors.
 APPINFRA_TOOLING_ENV_VARS: frozenset[str] = frozenset(
     {
         "INFRA_CHECK_PYTEST_SUITE",
-        "INFRA_CICD_PYTHON_VERSION",
+        "INFRA_CICD_PYTHON_VERSION",  # retired in 0.12.0; kept for stale exports
         "INFRA_CLEAN_PRESERVE",
         "INFRA_COMPOSE_CMD",
         "INFRA_CONTAINER_CMD",
@@ -46,7 +47,7 @@ APPINFRA_TOOLING_ENV_VARS: frozenset[str] = frozenset(
         "INFRA_DEV_MYPY_FLAGS",
         "INFRA_DEV_PKG_NAME",
         "INFRA_DEV_PROJECT_ROOT",
-        "INFRA_DEV_SETUP_EXTRAS",
+        "INFRA_DEV_SETUP_EXTRAS",  # retired in 0.12.0; kept for stale exports
         "INFRA_DEV_SKIP_TARGETS",
         "INFRA_DISABLE_GROUPS",
         "INFRA_DISABLE_TARGETS",
@@ -344,6 +345,8 @@ class Config(DotDict):
         passes ``spec.resolve(etc_dir=..., config_file=...)`` to the
         constructor. The include root comes from the resolved file.
         """
+        if origin is not None and not isinstance(origin, Auto):
+            origin = _resolve_origin(origin, frame_depth=1)
         spec = ConfigSpec(
             namespace,
             name,

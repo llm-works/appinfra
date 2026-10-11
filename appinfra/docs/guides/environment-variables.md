@@ -386,8 +386,8 @@ These environment variables control framework behavior (not config value overrid
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `INFRA_DEFAULT_CONFIG_FILE` | `infra.yaml` | Config filename the `pg.*` and `docs.*` Make targets fall back to when `INFRA_PG_CONFIG_FILE` / `INFRA_DOCS_CONFIG_FILE` are empty |
-| `INFRA_NO_CONFIRM` | unset | When set to `1`, bypasses the `areyousure` confirmation prompt used by destructive Make targets (e.g., `pg.server.down`, `pg.server.clean`, `cicd.erase`, `uninstall`). Intended for CI and other non-interactive contexts. |
-| `INFRA_CONTAINER_CMD` | `docker` | Container runtime used by `pg.*` and `cicd.*` Make targets (`ps`, `exec`, `volume`, ...). Set to `podman` to run the local-dev container layer under Podman. Exported to helper shell scripts (`pg.sh`, `cicd-test.sh`). |
+| `INFRA_NO_CONFIRM` | unset | When set to `1`, bypasses the `areyousure` confirmation prompt used by destructive Make targets (e.g., `pg.server.down`, `pg.server.clean`, `uninstall`). Intended for CI and other non-interactive contexts. |
+| `INFRA_CONTAINER_CMD` | `docker` | Container runtime used by `pg.*` Make targets (`ps`, `exec`, `volume`, ...). Set to `podman` to run the local-dev container layer under Podman. Exported to the `pg.sh` helper script. |
 | `INFRA_COMPOSE_CMD` | `docker compose` | Compose orchestrator paired with `INFRA_CONTAINER_CMD`. Set to `podman compose` alongside the container-cmd override. |
 
 These names are excluded from config overrides, so a config key such as `default` or

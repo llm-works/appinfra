@@ -10,6 +10,38 @@ For API stability guarantees and deprecation policy, see
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-10-10
+
+### Changed
+- `origin=` on `ConfigSpec` and `.config.with_spec()` accepts a relative path,
+  anchored to the file that literally holds the call (`origin=".."` is one dir
+  above it). Absolute paths unchanged.
+- **Breaking:** `make setup` installs dependencies only and never the project
+  itself, in every project including appinfra; `INFRA_DEV_SETUP_EXTRAS` is
+  removed. `make check` runs against the source tree without `make install`.
+- **Breaking:** log output without colors is the colored output minus ANSI codes:
+  `key[value]` instead of `[key:value]`, nested dicts nested the same way, the
+  `after` timing first, insertion order kept, and full tracebacks.
+- **Breaking:** `PG.session()` and `SQLite.session()` no longer expire ORM objects
+  when they commit, so objects returned from the block stay readable instead of
+  raising `DetachedInstanceError`. Set `expire_on_commit: true` in the database
+  config to restore expiry.
+
+### Removed
+- **Breaking:** the `cicd.*` Make targets (`Makefile.cicd`) and `test.ci`. The CI
+  workflows run the Docker image through `docker compose` directly.
+
+### Fixed
+- The Examples step of `make check` imports the project from the source tree,
+  as `make examples.check` does, so it passes without the project installed.
+- `make setup` no longer pulls the published package from the index for
+  extras that reference the project itself (e.g. `pkg[extra]` in pkg's own
+  extras); the dependencies come from the checked-out source.
+- `ChannelTimeoutError` and `HealthTimeoutError` also subclass the builtin
+  `TimeoutError`, so timeouts reach `except TimeoutError` handlers.
+- `extra={"exception": e}` renders the traceback of `e` itself, also when logged
+  outside its `except` block, instead of whichever exception is currently active.
+
 ## [0.11.1] - 2026-09-08
 
 ### Added
@@ -985,7 +1017,8 @@ as config. Affected: `ConfigValidator`, `PG.readonly`, `PG.migrate()`,
 ### Changed
 - Package renamed to `appinfra` (install and import both use `appinfra`)
 
-[Unreleased]: https://github.com/llm-works/appinfra/compare/v0.11.1...HEAD
+[Unreleased]: https://github.com/llm-works/appinfra/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/llm-works/appinfra/compare/v0.11.1...v0.12.0
 [0.11.1]: https://github.com/llm-works/appinfra/compare/v0.11.0...v0.11.1
 [0.11.0]: https://github.com/llm-works/appinfra/compare/v0.10.5...v0.11.0
 [0.10.5]: https://github.com/llm-works/appinfra/compare/v0.10.4...v0.10.5

@@ -298,6 +298,7 @@ dbs:
 | `url` | string | **required** | Database connection URL |
 | `readonly` | boolean | `false` | Enable read-only mode |
 | `create_db` | boolean | `false` | Create database if it doesn't exist |
+| `expire_on_commit` | boolean | `false` | Expire loaded ORM objects when `session()` commits |
 | `extensions` | list | `[]` | PostgreSQL extensions to create (e.g., `vector`, `pg_trgm`) |
 | `pool_size` | integer | `5` | Connection pool size |
 | `max_overflow` | integer | `10` | Maximum overflow connections |

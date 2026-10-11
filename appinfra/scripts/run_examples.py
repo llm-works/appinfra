@@ -38,7 +38,9 @@ any other is rejected:
   interfaces and releases it; a port another process holds is unavailable.
 
 Scripts run with stdin closed and inherit the current working directory, so
-relative paths resolve the same way as under ``make``. Each case gets a
+relative paths resolve the same way as under ``make``. That directory, the
+project root, is prepended to ``PYTHONPATH``: examples import the project
+from the source tree, with or without an installed copy. Each case gets a
 private scratch directory as ``TMPDIR``, removed afterwards, so an example
 that writes files uses ``tempfile`` and lands there, never in the checkout.
 
@@ -73,9 +75,14 @@ from pathlib import Path
 from typing import IO
 
 # Allow running from a source checkout without installing the package.
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+# Walk upward from the script to find the directory containing appinfra/.
+_script_dir = Path(__file__).resolve().parent
+for _ancestor in (_script_dir, *_script_dir.parents):
+    if (_ancestor / "appinfra").is_dir():
+        sys.path.insert(0, str(_ancestor))
+        break
 
-from appinfra.ui import status
+from appinfra.ui import status  # noqa: E402
 
 _MARKER_RE = re.compile(r"^#\s*ci-(run|skip|stop|timeout|requires):\s*(.*?)\s*$")
 _DEFAULT_TIMEOUT_S = 7.0
@@ -290,6 +297,9 @@ def _spawn(cmd: list[str], scratch: Path) -> subprocess.Popen[str]:
     env = os.environ.copy()
     env["PYTHONUNBUFFERED"] = "1"
     env["TMPDIR"] = str(scratch)
+    env["PYTHONPATH"] = os.pathsep.join(
+        p for p in (os.getcwd(), env.get("PYTHONPATH")) if p
+    )
     return subprocess.Popen(
         cmd,
         stdin=subprocess.DEVNULL,

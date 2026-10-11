@@ -19,12 +19,12 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           persist-credentials: false
 
       - name: Set up Docker layer caching
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: /tmp/.buildx-cache
           key: docker-${{ runner.os }}-py3.12-${{ hashFiles('pyproject.toml', 'appinfra/scripts/cicd/Dockerfile') }}

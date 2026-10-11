@@ -161,12 +161,6 @@ test.v:: ## runs all tests (verbose)
 	@echo "* all tests completed"
 .PHONY: test.v
 
-test.ci:: ## runs tests appropriate for CI (unit + integration)
-	@echo "* running CI test suite..."
-	@$(call run_pytest,tests/ -m "unit or integration" -qq --tb=short)
-	@echo "* CI test suite completed"
-.PHONY: test.ci
-
 test.coverage:: ## runs tests with coverage analysis (configurable via INFRA_PYTEST_COVERAGE_MARKERS)
 	@echo "* running tests with coverage analysis..."
 	@rm -rf $(_COVERAGE_DIR) 2>/dev/null || true
