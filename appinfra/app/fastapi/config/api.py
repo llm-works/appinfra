@@ -23,6 +23,12 @@ class ApiConfig:
         title: API title for OpenAPI docs (default: "API Server")
         description: API description for OpenAPI docs
         version: API version (default: "0.1.0")
+        docs_url: Path of the Swagger UI page, or None to not serve it
+            (default: None). Also controls /docs/oauth2-redirect.
+        redoc_url: Path of the ReDoc page, or None to not serve it
+            (default: None)
+        openapi_url: Path of the OpenAPI schema, or None to not serve it
+            (default: None). The docs pages need it to render.
         response_timeout: Default response timeout in seconds (default: 60.0).
             Used when IPC is not configured.
         log_file: Path for subprocess log isolation (optional).
@@ -44,6 +50,10 @@ class ApiConfig:
     title: str = "API Server"
     description: str = ""
     version: str = "0.1.0"
+    # Off by default: the schema lists every route, so serving it is opt-in.
+    docs_url: str | None = None
+    redoc_url: str | None = None
+    openapi_url: str | None = None
     response_timeout: float = 60.0
     log_file: str | None = None
     etc_dir: str | None = None  # For subprocess config hot-reload

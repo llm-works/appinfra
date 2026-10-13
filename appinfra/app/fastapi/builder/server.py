@@ -163,6 +163,19 @@ class ServerBuilder:
         self._api.version = version
         return self
 
+    def with_docs(self, enabled: bool = True) -> Self:
+        """
+        Serve or drop /docs, /redoc and /openapi.json (default: dropped).
+
+        The OpenAPI schema lists every route, so these stay off unless
+        enabled. Set ``docs_url``, ``redoc_url`` and ``openapi_url`` on
+        ``ApiConfig`` for other paths.
+        """
+        self._api.docs_url = "/docs" if enabled else None
+        self._api.redoc_url = "/redoc" if enabled else None
+        self._api.openapi_url = "/openapi.json" if enabled else None
+        return self
+
     def with_timeout(self, timeout: float) -> Self:
         """Set default response timeout in seconds."""
         self._api.response_timeout = timeout

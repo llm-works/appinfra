@@ -408,6 +408,9 @@ class FastAPIAdapter:
             title=self._config.title,
             description=self._config.description,
             version=self._config.version,
+            docs_url=self._config.docs_url,
+            redoc_url=self._config.redoc_url,
+            openapi_url=self._config.openapi_url,
             lifespan=lifespan,
         )
 

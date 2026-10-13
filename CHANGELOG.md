@@ -10,6 +10,11 @@ For API stability guarantees and deprecation policy, see
 
 ## [Unreleased]
 
+### Changed
+- **Breaking:** servers built with `ServerBuilder` no longer serve `/docs`, `/redoc`
+  and `/openapi.json`. `with_docs()` turns them back on; the paths are set by the
+  new `ApiConfig` fields `docs_url`, `redoc_url` and `openapi_url`.
+
 ## [0.12.0] - 2026-10-10
 
 ### Changed
