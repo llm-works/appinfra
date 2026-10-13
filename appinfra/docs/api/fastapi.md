@@ -117,6 +117,8 @@ server = (
     .with_title("My API")
     .with_description("API description")
     .with_version("1.0.0")
+    # Serve /docs, /redoc and /openapi.json (off by default)
+    .with_docs()
     # Timeouts
     .with_timeout(30.0)
     # Bulk configuration
@@ -124,6 +126,15 @@ server = (
     .build()
 )
 ```
+
+### API Docs and OpenAPI Schema
+
+The Swagger UI (`/docs`, with `/docs/oauth2-redirect`), ReDoc (`/redoc`) and the
+OpenAPI schema (`/openapi.json`) are not served by default: the schema lists every
+route, including internal and token-protected ones. `with_docs()` serves all three at
+FastAPI's default paths; `with_docs(False)` drops them again. For other paths, set
+`docs_url`, `redoc_url` and `openapi_url` on `ApiConfig`, where `None` drops a route.
+Both docs pages load the schema, so they need `openapi_url` set to render.
 
 ### Route Configuration
 

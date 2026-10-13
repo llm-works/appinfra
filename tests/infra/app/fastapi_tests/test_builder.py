@@ -55,6 +55,28 @@ class TestServerBuilder:
         assert builder._api.description == "Test description"
         assert builder._api.version == "2.0.0"
 
+    def test_docs_off_by_default(self, mock_fastapi, mock_lg):
+        """A new builder serves no docs pages and no OpenAPI schema."""
+        from appinfra.app.fastapi.builder.server import ServerBuilder
+
+        api = ServerBuilder(mock_lg, "test-api")._api
+        assert (api.docs_url, api.redoc_url, api.openapi_url) == (None, None, None)
+
+    def test_with_docs_toggles_all_three(self, mock_fastapi, mock_lg):
+        """with_docs() sets FastAPI's default paths; with_docs(False) clears them."""
+        from appinfra.app.fastapi.builder.server import ServerBuilder
+
+        builder = ServerBuilder(mock_lg, "test-api").with_docs()
+        api = builder._api
+        assert (api.docs_url, api.redoc_url, api.openapi_url) == (
+            "/docs",
+            "/redoc",
+            "/openapi.json",
+        )
+
+        builder.with_docs(False)
+        assert (api.docs_url, api.redoc_url, api.openapi_url) == (None, None, None)
+
     def test_timeout_configuration(self, mock_fastapi, mock_lg):
         """Test timeout configuration."""
         from appinfra.app.fastapi.builder.server import ServerBuilder
@@ -761,3 +783,36 @@ class TestServerBuilderLifecycleCallbacks:
             adapter = mock_adapter.return_value
             adapter.add_startup_callback.assert_called_once()
             adapter.add_request_callback.assert_called_once()
+
+
+_DOCS_PATHS = ["/docs", "/docs/oauth2-redirect", "/redoc", "/openapi.json"]
+
+
+@pytest.mark.integration
+class TestDocsRoutes:
+    """Docs and schema routes served by a real FastAPI app."""
+
+    def _get_all(self, mock_lg, *, docs: bool | None) -> dict[str, int]:
+        """Status of each docs path on a server built with the given setting."""
+        from starlette.testclient import TestClient
+
+        from appinfra.app.fastapi.builder.server import ServerBuilder
+
+        builder = ServerBuilder(mock_lg, "test-api").routes.with_route(
+            "/health", lambda: {"status": "ok"}
+        )
+        builder = builder.done()
+        if docs is not None:
+            builder.with_docs(docs)
+        with TestClient(builder.build().app) as client:
+            assert client.get("/health").status_code == 200
+            return {path: client.get(path).status_code for path in _DOCS_PATHS}
+
+    @pytest.mark.parametrize("docs", [None, False], ids=["default", "disabled"])
+    def test_docs_routes_absent(self, mock_lg, docs):
+        """Without with_docs(True) every docs path answers 404."""
+        assert self._get_all(mock_lg, docs=docs) == dict.fromkeys(_DOCS_PATHS, 404)
+
+    def test_docs_routes_served_when_enabled(self, mock_lg):
+        """with_docs() serves the Swagger UI, ReDoc and the schema."""
+        assert self._get_all(mock_lg, docs=True) == dict.fromkeys(_DOCS_PATHS, 200)

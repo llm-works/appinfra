@@ -294,7 +294,13 @@ class TestFastAPIAdapter:
         app = adapter.build()
 
         mock_fastapi["FastAPI"].assert_called_once_with(
-            title="My API", description="Test", version="1.0.0", lifespan=None
+            title="My API",
+            description="Test",
+            version="1.0.0",
+            docs_url=None,
+            redoc_url=None,
+            openapi_url=None,
+            lifespan=None,
         )
         assert app is mock_fastapi["app"]
 
