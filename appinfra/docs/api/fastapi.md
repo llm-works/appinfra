@@ -117,12 +117,12 @@ server = (
     .with_title("My API")
     .with_description("API description")
     .with_version("1.0.0")
-    # Serve /docs, /redoc and /openapi.json (off by default)
-    .with_docs()
     # Timeouts
     .with_timeout(30.0)
     # Bulk configuration
     .with_config(ApiConfig(...))
+    # Serve /docs, /redoc and /openapi.json (off by default)
+    .with_docs()
     .build()
 )
 ```
