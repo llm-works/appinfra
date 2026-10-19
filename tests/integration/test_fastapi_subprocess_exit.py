@@ -17,10 +17,12 @@ import multiprocessing as mp
 import os
 import signal
 import socket
+import tempfile
 import threading
 import time
 import uuid
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -146,6 +148,45 @@ def _run_parent(method: str, port: int, pid_q: mp.Queue[int]) -> None:
     time.sleep(120)
 
 
+def _make_shutdown_marker_callback(marker_path_str: str) -> Any:
+    """Factory that creates a shutdown callback writing to the given path.
+
+    Lazy resolves this factory in the subprocess with the path as config.
+    The path is passed as a string because Path objects may not pickle
+    cleanly across all start methods.
+    """
+
+    async def _write_marker(app: Any) -> None:
+        Path(marker_path_str).write_text("shutdown")
+
+    return _write_marker
+
+
+def _build_server_with_shutdown_callback(port: int, marker_path: Path) -> Any:
+    """Build a server that writes a marker file on shutdown."""
+    from appinfra.app.fastapi.builder.server import ServerBuilder
+    from appinfra.log import Logger
+    from appinfra.subprocess import Lazy
+
+    lg = Logger("test-shutdown-callback")
+    return (
+        ServerBuilder(lg, "test-shutdown-callback")
+        .with_host("127.0.0.1")
+        .with_port(port)
+        .routes.with_route("/ping", _ping_handler, methods=["GET"])
+        .done()
+        .with_on_shutdown(
+            Lazy(
+                "tests.integration.test_fastapi_subprocess_exit:_make_shutdown_marker_callback",
+                str(marker_path),
+            )
+        )
+        .subprocess.with_ipc(mp.Queue(), mp.Queue())
+        .done()
+        .build()
+    )
+
+
 @pytest.mark.integration
 class TestSubprocessExit:
     """The uvicorn subprocess exits promptly when told to or orphaned."""
@@ -162,6 +203,25 @@ class TestSubprocessExit:
 
         assert time.monotonic() - started < 2.0
         assert proc.exitcode == 0
+
+    def test_shutdown_callback_executes_on_stop(self) -> None:
+        """Shutdown callbacks registered via the builder run when stop() is called."""
+        port = _free_port()
+        with tempfile.TemporaryDirectory() as tmp:
+            marker = Path(tmp) / "shutdown_marker"
+            server = _build_server_with_shutdown_callback(port, marker)
+            proc = server.start_subprocess()
+            try:
+                _wait_ready(port)
+                assert not marker.exists(), "marker should not exist before shutdown"
+
+                server.stop(timeout=5.0)
+                assert proc.exitcode == 0
+                assert marker.exists(), "shutdown callback did not write marker"
+                assert marker.read_text() == "shutdown"
+            finally:
+                if proc.is_alive():
+                    proc.kill()
 
     def test_stop_fails_request_waiting_on_ipc(self) -> None:
         """A request waiting on IPC fails at once instead of blocking stop()."""

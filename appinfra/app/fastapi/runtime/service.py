@@ -115,20 +115,34 @@ class UvicornService(Service):
             return [str(Path(self._config.etc_dir) / self._config.config_file)]
         return []
 
+    def _build_uvicorn_config(self, app: Any) -> Any:
+        """Build uvicorn.Config for the given app."""
+        import uvicorn
+
+        from .server import _build_uvicorn_log_config
+
+        uvicorn_kwargs = self._config.uvicorn.to_uvicorn_kwargs()
+        uvicorn_kwargs["log_config"] = _build_uvicorn_log_config(self._config)
+        return uvicorn.Config(
+            app,
+            host=self._config.host,
+            port=self._config.port,
+            **uvicorn_kwargs,
+        )
+
     def execute(self) -> None:
         """Run uvicorn (runs in subprocess).
 
         Exits on SIGTERM/SIGINT, when the shutdown event is set, or when the
         parent process dies (see ``WatchedServer``).
         """
-        import uvicorn
         from uvicorn.main import STARTUP_FAILURE
 
         from ....subprocess import SubprocessContext
-        from .server import _build_uvicorn_log_config
         from .watched_server import WatchedServer
 
-        assert self._shutdown_event is not None, "injected by ProcessRunner"
+        if self._shutdown_event is None:
+            raise RuntimeError("_shutdown_event must be injected by ProcessRunner")
         self._setup_subprocess_logging()
 
         with SubprocessContext(
@@ -138,15 +152,7 @@ class UvicornService(Service):
         ):
             ipc_channel = self._create_ipc_channel()
             app = self._adapter.build(ipc_channel=ipc_channel)
-
-            uvicorn_kwargs = self._config.uvicorn.to_uvicorn_kwargs()
-            uvicorn_kwargs["log_config"] = _build_uvicorn_log_config(self._config)
-            config = uvicorn.Config(
-                app,
-                host=self._config.host,
-                port=self._config.port,
-                **uvicorn_kwargs,
-            )
+            config = self._build_uvicorn_config(app)
             server = WatchedServer(config, self._shutdown_event, ipc_channel)
             server.run()
             if not server.started:
