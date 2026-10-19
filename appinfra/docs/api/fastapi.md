@@ -484,7 +484,7 @@ Access via `.uvicorn`:
 ```python
 server = (
     ServerBuilder(lg, "myapi")
-    .uvicorn.with_workers(4)
+    .uvicorn.with_workers(1)  # subprocess mode requires 1
     .with_log_level("info")
     .with_access_log(True)
     .with_ssl("/path/to/key.pem", "/path/to/cert.pem")
