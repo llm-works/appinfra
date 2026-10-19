@@ -8,10 +8,12 @@ This module provides:
 - HasId: Protocol for messages with an id attribute
 - RedeliveryBuffer: Shared O(1) buffer for out-of-order message redelivery
 - validate_response: Shared response validation logic
+- send_slice: Wait slice for close-aware sends
 """
 
 from __future__ import annotations
 
+import time
 import uuid
 from collections import deque
 from dataclasses import dataclass, field
@@ -50,6 +52,17 @@ def validate_response(message: Any) -> Any:
     if hasattr(message, "error") and message.error:
         raise ChannelError(f"Request failed: {message.error}")
     return message
+
+
+#: Longest a channel's send() waits on the transport before rechecking close.
+SEND_POLL_INTERVAL = 0.1
+
+
+def send_slice(deadline: float | None) -> float:
+    """Seconds for the next transport send attempt, given an optional deadline."""
+    if deadline is None:
+        return SEND_POLL_INTERVAL
+    return max(0.0, min(SEND_POLL_INTERVAL, deadline - time.monotonic()))
 
 
 class RedeliveryBuffer:

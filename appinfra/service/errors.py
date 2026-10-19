@@ -83,3 +83,12 @@ class ChannelTimeoutError(ChannelError, TimeoutError):
 
 class ChannelClosedError(ChannelError):
     """Channel has been closed."""
+
+
+class ChannelFullError(ChannelError, BlockingIOError):
+    """
+    Outbound queue stayed full for the whole send timeout.
+
+    Also a builtin BlockingIOError, so generic ``except BlockingIOError``
+    handlers catch channel full errors.
+    """

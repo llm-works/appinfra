@@ -88,6 +88,7 @@ from .channel import (
 from .errors import (
     ChannelClosedError,
     ChannelError,
+    ChannelFullError,
     ChannelTimeoutError,
     CycleError,
     DependencyFailedError,
@@ -141,6 +142,7 @@ __all__ = [
     "ChannelError",
     "ChannelTimeoutError",
     "ChannelClosedError",
+    "ChannelFullError",
     # Factories
     "ChannelConfig",
     "ChannelPair",

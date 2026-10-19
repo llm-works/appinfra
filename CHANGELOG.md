@@ -14,10 +14,19 @@ For API stability guarantees and deprecation policy, see
 - **Breaking:** servers built with `ServerBuilder` no longer serve `/docs`, `/redoc`
   and `/openapi.json`. `with_docs()` turns them back on; the paths are set by the
   new `ApiConfig` fields `docs_url`, `redoc_url` and `openapi_url`.
+- **Breaking:** channel and transport `send()` take `timeout=None`. On a full bounded
+  queue, a channel's `send()` raises the new `ChannelFullError` after the timeout
+  (`timeout=0` does not wait), and `ChannelClosedError` if the channel closes meanwhile.
+  Custom transports must accept and honor `timeout`.
 
 ### Fixed
 - `select_scrollable` and `select_table`: Esc followed quickly by `q` or Enter no longer
   raises "Return value already set" in the event loop.
+- The FastAPI server subprocess exits when its parent dies, and `Server.stop()` no longer
+  waits its full timeout before SIGTERM. Requests waiting on IPC fail at once with
+  `ChannelClosedError` instead of holding the shutdown.
+- `AsyncProcessQueueTransport` raises `ChannelClosedError`, not `ValueError`, for a send
+  or receive that was still queued when the channel closed.
 
 ## [0.12.0] - 2026-10-10
 

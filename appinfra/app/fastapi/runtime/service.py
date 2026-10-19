@@ -75,6 +75,10 @@ class UvicornService(Service):
             raise ConfigError(f"Invalid port: {self._config.port}")
         if not self._config.host:
             raise ConfigError("Host is required")
+        # uvicorn's multi-worker mode needs the app as an import string, and
+        # this service passes the built app object.
+        if self._config.uvicorn.workers != 1:
+            raise ConfigError("uvicorn workers must be 1 in subprocess mode")
 
     def _setup_subprocess_logging(self) -> None:
         """Set up logging for subprocess."""
@@ -111,13 +115,34 @@ class UvicornService(Service):
             return [str(Path(self._config.etc_dir) / self._config.config_file)]
         return []
 
-    def execute(self) -> None:
-        """Run uvicorn (runs in subprocess)."""
+    def _build_uvicorn_config(self, app: Any) -> Any:
+        """Build uvicorn.Config for the given app."""
         import uvicorn
 
-        from ....subprocess import SubprocessContext
         from .server import _build_uvicorn_log_config
 
+        uvicorn_kwargs = self._config.uvicorn.to_uvicorn_kwargs()
+        uvicorn_kwargs["log_config"] = _build_uvicorn_log_config(self._config)
+        return uvicorn.Config(
+            app,
+            host=self._config.host,
+            port=self._config.port,
+            **uvicorn_kwargs,
+        )
+
+    def execute(self) -> None:
+        """Run uvicorn (runs in subprocess).
+
+        Exits on SIGTERM/SIGINT, when the shutdown event is set, or when the
+        parent process dies (see ``WatchedServer``).
+        """
+        from uvicorn.main import STARTUP_FAILURE
+
+        from ....subprocess import SubprocessContext
+        from .watched_server import WatchedServer
+
+        if self._shutdown_event is None:
+            raise RuntimeError("_shutdown_event must be injected by ProcessRunner")
         self._setup_subprocess_logging()
 
         with SubprocessContext(
@@ -127,18 +152,14 @@ class UvicornService(Service):
         ):
             ipc_channel = self._create_ipc_channel()
             app = self._adapter.build(ipc_channel=ipc_channel)
-
-            uvicorn_kwargs = self._config.uvicorn.to_uvicorn_kwargs()
-            uvicorn_kwargs["log_config"] = _build_uvicorn_log_config(self._config)
-            uvicorn.run(
-                app,
-                host=self._config.host,
-                port=self._config.port,
-                **uvicorn_kwargs,
-            )
+            config = self._build_uvicorn_config(app)
+            server = WatchedServer(config, self._shutdown_event, ipc_channel)
+            server.run()
+            if not server.started:
+                raise SystemExit(STARTUP_FAILURE)
 
     def teardown(self) -> None:
-        """Cleanup - uvicorn handles its own shutdown via SIGTERM."""
+        """Cleanup - uvicorn shuts itself down (see ``execute``)."""
         pass
 
     def is_healthy(self) -> bool:
