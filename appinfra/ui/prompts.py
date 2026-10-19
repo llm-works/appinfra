@@ -543,7 +543,7 @@ def _inquirer_select(
         choices[default_index] if 0 <= default_index < len(choices) else None
     )
 
-    result = inq.select(
+    prompt = inq.select(
         message=message,
         choices=choices,
         default=default_value,
@@ -551,8 +551,38 @@ def _inquirer_select(
         style=style,
         keybindings={"skip": [{"key": "q"}, {"key": "escape"}]},
         mandatory=False,
-    ).execute()
+    )
+    _ignore_keys_after_exit(prompt)
+    result = prompt.execute()
     return cast(str, result) if result is not None else None
+
+
+def _ignore_keys_after_exit(prompt: Any) -> None:
+    """
+    Make every key action of an InquirerPy prompt a no-op once it has exited.
+
+    InquirerPy's answer, skip and interrupt handlers call ``app.exit()``
+    unconditionally, and prompt_toolkit raises "Return value already set" on
+    a second call. prompt_toolkit holds a lone Esc until the next key decides
+    whether it starts a sequence, then handles both in one batch: Esc then q,
+    or Esc then Enter, exits twice. The exception is raised in the event
+    loop, out of reach of a try/except around ``execute()``.
+
+    The bindings look up ``kb_func_lookup`` on every key press, so wrapping
+    its entries covers every key and every action, built-in ones included.
+    """
+
+    def guard(func: Callable[..., None]) -> Callable[..., None]:
+        def guarded(event: Any, *args: Any) -> None:
+            if event is None or not event.app.is_done:
+                func(event, *args)
+
+        return guarded
+
+    prompt.kb_func_lookup = {
+        action: [{**method, "func": guard(method["func"])} for method in methods]
+        for action, methods in prompt.kb_func_lookup.items()
+    }
 
 
 def _result_to_row(

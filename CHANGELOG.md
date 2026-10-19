@@ -15,6 +15,10 @@ For API stability guarantees and deprecation policy, see
   and `/openapi.json`. `with_docs()` turns them back on; the paths are set by the
   new `ApiConfig` fields `docs_url`, `redoc_url` and `openapi_url`.
 
+### Fixed
+- `select_scrollable` and `select_table`: Esc followed quickly by `q` or Enter no longer
+  raises "Return value already set" in the event loop.
+
 ## [0.12.0] - 2026-10-10
 
 ### Changed
