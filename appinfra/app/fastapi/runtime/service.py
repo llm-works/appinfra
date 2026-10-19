@@ -75,6 +75,10 @@ class UvicornService(Service):
             raise ConfigError(f"Invalid port: {self._config.port}")
         if not self._config.host:
             raise ConfigError("Host is required")
+        # uvicorn's multi-worker mode needs the app as an import string, and
+        # this service passes the built app object.
+        if self._config.uvicorn.workers != 1:
+            raise ConfigError("uvicorn workers must be 1 in subprocess mode")
 
     def _setup_subprocess_logging(self) -> None:
         """Set up logging for subprocess."""
@@ -112,12 +116,19 @@ class UvicornService(Service):
         return []
 
     def execute(self) -> None:
-        """Run uvicorn (runs in subprocess)."""
+        """Run uvicorn (runs in subprocess).
+
+        Exits on SIGTERM/SIGINT, when the shutdown event is set, or when the
+        parent process dies (see ``WatchedServer``).
+        """
         import uvicorn
+        from uvicorn.main import STARTUP_FAILURE
 
         from ....subprocess import SubprocessContext
         from .server import _build_uvicorn_log_config
+        from .watched_server import WatchedServer
 
+        assert self._shutdown_event is not None, "injected by ProcessRunner"
         self._setup_subprocess_logging()
 
         with SubprocessContext(
@@ -130,15 +141,19 @@ class UvicornService(Service):
 
             uvicorn_kwargs = self._config.uvicorn.to_uvicorn_kwargs()
             uvicorn_kwargs["log_config"] = _build_uvicorn_log_config(self._config)
-            uvicorn.run(
+            config = uvicorn.Config(
                 app,
                 host=self._config.host,
                 port=self._config.port,
                 **uvicorn_kwargs,
             )
+            server = WatchedServer(config, self._shutdown_event, ipc_channel)
+            server.run()
+            if not server.started:
+                raise SystemExit(STARTUP_FAILURE)
 
     def teardown(self) -> None:
-        """Cleanup - uvicorn handles its own shutdown via SIGTERM."""
+        """Cleanup - uvicorn shuts itself down (see ``execute``)."""
         pass
 
     def is_healthy(self) -> bool:

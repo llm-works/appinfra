@@ -383,7 +383,13 @@ class AsyncProcessQueueTransport(Generic[TRequest, TResponse]):
     async def send(self, message: TRequest) -> None:
         """Put message on the outbound mp.Queue via executor."""
         loop = asyncio.get_running_loop()
-        await loop.run_in_executor(None, self._outbound.put, message)
+        try:
+            await loop.run_in_executor(None, self._outbound.put, message)
+        except ValueError as e:
+            # Same close() race as recv().
+            if self._closed:
+                raise ChannelClosedError("Channel is closed") from e
+            raise
 
     _RECV_CAP = 60.0
 
@@ -403,6 +409,12 @@ class AsyncProcessQueueTransport(Generic[TRequest, TResponse]):
             )
         except queue.Empty:
             raise ChannelTimeoutError(f"Timeout waiting for message ({timeout}s)")
+        except ValueError as e:
+            # mp.Queue.get() raises ValueError once close() has run, which can
+            # happen while this call waited for an executor thread.
+            if self._closed:
+                raise ChannelClosedError("Channel is closed") from e
+            raise
 
     async def close(self) -> None:
         """Close both multiprocessing queues."""

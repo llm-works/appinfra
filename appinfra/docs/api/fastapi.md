@@ -499,6 +499,10 @@ server = (
 )
 ```
 
+Subprocess mode requires `workers=1`: uvicorn runs multiple workers only from an import string,
+and the subprocess passes it the built app. Other values make `start_subprocess()` raise
+`SetupError`.
+
 ## Server
 
 Runtime server instance returned by `ServerBuilder.build()`.
@@ -520,6 +524,21 @@ server.start()  # Run server (blocking)
 server.start_subprocess()  # Start in subprocess (non-blocking, returns Process)
 server.stop()  # Stop subprocess
 ```
+
+### Subprocess Shutdown
+
+The server subprocess exits when:
+
+- `server.stop()` sets its shutdown event. `stop()` escalates to SIGTERM, then SIGKILL, only if the
+  subprocess is still running after `timeout` (default 5s).
+- The parent process exits, including by SIGKILL. The subprocess checks for this every 0.1s, so an
+  orphaned server releases its port instead of running on.
+- It receives SIGTERM or SIGINT (uvicorn's own signal handling).
+
+In the first two cases the IPC channel closes before uvicorn drains in-flight requests: handlers
+waiting in `ipc.submit()` or `ipc.submit_stream()` raise `ChannelClosedError` (from
+`appinfra.service`) at once instead of holding the shutdown for the response timeout. Unhandled,
+it becomes a 500; an exception handler can map it to another status such as 503.
 
 ## IPCChannel
 

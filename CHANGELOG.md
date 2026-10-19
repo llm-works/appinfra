@@ -18,6 +18,11 @@ For API stability guarantees and deprecation policy, see
 ### Fixed
 - `select_scrollable` and `select_table`: Esc followed quickly by `q` or Enter no longer
   raises "Return value already set" in the event loop.
+- The FastAPI server subprocess exits when its parent dies, and `Server.stop()` no longer
+  waits its full timeout before SIGTERM. Requests waiting on IPC fail at once with
+  `ChannelClosedError` instead of holding the shutdown.
+- `AsyncProcessQueueTransport` raises `ChannelClosedError`, not `ValueError`, for a send
+  or receive that was still queued when the channel closed.
 
 ## [0.12.0] - 2026-10-10
 

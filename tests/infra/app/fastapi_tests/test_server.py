@@ -536,3 +536,26 @@ class TestServerStart:
             assert call_args[0][0] is mock_app
             assert call_args[1]["host"] == "127.0.0.1"
             assert call_args[1]["port"] == 9000
+
+
+@pytest.mark.unit
+class TestUvicornServiceSetup:
+    """Tests for UvicornService.setup() validation."""
+
+    def test_rejects_multiple_workers(self):
+        """workers != 1 fails setup: the subprocess passes uvicorn an app object."""
+        from appinfra.app.fastapi.config.uvicorn import UvicornConfig
+        from appinfra.app.fastapi.errors import ConfigError
+        from appinfra.app.fastapi.runtime.service import UvicornService
+
+        config = ApiConfig(uvicorn=UvicornConfig(workers=4))
+        service = UvicornService(MagicMock(), MagicMock(), config)
+
+        with pytest.raises(ConfigError, match="workers"):
+            service.setup()
+
+    def test_accepts_single_worker(self):
+        """The default single worker passes setup."""
+        from appinfra.app.fastapi.runtime.service import UvicornService
+
+        UvicornService(MagicMock(), MagicMock(), ApiConfig()).setup()

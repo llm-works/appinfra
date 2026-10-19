@@ -241,7 +241,8 @@ class Server:
         """
         Gracefully stop the server.
 
-        Uses terminate -> join(timeout) -> kill pattern.
+        Sets the shutdown event and waits up to ``timeout`` for the subprocess
+        to exit, then escalates to SIGTERM and SIGKILL.
 
         Args:
             timeout: Seconds to wait for graceful shutdown
