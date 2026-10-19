@@ -430,7 +430,7 @@ class StubTransport:
         self._outbox = outbox
         self._closed = False
 
-    def send(self, message: Any) -> None:
+    def send(self, message: Any, timeout: float | None = None) -> None:
         self._outbox.append(message)
 
     def recv(self, timeout: float | None = None) -> Any:

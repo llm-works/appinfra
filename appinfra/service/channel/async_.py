@@ -22,8 +22,8 @@ import time
 from collections.abc import AsyncIterator
 from typing import Any, Generic, Protocol, TypeVar, cast, runtime_checkable
 
-from ..errors import ChannelClosedError, ChannelTimeoutError
-from .base import RedeliveryBuffer, validate_response
+from ..errors import ChannelClosedError, ChannelFullError, ChannelTimeoutError
+from .base import RedeliveryBuffer, send_slice, validate_response
 
 TRequest = TypeVar("TRequest")
 TResponse = TypeVar("TResponse")
@@ -41,8 +41,12 @@ class AsyncChannel(Protocol):
     buffering, and close management.
     """
 
-    async def send(self, message: Any) -> None:
-        """Send message without waiting for response."""
+    async def send(self, message: Any, timeout: float | None = None) -> None:
+        """Send message without waiting for response.
+
+        Raises ``ChannelFullError`` if there is no room within *timeout*
+        seconds (None waits until there is, 0 does not wait).
+        """
         ...
 
     async def recv(self, timeout: float | None = None) -> Any:
@@ -80,8 +84,21 @@ class AsyncTransport(Protocol):
     management.
     """
 
-    async def send(self, message: Any) -> None:
-        """Send a message over the wire."""
+    async def send(self, message: Any, timeout: float | None = None) -> None:
+        """
+        Send a message over the wire.
+
+        Implementations must honor *timeout*: ``AsyncBufferedChannel`` sends in
+        short slices to check for close while the wire is full.
+
+        Args:
+            message: Message to send.
+            timeout: Maximum seconds to wait for room. None means block
+                indefinitely; 0 means do not wait.
+
+        Raises:
+            ChannelFullError: If there is no room within timeout.
+        """
         ...
 
     async def recv(self, timeout: float | None = None) -> Any:
@@ -150,11 +167,32 @@ class AsyncBufferedChannel(Generic[TRequest, TResponse]):
         """True if the channel or its transport has been closed."""
         return self._closed or self._transport.is_closed
 
-    async def send(self, message: TRequest) -> None:
-        """Send message without waiting for response."""
-        if self.is_closed:
-            raise ChannelClosedError("Channel is closed")
-        await self._transport.send(message)
+    async def send(self, message: TRequest, timeout: float | None = None) -> None:
+        """
+        Send message without waiting for response.
+
+        While the transport is full, retries in short slices so that
+        ``close()`` interrupts the wait.
+
+        Args:
+            message: Message to send.
+            timeout: Maximum seconds to wait for room. None waits until there
+                is room or the channel closes; 0 tries once.
+
+        Raises:
+            ChannelClosedError: If the channel is closed, or closes while waiting.
+            ChannelFullError: If the transport stays full for *timeout* seconds.
+        """
+        deadline = None if timeout is None else time.monotonic() + timeout
+        while True:
+            if self.is_closed:
+                raise ChannelClosedError("Channel is closed")
+            try:
+                await self._transport.send(message, send_slice(deadline))
+                return
+            except ChannelFullError:
+                if deadline is not None and time.monotonic() >= deadline:
+                    raise ChannelFullError(f"Channel full for {timeout}s") from None
 
     async def recv(self, timeout: float | None = None) -> TResponse:
         """
@@ -176,7 +214,11 @@ class AsyncBufferedChannel(Generic[TRequest, TResponse]):
     async def submit(
         self, request: TRequest, timeout: float | None = None
     ) -> TResponse:
-        """Send request and wait for matching response."""
+        """Send request and wait for matching response.
+
+        *timeout* covers both waiting for room to send and waiting for the
+        response.
+        """
         if self.is_closed:
             raise ChannelClosedError("Channel is closed")
         if not hasattr(request, "id"):
@@ -184,9 +226,10 @@ class AsyncBufferedChannel(Generic[TRequest, TResponse]):
 
         request_id = request.id  # type: ignore[union-attr]
         effective_timeout = timeout if timeout is not None else self._response_timeout
+        deadline = time.monotonic() + effective_timeout
 
-        await self.send(request)
-        return await self._poll_for_response(request_id, effective_timeout)
+        await self.send(request, effective_timeout)
+        return await self._poll_for_response(request_id, deadline, effective_timeout)
 
     async def submit_stream(
         self, request: TRequest, timeout: float | None = None
@@ -205,7 +248,7 @@ class AsyncBufferedChannel(Generic[TRequest, TResponse]):
         request_id = request.id  # type: ignore[union-attr]
         effective_timeout = timeout if timeout is not None else self._response_timeout
 
-        await self.send(request)
+        await self.send(request, effective_timeout)
         async for chunk in self._poll_for_stream(request_id, effective_timeout):
             yield chunk
 
@@ -256,9 +299,10 @@ class AsyncBufferedChannel(Generic[TRequest, TResponse]):
         except Exception as exc:
             raise ChannelClosedError("Channel is closed") from exc
 
-    async def _poll_for_response(self, request_id: str, timeout: float) -> TResponse:
-        """Poll for a response with the given request_id."""
-        deadline = time.monotonic() + timeout
+    async def _poll_for_response(
+        self, request_id: str, deadline: float, timeout: float
+    ) -> TResponse:
+        """Poll for a response with the given request_id until *deadline*."""
         poll_interval = 0.05
 
         while True:
@@ -347,9 +391,20 @@ class AsyncQueueTransport(Generic[TRequest, TResponse]):
         self._inbound = inbound
         self._closed = False
 
-    async def send(self, message: TRequest) -> None:
-        """Put message on the outbound asyncio queue."""
-        await self._outbound.put(message)
+    async def send(self, message: TRequest, timeout: float | None = None) -> None:
+        """Put message on the outbound asyncio queue, waiting up to *timeout*."""
+        try:
+            self._outbound.put_nowait(message)
+            return
+        except asyncio.QueueFull:
+            # Handle the no-wait case here: wait_for(timeout=0) behavior
+            # differs across Python versions.
+            if timeout is not None and timeout <= 0:
+                raise ChannelFullError("Queue full (0s)") from None
+        try:
+            await asyncio.wait_for(self._outbound.put(message), timeout=timeout)
+        except TimeoutError:
+            raise ChannelFullError(f"Queue full ({timeout}s)") from None
 
     async def recv(self, timeout: float | None = None) -> TResponse:
         """Get next message from the inbound asyncio queue."""
@@ -380,28 +435,37 @@ class AsyncProcessQueueTransport(Generic[TRequest, TResponse]):
         self._inbound = inbound
         self._closed = False
 
-    async def send(self, message: TRequest) -> None:
-        """Put message on the outbound mp.Queue via executor."""
+    _BLOCK_CAP = 60.0
+
+    async def send(self, message: TRequest, timeout: float | None = None) -> None:
+        """Put message on the outbound mp.Queue via executor.
+
+        When timeout is None, caps at ``_BLOCK_CAP`` like ``recv()``; the
+        channel's send loop retries on ``ChannelFullError``.
+        """
+        effective = timeout if timeout is not None else self._BLOCK_CAP
         loop = asyncio.get_running_loop()
         try:
-            await loop.run_in_executor(None, self._outbound.put, message)
+            await loop.run_in_executor(
+                None, lambda: self._outbound.put(message, timeout=effective)
+            )
+        except queue.Full:
+            raise ChannelFullError(f"Queue full ({timeout}s)") from None
         except ValueError as e:
             # Same close() race as recv().
             if self._closed:
                 raise ChannelClosedError("Channel is closed") from e
             raise
 
-    _RECV_CAP = 60.0
-
     async def recv(self, timeout: float | None = None) -> TResponse:
         """Get next message from the inbound mp.Queue via executor.
 
-        When timeout is None, caps at ``_RECV_CAP`` (60s) to avoid blocking
+        When timeout is None, caps at ``_BLOCK_CAP`` (60s) to avoid blocking
         the executor thread indefinitely — mp.Queue.get(timeout=None) cannot
         be interrupted by close().  The channel's poll loop retries
         automatically, so the cap is transparent to callers.
         """
-        effective = timeout if timeout is not None else self._RECV_CAP
+        effective = timeout if timeout is not None else self._BLOCK_CAP
         loop = asyncio.get_running_loop()
         try:
             return await loop.run_in_executor(

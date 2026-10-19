@@ -327,7 +327,7 @@ from appinfra.service import Channel
 class ZMQChannel:
     """Implements Channel protocol directly — no BufferedChannel needed."""
 
-    def send(self, message): ...
+    def send(self, message, timeout=None): ...
     def recv(self, timeout=None): ...
     def submit(self, request, timeout=None): ...
     def close(self): ...
@@ -345,7 +345,7 @@ from appinfra.service import BufferedChannel, Transport
 class SharedMemTransport:
     """Any object satisfying the Transport protocol."""
 
-    def send(self, message): ...
+    def send(self, message, timeout=None): ...
     def recv(self, timeout=None): ...
     def close(self): ...
     @property
@@ -354,6 +354,14 @@ class SharedMemTransport:
 
 channel = BufferedChannel(SharedMemTransport(shm_region))
 ```
+
+A transport's `send()` and `recv()` must return or raise within *timeout*: `send()` raises
+`ChannelFullError` when there is no room, `recv()` raises `ChannelTimeoutError` when nothing
+arrives. `BufferedChannel` calls both in short slices so that `close()` interrupts a wait.
+
+`send(message, timeout=None)` on a channel waits while a bounded queue is full. It raises
+`ChannelClosedError` if the channel closes meanwhile and `ChannelFullError` once *timeout* passes;
+`timeout=0` tries once without waiting. `submit()` counts that wait against its own timeout.
 
 ### Transports and Channel Types
 
