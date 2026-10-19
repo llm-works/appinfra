@@ -431,6 +431,9 @@ class ProcessQueueTransport(Generic[TRequest, TResponse]):
         self._closed = True
         try:
             self._outbound.close()
+        except Exception:
+            pass
+        try:
             self._inbound.close()
         except Exception:
             pass
