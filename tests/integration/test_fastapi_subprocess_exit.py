@@ -275,4 +275,7 @@ class TestSubprocessExit:
             assert _port_bindable(port)
         finally:
             if not _pid_gone(child_pid):
-                os.kill(child_pid, signal.SIGKILL)
+                try:
+                    os.kill(child_pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
