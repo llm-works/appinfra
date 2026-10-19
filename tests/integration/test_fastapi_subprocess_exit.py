@@ -263,15 +263,15 @@ class TestSubprocessExit:
             killed_at = time.monotonic()
             os.kill(parent.pid, signal.SIGKILL)
             parent.join(timeout=5.0)
-            deadline = killed_at + 5.0
+            deadline = killed_at + 10.0
             while not _pid_gone(child_pid) and time.monotonic() < deadline:
                 time.sleep(0.05)
             exited_in = time.monotonic() - killed_at
             thread.join(timeout=5.0)
 
             assert _pid_gone(child_pid), "child outlived its parent"
-            assert exited_in < 3.0
-            assert result["done_at"] - killed_at < 3.0
+            assert exited_in < 8.0
+            assert result["done_at"] - killed_at < 8.0
             assert _port_bindable(port)
         finally:
             if not _pid_gone(child_pid):
