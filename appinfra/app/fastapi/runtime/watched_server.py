@@ -30,6 +30,8 @@ class WatchedServer(uvicorn.Server):
     forkserver start method the OS parent is the fork server.
     """
 
+    should_exit: bool  # inherited from uvicorn.Server, declared for mypy
+
     def __init__(
         self,
         config: uvicorn.Config,
@@ -48,7 +50,8 @@ class WatchedServer(uvicorn.Server):
             self.should_exit = True
             if self._ipc_channel is not None:
                 await self._ipc_channel.stop_polling()
-        return await super().on_tick(counter)
+        result: bool = await super().on_tick(counter)
+        return result
 
     def _exit_requested(self) -> bool:
         if self._shutdown_event.is_set():
