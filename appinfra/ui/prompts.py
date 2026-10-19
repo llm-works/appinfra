@@ -574,11 +574,13 @@ def _ignore_keys_after_exit(prompt: Any) -> None:
 
     def guard(func: Callable[..., None]) -> Callable[..., None]:
         def guarded(event: Any, *args: Any) -> None:
-            if event is None or not event.app.is_done:
+            assert event is not None
+            if not event.app.is_done:
                 func(event, *args)
 
         return guarded
 
+    # Internal attribute — tests exercise real prompts to catch breakage on upgrade.
     prompt.kb_func_lookup = {
         action: [{**method, "func": guard(method["func"])} for method in methods]
         for action, methods in prompt.kb_func_lookup.items()
