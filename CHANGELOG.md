@@ -10,6 +10,10 @@ For API stability guarantees and deprecation policy, see
 
 ## [Unreleased]
 
+### Added
+- `ChannelResponseError` (a `ChannelError`): raised by `submit()` and `submit_stream()` for a
+  response with `error` set; its `response` attribute holds the full message.
+
 ### Changed
 - **Breaking:** servers built with `ServerBuilder` no longer serve `/docs`, `/redoc`
   and `/openapi.json`. `with_docs()` turns them back on; the paths are set by the

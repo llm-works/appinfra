@@ -315,6 +315,19 @@ await pair.parent.send(request)  # Parent uses async
 pair.child.recv()  # Child uses sync in subprocess
 ```
 
+### Error Responses
+
+A response whose `error` field is set makes `submit()` and `submit_stream()` raise
+`ChannelResponseError`, a `ChannelError` subclass. Its `response` attribute holds the message as
+received, so fields beyond the error text stay readable:
+
+```python
+try:
+    response = await pair.parent.submit(request, timeout=5.0)
+except ChannelResponseError as e:
+    status = e.response.status  # e.g. tell a rejection from a failure
+```
+
 ### Custom Channels and Transports
 
 Smart transports (ZMQ, gRPC) that handle their own correlation can implement
