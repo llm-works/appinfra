@@ -3,6 +3,8 @@
 
 """Service errors."""
 
+from typing import Any
+
 from appinfra.errors import InfraError
 
 
@@ -83,6 +85,19 @@ class ChannelTimeoutError(ChannelError, TimeoutError):
 
 class ChannelClosedError(ChannelError):
     """Channel has been closed."""
+
+
+class ChannelResponseError(ChannelError):
+    """
+    Response message carried an error.
+
+    ``response`` is the message as received, so callers can read fields
+    beyond the error text, e.g. a status that tells a rejection from a failure.
+    """
+
+    def __init__(self, response: Any) -> None:
+        self.response = response
+        super().__init__(f"Request failed: {response.error}")
 
 
 class ChannelFullError(ChannelError, BlockingIOError):

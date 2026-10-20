@@ -19,7 +19,7 @@ from collections import deque
 from dataclasses import dataclass, field
 from typing import Any, Protocol, TypeVar, runtime_checkable
 
-from ..errors import ChannelError
+from ..errors import ChannelResponseError
 
 # Message types used by channel implementations
 TRequest = TypeVar("TRequest")
@@ -48,9 +48,9 @@ class Message:
 
 
 def validate_response(message: Any) -> Any:
-    """Raise ``ChannelError`` if a response message carries an error field."""
+    """Raise ``ChannelResponseError`` if a response message carries an error field."""
     if hasattr(message, "error") and message.error:
-        raise ChannelError(f"Request failed: {message.error}")
+        raise ChannelResponseError(message)
     return message
 
 

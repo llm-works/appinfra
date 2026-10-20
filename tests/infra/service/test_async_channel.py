@@ -14,7 +14,7 @@ from appinfra.service import (
     AsyncQueueChannelFactory,
     ChannelClosedError,
     ChannelConfig,
-    ChannelError,
+    ChannelResponseError,
     ChannelTimeoutError,
     Message,
 )
@@ -174,8 +174,11 @@ class TestAsyncThreadChannel:
 
         task = asyncio.create_task(responder())
 
-        with pytest.raises(ChannelError, match="something failed"):
+        with pytest.raises(ChannelResponseError, match="something failed") as exc:
             await parent.submit(Request(id="1", data="test"), timeout=1.0)
+        assert exc.value.response == Response(
+            id="1", result="", error="something failed"
+        )
 
         await task
 
@@ -480,11 +483,12 @@ class TestAsyncChannelStreaming:
 
         task = asyncio.create_task(responder())
 
-        with pytest.raises(ChannelError, match="stream failed"):
+        with pytest.raises(ChannelResponseError, match="stream failed") as exc:
             async for _ in parent.submit_stream(
                 Request(id="1", data="test"), timeout=1.0
             ):
                 pass
+        assert exc.value.response == Response(id="1", result="", error="stream failed")
 
         await task
 
