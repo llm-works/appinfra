@@ -207,7 +207,10 @@ class LoggerFactory:
         for lg in doomed:
             for handler in list(lg.handlers):
                 lg.removeHandler(handler)
-                handler.close()
+                try:
+                    handler.close()
+                except Exception:
+                    pass  # Don't abort cleanup
             registry.pop(lg.name, None)
 
     @staticmethod
