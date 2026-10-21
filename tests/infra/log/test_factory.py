@@ -220,6 +220,30 @@ class TestTakeOver:
         assert logging.root.manager.loggerDict[unique_logger_name] is lib
         assert lib.handlers == [handler]
 
+    @pytest.mark.parametrize("method", ["derive", "create_child"])
+    def test_derive_never_returns_a_library_logger(
+        self, log_config, unique_logger_name, method
+    ):
+        """A view is an appinfra logger; a library's logger under its name is an error."""
+        parent = LoggerFactory.create(f"/{unique_logger_name}", log_config)
+        lib = _library_logger(f"/{unique_logger_name}/view", logging.Logger)
+
+        with pytest.raises(LoggerExistsError):
+            getattr(LoggerFactory, method)(parent, "view")
+        assert logging.root.manager.loggerDict[lib.name] is lib
+
+    def test_view_of_a_logger_built_without_the_factory_is_appinfra(
+        self, log_config, unique_logger_name
+    ):
+        """Such a view has no holder, yet it is the factory's: looked up, never taken over."""
+        parent = Logger(unique_logger_name)  # as Logger.with_queue() builds one
+        view = LoggerFactory.derive(parent, "view")
+
+        assert LoggerFactory.derive(parent, "view") is view
+        with pytest.raises(LoggerExistsError):
+            LoggerFactory.create(view.name, log_config)
+        assert view._root_logger is parent
+
     def test_library_logger_subclass_is_not_taken_over(
         self, log_config, unique_logger_name
     ):

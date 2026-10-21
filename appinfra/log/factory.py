@@ -170,8 +170,8 @@ class LoggerFactory:
         takes it over instead.
         """
         existing = LoggerFactory._registered(name)
-        if isinstance(existing, Logger) and existing._holder is not None:
-            return existing
+        if existing is not None and _is_factory_logger(existing):
+            return cast(Logger, existing)
         return None
 
     @staticmethod
@@ -429,14 +429,17 @@ class LoggerFactory:
         Returns:
             Child logger instance with inherited configuration
 
+        Raises:
+            LoggerExistsError: A library's logger, not an appinfra one, holds the name.
+
         See Also:
             derive: Create logger with one or more hierarchical tag components
         """
         full_name = f"{parent.name}/{name}" if parent.name != "/" else f"/{name}"
 
-        existing = LoggerFactory._registered(full_name)
+        existing = LoggerFactory._lookup_view(full_name)
         if existing is not None:
-            return cast(Logger, existing)
+            return existing
 
         return LoggerFactory._create_view_logger(full_name, parent, "child logger")
 
@@ -484,6 +487,9 @@ class LoggerFactory:
         Returns:
             Derived logger instance with inherited configuration
 
+        Raises:
+            LoggerExistsError: A library's logger, not an appinfra one, holds the name.
+
         See Also:
             create_child: Simpler API for creating single-name child loggers
         """
@@ -493,11 +499,26 @@ class LoggerFactory:
         prefix = parent.name if parent.name == "/" else parent.name + "/"
         name = prefix + "/".join(tags)
 
-        existing = LoggerFactory._registered(name)
+        existing = LoggerFactory._lookup_view(name)
         if existing is not None:
-            return cast(Logger, existing)
+            return existing
 
         return LoggerFactory._create_view_logger(name, parent, "derived logger")
+
+    @staticmethod
+    def _lookup_view(name: str) -> Logger | None:
+        """
+        Return the appinfra logger already at ``name``, or ``None`` when the name is free.
+
+        Raises:
+            LoggerExistsError: A logger the factory did not make (a library's) holds
+                ``name``. :meth:`derive` and :meth:`create_child` return appinfra loggers
+                only; taking over a library's logger is :meth:`create`'s job.
+        """
+        owned = LoggerFactory._owned(name)
+        if owned is None and LoggerFactory._registered(name) is not None:
+            raise LoggerExistsError(name)
+        return owned
 
 
 def _is_library_logger(lg: logging.Logger) -> bool:
@@ -511,7 +532,20 @@ def _is_library_logger(lg: logging.Logger) -> bool:
     """
     if type(lg) is logging.Logger:
         return True
-    return isinstance(lg, Logger) and lg._holder is None
+    return isinstance(lg, Logger) and not _is_factory_logger(lg)
+
+
+def _is_factory_logger(lg: logging.Logger) -> bool:
+    """
+    Whether :class:`LoggerFactory` made ``lg``.
+
+    A created logger has a config holder; a view (:meth:`LoggerFactory.derive`,
+    :meth:`LoggerFactory.create_child`) has a root, and no holder when its root was
+    built without the factory (``Logger(...)``, ``Logger.with_queue()``).
+    """
+    return isinstance(lg, Logger) and (
+        lg._holder is not None or lg._root_logger is not None
+    )
 
 
 def _descends_from(lg: logging.Logger, target: logging.Logger) -> bool:
