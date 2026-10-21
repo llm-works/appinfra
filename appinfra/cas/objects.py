@@ -20,6 +20,7 @@ Serialization:
 
 from __future__ import annotations
 
+import bisect
 import hashlib
 import json
 import re
@@ -147,9 +148,11 @@ class Tree(Object):
 
     def get(self, name: str) -> TreeEntry | None:
         """Return the entry named ``name``, or ``None``."""
-        for entry in self.entries:
-            if entry.name == name:
-                return entry
+        if not self.entries:
+            return None
+        idx = bisect.bisect_left(self.entries, name, key=lambda e: e.name)
+        if idx < len(self.entries) and self.entries[idx].name == name:
+            return self.entries[idx]
         return None
 
     def serialize(self) -> bytes:

@@ -150,6 +150,9 @@ def _locked(
 class FileStore(Store):
     """Repositories as directories under ``root``; safe across threads and processes."""
 
+    MAX_REPO_NAME_BYTES: int = _MAX_REPO_SEGMENT
+    """Longest repository name in UTF-8 bytes before URL-quoting; ref names allow 255."""
+
     def __init__(
         self, lg: Logger, root: str | os.PathLike[str], *, fsync: bool = True
     ) -> None:
