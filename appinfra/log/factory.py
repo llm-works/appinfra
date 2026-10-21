@@ -161,6 +161,20 @@ class LoggerFactory:
         return LoggerFactory._finish_logger(lg, config)
 
     @staticmethod
+    def _owned(name: str) -> Logger | None:
+        """
+        Return the logger the factory made in this process as ``name``, or ``None``.
+
+        A library's logger is not one, even with appinfra's class: :meth:`reconfigure`,
+        :meth:`destroy` and :meth:`create_or_replace` leave it alone, and :meth:`create`
+        takes it over instead.
+        """
+        existing = LoggerFactory._registered(name)
+        if isinstance(existing, Logger) and existing._holder is not None:
+            return existing
+        return None
+
+    @staticmethod
     def create_or_replace(
         name: str,
         config: LogConfig,
@@ -192,8 +206,8 @@ class LoggerFactory:
                 :meth:`create_child`. A view shares its root's settings, so applying a
                 config to it would change the root and every view of it.
         """
-        existing = LoggerFactory._registered(name)
-        if not isinstance(existing, Logger):
+        existing = LoggerFactory._owned(name)
+        if existing is None:
             raise LoggerNotFoundError(name)
         if existing._root_logger is not None:
             raise LogConfigError(
@@ -214,11 +228,12 @@ class LoggerFactory:
         working but has no handlers left.
 
         Raises:
-            LoggerNotFoundError: No logger named ``name`` exists in this process.
+            LoggerNotFoundError: No appinfra logger named ``name`` exists in this
+                process. A library's logger under the name is not one.
             Exception: The first error a handler's ``close()`` raised, once every
                 handler is closed and every logger removed.
         """
-        target = LoggerFactory._registered(name)
+        target = LoggerFactory._owned(name)
         if target is None:
             raise LoggerNotFoundError(name)
         registry = logging.root.manager.loggerDict
@@ -242,8 +257,8 @@ class LoggerFactory:
 
     @staticmethod
     def destroy_if_exists(name: str) -> bool:
-        """:meth:`destroy` ``name`` if this process holds a logger under it; return whether."""
-        if LoggerFactory._registered(name) is None:
+        """:meth:`destroy` ``name`` if this process holds an appinfra logger under it; return whether."""
+        if LoggerFactory._owned(name) is None:
             return False
         LoggerFactory.destroy(name)
         return True

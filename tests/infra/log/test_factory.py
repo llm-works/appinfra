@@ -185,6 +185,41 @@ class TestTakeOver:
         with pytest.raises(LoggerExistsError):
             LoggerFactory.create(unique_logger_name, log_config)
 
+    def test_create_or_replace_takes_over_too(
+        self, log_config, unique_logger_name, capsys
+    ):
+        """Nothing of appinfra's to replace: the library's object is taken over."""
+        lib = _library_logger(unique_logger_name, logging.Logger)
+        plain = io.StringIO()
+        lib.addHandler(logging.StreamHandler(plain))
+
+        lg = LoggerFactory.create_or_replace(unique_logger_name, log_config)
+        lib.warning("library warning")
+
+        assert lg is lib
+        assert "library warning" in capsys.readouterr().out
+        assert plain.getvalue() == ""
+
+    @pytest.mark.parametrize(
+        "cls", [logging.Logger, Logger], ids=["stdlib", "appinfra"]
+    )
+    def test_destroy_and_reconfigure_leave_it_alone(
+        self, log_config, unique_logger_name, cls
+    ):
+        """A library's logger is not appinfra's to destroy or reconfigure."""
+        lib = _library_logger(unique_logger_name, cls)
+        handler = logging.StreamHandler(io.StringIO())
+        lib.addHandler(handler)
+
+        with pytest.raises(LoggerNotFoundError):
+            LoggerFactory.destroy(unique_logger_name)
+        with pytest.raises(LoggerNotFoundError):
+            LoggerFactory.reconfigure(unique_logger_name, log_config)
+        assert LoggerFactory.destroy_if_exists(unique_logger_name) is False
+
+        assert logging.root.manager.loggerDict[unique_logger_name] is lib
+        assert lib.handlers == [handler]
+
     def test_library_logger_subclass_is_not_taken_over(
         self, log_config, unique_logger_name
     ):
