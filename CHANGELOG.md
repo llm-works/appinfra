@@ -11,6 +11,8 @@ For API stability guarantees and deprecation policy, see
 ## [Unreleased]
 
 ### Added
+- `appinfra.cas`: content-addressed store of blobs, trees and commits with compare-and-set
+  refs, ancestry and pruning; in-memory and file stores. See `docs/api/cas.md`.
 - `ChannelResponseError` (a `ChannelError`): raised by `submit()` and `submit_stream()` for a
   response with `error` set; its `response` attribute holds the full message.
 
