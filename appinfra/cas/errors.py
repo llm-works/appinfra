@@ -59,7 +59,11 @@ class RefConflictError(CasError):
     """A ref no longer points where the writer expected: another writer moved it."""
 
     def __init__(self, repo: str, ref: str, expected: str | None) -> None:
-        super().__init__(f"ref {ref} no longer points at {expected}", repo=repo)
+        if expected is None:
+            msg = f"ref {ref} was created by another writer"
+        else:
+            msg = f"ref {ref} no longer points at {expected}"
+        super().__init__(msg, repo=repo)
         self.repo = repo
         self.ref = ref
         self.expected = expected

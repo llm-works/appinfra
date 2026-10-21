@@ -34,7 +34,7 @@ import uuid
 from collections.abc import Iterable, Iterator
 from pathlib import Path
 from typing import cast, get_args
-from urllib.parse import quote, unquote
+from urllib.parse import unquote
 
 from ..log import Logger
 from .errors import CorruptObjectError, InvalidNameError
@@ -45,7 +45,19 @@ _HEADER_MAX = 32
 """Upper bound of an object header: ``commit`` plus a 20-digit length plus NUL."""
 
 _DELETED = "%deleted-"
-"""Infix of a repository directory being deleted; quote() never writes lowercase escapes."""
+"""Infix of a repository directory being deleted; _encode() never writes lowercase escapes."""
+
+_UNRESERVED = frozenset("abcdefghijklmnopqrstuvwxyz0123456789-._~")
+"""Characters _encode() leaves unchanged; uppercase letters are percent-encoded."""
+
+
+def _encode(name: str) -> str:
+    """Encode ``name`` into one segment that a case-insensitive filesystem keeps distinct."""
+    return "".join(
+        ch if ch in _UNRESERVED else "".join(f"%{b:02X}" for b in ch.encode("utf-8"))
+        for ch in name
+    )
+
 
 _MAX_REF_SEGMENT = 255
 """Longest quoted ref name: the usual filesystem limit on one path segment."""
@@ -55,8 +67,8 @@ _MAX_REPO_SEGMENT = _MAX_REF_SEGMENT - len(_DELETED) - 32
 
 
 def _segment(what: str, name: str, limit: int) -> str:
-    """URL-quote ``name`` into one path segment; raise if it would be longer than ``limit``."""
-    segment = quote(check_name(what, name), safe="")
+    """Encode ``name`` into one path segment; raise if it would be longer than ``limit``."""
+    segment = _encode(check_name(what, name))
     if len(segment) > limit:
         raise InvalidNameError(what, name)
     return segment
@@ -151,7 +163,7 @@ class FileStore(Store):
     """Repositories as directories under ``root``; safe across threads and processes."""
 
     MAX_REPO_NAME_BYTES: int = _MAX_REPO_SEGMENT
-    """Longest repository name in UTF-8 bytes before URL-quoting; ref names allow 255."""
+    """Longest encoded repository name; ref names allow 255. Non-lowercase letters expand 3x."""
 
     def __init__(
         self, lg: Logger, root: str | os.PathLike[str], *, fsync: bool = True
@@ -235,9 +247,7 @@ class FileStore(Store):
         return sorted(
             unquote(p.name)
             for p in self._root.iterdir()
-            if p.is_dir()
-            and quote(unquote(p.name), safe="") == p.name
-            and _has_content(p)
+            if p.is_dir() and _encode(unquote(p.name)) == p.name and _has_content(p)
         )
 
     # -- objects ----------------------------------------------------------------

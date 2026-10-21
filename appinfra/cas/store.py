@@ -471,7 +471,15 @@ class Repo:
         """Return the ids ``object_id`` points at; a blob is not read, it points at nothing."""
         if self._store.object_type(self._name, object_id) == "blob":
             return []
-        return [link_id for link_id, _ in _links(self.get(object_id))]
+        try:
+            obj = self.get(object_id)
+        except CorruptObjectError:
+            self._lg.warning(
+                "pruning a corrupt object",
+                extra={"repo": self._name, "object_id": object_id},
+            )
+            return []
+        return [link_id for link_id, _ in _links(obj)]
 
     def _reachable(self, roots: Iterable[str]) -> set[str]:
         """Return ``roots`` and the ids of every object they reach."""

@@ -10,6 +10,7 @@ import time
 from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from weakref import WeakValueDictionary
 
 from ..log import Logger
 from .objects import ObjectType
@@ -68,7 +69,9 @@ class MemoryStore(Store):
         super().__init__(lg)
         self._lock = threading.Lock()
         self._repos: dict[str, _Repo] = {}
-        self._repo_locks: dict[str, _SharedExclusiveLock] = {}
+        self._repo_locks: WeakValueDictionary[str, _SharedExclusiveLock] = (
+            WeakValueDictionary()
+        )
 
     @contextmanager
     def lock(self, repo: str, exclusive: bool = False) -> Iterator[None]:

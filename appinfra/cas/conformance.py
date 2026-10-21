@@ -28,8 +28,9 @@ Requires pytest.
 
 from __future__ import annotations
 
+import contextlib
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
@@ -75,15 +76,50 @@ _HOLD = 0.3
 """Seconds a test waits to see that a blocked call stays blocked."""
 
 
+@contextlib.contextmanager
+def _pruning(repo: Repo) -> Iterator[None]:
+    """Run ``repo.prune(expire=0)`` in a thread until the block exits; re-raise any error."""
+    stop = threading.Event()
+    error: BaseException | None = None
+
+    def pruner() -> None:
+        nonlocal error
+        try:
+            while not stop.is_set():
+                repo.prune(expire=0)
+        except BaseException as e:
+            error = e
+
+    thread = threading.Thread(target=pruner)
+    thread.start()
+    try:
+        yield
+    finally:
+        stop.set()
+        thread.join()
+        if error:
+            raise error
+
+
 def _blocked_while(store: Store, exclusive: bool, call: Callable[[], object]) -> bool:
     """Run ``call`` in a thread while holding the lock; True if it waited for the release."""
-    thread = threading.Thread(target=call)
+    errors: list[BaseException] = []
+
+    def run() -> None:
+        try:
+            call()
+        except BaseException as e:
+            errors.append(e)
+
+    thread = threading.Thread(target=run)
     with store.lock("r", exclusive=exclusive):
         thread.start()
         thread.join(_HOLD)
         blocked = thread.is_alive()
     thread.join(5.0)
     assert not thread.is_alive(), "call did not finish after the lock was released"
+    if errors:
+        raise errors[0]
     return blocked
 
 
@@ -551,7 +587,6 @@ class StoreConformance:
         """Writers committing while prune runs with expire=0 never leave a broken link."""
         repo = store.repo("r")
         repo.put(Blob(b"seed"))
-        stop = threading.Event()
 
         def writer(i: int) -> None:
             for n in range(10):
@@ -560,18 +595,8 @@ class StoreConformance:
                 except ObjectNotFoundError:
                     pass  # prune took an object this writer had not referenced yet
 
-        def pruner() -> None:
-            while not stop.is_set():
-                repo.prune(expire=0)
-
-        thread = threading.Thread(target=pruner)
-        thread.start()
-        try:
-            with ThreadPoolExecutor(max_workers=4) as pool:
-                list(pool.map(writer, range(4)))
-        finally:
-            stop.set()
-            thread.join()
+        with _pruning(repo), ThreadPoolExecutor(max_workers=4) as pool:
+            list(pool.map(writer, range(4)))
         assert dangling_links(store, "r") == []
         for tip in repo.refs().values():
             list(repo.ancestors(tip))
