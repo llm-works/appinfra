@@ -31,6 +31,29 @@ class LogConfigError(LogError):
     pass
 
 
+class LoggerExistsError(LogConfigError):
+    """
+    A logger with this name already exists.
+
+    Creating a logger never touches an existing one: a name used twice is almost always
+    an accident, and reconfiguring silently would change the first logger under its
+    owner. Use ``LoggerFactory.reconfigure`` to change it on purpose, or
+    ``LoggerFactory.destroy`` before creating the name again.
+    """
+
+    def __init__(self, name: str) -> None:
+        self.name = name
+        super().__init__(f"logger {name!r} already exists")
+
+
+class LoggerNotFoundError(LogConfigError):
+    """No appinfra logger with this name exists."""
+
+    def __init__(self, name: str) -> None:
+        self.name = name
+        super().__init__(f"no logger named {name!r}")
+
+
 class FormatterError(LogError):
     """Raised when there's an error in log formatting."""
 

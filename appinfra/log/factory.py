@@ -10,12 +10,14 @@ configuration and proper setup of handlers and formatters.
 
 import collections
 import logging
+import os
 import sys
-from typing import Any
+from typing import Any, cast
 
 from .callback import CallbackRegistry
 from .config import ChildLogConfig, LogConfig
 from .config_holder import LogConfigHolder
+from .errors import LoggerExistsError, LoggerNotFoundError
 from .formatters import LogFormatter
 from .logger import Logger
 
@@ -75,28 +77,31 @@ class LoggerFactory:
         )
 
     @staticmethod
-    def _setup_console_handler(
-        config: LogConfig,
-    ) -> tuple[logging.Handler, LogConfigHolder]:
-        """Set up and return console handler with formatter and holder.
-
-        Creates handler with LogConfigHolder for hot-reload support.
-        The holder is registered with the global registry, enabling
-        automatic config updates when files change.
-
-        Returns:
-            Tuple of (handler, holder) - holder is shared with logger for hot-reload
-        """
+    def _console_handler(holder: LogConfigHolder) -> logging.Handler:
+        """Return a stdout handler formatting through ``holder`` (hot-reload support)."""
         handler = logging.StreamHandler(sys.stdout)
-        handler.setLevel(config.level)
+        handler.setLevel(holder.config.level)
+        handler.setFormatter(LogFormatter(holder))
+        return handler
 
-        # Create holder for hot-reload support
-        holder = LogConfigHolder(config)
+    @staticmethod
+    def _apply_config(lg: Logger, config: LogConfig) -> LogConfigHolder:
+        """
+        Give ``lg`` the settings of ``config``; return its holder of the effective config.
 
-        formatter = LogFormatter(holder)
-        handler.setFormatter(formatter)
-
-        return handler, holder
+        Sets the config, the level (after topic overrides), the disabled flag and the
+        holder its formatters read location, micros and colors from. Used both for a new
+        logger and for reconfiguring an existing one, so the two cannot drift apart.
+        """
+        effective = LoggerFactory._get_effective_config(lg.name, config)
+        lg._config = config
+        lg._logging_disabled = config.level is False
+        lg.setLevel(effective.level)
+        if lg._holder is None:
+            lg._holder = LogConfigHolder(effective)
+        else:
+            lg._holder.update(effective)
+        return lg._holder
 
     @staticmethod
     def create(
@@ -117,6 +122,11 @@ class LoggerFactory:
         Returns:
             Configured logger instance
 
+        Raises:
+            LoggerExistsError: A logger named ``name`` already exists, whatever its
+                config. Use :meth:`reconfigure` to change it, or :meth:`destroy` it
+                before creating the name again.
+
         Example:
             >>> from appinfra.log import LoggerFactory, LogConfig
             >>>
@@ -133,31 +143,96 @@ class LoggerFactory:
             [12:34:56,789] [I] Request received [service:users] [1234] [/api]
         """
         logging.setLoggerClass(logger_class)
-
-        # An existing logger keeps its config and handlers; extra is per-record
-        # data and follows the latest request, so a repeated setup is not
-        # silently missing fields. The name may hold a plain stdlib logger
-        # created by a library, which has no extra to set.
-        existing = LoggerFactory._check_existing_logger(name)
-        if existing:
-            if extra is not None and isinstance(existing, Logger):
-                existing.set_extra(extra)
-            return existing
-
-        # Create new logger
+        if LoggerFactory._registered(name) is not None:
+            raise LoggerExistsError(name)
         return LoggerFactory._create_new_logger(name, config, logger_class, extra)
 
     @staticmethod
-    def _check_existing_logger(name: str) -> Logger | None:
-        """Check if logger exists and return it."""
-        if name in logging.root.manager.loggerDict:
-            from typing import cast
+    def create_or_replace(
+        name: str,
+        config: LogConfig,
+        logger_class: type[Logger] = Logger,
+        extra: dict[str, Any] | collections.OrderedDict | None = None,
+    ) -> Logger:
+        """
+        Create logger ``name``, first destroying any logger this process holds under it.
 
-            lg = cast(Logger, logging.getLogger(name))
-            if hasattr(lg, "trace2"):
-                lg.trace2("logger already exists", extra={"logger": name})
-            return lg
-        return None
+        :meth:`destroy` then :meth:`create`: the old logger's handlers are closed and the
+        loggers derived from it are removed, so whoever still holds it logs nowhere. Use
+        it when this code owns the name and means to start over; to change a live
+        logger's settings without that, use :meth:`reconfigure`.
+        """
+        LoggerFactory.destroy_if_exists(name)
+        return LoggerFactory.create(name, config, logger_class, extra)
+
+    @staticmethod
+    def reconfigure(name: str, config: LogConfig) -> Logger:
+        """
+        Apply ``config`` (level, location, micros, colors) to the existing logger ``name``.
+
+        The logger is changed in place: everyone holding it sees the new settings.
+        Handlers are left as they are.
+
+        Raises:
+            LoggerNotFoundError: No appinfra logger named ``name`` exists.
+        """
+        existing = LoggerFactory._registered(name)
+        if not isinstance(existing, Logger):
+            raise LoggerNotFoundError(name)
+        LoggerFactory._apply_config(existing, config)
+        return existing
+
+    @staticmethod
+    def destroy(name: str) -> None:
+        """
+        Close and remove the logger ``name``, and every logger derived from it.
+
+        Derived loggers (:meth:`derive`, :meth:`create_child`) are views that log through
+        it, so they go too: none is left pointing at a removed logger. Their names are
+        free again for :meth:`create`. A reference still held to a removed logger keeps
+        working but has no handlers left.
+
+        Raises:
+            LoggerNotFoundError: No logger named ``name`` exists in this process.
+        """
+        target = LoggerFactory._registered(name)
+        if target is None:
+            raise LoggerNotFoundError(name)
+        registry = logging.root.manager.loggerDict
+        doomed = [
+            lg
+            for lg in list(registry.values())
+            if isinstance(lg, logging.Logger) and _descends_from(lg, target)
+        ]
+        for lg in doomed:
+            for handler in list(lg.handlers):
+                lg.removeHandler(handler)
+                handler.close()
+            registry.pop(lg.name, None)
+
+    @staticmethod
+    def destroy_if_exists(name: str) -> bool:
+        """:meth:`destroy` ``name`` if this process holds a logger under it; return whether."""
+        if LoggerFactory._registered(name) is None:
+            return False
+        LoggerFactory.destroy(name)
+        return True
+
+    @staticmethod
+    def _registered(name: str) -> logging.Logger | None:
+        """
+        Return the logger this process registered as ``name``, or ``None``.
+
+        A stdlib ``PlaceHolder`` is not a logger. An appinfra logger created by another
+        process was inherited across a fork: it belongs to the parent, so the name is
+        free in this process. The inherited object keeps working for code that holds it.
+        """
+        existing = logging.root.manager.loggerDict.get(name)
+        if not isinstance(existing, logging.Logger):
+            return None
+        if isinstance(existing, Logger) and existing._owner_pid != os.getpid():
+            return None
+        return existing
 
     @staticmethod
     def _create_new_logger(
@@ -169,12 +244,8 @@ class LoggerFactory:
         """Create a new logger with effective config and handler."""
         callback_registry = CallbackRegistry()
         lg = logger_class(name, config, callback_registry, extra)
-        effective_config = LoggerFactory._get_effective_config(name, config)
-        lg.setLevel(effective_config.level)
-
-        handler, holder = LoggerFactory._setup_console_handler(effective_config)
-        lg.addHandler(handler)
-        lg._holder = holder  # Share holder for hot-reload of location
+        holder = LoggerFactory._apply_config(lg, config)
+        lg.addHandler(LoggerFactory._console_handler(holder))
         lg.propagate = False
 
         # Set parent to root for proper propagation when propagate=True
@@ -186,9 +257,9 @@ class LoggerFactory:
         lg.trace2(
             "created logger",
             extra={
-                "level": logging.getLevelName(effective_config.level),
-                "location": effective_config.location,
-                "micros": effective_config.micros,
+                "level": logging.getLevelName(holder.config.level),
+                "location": holder.config.location,
+                "micros": holder.config.micros,
             },
         )
         return lg
@@ -302,9 +373,9 @@ class LoggerFactory:
         """
         full_name = f"{parent.name}/{name}" if parent.name != "/" else f"/{name}"
 
-        existing = LoggerFactory._check_existing_logger(full_name)
-        if existing:
-            return existing
+        existing = LoggerFactory._registered(full_name)
+        if existing is not None:
+            return cast(Logger, existing)
 
         return LoggerFactory._create_view_logger(full_name, parent, "child logger")
 
@@ -361,8 +432,18 @@ class LoggerFactory:
         prefix = parent.name if parent.name == "/" else parent.name + "/"
         name = prefix + "/".join(tags)
 
-        existing = LoggerFactory._check_existing_logger(name)
-        if existing:
-            return existing
+        existing = LoggerFactory._registered(name)
+        if existing is not None:
+            return cast(Logger, existing)
 
         return LoggerFactory._create_view_logger(name, parent, "derived logger")
+
+
+def _descends_from(lg: logging.Logger, target: logging.Logger) -> bool:
+    """True when ``lg`` is ``target`` or reaches it through its ``parent`` chain."""
+    node: logging.Logger | None = lg
+    while node is not None:
+        if node is target:
+            return True
+        node = node.parent
+    return False

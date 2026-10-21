@@ -336,32 +336,6 @@ class App(Traceable):
             help="output logs in JSON format",
         )
 
-    def setup_logging_from_config(self, config: Any) -> tuple[Logger, Any]:
-        """
-        Set up logging from the provided configuration object with command-line overrides.
-
-        This method leverages the standalone setup_logging_from_config utility function
-        and automatically passes the parsed command-line arguments.
-
-        Args:
-            config: Configuration object (``self.config`` after setup, or any
-                ``Config`` / ``DotDict`` with a ``logging`` section)
-
-        Returns:
-            Tuple of (configured_logger, handler_registry)
-
-        Raises:
-            ValueError: If configuration is invalid
-        """
-        from .logging_utils import (
-            setup_logging_from_config as _setup_logging_from_config,
-        )
-
-        # Use the parsed arguments from the app
-        args_dict = vars(self.args) if hasattr(self, "args") else {}
-
-        return _setup_logging_from_config(config=config, args=args_dict)
-
     def configure(self) -> None:
         """
         Configure the application after argument parsing.

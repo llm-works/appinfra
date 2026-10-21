@@ -10,6 +10,7 @@ including custom log levels, callback support, and multiprocessing features.
 
 import collections
 import logging
+import os
 import sys
 import threading
 from typing import Any, Self
@@ -62,20 +63,19 @@ class Logger(logging.Logger):
         if callback_registry is None:
             callback_registry = CallbackRegistry()
 
-        # Handle disabled logging (level = False)
-        if config.level is False:
-            # Set to highest possible level to disable all logging
-            super().__init__(name, logging.CRITICAL + 1)
-            self._logging_disabled = True
-        else:
-            super().__init__(name, config.level)
-            self._logging_disabled = False
+        # level=False disables logging: above the highest level, nothing passes
+        disabled = config.level is False
+        super().__init__(name, logging.CRITICAL + 1 if disabled else config.level)
+        self._logging_disabled = disabled
 
         self._config = config
         self._holder: LogConfigHolder | None = None  # Set by factory for hot-reload
         self._callbacks = callback_registry
         self._extra = extra.copy() if extra else {}  # Defensive copy, preserves type
         self._root_logger: Logger | None = None  # Set for derived "view" loggers
+        # The process that created this logger owns its name; a forked child inherits
+        # the object but may create the name anew (see LoggerFactory._registered).
+        self._owner_pid = os.getpid()
 
         # Validate pre-populated extra keys at init time
         self._validate_extra_keys(self._extra)

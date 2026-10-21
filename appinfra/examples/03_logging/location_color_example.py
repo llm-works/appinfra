@@ -112,7 +112,7 @@ def demo_multiple_colors():
 
     for name, color in colors:
         logger = (
-            LoggingBuilder(f"demo.{name.lower()}")
+            LoggingBuilder(f"demo.colors.{name.lower()}")
             .with_level("info")
             .with_location(1)
             .with_location_color(color)

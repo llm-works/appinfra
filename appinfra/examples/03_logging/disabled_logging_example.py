@@ -161,11 +161,11 @@ def demo_performance_comparison():
 
     # Create enabled logger
     enabled_config = LogConfig.from_params("info", location=1, micros=True)
-    enabled_logger = LoggerFactory.create("enabled_logger", enabled_config)
+    enabled_logger = LoggerFactory.create("perf_enabled_logger", enabled_config)
 
     # Create disabled logger
     disabled_config = LogConfig.from_params(False, location=1, micros=True)
-    disabled_logger = LoggerFactory.create("disabled_logger", disabled_config)
+    disabled_logger = LoggerFactory.create("perf_disabled_logger", disabled_config)
 
     # Test performance with enabled logging
     start_time = time.time()
@@ -193,10 +193,10 @@ def demo_mixed_logging_scenarios():
 
     # Create both enabled and disabled loggers
     enabled_config = LogConfig.from_params("info", location=1, micros=True)
-    enabled_logger = LoggerFactory.create("enabled_logger", enabled_config)
+    enabled_logger = LoggerFactory.create("mixed_enabled_logger", enabled_config)
 
     disabled_config = LogConfig.from_params(False, location=1, micros=True)
-    disabled_logger = LoggerFactory.create("disabled_logger", disabled_config)
+    disabled_logger = LoggerFactory.create("mixed_disabled_logger", disabled_config)
 
     print("Enabled logger:")
     enabled_logger.info("This message WILL appear")

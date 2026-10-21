@@ -40,6 +40,7 @@ class LifecycleManager:
             None  # Derived logger for lifecycle messages at /infra/app/lifecycle
         )
         self._handler_registry: HandlerRegistry | None = None
+        self._shut_down = False
         self._start_time: float | None = None
 
         # Component registrations for shutdown
@@ -302,10 +303,14 @@ class LifecycleManager:
         Args:
             return_code: Exit code for the application
 
+        Ends by destroying the root logger this lifecycle created (and the loggers
+        derived from it), so the process is free to set up logging again. A second call
+        does nothing.
+
         Returns:
             Final return code after cleanup
         """
-        if not self._logger:
+        if not self._logger or self._shut_down:
             return return_code
 
         assert self._lifecycle_logger is not None  # Set during initialization
@@ -325,6 +330,9 @@ class LifecycleManager:
         self.finalize(return_code)
         self._log_shutdown_complete(return_code)
 
+        # Raising here would hide the error a shutdown on an exception path follows
+        LoggerFactory.destroy_if_exists(self._logger.name)
+        self._shut_down = True
         return return_code
 
     def _log_shutdown_complete(self, return_code: int) -> None:

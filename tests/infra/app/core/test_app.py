@@ -13,7 +13,6 @@ Tests key functionality including:
 """
 
 import argparse
-import logging
 import os
 import sys
 from pathlib import Path
@@ -273,60 +272,6 @@ class TestAddLogDefaultArgs:
         args = app.parser.parse_args(["-l", "warning", "-q"])
         assert args.log_level == "warning"
         assert args.quiet is True
-
-
-# =============================================================================
-# Test Setup Logging From Config
-# =============================================================================
-
-
-@pytest.mark.unit
-class TestSetupLoggingFromConfig:
-    """Test setup_logging_from_config method (lines 181-188)."""
-
-    def test_setup_logging_from_config(self):
-        """Test setup_logging_from_config creates logger."""
-        app = App()
-        app._parsed_args = argparse.Namespace(
-            log_level="debug", log_location=0, log_micros=False
-        )
-
-        config = DotDict(
-            logging=DotDict(
-                level="info",
-                location=0,
-                micros=False,
-                handlers=DotDict(
-                    console=DotDict(type="console", enabled=True, stream="stdout")
-                ),
-            )
-        )
-
-        logger, registry = app.setup_logging_from_config(config)
-
-        assert logger is not None
-        assert isinstance(logger, logging.Logger)
-
-    def test_setup_logging_from_config_with_args(self):
-        """Test setup_logging_from_config with args attribute."""
-        app = App()
-        app._parsed_args = argparse.Namespace(
-            log_level="warning", log_location=1, log_micros=True
-        )
-
-        config = DotDict(
-            logging=DotDict(
-                level="info",
-                location=0,
-                micros=False,
-                handlers=DotDict(
-                    console=DotDict(type="console", enabled=True, stream="stdout")
-                ),
-            )
-        )
-
-        logger, registry = app.setup_logging_from_config(config)
-        assert logger is not None
 
 
 # =============================================================================

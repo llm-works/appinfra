@@ -63,6 +63,8 @@ from .errors import (
     InvalidLogLevelError,
     LogConfigError,
     LogError,
+    LoggerExistsError,
+    LoggerNotFoundError,
     ReservedKeyError,
 )
 from .factory import LoggerFactory
@@ -325,6 +327,8 @@ __all__ = [
     "LogError",
     "InvalidLogLevelError",
     "LogConfigError",
+    "LoggerExistsError",
+    "LoggerNotFoundError",
     "FormatterError",
     "CallbackError",
     "ReservedKeyError",

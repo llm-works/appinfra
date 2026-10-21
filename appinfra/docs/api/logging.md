@@ -92,11 +92,41 @@ Factory for creating and managing loggers.
 ```python
 class LoggerFactory:
     @staticmethod
-    def create_root(config: LogConfig) -> Logger: ...
+    def create_root(config: LogConfig) -> Logger: ...  # create("/", config)
+
+    @staticmethod
+    def create(name: str, config: LogConfig) -> Logger: ...
+
+    @staticmethod
+    def create_or_replace(name: str, config: LogConfig) -> Logger: ...
+
+    @staticmethod
+    def reconfigure(name: str, config: LogConfig) -> Logger: ...
+
+    @staticmethod
+    def destroy(name: str) -> None: ...
+
+    @staticmethod
+    def destroy_if_exists(name: str) -> bool: ...
 
     @staticmethod
     def derive(parent: Logger, name: str) -> Logger: ...
 ```
+
+A logger name belongs to whoever created it. `create()` (and `create_root()`, and every builder's
+`build()`) raises `LoggerExistsError` when the name is taken, whatever the config: a name used
+twice is almost always an accident, and changing the first logger would surprise its owner. To
+change a live logger on purpose, `reconfigure()` applies a new level, location, micros and colors
+in place. To start over, `destroy()` closes the logger's handlers and removes it with every logger
+derived from it, or `create_or_replace()` does that and creates the name anew. `reconfigure()` and
+`destroy()` raise `LoggerNotFoundError` for a name that does not exist; `destroy_if_exists()`
+returns whether there was one instead.
+
+`derive()` and `create_child()` are lookups: they return an existing view of the same name.
+
+A logger belongs to the process that created it. A forked child inherits its parent's loggers
+but may create their names anew; the inherited objects keep working for code that holds them. An
+`App` creates the root logger `/` in `setup()` and destroys it at the end of `shutdown()`.
 
 ## File Logging with Rotation
 

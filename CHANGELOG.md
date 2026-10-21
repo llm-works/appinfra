@@ -24,6 +24,10 @@ For API stability guarantees and deprecation policy, see
   queue, a channel's `send()` raises the new `ChannelFullError` after the timeout
   (`timeout=0` does not wait), and `ChannelClosedError` if the channel closes meanwhile.
   Custom transports must accept and honor `timeout`.
+- **Breaking:** `LoggerFactory.create()`, `create_root()` and logging builders' `build()`
+  raise `LoggerExistsError` for a name already taken in this process. New: `reconfigure()`,
+  `destroy()`, `destroy_if_exists()`, `create_or_replace()`. `App.setup_logging_from_config()`
+  is removed; an app destroys its root logger at shutdown.
 
 ### Fixed
 - `select_scrollable` and `select_table`: Esc followed quickly by `q` or Enter no longer

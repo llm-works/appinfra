@@ -10,6 +10,7 @@ Tests key functionality including:
 - Finalization
 """
 
+import logging
 import os
 import time as std_time
 from unittest.mock import Mock, patch
@@ -518,6 +519,20 @@ class TestShutdown:
         result = manager.shutdown(42)
 
         assert result == 42
+
+    def test_shutdown_releases_the_root_logger(self):
+        """After shutdown the root name is free, and a second shutdown does nothing."""
+        config = DotDict(logging=DotDict(level="info", location=0, micros=False))
+        manager = LifecycleManager(Mock())
+        manager.initialize(config)
+
+        manager.shutdown(0)
+        assert "/" not in logging.root.manager.loggerDict
+        assert manager.shutdown(3) == 3  # no second teardown
+
+        next_manager = LifecycleManager(Mock())
+        next_manager.initialize(config)  # creates "/" again without a conflict
+        next_manager.shutdown(0)
 
 
 @pytest.mark.unit

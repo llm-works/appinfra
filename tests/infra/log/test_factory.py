@@ -19,6 +19,7 @@ import pytest
 
 from appinfra.log.config import LogConfig
 from appinfra.log.config_holder import LogConfigHolder
+from appinfra.log.errors import LoggerExistsError, LoggerNotFoundError
 from appinfra.log.factory import LoggerFactory
 
 # =============================================================================
@@ -84,60 +85,218 @@ class TestCreateRoot:
         # Cleanup
         logger.handlers.clear()
 
-    def test_create_root_again_applies_new_extra(self, log_config):
-        """A repeated root setup replaces the extra fields instead of dropping them."""
+    def test_create_root_again_raises(self, log_config):
+        """A second root setup is a name conflict, whatever its config."""
         first = LoggerFactory.create_root(log_config, extra={"service": "api"})
 
-        second = LoggerFactory.create_root(log_config, extra={"service": "worker"})
+        with pytest.raises(LoggerExistsError):
+            LoggerFactory.create_root(log_config, extra={"service": "worker"})
 
-        assert second is first
-        assert second._extra == {"service": "worker"}
-
-        # Cleanup
-        first.handlers.clear()
+        assert first._extra == {"service": "api"}  # the first logger is untouched
 
 
 # =============================================================================
-# Test logger already exists branch - Lines 64-66
+# Existing names: create raises
 # =============================================================================
 
 
 @pytest.mark.unit
 class TestLoggerExists:
-    """Test logger already exists branch."""
+    """create() never touches an existing logger."""
 
-    def test_create_returns_existing_logger_when_registered(
-        self, log_config, unique_logger_name
-    ):
-        """Test create returns existing logger if in manager (lines 64-66)."""
-        # First, manually register a logger in the manager to trigger the branch
-        existing_logger = logging.getLogger(unique_logger_name)
+    def test_create_raises_when_name_exists(self, log_config, unique_logger_name):
+        """Same or different config: the second create raises."""
+        first = LoggerFactory.create(unique_logger_name, log_config)
 
-        # Now call LoggerFactory.create - should hit the "already exists" branch
+        with pytest.raises(LoggerExistsError) as exc:
+            LoggerFactory.create(unique_logger_name, log_config)
+
+        assert exc.value.name == unique_logger_name
+        assert first.level == logging.DEBUG
+
+    def test_create_raises_over_a_stdlib_logger(self, log_config, unique_logger_name):
+        """A library's plain logger holds the name too."""
+        logging.getLogger(unique_logger_name)
+
+        with pytest.raises(LoggerExistsError):
+            LoggerFactory.create(unique_logger_name, log_config)
+
+    def test_placeholder_is_not_a_logger(self, log_config, unique_logger_name):
+        """The PlaceHolder stdlib puts in for a dotted name's parent does not block it."""
+        logging.getLogger(f"{unique_logger_name}.child")
+
         logger = LoggerFactory.create(unique_logger_name, log_config)
 
-        # Should return the existing logger (or at least not crash)
         assert logger.name == unique_logger_name
 
-        # Cleanup
-        existing_logger.handlers.clear()
-        if hasattr(logger, "handlers"):
-            logger.handlers.clear()
 
-    def test_create_with_extra_over_stdlib_logger_does_not_crash(
-        self, log_config, unique_logger_name
-    ):
-        """A library's plain logger under the name has no extra to set."""
-        existing_logger = logging.getLogger(unique_logger_name)
+# =============================================================================
+# reconfigure
+# =============================================================================
 
-        logger = LoggerFactory.create(
-            unique_logger_name, log_config, extra={"service": "api"}
+
+@pytest.mark.unit
+class TestReconfigure:
+    """reconfigure() changes a live logger in place."""
+
+    def test_applies_level_and_settings(self, log_config, unique_logger_name):
+        """Everyone holding the logger sees the new level and holder settings."""
+        logger = LoggerFactory.create(unique_logger_name, log_config)
+        handlers = list(logger.handlers)
+
+        updated = LoggerFactory.reconfigure(
+            unique_logger_name,
+            LogConfig(level=logging.WARNING, location=2, micros=True, colors=False),
         )
 
-        assert logger is existing_logger
+        assert updated is logger
+        assert logger.level == logging.WARNING
+        assert logger.get_level() == logging.WARNING
+        assert logger._holder.location == 2 and logger._holder.micros is True
+        assert logger.handlers == handlers  # handlers are left alone
 
-        # Cleanup
-        existing_logger.handlers.clear()
+    def test_disabling(self, log_config, unique_logger_name):
+        """level=False disables the logger, as at creation."""
+        logger = LoggerFactory.create(unique_logger_name, log_config)
+
+        LoggerFactory.reconfigure(unique_logger_name, LogConfig.from_params(False))
+
+        assert logger.disabled is True
+
+    def test_raises_when_absent(self, log_config, unique_logger_name):
+        """There is nothing to reconfigure."""
+        with pytest.raises(LoggerNotFoundError):
+            LoggerFactory.reconfigure(unique_logger_name, log_config)
+
+
+# =============================================================================
+# destroy
+# =============================================================================
+
+
+@pytest.mark.unit
+class TestDestroy:
+    """destroy() frees a name, with every logger derived from it."""
+
+    def test_frees_the_name(self, log_config, unique_logger_name):
+        """After destroy, create() of the name works again."""
+        old = LoggerFactory.create(unique_logger_name, log_config)
+
+        LoggerFactory.destroy(unique_logger_name)
+        new = LoggerFactory.create(unique_logger_name, log_config)
+
+        assert new is not old
+        assert (
+            old.handlers == []
+        )  # closed and removed; the old object still logs nowhere
+
+    def test_removes_derived_loggers(self, log_config, unique_logger_name):
+        """No view is left pointing at a removed logger."""
+        parent = LoggerFactory.create(unique_logger_name, log_config)
+        child = LoggerFactory.derive(parent, ["a", "b"])
+        sibling = LoggerFactory.create(f"{unique_logger_name}-other", log_config)
+
+        LoggerFactory.destroy(unique_logger_name)
+
+        registry = logging.root.manager.loggerDict
+        assert unique_logger_name not in registry and child.name not in registry
+        assert registry[sibling.name] is sibling  # an unrelated name is untouched
+
+    def test_root_destroy_spares_independent_loggers(
+        self, log_config, unique_logger_name
+    ):
+        """A logger created with a '/' name is not a view of the root."""
+        root = LoggerFactory.create_root(log_config)
+        view = LoggerFactory.derive(root, "view")
+        independent = LoggerFactory.create(f"/{unique_logger_name}", log_config)
+
+        LoggerFactory.destroy("/")
+
+        registry = logging.root.manager.loggerDict
+        assert "/" not in registry and view.name not in registry
+        assert registry[independent.name] is independent
+
+    def test_absent_raises(self, unique_logger_name):
+        """Destroying a name nobody uses is an error: a typo or a second destroy."""
+        with pytest.raises(LoggerNotFoundError):
+            LoggerFactory.destroy(unique_logger_name)
+
+    def test_destroy_if_exists(self, log_config, unique_logger_name):
+        """Reports whether there was something to destroy, and never raises."""
+        LoggerFactory.create(unique_logger_name, log_config)
+
+        assert LoggerFactory.destroy_if_exists(unique_logger_name) is True
+        assert LoggerFactory.destroy_if_exists(unique_logger_name) is False
+
+
+@pytest.mark.unit
+class TestCreateOrReplace:
+    """create_or_replace() is destroy() then create()."""
+
+    def test_replaces_an_existing_logger(self, log_config, unique_logger_name):
+        """The old logger and its views go; a fresh logger takes the name."""
+        old = LoggerFactory.create(unique_logger_name, log_config)
+        view = LoggerFactory.derive(old, "view")
+
+        new = LoggerFactory.create_or_replace(
+            unique_logger_name, LogConfig.from_params("warning")
+        )
+
+        registry = logging.root.manager.loggerDict
+        assert new is not old and registry[unique_logger_name] is new
+        assert new.level == logging.WARNING
+        assert old.handlers == [] and view.name not in registry
+
+    def test_creates_when_absent(self, log_config, unique_logger_name):
+        """With nothing to replace it is plain create()."""
+        logger = LoggerFactory.create_or_replace(unique_logger_name, log_config)
+
+        assert logging.root.manager.loggerDict[unique_logger_name] is logger
+
+
+def _create_root_in_child(conn) -> None:
+    """In a forked child: take over the inherited root name and log through both."""
+    from appinfra.log.factory import LoggerFactory as Factory
+
+    inherited = logging.root.manager.loggerDict["/"]
+    try:
+        own = Factory.create_root(LogConfig.from_params("info"))
+        view = Factory.derive(own, "view")
+        conn.send(
+            (
+                own is not inherited,
+                view._root_logger is own,
+                bool(inherited.handlers),
+            )
+        )
+    except Exception as e:  # report instead of dying silently
+        conn.send(repr(e))
+    finally:
+        conn.close()
+
+
+@pytest.mark.unit
+@pytest.mark.skipif(
+    "fork" not in __import__("multiprocessing").get_all_start_methods(),
+    reason="needs the fork start method",
+)
+def test_forked_child_may_create_an_inherited_name(log_config):
+    """A logger inherited across fork belongs to the parent; the child can create the name."""
+    import multiprocessing
+
+    parent_root = LoggerFactory.create_root(log_config)
+    LoggerFactory.derive(parent_root, "view")
+    ctx = multiprocessing.get_context("fork")
+    recv, send = ctx.Pipe(duplex=False)
+    child = ctx.Process(target=_create_root_in_child, args=(send,))
+    child.start()
+    result = recv.recv()
+    child.join(10.0)
+
+    # new root, a view of the new root (not the inherited one), inherited lg still works
+    assert result == (True, True, True)
+    with pytest.raises(LoggerExistsError):  # in this process the name is still taken
+        LoggerFactory.create_root(log_config)
 
 
 # =============================================================================

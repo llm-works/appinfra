@@ -202,9 +202,11 @@ def _create_specificity_app():
 def _demonstrate_pattern_matching():
     """Create loggers and demonstrate pattern specificity matching."""
     log_config = LogConfig.from_params("info", location=0, micros=False)
-    infra_logger = LoggerFactory.create("/infra/cache", log_config)
-    db_logger = LoggerFactory.create("/infra/db/connection", log_config)
-    queries_logger = LoggerFactory.create("/infra/db/queries", log_config)
+    # Earlier examples in this script created some of these names; replace them so
+    # they are created anew under this example's topic rules
+    infra_logger = LoggerFactory.create_or_replace("/infra/cache", log_config)
+    db_logger = LoggerFactory.create_or_replace("/infra/db/connection", log_config)
+    queries_logger = LoggerFactory.create_or_replace("/infra/db/queries", log_config)
 
     print("\nPattern matching (most specific wins):")
     print(f"  /infra/cache → {logging.getLevelName(infra_logger.level)}")

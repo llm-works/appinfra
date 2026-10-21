@@ -214,7 +214,7 @@ def _demo_console_and_file_output():
     """Demonstrate basic console and file output."""
     print("\n1. Console and File Output:")
     logger1 = (
-        LoggingBuilder("demo.multiple")
+        LoggingBuilder("demo.console_and_file")
         .with_level("info")
         .with_console_handler()
         .with_file_handler(f"{LOG_DIR}/multiple_demo.log")
