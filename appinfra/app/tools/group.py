@@ -91,6 +91,10 @@ class ToolGroup:
             Tool: The added tool instance
         """
         self._check_new_tool(tool)
+        # Hang the subtool off this group's tool, as App.add_tool does for top-level
+        # tools: its logger then derives from the parent's, as /<tool>/<subtool>
+        if tool.parent is None:
+            tool.set_parent(self._parent)
         self._set_tool(tool)
         if run_func is not None:
             self._set_func(tool.name, run_func)
