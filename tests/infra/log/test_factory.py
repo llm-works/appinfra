@@ -219,6 +219,24 @@ class TestTakeOver:
         assert logging.root.manager.loggerDict[unique_logger_name] is lib
         assert lib.handlers == [handler]
 
+    def test_destroy_leaves_the_library_child_loggers(
+        self, log_config, unique_logger_name
+    ):
+        """Destroying a taken-over logger removes it, not the library's own children."""
+        _library_logger(unique_logger_name, logging.Logger)
+        child = logging.getLogger(f"{unique_logger_name}.sub")
+        handler = _RecordingHandler()
+        child.addHandler(handler)
+        lg = LoggerFactory.create(unique_logger_name, log_config)
+        view = LoggerFactory.derive(lg, "view")
+
+        LoggerFactory.destroy(unique_logger_name)
+
+        registry = logging.root.manager.loggerDict
+        assert unique_logger_name not in registry and view.name not in registry
+        assert registry[child.name] is child and child.parent is logging.root
+        assert child.handlers == [handler] and not handler.closed
+
     @pytest.mark.parametrize("method", ["derive", "create_child"])
     def test_derive_never_returns_a_library_logger(
         self, log_config, unique_logger_name, method

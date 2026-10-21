@@ -237,13 +237,8 @@ class LoggerFactory:
         if target is None:
             raise LoggerNotFoundError(name)
         registry = logging.root.manager.loggerDict
-        doomed = [
-            lg
-            for lg in list(registry.values())
-            if isinstance(lg, logging.Logger) and _descends_from(lg, target)
-        ]
         error: Exception | None = None
-        for lg in doomed:
+        for lg in LoggerFactory._doomed(target):
             for handler in list(lg.handlers):
                 lg.removeHandler(handler)
                 try:
@@ -254,6 +249,32 @@ class LoggerFactory:
             registry.pop(lg.name, None)
         if error is not None:
             raise error
+
+    @staticmethod
+    def _doomed(target: Logger) -> list[logging.Logger]:
+        """
+        Return ``target`` and the factory's loggers below it, which :meth:`destroy` removes.
+
+        Below a taken-over library logger, the library's own child loggers are not
+        appinfra's: they stay registered, and those whose parent is ``target`` get the
+        stdlib root back as their parent, as before the takeover.
+        """
+        registry = logging.root.manager.loggerDict
+        doomed = [
+            lg
+            for lg in list(registry.values())
+            if isinstance(lg, logging.Logger)
+            and (lg is target or _is_factory_logger(lg))
+            and _descends_from(lg, target)
+        ]
+        for lg in list(registry.values()):
+            if (
+                isinstance(lg, logging.Logger)
+                and lg.parent is target
+                and lg not in doomed
+            ):
+                lg.parent = logging.root
+        return doomed
 
     @staticmethod
     def destroy_if_exists(name: str) -> bool:
