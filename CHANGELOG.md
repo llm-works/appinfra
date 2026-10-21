@@ -34,6 +34,11 @@ For API stability guarantees and deprecation policy, see
 - **Breaking:** a log handler created without its own `level` stays at `NOTSET` and follows its
   logger's level, including after `reconfigure()`, hot-reload and topic-level updates, none of
   which change handler levels any more. An explicit handler level is kept.
+- Tool loggers follow the tool tree: a subtool added with `add_tool()` gets the group's tool as
+  parent and logs as `/<tool>/<subtool>`; a tool outside an app logs as `/<tool name>`. Both
+  logged as `/` before.
+- The FastAPI and TCP server examples listen on 25442/25443 and 25444 instead of 8000/8001 and
+  9001, next to the pg ports.
 
 ### Fixed
 - `select_scrollable` and `select_table`: Esc followed quickly by `q` or Enter no longer
