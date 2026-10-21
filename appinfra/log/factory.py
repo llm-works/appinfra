@@ -274,6 +274,8 @@ class LoggerFactory:
                 and lg not in doomed
             ):
                 lg.parent = logging.root
+                # Clears the level caches, which hold results from the old parent
+                lg.setLevel(lg.level)
         return doomed
 
     @staticmethod

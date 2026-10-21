@@ -223,12 +223,14 @@ class TestTakeOver:
         self, log_config, unique_logger_name
     ):
         """Destroying a taken-over logger removes it, not the library's own children."""
-        _library_logger(unique_logger_name, logging.Logger)
-        child = logging.getLogger(f"{unique_logger_name}.sub")
+        lib = _library_logger(unique_logger_name, logging.Logger)
+        child = _library_logger(f"{unique_logger_name}.sub", logging.Logger)
+        child.parent = lib  # a NOTSET child: its parent's level decides
         handler = _RecordingHandler()
         child.addHandler(handler)
         lg = LoggerFactory.create(unique_logger_name, log_config)
         view = LoggerFactory.derive(lg, "view")
+        assert child.isEnabledFor(logging.DEBUG)  # cached under the debug-level parent
 
         LoggerFactory.destroy(unique_logger_name)
 
@@ -236,6 +238,10 @@ class TestTakeOver:
         assert unique_logger_name not in registry and view.name not in registry
         assert registry[child.name] is child and child.parent is logging.root
         assert child.handlers == [handler] and not handler.closed
+        # the stdlib root's level now decides, not the cached result
+        assert child.isEnabledFor(logging.DEBUG) is (
+            logging.root.getEffectiveLevel() <= logging.DEBUG
+        )
 
     @pytest.mark.parametrize("method", ["derive", "create_child"])
     def test_derive_never_returns_a_library_logger(
