@@ -10,7 +10,7 @@ and its history, not a git implementation; git cannot read its repositories.
 ```python
 from appinfra.cas import Blob, Commit, FileStore, Tree, TreeEntry, canonical_json
 
-store = FileStore("/var/lib/app/cas")
+store = FileStore(lg, "/var/lib/app/cas")
 repo = store.repo("docs")
 
 readme = repo.put(Blob(b"hello"))
@@ -106,8 +106,8 @@ missing, `prune` raises `ObjectNotFoundError` and deletes nothing.
 
 | Store | Use |
 |-------|-----|
-| `MemoryStore()` | Tests and single-process use; thread-safe |
-| `FileStore(root, fsync=True)` | One directory per repository; safe across threads and processes on a local filesystem. `fsync=False` skips flushing, for test suites |
+| `MemoryStore(lg)` | Tests and single-process use; thread-safe |
+| `FileStore(lg, root, fsync=True)` | One directory per repository; safe across threads and processes on a local filesystem. `fsync=False` skips flushing, for test suites |
 
 `FileStore` writes every file to a `tmp/` directory, fsyncs it and renames it into place, so a
 reader never sees a partial file. It also fsyncs the directory after every rename, unlink and new
@@ -163,6 +163,21 @@ class TestMyStore(StoreConformance):
 
         return age
 ```
+
+A store subclass passes the logger to `Store.__init__(lg)`.
+
+## Logging
+
+Stores log to a logger derived from `lg` named `cas` (e.g. `/cas` under the root logger), so its
+level can be set on its own. Nothing is logged at `info`: an application running at `info` sees
+only a `warning` when cleanup finds what a crashed writer left behind (temp files in `tmp/`, or a
+directory a failed `delete_repo` left). Errors are raised, not logged.
+
+| Level | Event |
+|-------|-------|
+| `warning` | Temp files of a writer that died removed by `prune`; a failed delete's leftover removed |
+| `debug` | `prune` finished (`deleted`, `kept`, `swept`, `after`); repository deleted |
+| `trace` | Ref moved or deleted; `commit()` found its ref moved; a lock relocked after its file was renamed away |
 
 ## Errors
 

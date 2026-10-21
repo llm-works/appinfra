@@ -11,7 +11,7 @@ its own objects and refs.
 Example:
     from appinfra.cas import Blob, FileStore, Tree, TreeEntry
 
-    repo = FileStore("/var/lib/app/cas").repo("docs")
+    repo = FileStore(lg, "/var/lib/app/cas").repo("docs")
     blob = repo.put(Blob(b"hello"))
     tree = repo.put(Tree((TreeEntry("readme", "blob", blob),)))
     commit = repo.commit("main", tree, payload=b"first version")

@@ -11,15 +11,18 @@ import pytest
 
 from appinfra.cas import Blob, Commit, MemoryStore, Repo, Tree, TreeEntry
 from appinfra.cas.conformance import dangling_links
+from appinfra.log import Logger
 
 pytestmark = pytest.mark.unit
+
+LG = Logger("test-cas")
 
 
 class _CrashingStore(MemoryStore):
     """Records delete order; raises after ``crash_after`` deletes when set."""
 
     def __init__(self, crash_after: int | None = None) -> None:
-        super().__init__()
+        super().__init__(LG)
         self.deleted: list[str] = []
         self._crash_after = crash_after
 

@@ -19,6 +19,8 @@ from collections.abc import Iterable, Iterator
 from contextlib import AbstractContextManager
 from typing import TypeVar, overload
 
+from .. import time as infratime
+from ..log import Logger, LoggerFactory
 from .errors import (
     CorruptObjectError,
     InvalidNameError,
@@ -76,7 +78,14 @@ class Store(ABC):
     :meth:`write_ref` atomic: of concurrent writers passing the same ``old``, at most one
     succeeds. :meth:`lock` must exclude across every thread and process that can open the
     store.
+
+    Logs to ``<lg>/cas``, never above debug except for a ``warning`` when cleanup finds
+    what a crashed writer left behind. Errors are raised, not logged.
     """
+
+    def __init__(self, lg: Logger) -> None:
+        """Log to a ``cas`` logger derived from ``lg``."""
+        self._lg = LoggerFactory.derive(lg, "cas")
 
     def repo(self, name: str) -> Repo:
         """Return the repository ``name``; it is created by its first write."""
@@ -154,14 +163,15 @@ class Store(ABC):
     def list_refs(self, repo: str) -> dict[str, str]:
         """Return every ref of the repository: name to object id."""
 
-    def sweep(self, repo: str, cutoff: float) -> None:  # noqa: B027 - optional hook
+    def sweep(self, repo: str, cutoff: float) -> int:
         """
-        Remove backend leftovers last touched before ``cutoff`` (epoch secs).
+        Remove backend leftovers last touched before ``cutoff`` (epoch secs); return how many.
 
         Called by :meth:`Repo.prune` under the exclusive lock, so no write through
         :class:`Repo` is in progress. A backend that leaves nothing behind, such as temp
-        files of a writer that died, keeps this no-op.
+        files of a writer that died, keeps this default, which removes nothing.
         """
+        return 0
 
 
 class Repo:
@@ -176,6 +186,7 @@ class Repo:
     def __init__(self, store: Store, name: str) -> None:
         self._store = store
         self._name = name
+        self._lg = store._lg
 
     @property
     def name(self) -> str:
@@ -278,7 +289,13 @@ class Repo:
         name, new = check_name("ref", name), check_id(new)
         with self._store.lock(self._name):
             self._require(new, "commit")
-            return self._store.write_ref(self._name, name, new, old)
+            moved = self._store.write_ref(self._name, name, new, old)
+        if moved:
+            self._lg.trace(
+                "moved ref",
+                extra={"repo": self._name, "ref": name, "old": old, "new": new},
+            )
+        return moved
 
     def delete_ref(self, name: str, old: str) -> bool:
         """
@@ -291,7 +308,12 @@ class Repo:
         if self._store.read_ref(self._name, name) != old:
             return False  # also spares locking, and so touching, an unknown repository
         with self._store.lock(self._name):
-            return self._store.write_ref(self._name, name, None, old)
+            deleted = self._store.write_ref(self._name, name, None, old)
+        if deleted:
+            self._lg.trace(
+                "deleted ref", extra={"repo": self._name, "ref": name, "old": old}
+            )
+        return deleted
 
     def refs(self, prefix: str = "") -> dict[str, str]:
         """Return the refs whose name starts with ``prefix``, sorted by name."""
@@ -312,6 +334,10 @@ class Repo:
         tip = self.get_ref(ref)
         commit_id = self.put(Commit(tree, (tip,) if tip else (), payload))
         if not self.set_ref(ref, commit_id, tip):
+            self._lg.trace(
+                "ref moved under commit",
+                extra={"repo": self._name, "ref": ref, "expected": tip},
+            )
             raise RefConflictError(self._name, ref, tip)
         return commit_id
 
@@ -397,6 +423,7 @@ class Repo:
             raise ValueError(f"expire must be >= 0, got {expire}")
         if self._name not in self._store.list_repos():
             return 0  # nothing to prune; don't create the repository by locking it
+        start_t = infratime.start()
         with self._store.lock(self._name, exclusive=True):
             cutoff = time.time() - expire
             stored = self._store.list_objects(self._name)
@@ -405,7 +432,17 @@ class Repo:
             reachable = self._reachable(roots)
             garbage = [oid for oid in stored if oid not in reachable]
             self._store.delete_objects(self._name, self._referrers_first(garbage))
-            self._store.sweep(self._name, cutoff)
+            swept = self._store.sweep(self._name, cutoff)
+        self._lg.debug(
+            "pruned",
+            extra={
+                "repo": self._name,
+                "deleted": len(garbage),
+                "kept": len(stored) - len(garbage),
+                "swept": swept,
+                "after": infratime.since(start_t),
+            },
+        )
         return len(garbage)
 
     def _referrers_first(self, object_ids: list[str]) -> list[str]:

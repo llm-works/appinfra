@@ -36,6 +36,7 @@ from pathlib import Path
 from typing import cast, get_args
 from urllib.parse import quote, unquote
 
+from ..log import Logger
 from .errors import CorruptObjectError, InvalidNameError
 from .objects import ObjectType, is_object_id
 from .store import Store, check_id, check_name
@@ -119,7 +120,9 @@ def _is_current(fd: int, path: Path) -> bool:
 
 
 @contextlib.contextmanager
-def _locked(lock_file: Path, exclusive: bool, fsync: bool) -> Iterator[None]:
+def _locked(
+    lg: Logger, lock_file: Path, exclusive: bool, fsync: bool
+) -> Iterator[None]:
     """
     Hold a ``flock`` on ``lock_file`` (created with its directory if absent) for the block.
 
@@ -136,6 +139,10 @@ def _locked(lock_file: Path, exclusive: bool, fsync: bool) -> Iterator[None]:
             if _is_current(fd, lock_file):
                 yield
                 return
+            lg.trace(
+                "lock file renamed away while waiting, relocking",
+                extra={"path": str(lock_file)},
+            )
         finally:
             os.close(fd)
 
@@ -143,7 +150,9 @@ def _locked(lock_file: Path, exclusive: bool, fsync: bool) -> Iterator[None]:
 class FileStore(Store):
     """Repositories as directories under ``root``; safe across threads and processes."""
 
-    def __init__(self, root: str | os.PathLike[str], *, fsync: bool = True) -> None:
+    def __init__(
+        self, lg: Logger, root: str | os.PathLike[str], *, fsync: bool = True
+    ) -> None:
         """
         Use ``root`` as the store's directory; it is created by the first write.
 
@@ -151,6 +160,7 @@ class FileStore(Store):
         locked, but a power loss can lose or reorder them. Meant for test suites, where
         flushing dominates the run time.
         """
+        super().__init__(lg)
         self._root = Path(root)
         self._fsync = fsync
 
@@ -159,7 +169,9 @@ class FileStore(Store):
     @contextlib.contextmanager
     def lock(self, repo: str, exclusive: bool = False) -> Iterator[None]:
         """Hold ``repo.lock``, shared or exclusive, for the block."""
-        with _locked(self._repo_dir(repo) / "repo.lock", exclusive, self._fsync):
+        with _locked(
+            self._lg, self._repo_dir(repo) / "repo.lock", exclusive, self._fsync
+        ):
             yield
 
     def delete_repo(self, name: str) -> None:
@@ -172,27 +184,41 @@ class FileStore(Store):
         """
         repo_dir = self._repo_dir(name)
         prefix = f"{repo_dir.name}{_DELETED}"
+        doomed = repo_dir.with_name(f"{prefix}{uuid.uuid4().hex}")
         if repo_dir.is_dir():
-            doomed = repo_dir.with_name(f"{prefix}{uuid.uuid4().hex}")
             with self.lock(name, exclusive=True):
                 with contextlib.suppress(FileNotFoundError):
                     repo_dir.rename(doomed)
                     _fsync_dir(self._root, self._fsync)
+                    self._lg.debug("deleted repository", extra={"repo": name})
         if self._root.is_dir():
             for leftover in self._root.iterdir():
                 if leftover.name.startswith(prefix):
+                    if leftover != doomed:
+                        self._lg.warning(
+                            "removing what a failed delete left behind",
+                            extra={"repo": name, "path": str(leftover)},
+                        )
                     with contextlib.suppress(FileNotFoundError):  # a concurrent delete
                         shutil.rmtree(leftover)
 
-    def sweep(self, repo: str, cutoff: float) -> None:
+    def sweep(self, repo: str, cutoff: float) -> int:
         """Delete temp files of writers that died, last modified before ``cutoff``."""
         tmp_dir = self._repo_dir(repo) / "tmp"
         if not tmp_dir.is_dir():
-            return
+            return 0
+        swept = 0
         for path in tmp_dir.iterdir():
             with contextlib.suppress(FileNotFoundError):
                 if path.stat().st_mtime <= cutoff:
                     path.unlink()
+                    swept += 1
+        if swept:
+            self._lg.warning(
+                "removed temp files of a writer that died",
+                extra={"repo": repo, "count": swept},
+            )
+        return swept
 
     def list_repos(self) -> list[str]:
         """
@@ -292,7 +318,7 @@ class FileStore(Store):
         if new is None and not path.parent.is_dir():
             return old is None  # nothing to delete; and nothing gets created
         _makedirs(path.parent, self._fsync)
-        with _locked(self._repo_dir(repo) / "refs.lock", True, self._fsync):
+        with _locked(self._lg, self._repo_dir(repo) / "refs.lock", True, self._fsync):
             if self.read_ref(repo, name) != old:
                 return False
             if new is None:

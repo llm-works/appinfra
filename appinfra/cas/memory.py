@@ -11,6 +11,7 @@ from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 
+from ..log import Logger
 from .objects import ObjectType
 from .store import Store
 
@@ -63,7 +64,8 @@ class _SharedExclusiveLock:
 class MemoryStore(Store):
     """Repositories held in a dict; thread-safe, gone when the process ends."""
 
-    def __init__(self) -> None:
+    def __init__(self, lg: Logger) -> None:
+        super().__init__(lg)
         self._lock = threading.Lock()
         self._repos: dict[str, _Repo] = {}
         self._repo_locks: dict[str, _SharedExclusiveLock] = {}
@@ -79,7 +81,9 @@ class MemoryStore(Store):
     def delete_repo(self, name: str) -> None:
         """Delete the repository ``name`` under its exclusive lock; no-op if absent."""
         with self.lock(name, exclusive=True), self._lock:
-            self._repos.pop(name, None)
+            deleted = self._repos.pop(name, None) is not None
+        if deleted:
+            self._lg.debug("deleted repository", extra={"repo": name})
 
     def list_repos(self) -> list[str]:
         """Return the names of the repositories holding an object or a ref, sorted."""
