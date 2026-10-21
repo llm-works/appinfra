@@ -28,6 +28,8 @@ For API stability guarantees and deprecation policy, see
   raise `LoggerExistsError` for a name already taken in this process. New: `reconfigure()`,
   `destroy()`, `destroy_if_exists()`, `create_or_replace()`. `App.setup_logging_from_config()`
   is removed; an app destroys its root logger at shutdown.
+- **Breaking:** `App.subprocess_context()` is a context manager only: it creates the process's root
+  logger on entry and destroys it on exit, so a worker can enter it once per task.
 - **Breaking:** a log handler created without its own `level` stays at `NOTSET` and follows its
   logger's level, including after `reconfigure()`, hot-reload and topic-level updates, none of
   which change handler levels any more. An explicit handler level is kept.

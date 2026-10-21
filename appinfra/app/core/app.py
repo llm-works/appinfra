@@ -12,7 +12,8 @@ from __future__ import annotations
 
 import argparse
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -22,6 +23,7 @@ from ...dot_dict import DotDict
 if TYPE_CHECKING:
     from ...config import ConfigWatcher
     from ...log import Logger
+    from ...log.config import LogConfig
     from ...subprocess import SubprocessContext
 
 from ... import time
@@ -650,13 +652,18 @@ class App(Traceable):
 
         return cast("Logger", self.lifecycle.logger)
 
-    def subprocess_context(self, handle_signals: bool = True) -> SubprocessContext:
+    @contextmanager
+    def subprocess_context(
+        self, handle_signals: bool = True
+    ) -> Iterator[SubprocessContext]:
         """
-        Create a SubprocessContext for use in child processes.
+        Run a block of a child process with its own root logger.
 
-        Creates a fresh logger for the subprocess and wires up config hot-reload
-        on the resolved config file, if the app declared a spec.
-        Use this in worker processes spawned via multiprocessing.
+        Creates the process's root logger from the app's logging config, enters a
+        SubprocessContext with it (config hot-reload on the resolved config file, if
+        the app declared a spec), and destroys the root logger as the last step on
+        exit. Use this in worker processes spawned via multiprocessing; a worker that
+        runs several tasks can enter it once per task.
 
         Usage:
             with app.subprocess_context() as ctx:
@@ -667,29 +674,38 @@ class App(Traceable):
         Args:
             handle_signals: Whether to install signal handlers (default True)
 
-        Returns:
-            SubprocessContext configured with fresh logger and config watcher
+        Yields:
+            The entered SubprocessContext; its ``lg`` is the process's root logger
         """
         from ...log import LoggerFactory
-        from ...log.config import LogConfig
         from ...subprocess import SubprocessContext
 
-        # Create fresh logger for subprocess (forked memory is isolated)
+        lg = LoggerFactory.create_root(self._subprocess_log_config())
+        try:
+            config_path = self.config_path
+            with SubprocessContext(
+                lg=lg,
+                config_files=[str(config_path)] if config_path else [],
+                handle_signals=handle_signals,
+                origin=self._origin,
+            ) as ctx:
+                yield ctx
+        finally:
+            # Last, after the context has stopped its config watcher (which logs).
+            # A missing logger is not an error: raising for it would hide the
+            # exception the block may be leaving with.
+            LoggerFactory.destroy_if_exists(lg.name)
+
+    def _subprocess_log_config(self) -> LogConfig:
+        """The ``logging`` section of the app's config, for a child's root logger."""
+        from ...log.config import LogConfig
+
         config_dict = (
             self.config.to_dict()
             if hasattr(self.config, "to_dict")
             else dict(self.config)
         )
-        log_config = LogConfig.from_config(config_dict, "logging")
-        lg = LoggerFactory.create_root(log_config)
-
-        config_path = self.config_path
-        return SubprocessContext(
-            lg=lg,
-            config_files=[str(config_path)] if config_path else [],
-            handle_signals=handle_signals,
-            origin=self._origin,
-        )
+        return LogConfig.from_config(config_dict, "logging")
 
     def create_config_watcher(self) -> ConfigWatcher | None:
         """

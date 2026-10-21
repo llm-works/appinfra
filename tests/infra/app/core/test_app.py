@@ -13,6 +13,7 @@ Tests key functionality including:
 """
 
 import argparse
+import logging
 import os
 import sys
 from pathlib import Path
@@ -1007,31 +1008,26 @@ class TestDeepMerge:
 class TestSubprocessContextMethod:
     """Test App.subprocess_context() helper method."""
 
-    def test_subprocess_context_returns_context_manager(self):
-        """Test that subprocess_context() returns a SubprocessContext."""
+    def test_subprocess_context_yields_entered_context(self):
+        """The block gets an entered SubprocessContext."""
         from appinfra.subprocess import SubprocessContext
 
         app = App()
         app.config = DotDict(logging=DotDict(level="info", location=0))
 
-        ctx = app.subprocess_context()
-
-        assert isinstance(ctx, SubprocessContext)
-        # Clean up
-        ctx._lg.handlers.clear()
+        with app.subprocess_context(handle_signals=False) as ctx:
+            assert isinstance(ctx, SubprocessContext)
+            assert ctx.running is True
 
     def test_subprocess_context_creates_fresh_logger(self):
-        """Test that subprocess_context() creates a new logger instance."""
+        """The context logs through a root logger of its own, not the app's."""
         app = App()
         app.config = DotDict(logging=DotDict(level="debug", location=1))
         app.lifecycle._logger = Mock()
 
-        ctx = app.subprocess_context()
-
-        # The context should have its own logger, not the app's
-        assert ctx._lg is not app.lifecycle._logger
-        # Clean up
-        ctx._lg.handlers.clear()
+        with app.subprocess_context(handle_signals=False) as ctx:
+            assert ctx.lg is not app.lifecycle._logger
+            assert ctx.lg.name == "/"
 
     def test_subprocess_context_passes_config_files(self):
         """Test that subprocess_context() passes the resolved config file."""
@@ -1043,11 +1039,9 @@ class TestSubprocessContextMethod:
             Path("/etc/myapp/config.yaml"), Path("/etc/myapp"), rule=6
         )
 
-        ctx = app.subprocess_context()
-
-        assert ctx._config_files == ["/etc/myapp/config.yaml"]
-        # Clean up
-        ctx._lg.handlers.clear()
+        with patch("appinfra.subprocess.SubprocessContext._start_config_watcher"):
+            with app.subprocess_context(handle_signals=False) as ctx:
+                assert ctx._config_files == ["/etc/myapp/config.yaml"]
 
     def test_subprocess_context_forwards_origin(self, tmp_path):
         """Test that subprocess_context() forwards the resolved include root."""
@@ -1059,45 +1053,96 @@ class TestSubprocessContextMethod:
         app._config_source = ConfigFile(etc / "config.yaml", etc, rule=6)
         app._origin = etc
 
-        ctx = app.subprocess_context()
-
-        assert ctx._origin == etc.resolve()
-        # Clean up
-        ctx._lg.handlers.clear()
+        with patch("appinfra.subprocess.SubprocessContext._start_config_watcher"):
+            with app.subprocess_context(handle_signals=False) as ctx:
+                assert ctx._origin == etc.resolve()
 
     def test_subprocess_context_handles_missing_config(self):
         """Test subprocess_context() works without a resolved config file."""
         app = App()
         app.config = DotDict(logging=DotDict(level="info", location=0))
 
-        ctx = app.subprocess_context()
-
-        assert ctx._config_files == []
-        # Clean up
-        ctx._lg.handlers.clear()
+        with app.subprocess_context(handle_signals=False) as ctx:
+            assert ctx._config_files == []
 
     def test_subprocess_context_handle_signals_parameter(self):
-        """Test that handle_signals parameter is passed correctly."""
-        app = App()
-        app.config = DotDict(logging=DotDict(level="info", location=0))
-
-        ctx = app.subprocess_context(handle_signals=False)
-
-        # Can't easily verify signal handling is disabled, but no exception means success
-        assert ctx is not None
-        # Clean up
-        ctx._lg.handlers.clear()
-
-    def test_subprocess_context_can_be_used_as_context_manager(self):
-        """Test that subprocess_context() works with 'with' statement."""
+        """handle_signals is passed through to the context."""
         app = App()
         app.config = DotDict(logging=DotDict(level="info", location=0))
 
         with app.subprocess_context(handle_signals=False) as ctx:
-            assert ctx.running is True
+            assert ctx._handle_signals is False
 
-        # After exiting, running should be True (only signal sets it to False)
-        # Actually verify it doesn't raise
+    def test_subprocess_context_destroys_its_root_logger_on_exit(self):
+        """The root logger lives exactly as long as the block."""
+        app = App()
+        app.config = DotDict(logging=DotDict(level="info", location=0))
+
+        with app.subprocess_context(handle_signals=False) as ctx:
+            assert logging.root.manager.loggerDict["/"] is ctx.lg
+
+        assert "/" not in logging.root.manager.loggerDict
+        assert ctx.lg.handlers == []
+
+    def test_subprocess_context_can_be_entered_once_per_task(self):
+        """A worker that runs several tasks enters it again without a name conflict."""
+        app = App()
+        app.config = DotDict(logging=DotDict(level="info", location=0))
+
+        for _ in range(2):
+            with app.subprocess_context(handle_signals=False) as ctx:
+                ctx.lg.info("task")
+
+        assert "/" not in logging.root.manager.loggerDict
+
+    def test_subprocess_context_destroys_root_when_block_raises(self):
+        """The block's exception propagates and the root logger is still destroyed."""
+        app = App()
+        app.config = DotDict(logging=DotDict(level="info", location=0))
+
+        with pytest.raises(RuntimeError, match="task failed"):
+            with app.subprocess_context(handle_signals=False):
+                raise RuntimeError("task failed")
+
+        assert "/" not in logging.root.manager.loggerDict
+
+
+# Set before the pool forks; the worker inherits it
+_POOL_APP: App | None = None
+
+
+def _pool_task(i: int) -> int:
+    """One task in a reused pool worker: enter the app's subprocess context."""
+    assert _POOL_APP is not None
+    with _POOL_APP.subprocess_context(handle_signals=False) as ctx:
+        ctx.lg.info("task", extra={"i": i})
+    return i
+
+
+@pytest.mark.unit
+@pytest.mark.skipif(
+    "fork" not in __import__("multiprocessing").get_all_start_methods(),
+    reason="needs the fork start method",
+)
+def test_subprocess_context_in_a_reused_pool_worker():
+    """One pool worker runs two tasks, each with its own root logger."""
+    import multiprocessing
+
+    from appinfra.log import LogConfig, LoggerFactory
+
+    global _POOL_APP
+    _POOL_APP = App()
+    _POOL_APP.config = DotDict(logging=DotDict(level="info", location=0))
+    parent_root = LoggerFactory.create_root(LogConfig.from_params("info"))
+    try:
+        with multiprocessing.get_context("fork").Pool(1) as pool:
+            results = pool.map_async(_pool_task, [1, 2]).get(timeout=30)
+    finally:
+        _POOL_APP = None
+
+    assert results == [1, 2]
+    # the workers' roots were their own; the parent's is untouched
+    assert logging.root.manager.loggerDict["/"] is parent_root
 
 
 @pytest.mark.unit
