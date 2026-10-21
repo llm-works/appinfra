@@ -40,12 +40,13 @@ class LogConfigError(LogError):
 
 class LoggerExistsError(LogConfigError):
     """
-    A logger with this name already exists.
+    An appinfra logger with this name already exists.
 
-    Creating a logger never touches an existing one: a name used twice is almost always
-    an accident, and reconfiguring silently would change the first logger under its
-    owner. Use ``LoggerFactory.reconfigure`` to change it on purpose, or
-    ``LoggerFactory.destroy`` before creating the name again.
+    Creating a logger never touches an existing appinfra one: a name used twice is
+    almost always an accident, and reconfiguring silently would change the first logger
+    under its owner. Use ``LoggerFactory.reconfigure`` to change it on purpose, or
+    ``LoggerFactory.destroy`` before creating the name again. (A library's plain stdlib
+    logger under the name is taken over instead; see ``LoggerFactory.create``.)
     """
 
     def __init__(self, name: str) -> None:

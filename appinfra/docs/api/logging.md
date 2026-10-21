@@ -130,6 +130,13 @@ then the first such error is raised.
 
 `derive()` and `create_child()` are lookups: they return an existing view of the same name.
 
+A library's own logger under the name does not block `create()`: a plain stdlib logger (or one
+`logging.getLogger()` made with appinfra's logger class) is taken over in place. The library keeps
+logging through the same object, and through its child loggers, now with the given config and
+appinfra's format; its own handlers and filters are dropped. A library's own `Logger` subclass is
+not taken over, since rewriting its class would break the library's calls to it, so `create()`
+raises `LoggerExistsError` for it.
+
 A logger belongs to the process that created it. A forked child inherits its parent's loggers
 but may create their names anew; the inherited objects keep working for code that holds them. An
 `App` creates the root logger `/` in `setup()` and destroys it at the end of `shutdown()`.

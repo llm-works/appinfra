@@ -25,7 +25,8 @@ For API stability guarantees and deprecation policy, see
   (`timeout=0` does not wait), and `ChannelClosedError` if the channel closes meanwhile.
   Custom transports must accept and honor `timeout`.
 - **Breaking:** `LoggerFactory.create()`, `create_root()` and logging builders' `build()`
-  raise `LoggerExistsError` for a name already taken in this process. New: `reconfigure()`,
+  raise `LoggerExistsError` for a name an appinfra logger in this process holds; a library's
+  stdlib logger under the name is taken over in place. New: `reconfigure()`,
   `destroy()`, `destroy_if_exists()`, `create_or_replace()`. `App.setup_logging_from_config()`
   is removed; an app destroys its root logger at shutdown.
 - **Breaking:** `App.subprocess_context()` is a context manager only: it creates the process's root

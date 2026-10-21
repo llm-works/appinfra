@@ -125,10 +125,15 @@ class LoggerFactory:
         Returns:
             Configured logger instance
 
+        A library's logger already under ``name`` (a plain stdlib one) is taken over in
+        place: the library keeps logging through the same object, now with this config
+        and appinfra's format, and its own handlers and filters are dropped.
+
         Raises:
-            LoggerExistsError: A logger named ``name`` already exists, whatever its
-                config. Use :meth:`reconfigure` to change it, or :meth:`destroy` it
-                before creating the name again.
+            LoggerExistsError: An appinfra logger this process created already holds
+                ``name``, whatever its config. Use :meth:`reconfigure` to change it, or
+                :meth:`destroy` it before creating the name again. A library's own
+                Logger subclass under the name raises too: it is not taken over.
 
         Example:
             >>> from appinfra.log import LoggerFactory, LogConfig
@@ -146,9 +151,14 @@ class LoggerFactory:
             [12:34:56,789] [I] Request received [service:users] [1234] [/api]
         """
         logging.setLoggerClass(logger_class)
-        if LoggerFactory._registered(name) is not None:
+        existing = LoggerFactory._registered(name)
+        if existing is None:
+            lg = logger_class(name, config, CallbackRegistry(), extra)
+        elif _is_library_logger(existing):
+            lg = LoggerFactory._take_over(existing, config, logger_class, extra)
+        else:
             raise LoggerExistsError(name)
-        return LoggerFactory._create_new_logger(name, config, logger_class, extra)
+        return LoggerFactory._finish_logger(lg, config)
 
     @staticmethod
     def create_or_replace(
@@ -255,15 +265,31 @@ class LoggerFactory:
         return existing
 
     @staticmethod
-    def _create_new_logger(
-        name: str,
+    def _take_over(
+        lg: logging.Logger,
         config: LogConfig,
         logger_class: type[Logger],
         extra: dict[str, Any] | collections.OrderedDict | None,
     ) -> Logger:
-        """Create a new logger with effective config and handler."""
-        callback_registry = CallbackRegistry()
-        lg = logger_class(name, config, callback_registry, extra)
+        """
+        Turn a library's logger into an appinfra logger, in place.
+
+        The library keeps its reference to this object, so its records, and those of
+        its child loggers, go through appinfra's handler and format from now on. Its
+        own handlers and filters are dropped, not closed: other loggers may share them.
+        """
+        name = lg.name
+        # A fresh object under the same identity: __init__ must not run over the
+        # state of an earlier one (it would wrap its own makeRecord)
+        lg.__dict__.clear()
+        lg.__class__ = logger_class
+        taken = cast(Logger, lg)
+        logger_class.__init__(taken, name, config, CallbackRegistry(), extra)
+        return taken
+
+    @staticmethod
+    def _finish_logger(lg: Logger, config: LogConfig) -> Logger:
+        """Give a new or taken-over logger its config and console handler; register it."""
         holder = LoggerFactory._apply_config(lg, config)
         lg.addHandler(LoggerFactory._console_handler(holder))
         lg.propagate = False
@@ -272,7 +298,7 @@ class LoggerFactory:
         lg.parent = logging.root
 
         # Register in loggerDict so hot-reload can find it
-        logging.root.manager.loggerDict[name] = lg
+        logging.root.manager.loggerDict[lg.name] = lg
 
         lg.trace2(
             "created logger",
@@ -457,6 +483,20 @@ class LoggerFactory:
             return cast(Logger, existing)
 
         return LoggerFactory._create_view_logger(name, parent, "derived logger")
+
+
+def _is_library_logger(lg: logging.Logger) -> bool:
+    """
+    Whether ``lg`` is a library's logger that :meth:`LoggerFactory.create` may take over.
+
+    That is a plain stdlib logger, or an appinfra one that ``logging.getLogger()`` made
+    (``setLoggerClass`` is process-wide) and the factory never configured. A library's
+    own Logger subclass is not: rewriting its class would break the library's calls to
+    its own methods.
+    """
+    if type(lg) is logging.Logger:
+        return True
+    return isinstance(lg, Logger) and lg._holder is None
 
 
 def _descends_from(lg: logging.Logger, target: logging.Logger) -> bool:

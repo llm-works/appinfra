@@ -13,10 +13,12 @@ Tests key functionality including:
 """
 
 import collections
+import io
 import logging
 
 import pytest
 
+from appinfra.log import Logger
 from appinfra.log.builder import LoggingBuilder
 from appinfra.log.config import LogConfig
 from appinfra.log.config_holder import LogConfigHolder
@@ -115,13 +117,6 @@ class TestLoggerExists:
         assert exc.value.name == unique_logger_name
         assert first.level == logging.DEBUG
 
-    def test_create_raises_over_a_stdlib_logger(self, log_config, unique_logger_name):
-        """A library's plain logger holds the name too."""
-        logging.getLogger(unique_logger_name)
-
-        with pytest.raises(LoggerExistsError):
-            LoggerFactory.create(unique_logger_name, log_config)
-
     def test_placeholder_is_not_a_logger(self, log_config, unique_logger_name):
         """The PlaceHolder stdlib puts in for a dotted name's parent does not block it."""
         logging.getLogger(f"{unique_logger_name}.child")
@@ -129,6 +124,81 @@ class TestLoggerExists:
         logger = LoggerFactory.create(unique_logger_name, log_config)
 
         assert logger.name == unique_logger_name
+
+
+# =============================================================================
+# Taking over a library's logger
+# =============================================================================
+
+
+def _library_logger(name: str, cls: type[logging.Logger]) -> logging.Logger:
+    """Register a logger the way logging.getLogger() does when ``cls`` is the logger class.
+
+    setLoggerClass is process-wide and other tests change it, so the class is explicit.
+    """
+    lg = cls(name)
+    lg.parent = logging.root
+    logging.root.manager.loggerDict[name] = lg
+    return lg
+
+
+@pytest.mark.unit
+class TestTakeOver:
+    """create() takes over a library's logger in place; the library keeps its reference."""
+
+    @pytest.mark.parametrize(
+        "cls", [logging.Logger, Logger], ids=["stdlib", "appinfra"]
+    )
+    def test_library_reference_logs_in_appinfra_format(
+        self, log_config, unique_logger_name, capsys, cls
+    ):
+        """The library's own object is now the appinfra logger, with appinfra's handler."""
+        lib = _library_logger(unique_logger_name, cls)
+        plain = io.StringIO()
+        lib.addHandler(logging.StreamHandler(plain))
+
+        lg = LoggerFactory.create(unique_logger_name, log_config)
+        lib.warning("library warning")
+
+        out = capsys.readouterr().out
+        assert lg is lib and isinstance(lib, Logger)
+        assert "[W]" in out and "library warning" in out and unique_logger_name in out
+        assert plain.getvalue() == ""  # the library's own handler was dropped
+
+    def test_library_child_loggers_follow(self, log_config, unique_logger_name, capsys):
+        """A library submodule's logger propagates to the taken-over one."""
+        _library_logger(unique_logger_name, logging.Logger)
+        child = logging.getLogger(f"{unique_logger_name}.sub")
+
+        LoggerFactory.create(unique_logger_name, log_config)
+        child.warning("submodule warning")
+
+        out = capsys.readouterr().out
+        assert "[W]" in out and "submodule warning" in out
+
+    def test_taken_over_logger_is_owned(self, log_config, unique_logger_name):
+        """After the takeover the name is an appinfra logger's: derive works, create raises."""
+        _library_logger(unique_logger_name, logging.Logger)
+        lg = LoggerFactory.create(unique_logger_name, log_config)
+
+        assert LoggerFactory.derive(lg, "view")._root_logger is lg
+        with pytest.raises(LoggerExistsError):
+            LoggerFactory.create(unique_logger_name, log_config)
+
+    def test_library_logger_subclass_is_not_taken_over(
+        self, log_config, unique_logger_name
+    ):
+        """Rewriting a library's own Logger class would break its calls to it."""
+
+        class LibraryLogger(logging.Logger):
+            def audit(self, msg: str) -> None:
+                self.info(msg)
+
+        lib = _library_logger(unique_logger_name, LibraryLogger)
+
+        with pytest.raises(LoggerExistsError):
+            LoggerFactory.create(unique_logger_name, log_config)
+        assert type(lib) is LibraryLogger
 
 
 # =============================================================================
