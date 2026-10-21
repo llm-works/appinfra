@@ -28,6 +28,9 @@ For API stability guarantees and deprecation policy, see
   raise `LoggerExistsError` for a name already taken in this process. New: `reconfigure()`,
   `destroy()`, `destroy_if_exists()`, `create_or_replace()`. `App.setup_logging_from_config()`
   is removed; an app destroys its root logger at shutdown.
+- **Breaking:** a log handler created without its own `level` stays at `NOTSET` and follows its
+  logger's level, including after `reconfigure()`, hot-reload and topic-level updates, none of
+  which change handler levels any more. An explicit handler level is kept.
 
 ### Fixed
 - `select_scrollable` and `select_table`: Esc followed quickly by `q` or Enter no longer

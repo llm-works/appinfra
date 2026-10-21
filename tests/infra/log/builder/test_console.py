@@ -82,7 +82,7 @@ class TestConsoleHandlerConfig:
 
         assert isinstance(handler, logging.StreamHandler)
         assert handler.stream is stream
-        assert handler.level == logging.INFO
+        assert handler.level == logging.NOTSET
 
     def test_create_handler_json_format(self):
         """Test creating handler with JSON format."""
@@ -137,14 +137,14 @@ class TestConsoleHandlerConfig:
 
         assert handler.level == logging.ERROR
 
-    def test_create_handler_uses_config_level_when_none(self):
-        """Test handler uses log config level when handler level is None."""
+    def test_create_handler_without_level_follows_logger(self):
+        """Without its own level the handler stays NOTSET: the logger's level decides."""
         handler_config = ConsoleHandlerConfig(level=None)
         log_config = LogConfig.from_params("warning")
 
         handler = handler_config.create_handler(log_config)
 
-        assert handler.level == logging.WARNING
+        assert handler.level == logging.NOTSET
 
     def test_create_handler_json_case_insensitive(self):
         """Test that format='JSON' (uppercase) works."""

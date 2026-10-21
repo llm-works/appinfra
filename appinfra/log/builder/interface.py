@@ -23,6 +23,20 @@ class HandlerConfig(ABC):
     def __init__(self, level: str | int | None = None) -> None:
         self.level = level
 
+    def apply_level(self, handler: logging.Handler) -> None:
+        """
+        Give ``handler`` this config's level, if it has one.
+
+        Without one the handler stays at NOTSET, so the logger's level decides what
+        it emits and follows reconfigure(), hot-reload and topic levels.
+        """
+        if self.level is None:
+            return
+        level = self.level
+        if isinstance(level, str):
+            level = getattr(logging, level.upper(), logging.INFO)
+        handler.setLevel(level)
+
     @abstractmethod
     def create_handler(self, config: LogConfig, logger: Any = None) -> logging.Handler:
         """Create the actual handler instance.

@@ -17,6 +17,7 @@ import logging
 
 import pytest
 
+from appinfra.log.builder import LoggingBuilder
 from appinfra.log.config import LogConfig
 from appinfra.log.config_holder import LogConfigHolder
 from appinfra.log.errors import LogConfigError, LoggerExistsError, LoggerNotFoundError
@@ -154,6 +155,31 @@ class TestReconfigure:
         assert logger.get_level() == logging.WARNING
         assert logger._holder.location == 2 and logger._holder.micros is True
         assert logger.handlers == handlers  # handlers are left alone
+
+    def test_lower_level_reaches_the_handler(self, unique_logger_name, capsys):
+        """Reconfiguring info -> debug makes debug records print."""
+        logger = LoggerFactory.create(unique_logger_name, LogConfig.from_params("info"))
+        logger.debug("before")
+
+        LoggerFactory.reconfigure(unique_logger_name, LogConfig.from_params("debug"))
+        logger.debug("after")
+
+        out = capsys.readouterr().out
+        assert "before" not in out and "after" in out
+
+    def test_keeps_a_handler_level_set_explicitly(self, unique_logger_name):
+        """A handler built with its own level keeps it across reconfigure."""
+        logger = (
+            LoggingBuilder(unique_logger_name)
+            .with_level("info")
+            .with_console_handler(level="error")
+            .build()
+        )
+
+        LoggerFactory.reconfigure(unique_logger_name, LogConfig.from_params("debug"))
+
+        assert logger.level == logging.DEBUG
+        assert [h.level for h in logger.handlers] == [logging.ERROR]
 
     def test_disabling(self, log_config, unique_logger_name):
         """level=False disables the logger, as at creation."""

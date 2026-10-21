@@ -78,9 +78,12 @@ class LoggerFactory:
 
     @staticmethod
     def _console_handler(holder: LogConfigHolder) -> logging.Handler:
-        """Return a stdout handler formatting through ``holder`` (hot-reload support)."""
+        """Return a stdout handler formatting through ``holder`` (hot-reload support).
+
+        It has no level of its own: the logger's level, and a view's topic level,
+        decide what it prints.
+        """
         handler = logging.StreamHandler(sys.stdout)
-        handler.setLevel(holder.config.level)
         handler.setFormatter(LogFormatter(holder))
         return handler
 

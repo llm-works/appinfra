@@ -87,11 +87,7 @@ class ConsoleHandlerConfig(HandlerConfig):
         from dataclasses import replace
 
         handler = logging.StreamHandler(self.stream)
-        # Set handler level with proper resolution
-        level = self.level or config.level
-        if isinstance(level, str):
-            level = getattr(logging, level.upper(), logging.INFO)
-        handler.setLevel(level)
+        self.apply_level(handler)
 
         # Use appropriate formatter based on format parameter
         formatter: logging.Formatter

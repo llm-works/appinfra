@@ -72,11 +72,7 @@ class DatabaseHandler(logging.Handler):
         # Cache INSERT statements per column set
         self._sql_cache: dict[tuple, str] = {}
 
-        # Set handler level with proper resolution
-        level = handler_config.level or log_config.level
-        if isinstance(level, str):
-            level = getattr(logging, level.upper(), logging.INFO)
-        self.setLevel(level)
+        handler_config.apply_level(self)
 
         # Register with lifecycle manager if provided
         if lifecycle_manager and hasattr(lifecycle_manager, "register_db_handler"):

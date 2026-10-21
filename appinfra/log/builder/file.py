@@ -73,11 +73,7 @@ class FileHandlerConfig(HandlerConfig):
         handler = logging.FileHandler(
             self.filename, mode=self.mode, encoding=self.encoding, delay=self.delay
         )
-        # Set handler level with proper resolution
-        level = self.level or config.level
-        if isinstance(level, str):
-            level = getattr(logging, level.upper(), logging.INFO)
-        handler.setLevel(level)
+        self.apply_level(handler)
 
         formatter = _create_formatter(config, logger)
         handler.setFormatter(formatter)
@@ -132,11 +128,7 @@ class RotatingFileHandlerConfig(HandlerConfig):
             encoding=self.encoding,
             delay=self.delay,
         )
-        # Set handler level with proper resolution
-        level = self.level or config.level
-        if isinstance(level, str):
-            level = getattr(logging, level.upper(), logging.INFO)
-        handler.setLevel(level)
+        self.apply_level(handler)
 
         formatter = _create_formatter(config, logger)
         handler.setFormatter(formatter)
@@ -199,11 +191,7 @@ class TimedRotatingFileHandlerConfig(HandlerConfig):
             delay=self.delay,
             utc=self.utc,
         )
-        # Set handler level with proper resolution
-        level = self.level or config.level
-        if isinstance(level, str):
-            level = getattr(logging, level.upper(), logging.INFO)
-        handler.setLevel(level)
+        self.apply_level(handler)
 
         formatter = _create_formatter(config, logger)
         handler.setFormatter(formatter)

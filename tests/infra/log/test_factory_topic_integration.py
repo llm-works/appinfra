@@ -104,20 +104,16 @@ class TestLoggerFactoryTopicIntegration:
         logger = LoggerFactory.create("/test/logger", log_config)
         assert logger.level == 5  # TRACE from API
 
-    def test_logger_handler_level_matches_effective_level(self, log_config):
-        """Test that handler level is set to effective level."""
+    def test_topic_level_reaches_the_handler(self, log_config, capsys):
+        """A topic level below the config level is what the handler emits at."""
         manager = LogLevelManager.get_instance()
         manager.add_rule("/test/*", "debug", source="yaml", priority=1)
 
         logger = LoggerFactory.create("/test/logger", log_config)
+        logger.debug("topic debug line")
 
-        # Logger level should be DEBUG
         assert logger.level == logging.DEBUG
-
-        # Handler level should also be DEBUG
-        assert len(logger.handlers) > 0
-        for handler in logger.handlers:
-            assert handler.level == logging.DEBUG
+        assert "topic debug line" in capsys.readouterr().out
 
     def test_infra_logger_hierarchy(self, log_config):
         """Test realistic /infra logger hierarchy."""

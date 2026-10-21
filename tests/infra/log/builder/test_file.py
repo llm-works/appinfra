@@ -113,13 +113,15 @@ class TestFileHandlerConfig:
         assert handler.level == logging.WARNING
         handler.close()
 
-    def test_create_handler_uses_config_level_when_none(self, temp_log_dir, log_config):
-        """Test create_handler uses LogConfig level when handler level is None."""
+    def test_create_handler_without_level_follows_logger(
+        self, temp_log_dir, log_config
+    ):
+        """Without its own level the handler stays NOTSET: the logger's level decides."""
         log_file = temp_log_dir / "test.log"
         config = FileHandlerConfig(log_file, level=None)
         handler = config.create_handler(log_config)
 
-        assert handler.level == logging.DEBUG
+        assert handler.level == logging.NOTSET
         handler.close()
 
     def test_create_handler_creates_parent_directory(self, temp_log_dir, log_config):
@@ -193,13 +195,15 @@ class TestRotatingFileHandlerConfig:
         assert handler.level == logging.INFO
         handler.close()
 
-    def test_create_handler_uses_config_level_when_none(self, temp_log_dir, log_config):
-        """Test create_handler uses LogConfig level when handler level is None."""
+    def test_create_handler_without_level_follows_logger(
+        self, temp_log_dir, log_config
+    ):
+        """Without its own level the handler stays NOTSET: the logger's level decides."""
         log_file = temp_log_dir / "test.log"
         config = RotatingFileHandlerConfig(log_file, level=None)
         handler = config.create_handler(log_config)
 
-        assert handler.level == logging.DEBUG
+        assert handler.level == logging.NOTSET
         handler.close()
 
     def test_create_handler_with_rotation_params(self, temp_log_dir, log_config):
@@ -277,13 +281,15 @@ class TestTimedRotatingFileHandlerConfig:
         assert handler.level == logging.DEBUG
         handler.close()
 
-    def test_create_handler_uses_config_level_when_none(self, temp_log_dir, log_config):
-        """Test create_handler uses LogConfig level when handler level is None."""
+    def test_create_handler_without_level_follows_logger(
+        self, temp_log_dir, log_config
+    ):
+        """Without its own level the handler stays NOTSET: the logger's level decides."""
         log_file = temp_log_dir / "test.log"
         config = TimedRotatingFileHandlerConfig(log_file, level=None)
         handler = config.create_handler(log_config)
 
-        assert handler.level == logging.DEBUG
+        assert handler.level == logging.NOTSET
         handler.close()
 
     def test_create_handler_with_timed_params(self, temp_log_dir, log_config):
