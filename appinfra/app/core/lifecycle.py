@@ -330,9 +330,11 @@ class LifecycleManager:
         self.finalize(return_code)
         self._log_shutdown_complete(return_code)
 
-        # Raising here would hide the error a shutdown on an exception path follows
-        LoggerFactory.destroy_if_exists(self._logger.name)
+        # Done even if a handler fails to close below: that error propagates, chained
+        # to any exception the shutdown runs under. A missing logger is not an error:
+        # raising for it would hide the exception a shutdown on an error path follows.
         self._shut_down = True
+        LoggerFactory.destroy_if_exists(self._logger.name)
         return return_code
 
     def _log_shutdown_complete(self, return_code: int) -> None:

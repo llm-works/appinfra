@@ -17,7 +17,7 @@ from typing import Any, cast
 from .callback import CallbackRegistry
 from .config import ChildLogConfig, LogConfig
 from .config_holder import LogConfigHolder
-from .errors import LoggerExistsError, LoggerNotFoundError
+from .errors import LogConfigError, LoggerExistsError, LoggerNotFoundError
 from .formatters import LogFormatter
 from .logger import Logger
 
@@ -175,10 +175,18 @@ class LoggerFactory:
 
         Raises:
             LoggerNotFoundError: No appinfra logger named ``name`` exists.
+            LogConfigError: ``name`` is a view made by :meth:`derive` or
+                :meth:`create_child`. A view shares its root's settings, so applying a
+                config to it would change the root and every view of it.
         """
         existing = LoggerFactory._registered(name)
         if not isinstance(existing, Logger):
             raise LoggerNotFoundError(name)
+        if existing._root_logger is not None:
+            raise LogConfigError(
+                f"{name!r} is a derived view; reconfigure its root "
+                f"{existing._root_logger.name!r}"
+            )
         LoggerFactory._apply_config(existing, config)
         return existing
 
@@ -194,6 +202,8 @@ class LoggerFactory:
 
         Raises:
             LoggerNotFoundError: No logger named ``name`` exists in this process.
+            Exception: The first error a handler's ``close()`` raised, once every
+                handler is closed and every logger removed.
         """
         target = LoggerFactory._registered(name)
         if target is None:
@@ -204,14 +214,18 @@ class LoggerFactory:
             for lg in list(registry.values())
             if isinstance(lg, logging.Logger) and _descends_from(lg, target)
         ]
+        error: Exception | None = None
         for lg in doomed:
             for handler in list(lg.handlers):
                 lg.removeHandler(handler)
                 try:
                     handler.close()
-                except Exception:
-                    pass  # Don't abort cleanup
+                except Exception as e:
+                    # finish the cleanup first: a half-destroyed name could not be reused
+                    error = error or e
             registry.pop(lg.name, None)
+        if error is not None:
+            raise error
 
     @staticmethod
     def destroy_if_exists(name: str) -> bool:

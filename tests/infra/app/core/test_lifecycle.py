@@ -34,6 +34,17 @@ def create_test_tool(name: str):
     return TestTool(config=config)
 
 
+class _FailingCloseHandler(logging.Handler):
+    """A handler whose close() fails, as a file handler's final flush can."""
+
+    def emit(self, record: logging.LogRecord) -> None:
+        pass
+
+    def close(self) -> None:
+        super().close()
+        raise OSError("disk full")
+
+
 # =============================================================================
 # Test LifecycleManager Initialization
 # =============================================================================
@@ -533,6 +544,19 @@ class TestShutdown:
         next_manager = LifecycleManager(Mock())
         next_manager.initialize(config)  # creates "/" again without a conflict
         next_manager.shutdown(0)
+
+    def test_shutdown_raises_a_handler_close_error_once(self):
+        """The root logger is still released, and a second shutdown does nothing."""
+        config = DotDict(logging=DotDict(level="info", location=0, micros=False))
+        manager = LifecycleManager(Mock())
+        manager.initialize(config)
+        manager._logger.addHandler(_FailingCloseHandler())
+
+        with pytest.raises(OSError, match="disk full"):
+            manager.shutdown(0)
+
+        assert "/" not in logging.root.manager.loggerDict
+        assert manager.shutdown(3) == 3
 
 
 @pytest.mark.unit

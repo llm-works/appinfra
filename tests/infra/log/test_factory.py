@@ -19,7 +19,7 @@ import pytest
 
 from appinfra.log.config import LogConfig
 from appinfra.log.config_holder import LogConfigHolder
-from appinfra.log.errors import LoggerExistsError, LoggerNotFoundError
+from appinfra.log.errors import LogConfigError, LoggerExistsError, LoggerNotFoundError
 from appinfra.log.factory import LoggerFactory
 
 # =============================================================================
@@ -168,6 +168,19 @@ class TestReconfigure:
         with pytest.raises(LoggerNotFoundError):
             LoggerFactory.reconfigure(unique_logger_name, log_config)
 
+    def test_rejects_a_derived_view(self, log_config, unique_logger_name):
+        """A view shares its root's settings; the root is left as it was."""
+        root = LoggerFactory.create(unique_logger_name, log_config)
+        view = LoggerFactory.derive(root, "view")
+
+        with pytest.raises(LogConfigError, match="derived view"):
+            LoggerFactory.reconfigure(
+                view.name, LogConfig(level=logging.WARNING, location=2)
+            )
+
+        assert root._holder.location == 0
+        assert view.level == logging.NOTSET
+
 
 # =============================================================================
 # destroy
@@ -216,6 +229,23 @@ class TestDestroy:
         assert "/" not in registry and view.name not in registry
         assert registry[independent.name] is independent
 
+    def test_close_error_raises_after_full_cleanup(
+        self, log_config, unique_logger_name
+    ):
+        """A failing close() does not stop the rest; its error comes out at the end."""
+        parent = LoggerFactory.create(unique_logger_name, log_config)
+        view = LoggerFactory.derive(parent, "view")
+        failing, later = _FailingCloseHandler(), _RecordingHandler()
+        parent.addHandler(failing)
+        parent.addHandler(later)
+
+        with pytest.raises(OSError, match="disk full"):
+            LoggerFactory.destroy(unique_logger_name)
+
+        registry = logging.root.manager.loggerDict
+        assert unique_logger_name not in registry and view.name not in registry
+        assert parent.handlers == [] and later.closed
+
     def test_absent_raises(self, unique_logger_name):
         """Destroying a name nobody uses is an error: a typo or a second destroy."""
         with pytest.raises(LoggerNotFoundError):
@@ -227,6 +257,27 @@ class TestDestroy:
 
         assert LoggerFactory.destroy_if_exists(unique_logger_name) is True
         assert LoggerFactory.destroy_if_exists(unique_logger_name) is False
+
+
+class _RecordingHandler(logging.Handler):
+    """A handler that remembers whether it was closed."""
+
+    closed = False
+
+    def emit(self, record: logging.LogRecord) -> None:
+        pass
+
+    def close(self) -> None:
+        super().close()
+        self.closed = True
+
+
+class _FailingCloseHandler(_RecordingHandler):
+    """A handler whose close() fails, as a file handler's final flush can."""
+
+    def close(self) -> None:
+        super().close()
+        raise OSError("disk full")
 
 
 @pytest.mark.unit
@@ -290,8 +341,14 @@ def test_forked_child_may_create_an_inherited_name(log_config):
     recv, send = ctx.Pipe(duplex=False)
     child = ctx.Process(target=_create_root_in_child, args=(send,))
     child.start()
-    result = recv.recv()
-    child.join(10.0)
+    send.close()  # parent closes its end so recv can get EOF on child death
+    try:
+        assert recv.poll(10.0), "child did not report a result"
+        result = recv.recv()
+    finally:
+        child.join(10.0)
+        if child.is_alive():
+            child.terminate()
 
     # new root, a view of the new root (not the inherited one), inherited lg still works
     assert result == (True, True, True)

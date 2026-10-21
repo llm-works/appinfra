@@ -193,7 +193,8 @@ class PGTestCaseHelper(unittest.TestCase):
         # Its own name per test class, not the root logger: tests create and destroy
         # the root, and setUpClass runs outside the per-test logger cleanup
         return LoggerFactory.create(
-            f"/test-pg-helper/{cls.__name__}", LogConfig.from_params(level=level)
+            f"/test-pg-helper/{cls.__module__}.{cls.__qualname__}",
+            LogConfig.from_params(level=level),
         )
 
     @classmethod

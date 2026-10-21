@@ -120,10 +120,13 @@ A logger name belongs to whoever created it. `create()` (and `create_root()`, an
 `build()`) raises `LoggerExistsError` when the name is taken, whatever the config: a name used
 twice is almost always an accident, and changing the first logger would surprise its owner. To
 change a live logger on purpose, `reconfigure()` applies a new level, location, micros and colors
-in place. To start over, `destroy()` closes the logger's handlers and removes it with every logger
-derived from it, or `create_or_replace()` does that and creates the name anew. `reconfigure()` and
-`destroy()` raise `LoggerNotFoundError` for a name that does not exist; `destroy_if_exists()`
-returns whether there was one instead.
+in place; it raises `LogConfigError` for a view made by `derive()` or `create_child()`, which
+shares its root's settings, so the root is the logger to reconfigure. To start over, `destroy()`
+closes the logger's handlers and removes it with every logger derived from it, or
+`create_or_replace()` does that and creates the name anew. `reconfigure()` and `destroy()` raise
+`LoggerNotFoundError` for a name that does not exist; `destroy_if_exists()` returns whether there
+was one instead. A handler whose `close()` fails does not stop `destroy()`: the cleanup completes,
+then the first such error is raised.
 
 `derive()` and `create_child()` are lookups: they return an existing view of the same name.
 
