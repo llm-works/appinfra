@@ -12,6 +12,7 @@ Tests key functionality including:
 
 import logging
 import os
+import signal
 import time as std_time
 from unittest.mock import Mock, patch
 
@@ -544,6 +545,21 @@ class TestShutdown:
         next_manager = LifecycleManager(Mock())
         next_manager.initialize(config)  # creates "/" again without a conflict
         next_manager.shutdown(0)
+
+    def test_shutdown_restores_the_signal_handlers(self):
+        """The handlers initialize() installed do not outlive the lifecycle."""
+        before = signal.getsignal(signal.SIGTERM)
+        config = DotDict(logging=DotDict(level="info", location=0, micros=False))
+        manager = LifecycleManager(Mock())
+        try:
+            manager.initialize(config)
+            assert signal.getsignal(signal.SIGTERM) != before
+
+            manager.shutdown(0)
+
+            assert signal.getsignal(signal.SIGTERM) == before
+        finally:
+            signal.signal(signal.SIGTERM, before)
 
     def test_shutdown_raises_a_handler_close_error_once(self):
         """The root logger is still released, and a second shutdown does nothing."""

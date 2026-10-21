@@ -303,9 +303,9 @@ class LifecycleManager:
         Args:
             return_code: Exit code for the application
 
-        Ends by destroying the root logger this lifecycle created (and the loggers
-        derived from it), so the process is free to set up logging again. A second call
-        does nothing.
+        Puts back the SIGTERM and SIGINT handlers initialize() replaced, then ends by
+        destroying the root logger this lifecycle created (and the loggers derived from
+        it), so the process is free to set up logging again. A second call does nothing.
 
         Returns:
             Final return code after cleanup
@@ -329,6 +329,8 @@ class LifecycleManager:
         # Finalize and log completion
         self.finalize(return_code)
         self._log_shutdown_complete(return_code)
+        if self._shutdown_manager is not None:
+            self._shutdown_manager.restore_signal_handlers()
 
         # Done even if a handler fails to close below: that error propagates, chained
         # to any exception the shutdown runs under. A missing logger is not an error:

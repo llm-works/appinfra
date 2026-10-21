@@ -47,6 +47,20 @@ class ShutdownManager:
             signal.SIGINT, self._handle_signal
         )
 
+    def restore_signal_handlers(self) -> None:
+        """
+        Put back the SIGTERM and SIGINT handlers :meth:`register_signal_handlers` replaced.
+
+        Without this the process, and every child it forks afterwards, keeps turning
+        those signals into KeyboardInterrupt: a forked multiprocessing worker then
+        unwinds Python code on the SIGTERM that should end it.
+        """
+        for signum, handler in self._original_handlers.items():
+            # None: a handler not installed from Python, which cannot be put back
+            if handler is not None:
+                signal.signal(signum, handler)
+        self._original_handlers.clear()
+
     def _handle_signal(self, signum: int, frame: Any) -> None:
         """
         Handle shutdown signal by raising KeyboardInterrupt.

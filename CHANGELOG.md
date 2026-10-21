@@ -47,6 +47,8 @@ For API stability guarantees and deprecation policy, see
   or receive that was still queued when the channel closed.
 - `InvalidLogLevelError` and `ReservedKeyError` keep their message when pickled, as when a
   worker process raises one to its parent.
+- App shutdown puts back the SIGTERM and SIGINT handlers it installed, so the process, and
+  children it forks afterwards, no longer turn those signals into `KeyboardInterrupt`.
 
 ## [0.12.0] - 2026-10-10
 
