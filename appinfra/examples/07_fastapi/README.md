@@ -40,7 +40,7 @@ from appinfra.log import Logger
 lg = Logger("my-api")
 server = (
     ServerBuilder(lg, "my-api")
-    .with_port(8000)
+    .with_port(25442)
     .routes.with_route("/health", health_handler)
     .done()
     .build()
@@ -60,7 +60,7 @@ response_q: mp.Queue = mp.Queue()
 
 server = (
     ServerBuilder(lg, "worker-api")
-    .with_port(8001)
+    .with_port(25443)
     .subprocess.with_ipc(request_q, response_q)
     .with_auto_restart(True)
     .with_max_restarts(3)
@@ -91,7 +91,7 @@ proc = server.start_subprocess()  # Non-blocking
 
 ### Port already in use
 ```bash
-lsof -i :25442
+lsof -i :25442   # direct mode; :25443 for subprocess mode
 kill -9 <PID>
 ```
 
