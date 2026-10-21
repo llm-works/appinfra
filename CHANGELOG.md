@@ -42,6 +42,8 @@ For API stability guarantees and deprecation policy, see
   `ChannelClosedError` instead of holding the shutdown.
 - `AsyncProcessQueueTransport` raises `ChannelClosedError`, not `ValueError`, for a send
   or receive that was still queued when the channel closed.
+- `InvalidLogLevelError` and `ReservedKeyError` keep their message when pickled, as when a
+  worker process raises one to its parent.
 
 ## [0.12.0] - 2026-10-10
 

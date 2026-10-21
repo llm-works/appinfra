@@ -6,6 +6,10 @@ Custom exceptions for the logging system.
 
 This module defines the exception hierarchy used throughout the logging system
 for better error handling and debugging.
+
+An exception with constructor arguments passes them, unchanged, to
+``Exception.__init__`` and builds its message in ``__str__``: unpickling calls
+``cls(*args)``, so this is what lets it cross a process boundary intact.
 """
 
 from typing import Any
@@ -22,7 +26,10 @@ class InvalidLogLevelError(LogError):
 
     def __init__(self, level: Any) -> None:
         self.level = level
-        super().__init__(f"Invalid log level: {level}")
+        super().__init__(level)
+
+    def __str__(self) -> str:
+        return f"Invalid log level: {self.level}"
 
 
 class LogConfigError(LogError):
@@ -43,7 +50,10 @@ class LoggerExistsError(LogConfigError):
 
     def __init__(self, name: str) -> None:
         self.name = name
-        super().__init__(f"logger {name!r} already exists")
+        super().__init__(name)
+
+    def __str__(self) -> str:
+        return f"logger {self.name!r} already exists"
 
 
 class LoggerNotFoundError(LogConfigError):
@@ -51,7 +61,10 @@ class LoggerNotFoundError(LogConfigError):
 
     def __init__(self, name: str) -> None:
         self.name = name
-        super().__init__(f"no logger named {name!r}")
+        super().__init__(name)
+
+    def __str__(self) -> str:
+        return f"no logger named {self.name!r}"
 
 
 class FormatterError(LogError):
@@ -75,8 +88,11 @@ class ReservedKeyError(LogError):
 
     def __init__(self, keys: set[str]) -> None:
         self.keys = frozenset(keys)
-        keys_str = ", ".join(sorted(keys))
-        super().__init__(
+        super().__init__(self.keys)
+
+    def __str__(self) -> str:
+        keys_str = ", ".join(sorted(self.keys))
+        return (
             f"Reserved key(s) in log extra: {keys_str}. "
             f"These are LogRecord attributes and cannot be used."
         )
