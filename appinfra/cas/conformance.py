@@ -407,6 +407,11 @@ class StoreConformance:
         with pytest.raises(ValueError):
             store.repo("r").prune(expire=-1)
 
+    def test_write_times_use_the_store_clock(self, store: Store) -> None:
+        """An object just written has a write time close to store.now(), not another clock."""
+        blob_id = store.repo("r").put(Blob(b"x"))
+        assert abs(store.list_objects("r")[blob_id] - store.now()) < 60
+
     def test_prune_deletes_old_unreachable(self, store: Store, age: Age) -> None:
         """Unreachable objects older than ``expire`` go."""
         repo = store.repo("r")

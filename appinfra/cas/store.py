@@ -163,6 +163,16 @@ class Store(ABC):
     def list_refs(self, repo: str) -> dict[str, str]:
         """Return every ref of the repository: name to object id."""
 
+    def now(self) -> float:
+        """
+        Return the current time (epoch secs) on the clock that write times use.
+
+        :meth:`Repo.prune` compares :meth:`list_objects` times against it, so a backend
+        whose write times come from another clock (a database server's) returns that
+        clock here. The default is the local clock.
+        """
+        return time.time()
+
     def sweep(self, repo: str, cutoff: float) -> int:
         """
         Remove backend leftovers last touched before ``cutoff`` (epoch secs); return how many.
@@ -425,7 +435,7 @@ class Repo:
             return 0  # nothing to prune; don't create the repository by locking it
         start_t = infratime.start()
         with self._store.lock(self._name, exclusive=True):
-            cutoff = time.time() - expire
+            cutoff = self._store.now() - expire
             stored = self._store.list_objects(self._name)
             recent = [oid for oid, mtime in stored.items() if mtime > cutoff]
             roots = [*self._store.list_refs(self._name).values(), *recent]
