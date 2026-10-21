@@ -288,8 +288,9 @@ class TestConsoleLoggingIntegration:
         """Test complete console logging workflow."""
         stream = StringIO()
 
+        # A name no other test builds: build() on an existing name keeps its old level.
         logger = (
-            create_console_logger("integration.test")
+            create_console_logger("integration.console")
             .with_stream(stream)
             .with_colors(False)
             .with_level("debug")

@@ -47,3 +47,20 @@ class TestMemoryStore(StoreConformance):
         """A compare-and-set that fails leaves no empty repository behind."""
         assert not store.write_ref("r", "main", None, "0" * 64)
         assert store.list_repos() == []
+
+
+class _SkewedStore(MemoryStore):
+    """A store whose clock runs two hours ahead of the local one."""
+
+    def now(self) -> float:
+        """Return the local time plus two hours."""
+        return super().now() + 7200
+
+
+def test_prune_cutoff_comes_from_the_store_clock() -> None:
+    """prune measures age on store.now(), not the local clock."""
+    store = _SkewedStore(LG)
+    repo = store.repo("r")
+    blob_id = repo.put(Blob(b"x"))
+    assert repo.prune(expire=3600) == 1  # two hours old by the store's clock
+    assert blob_id not in repo

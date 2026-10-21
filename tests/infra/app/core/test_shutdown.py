@@ -74,6 +74,36 @@ class TestSignalRegistration:
             assert manager._original_handlers[signal.SIGTERM] is mock_term_handler
             assert manager._original_handlers[signal.SIGINT] is mock_int_handler
 
+    def test_restore_puts_back_the_original_handlers(self):
+        """After restore the process handles SIGTERM and SIGINT as it did before."""
+        before = {s: signal.getsignal(s) for s in (signal.SIGTERM, signal.SIGINT)}
+        manager = ShutdownManager()
+        try:
+            manager.register_signal_handlers()
+            assert signal.getsignal(signal.SIGTERM) == manager._handle_signal
+
+            manager.restore_signal_handlers()
+
+            assert {s: signal.getsignal(s) for s in before} == before
+        finally:
+            for signum, handler in before.items():
+                signal.signal(signum, handler)
+
+    def test_restore_twice_is_harmless(self):
+        """A second restore has nothing left to put back."""
+        before = signal.getsignal(signal.SIGTERM)
+        manager = ShutdownManager()
+        try:
+            manager.register_signal_handlers()
+            manager.restore_signal_handlers()
+            signal.signal(signal.SIGTERM, signal.SIG_DFL)
+
+            manager.restore_signal_handlers()
+
+            assert signal.getsignal(signal.SIGTERM) == signal.SIG_DFL
+        finally:
+            signal.signal(signal.SIGTERM, before)
+
 
 @pytest.mark.unit
 class TestSignalHandling:

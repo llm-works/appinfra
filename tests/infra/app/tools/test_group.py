@@ -230,6 +230,29 @@ class TestAddTool:
         assert group._tools["mytool"] is tool
         assert group._funcs["mytool"] is run_func
 
+    def test_sets_the_group_tool_as_parent(self):
+        """A subtool without a parent hangs off the group's tool."""
+        parent = Mock()
+        group = ToolGroup(parent, "cmd")
+        tool = Mock()
+        tool.name = "mytool"
+        tool.parent = None
+
+        group.add_tool(tool)
+
+        tool.set_parent.assert_called_once_with(parent)
+
+    def test_keeps_an_existing_parent(self):
+        """A subtool that already has a parent keeps it."""
+        group = ToolGroup(Mock(), "cmd")
+        tool = Mock()
+        tool.name = "mytool"
+        tool.parent = Mock()
+
+        group.add_tool(tool)
+
+        tool.set_parent.assert_not_called()
+
     def test_validates_tool_before_adding(self):
         """Test validates tool using _check_new_tool (line 83)."""
         parent = Mock()
@@ -618,6 +641,31 @@ class TestGetServerRoutes:
 @pytest.mark.integration
 class TestToolGroupIntegration:
     """Test ToolGroup integration scenarios."""
+
+    def test_same_named_subtools_in_two_groups(self):
+        """Subtool loggers follow the tool tree, so equal names in two groups differ."""
+        from appinfra.app.core.app import App
+        from appinfra.app.tools.base import Tool, ToolConfig
+        from appinfra.log import LogConfig, LoggerFactory
+
+        class _Tool(Tool):
+            def run(self, **kwargs):
+                return 0
+
+        app = App()
+        app.lifecycle._logger = LoggerFactory.create_root(LogConfig.from_params("info"))
+        for name in ("db", "cache"):
+            group_tool = _Tool(config=ToolConfig(name=name))
+            group_tool.add_tool(_Tool(config=ToolConfig(name="list")))
+            app.add_tool(group_tool)
+
+        names = []
+        for name in ("db", "cache"):
+            group_tool = app.registry.get_tool(name)
+            group_tool.setup()
+            names.append(group_tool._group.get_tool("list").lg.name)
+
+        assert names == ["/db/list", "/cache/list"]
 
     def test_full_tool_registration_workflow(self):
         """Test complete tool registration and lookup."""

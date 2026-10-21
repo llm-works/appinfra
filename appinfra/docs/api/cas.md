@@ -139,11 +139,13 @@ Subclass `Store` and implement its storage primitives (`lock`, `read_object`, `o
 `write_object`, `list_objects`, `delete_objects`, `read_ref`, `write_ref`, `list_refs`,
 `delete_repo`, `list_repos`). `Repo` builds everything else on them. `write_ref` must be atomic,
 and `lock(repo, exclusive)` must be a shared/exclusive lock that holds across every thread and
-process using the store. A backend that can leave debris behind (temp files, partial uploads)
-overrides `sweep(repo, cutoff)`, which `prune` calls under the exclusive lock; it is a no-op by
-default. `conformance.dangling_links(store, repo)` lists stored objects whose links are missing,
-for a backend's own crash tests. Run the conformance suite against the new store; it needs a `store`
-fixture and an `age` fixture that moves an object's write time into the past:
+process using the store. A backend whose write times come from another clock than the local one
+(a database server's `now()`) overrides `now()` to return that clock, so `prune` measures age on
+the same clock it compares against. A backend that can leave debris behind (temp files, partial
+uploads) overrides `sweep(repo, cutoff)`, which `prune` calls under the exclusive lock; it removes
+nothing by default. `conformance.dangling_links(store, repo)` lists stored objects whose links are
+missing, for a backend's own crash tests. Run the conformance suite against the new store; it needs
+a `store` fixture and an `age` fixture that moves an object's write time into the past:
 
 ```python
 import pytest

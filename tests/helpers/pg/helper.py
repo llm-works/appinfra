@@ -190,7 +190,12 @@ class PGTestCaseHelper(unittest.TestCase):
         level = cls.config.get("test.logging.level")
         if not isinstance(level, (str, int, bool)):
             level = "warning"
-        return LoggerFactory.create_root(LogConfig.from_params(level=level))
+        # Its own name per test class, not the root logger: tests create and destroy
+        # the root, and setUpClass runs outside the per-test logger cleanup
+        return LoggerFactory.create(
+            f"/test-pg-helper/{cls.__module__}.{cls.__qualname__}",
+            LogConfig.from_params(level=level),
+        )
 
     @classmethod
     def _test_database_connection(cls) -> None:

@@ -73,7 +73,8 @@ def sqlite_logger():
         micros=False,
         colors=False,
     )
-    return LoggerFactory.create_root(log_config)
+    # Its own name, not the root logger: tests create and destroy the root
+    return LoggerFactory.create("/test-sqlite", log_config)
 
 
 @pytest.fixture(scope="session")

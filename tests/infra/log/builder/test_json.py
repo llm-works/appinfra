@@ -910,8 +910,9 @@ class TestJSONLoggingIntegration:
             log_file = f.name
 
         try:
+            # A name no other test builds: build() on an existing name keeps its old level.
             logger = (
-                create_json_logger("integration.test")
+                create_json_logger("integration.json")
                 .with_json_file(log_file)
                 .with_pretty_print(False)
                 .with_timestamp_format("unix")

@@ -205,7 +205,8 @@ def pg_test_logger() -> Logger:
         micros=False,
         colors=False,
     )
-    return LoggerFactory.create_root(log_config)
+    # Its own name, not the root logger: an App under test creates the root
+    return LoggerFactory.create("/pg-test", log_config)
 
 
 @pytest.fixture(scope="session")

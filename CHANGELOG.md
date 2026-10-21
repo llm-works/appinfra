@@ -24,6 +24,18 @@ For API stability guarantees and deprecation policy, see
   queue, a channel's `send()` raises the new `ChannelFullError` after the timeout
   (`timeout=0` does not wait), and `ChannelClosedError` if the channel closes meanwhile.
   Custom transports must accept and honor `timeout`.
+- **Breaking:** `LoggerFactory.create()`, `create_root()` and logging builders' `build()`
+  raise `LoggerExistsError` for a name an appinfra logger in this process holds; a library's
+  stdlib logger under the name is taken over in place. New: `reconfigure()`,
+  `destroy()`, `destroy_if_exists()`, `create_or_replace()`. `App.setup_logging_from_config()`
+  is removed; an app destroys its root logger at shutdown.
+- **Breaking:** `App.subprocess_context()` is a context manager only: it creates the process's root
+  logger on entry and destroys it on exit, so a worker can enter it once per task.
+- Tool loggers follow the tool tree: a subtool added with `add_tool()` gets the group's tool as
+  parent and logs as `/<tool>/<subtool>`; a tool outside an app logs as `/<tool name>`. Both
+  logged as `/` before.
+- The FastAPI and TCP server examples listen on 25442/25443 and 25444 instead of 8000/8001 and
+  9001, next to the pg ports.
 
 ### Fixed
 - `select_scrollable` and `select_table`: Esc followed quickly by `q` or Enter no longer
@@ -33,6 +45,10 @@ For API stability guarantees and deprecation policy, see
   `ChannelClosedError` instead of holding the shutdown.
 - `AsyncProcessQueueTransport` raises `ChannelClosedError`, not `ValueError`, for a send
   or receive that was still queued when the channel closed.
+- `InvalidLogLevelError` and `ReservedKeyError` keep their message when pickled, as when a
+  worker process raises one to its parent.
+- App shutdown puts back the SIGTERM and SIGINT handlers it installed, so the process, and
+  children it forks afterwards, no longer turn those signals into `KeyboardInterrupt`.
 
 ## [0.12.0] - 2026-10-10
 

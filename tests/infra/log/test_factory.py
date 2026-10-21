@@ -13,12 +13,15 @@ Tests key functionality including:
 """
 
 import collections
+import io
 import logging
 
 import pytest
 
+from appinfra.log import Logger
 from appinfra.log.config import LogConfig
 from appinfra.log.config_holder import LogConfigHolder
+from appinfra.log.errors import LogConfigError, LoggerExistsError, LoggerNotFoundError
 from appinfra.log.factory import LoggerFactory
 
 # =============================================================================
@@ -84,60 +87,437 @@ class TestCreateRoot:
         # Cleanup
         logger.handlers.clear()
 
-    def test_create_root_again_applies_new_extra(self, log_config):
-        """A repeated root setup replaces the extra fields instead of dropping them."""
+    def test_create_root_again_raises(self, log_config):
+        """A second root setup is a name conflict, whatever its config."""
         first = LoggerFactory.create_root(log_config, extra={"service": "api"})
 
-        second = LoggerFactory.create_root(log_config, extra={"service": "worker"})
+        with pytest.raises(LoggerExistsError):
+            LoggerFactory.create_root(log_config, extra={"service": "worker"})
 
-        assert second is first
-        assert second._extra == {"service": "worker"}
-
-        # Cleanup
-        first.handlers.clear()
+        assert first._extra == {"service": "api"}  # the first logger is untouched
 
 
 # =============================================================================
-# Test logger already exists branch - Lines 64-66
+# Existing names: create raises
 # =============================================================================
 
 
 @pytest.mark.unit
 class TestLoggerExists:
-    """Test logger already exists branch."""
+    """create() never touches an existing logger."""
 
-    def test_create_returns_existing_logger_when_registered(
-        self, log_config, unique_logger_name
-    ):
-        """Test create returns existing logger if in manager (lines 64-66)."""
-        # First, manually register a logger in the manager to trigger the branch
-        existing_logger = logging.getLogger(unique_logger_name)
+    def test_create_raises_when_name_exists(self, log_config, unique_logger_name):
+        """Same or different config: the second create raises."""
+        first = LoggerFactory.create(unique_logger_name, log_config)
 
-        # Now call LoggerFactory.create - should hit the "already exists" branch
+        with pytest.raises(LoggerExistsError) as exc:
+            LoggerFactory.create(unique_logger_name, log_config)
+
+        assert exc.value.name == unique_logger_name
+        assert first.level == logging.DEBUG
+
+    def test_placeholder_is_not_a_logger(self, log_config, unique_logger_name):
+        """The PlaceHolder stdlib puts in for a dotted name's parent does not block it."""
+        logging.getLogger(f"{unique_logger_name}.child")
+
         logger = LoggerFactory.create(unique_logger_name, log_config)
 
-        # Should return the existing logger (or at least not crash)
         assert logger.name == unique_logger_name
 
-        # Cleanup
-        existing_logger.handlers.clear()
-        if hasattr(logger, "handlers"):
-            logger.handlers.clear()
 
-    def test_create_with_extra_over_stdlib_logger_does_not_crash(
+# =============================================================================
+# Taking over a library's logger
+# =============================================================================
+
+
+def _library_logger(name: str, cls: type[logging.Logger]) -> logging.Logger:
+    """Register a logger the way logging.getLogger() does when ``cls`` is the logger class.
+
+    setLoggerClass is process-wide and other tests change it, so the class is explicit.
+    """
+    lg = cls(name)
+    lg.parent = logging.root
+    logging.root.manager.loggerDict[name] = lg
+    return lg
+
+
+@pytest.mark.unit
+class TestTakeOver:
+    """create() takes over a library's logger in place; the library keeps its reference."""
+
+    @pytest.mark.parametrize(
+        "cls", [logging.Logger, Logger], ids=["stdlib", "appinfra"]
+    )
+    def test_library_reference_logs_in_appinfra_format(
+        self, log_config, unique_logger_name, capsys, cls
+    ):
+        """The library's own object is now the appinfra logger, with appinfra's handler."""
+        lib = _library_logger(unique_logger_name, cls)
+        plain = io.StringIO()
+        lib.addHandler(logging.StreamHandler(plain))
+
+        lg = LoggerFactory.create(unique_logger_name, log_config)
+        lib.warning("library warning")
+
+        out = capsys.readouterr().out
+        assert lg is lib and isinstance(lib, Logger)
+        assert "[W]" in out and "library warning" in out and unique_logger_name in out
+        assert plain.getvalue() == ""  # the library's own handler was dropped
+
+    def test_library_child_loggers_follow(self, log_config, unique_logger_name, capsys):
+        """A library submodule's logger propagates to the taken-over one."""
+        _library_logger(unique_logger_name, logging.Logger)
+        child = logging.getLogger(f"{unique_logger_name}.sub")
+
+        LoggerFactory.create(unique_logger_name, log_config)
+        child.warning("submodule warning")
+
+        out = capsys.readouterr().out
+        assert "[W]" in out and "submodule warning" in out
+
+    def test_taken_over_logger_is_owned(self, log_config, unique_logger_name):
+        """After the takeover the name is an appinfra logger's: derive works, create raises."""
+        _library_logger(unique_logger_name, logging.Logger)
+        lg = LoggerFactory.create(unique_logger_name, log_config)
+
+        assert LoggerFactory.derive(lg, "view")._root_logger is lg
+        with pytest.raises(LoggerExistsError):
+            LoggerFactory.create(unique_logger_name, log_config)
+
+    def test_create_or_replace_takes_over_too(
+        self, log_config, unique_logger_name, capsys
+    ):
+        """Nothing of appinfra's to replace: the library's object is taken over."""
+        lib = _library_logger(unique_logger_name, logging.Logger)
+        plain = io.StringIO()
+        lib.addHandler(logging.StreamHandler(plain))
+
+        lg = LoggerFactory.create_or_replace(unique_logger_name, log_config)
+        lib.warning("library warning")
+
+        assert lg is lib
+        assert "library warning" in capsys.readouterr().out
+        assert plain.getvalue() == ""
+
+    @pytest.mark.parametrize(
+        "cls", [logging.Logger, Logger], ids=["stdlib", "appinfra"]
+    )
+    def test_destroy_and_reconfigure_leave_it_alone(
+        self, log_config, unique_logger_name, cls
+    ):
+        """A library's logger is not appinfra's to destroy or reconfigure."""
+        lib = _library_logger(unique_logger_name, cls)
+        handler = logging.StreamHandler(io.StringIO())
+        lib.addHandler(handler)
+
+        with pytest.raises(LoggerNotFoundError):
+            LoggerFactory.destroy(unique_logger_name)
+        with pytest.raises(LoggerNotFoundError):
+            LoggerFactory.reconfigure(unique_logger_name, log_config)
+        assert LoggerFactory.destroy_if_exists(unique_logger_name) is False
+
+        assert logging.root.manager.loggerDict[unique_logger_name] is lib
+        assert lib.handlers == [handler]
+
+    def test_destroy_leaves_the_library_child_loggers(
         self, log_config, unique_logger_name
     ):
-        """A library's plain logger under the name has no extra to set."""
-        existing_logger = logging.getLogger(unique_logger_name)
+        """Destroying a taken-over logger removes it, not the library's own children."""
+        lib = _library_logger(unique_logger_name, logging.Logger)
+        child = _library_logger(f"{unique_logger_name}.sub", logging.Logger)
+        child.parent = lib  # a NOTSET child: its parent's level decides
+        handler = _RecordingHandler()
+        child.addHandler(handler)
+        lg = LoggerFactory.create(unique_logger_name, log_config)
+        view = LoggerFactory.derive(lg, "view")
+        assert child.isEnabledFor(logging.DEBUG)  # cached under the debug-level parent
 
-        logger = LoggerFactory.create(
-            unique_logger_name, log_config, extra={"service": "api"}
+        LoggerFactory.destroy(unique_logger_name)
+
+        registry = logging.root.manager.loggerDict
+        assert unique_logger_name not in registry and view.name not in registry
+        assert registry[child.name] is child and child.parent is logging.root
+        assert child.handlers == [handler] and not handler.closed
+        # the stdlib root's level now decides, not the cached result
+        assert child.isEnabledFor(logging.DEBUG) is (
+            logging.root.getEffectiveLevel() <= logging.DEBUG
         )
 
-        assert logger is existing_logger
+    @pytest.mark.parametrize("method", ["derive", "create_child"])
+    def test_derive_never_returns_a_library_logger(
+        self, log_config, unique_logger_name, method
+    ):
+        """A view is an appinfra logger; a library's logger under its name is an error."""
+        parent = LoggerFactory.create(f"/{unique_logger_name}", log_config)
+        lib = _library_logger(f"/{unique_logger_name}/view", logging.Logger)
 
-        # Cleanup
-        existing_logger.handlers.clear()
+        with pytest.raises(LoggerExistsError):
+            getattr(LoggerFactory, method)(parent, "view")
+        assert logging.root.manager.loggerDict[lib.name] is lib
+
+    def test_view_of_a_logger_built_without_the_factory_is_appinfra(
+        self, log_config, unique_logger_name
+    ):
+        """Such a view has no holder, yet it is the factory's: looked up, never taken over."""
+        parent = Logger(unique_logger_name)  # as Logger.with_queue() builds one
+        view = LoggerFactory.derive(parent, "view")
+
+        assert LoggerFactory.derive(parent, "view") is view
+        with pytest.raises(LoggerExistsError):
+            LoggerFactory.create(view.name, log_config)
+        assert view._root_logger is parent
+
+    def test_library_logger_subclass_is_not_taken_over(
+        self, log_config, unique_logger_name
+    ):
+        """Rewriting a library's own Logger class would break its calls to it."""
+
+        class LibraryLogger(logging.Logger):
+            def audit(self, msg: str) -> None:
+                self.info(msg)
+
+        lib = _library_logger(unique_logger_name, LibraryLogger)
+
+        with pytest.raises(LoggerExistsError):
+            LoggerFactory.create(unique_logger_name, log_config)
+        assert type(lib) is LibraryLogger
+
+
+# =============================================================================
+# reconfigure
+# =============================================================================
+
+
+@pytest.mark.unit
+class TestReconfigure:
+    """reconfigure() changes a live logger in place."""
+
+    def test_applies_level_and_settings(self, log_config, unique_logger_name):
+        """Everyone holding the logger sees the new level and holder settings."""
+        logger = LoggerFactory.create(unique_logger_name, log_config)
+        handlers = list(logger.handlers)
+
+        updated = LoggerFactory.reconfigure(
+            unique_logger_name,
+            LogConfig(level=logging.WARNING, location=2, micros=True, colors=False),
+        )
+
+        assert updated is logger
+        assert logger.level == logging.WARNING
+        assert logger.get_level() == logging.WARNING
+        assert logger._holder.location == 2 and logger._holder.micros is True
+        assert logger.handlers == handlers  # handlers are left alone
+
+    def test_lower_level_reaches_the_handler(self, unique_logger_name, capsys):
+        """Reconfiguring info -> debug makes debug records print."""
+        logger = LoggerFactory.create(unique_logger_name, LogConfig.from_params("info"))
+        logger.debug("before")
+
+        LoggerFactory.reconfigure(unique_logger_name, LogConfig.from_params("debug"))
+        logger.debug("after")
+
+        out = capsys.readouterr().out
+        assert "before" not in out and "after" in out
+
+    def test_disabling(self, log_config, unique_logger_name):
+        """level=False disables the logger, as at creation."""
+        logger = LoggerFactory.create(unique_logger_name, log_config)
+
+        LoggerFactory.reconfigure(unique_logger_name, LogConfig.from_params(False))
+
+        assert logger.disabled is True
+
+    def test_raises_when_absent(self, log_config, unique_logger_name):
+        """There is nothing to reconfigure."""
+        with pytest.raises(LoggerNotFoundError):
+            LoggerFactory.reconfigure(unique_logger_name, log_config)
+
+    def test_rejects_a_derived_view(self, log_config, unique_logger_name):
+        """A view shares its root's settings; the root is left as it was."""
+        root = LoggerFactory.create(unique_logger_name, log_config)
+        view = LoggerFactory.derive(root, "view")
+
+        with pytest.raises(LogConfigError, match="derived view"):
+            LoggerFactory.reconfigure(
+                view.name, LogConfig(level=logging.WARNING, location=2)
+            )
+
+        assert root._holder.location == 0
+        assert view.level == logging.NOTSET
+
+
+# =============================================================================
+# destroy
+# =============================================================================
+
+
+@pytest.mark.unit
+class TestDestroy:
+    """destroy() frees a name, with every logger derived from it."""
+
+    def test_frees_the_name(self, log_config, unique_logger_name):
+        """After destroy, create() of the name works again."""
+        old = LoggerFactory.create(unique_logger_name, log_config)
+
+        LoggerFactory.destroy(unique_logger_name)
+        new = LoggerFactory.create(unique_logger_name, log_config)
+
+        assert new is not old
+        assert (
+            old.handlers == []
+        )  # closed and removed; the old object still logs nowhere
+
+    def test_removes_derived_loggers(self, log_config, unique_logger_name):
+        """No view is left pointing at a removed logger."""
+        parent = LoggerFactory.create(unique_logger_name, log_config)
+        child = LoggerFactory.derive(parent, ["a", "b"])
+        sibling = LoggerFactory.create(f"{unique_logger_name}-other", log_config)
+
+        LoggerFactory.destroy(unique_logger_name)
+
+        registry = logging.root.manager.loggerDict
+        assert unique_logger_name not in registry and child.name not in registry
+        assert registry[sibling.name] is sibling  # an unrelated name is untouched
+
+    def test_root_destroy_spares_independent_loggers(
+        self, log_config, unique_logger_name
+    ):
+        """A logger created with a '/' name is not a view of the root."""
+        root = LoggerFactory.create_root(log_config)
+        view = LoggerFactory.derive(root, "view")
+        independent = LoggerFactory.create(f"/{unique_logger_name}", log_config)
+
+        LoggerFactory.destroy("/")
+
+        registry = logging.root.manager.loggerDict
+        assert "/" not in registry and view.name not in registry
+        assert registry[independent.name] is independent
+
+    def test_close_error_raises_after_full_cleanup(
+        self, log_config, unique_logger_name
+    ):
+        """A failing close() does not stop the rest; its error comes out at the end."""
+        parent = LoggerFactory.create(unique_logger_name, log_config)
+        view = LoggerFactory.derive(parent, "view")
+        failing, later = _FailingCloseHandler(), _RecordingHandler()
+        parent.addHandler(failing)
+        parent.addHandler(later)
+
+        with pytest.raises(OSError, match="disk full"):
+            LoggerFactory.destroy(unique_logger_name)
+
+        registry = logging.root.manager.loggerDict
+        assert unique_logger_name not in registry and view.name not in registry
+        assert parent.handlers == [] and later.closed
+
+    def test_absent_raises(self, unique_logger_name):
+        """Destroying a name nobody uses is an error: a typo or a second destroy."""
+        with pytest.raises(LoggerNotFoundError):
+            LoggerFactory.destroy(unique_logger_name)
+
+    def test_destroy_if_exists(self, log_config, unique_logger_name):
+        """Reports whether there was something to destroy, and never raises."""
+        LoggerFactory.create(unique_logger_name, log_config)
+
+        assert LoggerFactory.destroy_if_exists(unique_logger_name) is True
+        assert LoggerFactory.destroy_if_exists(unique_logger_name) is False
+
+
+class _RecordingHandler(logging.Handler):
+    """A handler that remembers whether it was closed."""
+
+    closed = False
+
+    def emit(self, record: logging.LogRecord) -> None:
+        pass
+
+    def close(self) -> None:
+        super().close()
+        self.closed = True
+
+
+class _FailingCloseHandler(_RecordingHandler):
+    """A handler whose close() fails, as a file handler's final flush can."""
+
+    def close(self) -> None:
+        super().close()
+        raise OSError("disk full")
+
+
+@pytest.mark.unit
+class TestCreateOrReplace:
+    """create_or_replace() is destroy() then create()."""
+
+    def test_replaces_an_existing_logger(self, log_config, unique_logger_name):
+        """The old logger and its views go; a fresh logger takes the name."""
+        old = LoggerFactory.create(unique_logger_name, log_config)
+        view = LoggerFactory.derive(old, "view")
+
+        new = LoggerFactory.create_or_replace(
+            unique_logger_name, LogConfig.from_params("warning")
+        )
+
+        registry = logging.root.manager.loggerDict
+        assert new is not old and registry[unique_logger_name] is new
+        assert new.level == logging.WARNING
+        assert old.handlers == [] and view.name not in registry
+
+    def test_creates_when_absent(self, log_config, unique_logger_name):
+        """With nothing to replace it is plain create()."""
+        logger = LoggerFactory.create_or_replace(unique_logger_name, log_config)
+
+        assert logging.root.manager.loggerDict[unique_logger_name] is logger
+
+
+def _create_root_in_child(conn) -> None:
+    """In a forked child: take over the inherited root name and log through both."""
+    from appinfra.log.factory import LoggerFactory as Factory
+
+    inherited = logging.root.manager.loggerDict["/"]
+    try:
+        own = Factory.create_root(LogConfig.from_params("info"))
+        view = Factory.derive(own, "view")
+        conn.send(
+            (
+                own is not inherited,
+                view._root_logger is own,
+                bool(inherited.handlers),
+            )
+        )
+    except Exception as e:  # report instead of dying silently
+        conn.send(repr(e))
+    finally:
+        conn.close()
+
+
+@pytest.mark.unit
+@pytest.mark.skipif(
+    "fork" not in __import__("multiprocessing").get_all_start_methods(),
+    reason="needs the fork start method",
+)
+def test_forked_child_may_create_an_inherited_name(log_config):
+    """A logger inherited across fork belongs to the parent; the child can create the name."""
+    import multiprocessing
+
+    parent_root = LoggerFactory.create_root(log_config)
+    LoggerFactory.derive(parent_root, "view")
+    ctx = multiprocessing.get_context("fork")
+    recv, send = ctx.Pipe(duplex=False)
+    child = ctx.Process(target=_create_root_in_child, args=(send,))
+    child.start()
+    send.close()  # parent closes its end so recv can get EOF on child death
+    try:
+        assert recv.poll(10.0), "child did not report a result"
+        result = recv.recv()
+    finally:
+        child.join(10.0)
+        if child.is_alive():
+            child.terminate()
+
+    # new root, a view of the new root (not the inherited one), inherited lg still works
+    assert result == (True, True, True)
+    with pytest.raises(LoggerExistsError):  # in this process the name is still taken
+        LoggerFactory.create_root(log_config)
 
 
 # =============================================================================
