@@ -4,7 +4,7 @@
 # SPDX-FileCopyrightText: Copyright 2026 The appinfra Authors
 
 # ci-stop: 4
-# ci-requires: port:9001
+# ci-requires: port:25444
 
 import json
 import sys
@@ -98,7 +98,7 @@ def main():
     lg = LoggerFactory.create_root(config)
 
     # Create and run the server
-    server = appinfra.net.TCPServer(lg, 9001, Syn(lg))
+    server = appinfra.net.TCPServer(lg, 25444, Syn(lg))
     lg.info("starting tcp server...")
 
     try:

@@ -91,7 +91,7 @@ proc = server.start_subprocess()  # Non-blocking
 
 ### Port already in use
 ```bash
-lsof -i :8000
+lsof -i :25442
 kill -9 <PID>
 ```
 
