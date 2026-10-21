@@ -71,12 +71,17 @@ def _has_content(repo_dir: Path) -> bool:
     return any(any(fan_out.iterdir()) for fan_out in objects_dir.iterdir())
 
 
-def _parse_header(raw: bytes) -> tuple[ObjectType, int, int]:
+def _parse_header(raw: bytes, repo: str, object_id: str) -> tuple[ObjectType, int, int]:
     """Return the type, the data length and the data offset of a stored object."""
     head, sep, _ = raw[:_HEADER_MAX].partition(b"\0")
     type_name, _, length = head.decode("ascii", errors="replace").partition(" ")
     if not sep or type_name not in get_args(ObjectType) or not length.isdigit():
-        raise CorruptObjectError("object", f"bad header {head[:_HEADER_MAX]!r}")
+        raise CorruptObjectError(
+            "object",
+            f"bad header {head[:_HEADER_MAX]!r}",
+            repo=repo,
+            object_id=object_id,
+        )
     return cast(ObjectType, type_name), int(length), len(head) + 1
 
 
@@ -214,10 +219,13 @@ class FileStore(Store):
             raw = self._object_path(repo, object_id).read_bytes()
         except FileNotFoundError:
             return None
-        object_type, length, offset = _parse_header(raw)
+        object_type, length, offset = _parse_header(raw, repo, object_id)
         if len(raw) - offset != length:
             raise CorruptObjectError(
-                object_type, f"{object_id}: length does not match header"
+                object_type,
+                "length does not match header",
+                repo=repo,
+                object_id=object_id,
             )
         return object_type, raw[offset:]
 
@@ -228,7 +236,7 @@ class FileStore(Store):
                 raw = f.read(_HEADER_MAX)
         except FileNotFoundError:
             return None
-        return _parse_header(raw)[0]
+        return _parse_header(raw, repo, object_id)[0]
 
     def write_object(
         self, repo: str, object_id: str, object_type: ObjectType, data: bytes

@@ -37,9 +37,22 @@ class ObjectTypeError(CasError):
 class CorruptObjectError(CasError):
     """Stored bytes do not parse as an object of their type."""
 
-    def __init__(self, object_type: str, reason: str) -> None:
-        super().__init__(f"corrupt {object_type}: {reason}")
+    def __init__(
+        self,
+        object_type: str,
+        reason: str,
+        *,
+        repo: str | None = None,
+        object_id: str | None = None,
+    ) -> None:
+        context = {"repo": repo, "object_id": object_id}
+        super().__init__(
+            f"corrupt {object_type}: {reason}",
+            **{key: value for key, value in context.items() if value is not None},
+        )
         self.object_type = object_type
+        self.repo = repo
+        self.object_id = object_id
 
 
 class RefConflictError(CasError):
@@ -53,7 +66,10 @@ class RefConflictError(CasError):
 
 
 class InvalidNameError(CasError, ValueError):
-    """A repository or ref name is empty or unusable as a name."""
+    """A repository or ref name is empty or unusable as a name.
+
+    Also a ``ValueError``, so ``except ValueError`` catches invalid names.
+    """
 
     def __init__(self, what: str, name: object) -> None:
         super().__init__(f"invalid {what} name: {name!r}")

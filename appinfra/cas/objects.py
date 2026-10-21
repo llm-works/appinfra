@@ -83,6 +83,10 @@ class Object(ABC):
     def deserialize(cls, data: bytes) -> Self:
         """Rebuild the object from its serialized bytes."""
 
+    def links(self) -> list[tuple[str, ObjectType]]:
+        """Return the (id, type) pairs of objects this object points at."""
+        return []
+
 
 @dataclass(frozen=True)
 class Blob(Object):
@@ -113,15 +117,11 @@ class TreeEntry:
     def __post_init__(self) -> None:
         """Reject an empty name, a commit entry and a malformed id."""
         if not isinstance(self.name, str) or not self.name:
-            raise CorruptObjectError(
-                "tree", f"entry name must be a non-empty str: {self.name!r}"
-            )
+            raise ValueError(f"entry name must be a non-empty str: {self.name!r}")
         if self.type not in ("blob", "tree"):
-            raise CorruptObjectError(
-                "tree", f"entry {self.name!r} has type {self.type!r}"
-            )
+            raise ValueError(f"entry {self.name!r} has type {self.type!r}")
         if not is_object_id(self.id):
-            raise CorruptObjectError("tree", f"entry {self.name!r} has id {self.id!r}")
+            raise ValueError(f"entry {self.name!r} has id {self.id!r}")
 
 
 @dataclass(frozen=True)
@@ -142,7 +142,7 @@ class Tree(Object):
         entries = tuple(sorted(self.entries, key=lambda e: e.name))
         for prev, curr in zip(entries, entries[1:]):
             if prev.name == curr.name:
-                raise CorruptObjectError("tree", f"duplicate entry name {curr.name!r}")
+                raise ValueError(f"duplicate entry name {curr.name!r}")
         object.__setattr__(self, "entries", entries)
 
     def get(self, name: str) -> TreeEntry | None:
@@ -156,6 +156,10 @@ class Tree(Object):
         """Return the bytes the id is computed over."""
         return canonical_json([[e.name, e.type, e.id] for e in self.entries])
 
+    def links(self) -> list[tuple[str, ObjectType]]:
+        """Return the (id, type) pairs of entries this tree points at."""
+        return [(entry.id, entry.type) for entry in self.entries]
+
     @classmethod
     def deserialize(cls, data: bytes) -> Tree:
         """Rebuild a tree from its serialized bytes."""
@@ -167,7 +171,12 @@ class Tree(Object):
             isinstance(e, list) and len(e) == 3 for e in body
         ):
             raise CorruptObjectError("tree", "expected a list of [name, type, id]")
-        return cls(tuple(TreeEntry(name, type_, id_) for name, type_, id_ in body))
+        try:
+            return cls(tuple(TreeEntry(name, type_, id_) for name, type_, id_ in body))
+        except (
+            ValueError
+        ) as e:  # invalid content read back is corruption, not caller error
+            raise CorruptObjectError("tree", str(e)) from e
 
 
 @dataclass(frozen=True)
@@ -188,17 +197,21 @@ class Commit(Object):
         """Store parents as a tuple; reject malformed ids and duplicate parents."""
         object.__setattr__(self, "parents", tuple(self.parents))
         if not is_object_id(self.tree):
-            raise CorruptObjectError("commit", f"tree id {self.tree!r}")
+            raise ValueError(f"tree id {self.tree!r}")
         for parent in self.parents:
             if not is_object_id(parent):
-                raise CorruptObjectError("commit", f"parent id {parent!r}")
+                raise ValueError(f"parent id {parent!r}")
         if len(set(self.parents)) != len(self.parents):
-            raise CorruptObjectError("commit", "duplicate parent")
+            raise ValueError("duplicate parent")
 
     def serialize(self) -> bytes:
         """Return the bytes the id is computed over."""
         lines = [f"tree {self.tree}"] + [f"parent {p}" for p in self.parents]
         return ("\n".join(lines) + "\n\n").encode("ascii") + self.payload
+
+    def links(self) -> list[tuple[str, ObjectType]]:
+        """Return the (id, type) pairs of the tree and parents this commit points at."""
+        return [(self.tree, "tree"), *((parent, "commit") for parent in self.parents)]
 
     @classmethod
     def deserialize(cls, data: bytes) -> Commit:
@@ -215,7 +228,12 @@ class Commit(Object):
         if not all(line.startswith("parent ") for line in lines[1:]):
             raise CorruptObjectError("commit", "unexpected header line")
         parents = tuple(line[len("parent ") :] for line in lines[1:])
-        return cls(lines[0][len("tree ") :], parents, payload)
+        try:
+            return cls(lines[0][len("tree ") :], parents, payload)
+        except (
+            ValueError
+        ) as e:  # invalid content read back is corruption, not caller error
+            raise CorruptObjectError("commit", str(e)) from e
 
 
 _CLASSES: dict[str, type[Object]] = {"blob": Blob, "tree": Tree, "commit": Commit}

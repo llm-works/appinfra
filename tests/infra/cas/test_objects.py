@@ -68,7 +68,7 @@ class TestTree:
 
     def test_duplicate_names_rejected(self) -> None:
         """Entry names are unique."""
-        with pytest.raises(CorruptObjectError):
+        with pytest.raises(ValueError):
             Tree((TreeEntry("a", "blob", ID), TreeEntry("a", "tree", ID)))
 
     @pytest.mark.parametrize(
@@ -77,7 +77,7 @@ class TestTree:
     )
     def test_bad_entry_rejected(self, name: str, type_: str, id_: str) -> None:
         """Empty names, commit entries and malformed ids are refused."""
-        with pytest.raises(CorruptObjectError):
+        with pytest.raises(ValueError):
             TreeEntry(name, type_, id_)  # type: ignore[arg-type]
 
     def test_any_name_round_trips(self) -> None:
@@ -91,9 +91,20 @@ class TestTree:
         assert Tree((entry,)).get("readme") == entry
         assert Tree((entry,)).get("other") is None
 
-    @pytest.mark.parametrize("data", [b"\xff", b"{}", b"[[1, 2]]", b"not json"])
+    @pytest.mark.parametrize(
+        "data",
+        [
+            b"\xff",
+            b"{}",
+            b"[[1, 2]]",
+            b"not json",
+            f'[["", "blob", "{ID}"]]'.encode(),
+            f'[["a", "commit", "{ID}"]]'.encode(),
+            f'[["a", "blob", "{ID}"], ["a", "tree", "{ID}"]]'.encode(),
+        ],
+    )
     def test_corrupt_bytes(self, data: bytes) -> None:
-        """Bytes that are not a list of [name, type, id] raise."""
+        """Bytes that are not a valid list of [name, type, id] are corruption, not ValueError."""
         with pytest.raises(CorruptObjectError):
             Tree.deserialize(data)
 
@@ -122,7 +133,7 @@ class TestCommit:
     )
     def test_invalid_links_rejected(self, tree: str, parents: tuple[str, ...]) -> None:
         """Malformed ids and duplicate parents are refused."""
-        with pytest.raises(CorruptObjectError):
+        with pytest.raises(ValueError):
             Commit(tree, parents)
 
     @pytest.mark.parametrize(
@@ -132,12 +143,36 @@ class TestCommit:
             b"\xff\n\n",
             f"parent {ID}\n\n".encode(),
             f"tree {ID}\nauthor x\n\n".encode(),
+            b"tree short\n\n",
+            f"tree {ID}\nparent short\n\n".encode(),
+            f"tree {ID}\nparent {ID}\nparent {ID}\n\n".encode(),
         ],
     )
     def test_corrupt_bytes(self, data: bytes) -> None:
-        """Missing blank line, non-ASCII header, wrong or unknown lines raise."""
+        """Bad header shape or invalid ids read back are corruption, not ValueError."""
         with pytest.raises(CorruptObjectError):
             Commit.deserialize(data)
+
+
+class TestCorruptObjectError:
+    """What the error carries and prints."""
+
+    def test_message_without_context(self) -> None:
+        """No repo or id: the message alone, without empty context."""
+        error = CorruptObjectError("tree", "bad bytes")
+        assert str(error) == "corrupt tree: bad bytes"
+        assert error.repo is None and error.object_id is None
+
+    def test_message_with_context(self) -> None:
+        """Repo and id are attributes and appear in the message."""
+        error = CorruptObjectError(
+            "blob", "content does not match id", repo="r", object_id=ID
+        )
+        assert (
+            str(error)
+            == f"corrupt blob: content does not match id (repo=r, object_id={ID})"
+        )
+        assert (error.repo, error.object_id) == ("r", ID)
 
 
 def test_blob_round_trip() -> None:

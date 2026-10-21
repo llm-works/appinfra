@@ -42,7 +42,7 @@ from .errors import (
     RefConflictError,
 )
 from .objects import Blob, Commit, Tree, TreeEntry
-from .store import Repo, Store, _links
+from .store import Repo, Store
 
 
 def dangling_links(store: Store, repo: str) -> list[tuple[str, str]]:
@@ -51,9 +51,12 @@ def dangling_links(store: Store, repo: str) -> list[tuple[str, str]]:
     pairs: list[tuple[str, str]] = []
     for object_id in stored:
         obj = store.repo(repo).get(object_id)
-        pairs.extend(
-            (object_id, link_id) for link_id, _ in _links(obj) if link_id not in stored
-        )
+        if obj is not None:
+            pairs.extend(
+                (object_id, link_id)
+                for link_id, _ in obj.links()
+                if link_id not in stored
+            )
     return pairs
 
 

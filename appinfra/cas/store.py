@@ -30,7 +30,6 @@ from .objects import (
     Commit,
     Object,
     ObjectType,
-    Tree,
     content_hash,
     deserialize,
     is_object_id,
@@ -235,7 +234,10 @@ class Repo:
         object_type, data = found
         if content_hash(object_type, data) != object_id:
             raise CorruptObjectError(
-                object_type, f"{object_id}: content does not match id"
+                object_type,
+                "content does not match id",
+                repo=self._name,
+                object_id=object_id,
             )
         obj = deserialize(object_type, data)
         if cls is not None and not isinstance(obj, cls):
@@ -454,8 +456,4 @@ class Repo:
 
 def _links(obj: Object | None) -> list[tuple[str, ObjectType]]:
     """Return the ids and required types of the objects ``obj`` points at."""
-    if isinstance(obj, Tree):
-        return [(entry.id, entry.type) for entry in obj.entries]
-    if isinstance(obj, Commit):
-        return [(obj.tree, "tree"), *((parent, "commit") for parent in obj.parents)]
-    return []
+    return obj.links() if obj is not None else []

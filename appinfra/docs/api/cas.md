@@ -38,8 +38,13 @@ for ancestor in repo.ancestors(commit_id):  # Commit objects, newest first
 All three derive from `Object` and are frozen dataclasses. `obj.id` is the sha256 hex digest of
 `"<type> <length>\0"` followed by `obj.serialize()`, so a blob and a tree with the same bytes get
 different ids. A commit has no author or timestamp: the same tree, parents and payload always give
-the same id. `canonical_json(value)` gives stable bytes for structured data and payloads; NaN and
-infinities raise `ValueError`, having no JSON form.
+the same id. `obj.links()` returns the `(id, type)` pairs an object points at.
+`canonical_json(value)` gives stable bytes for structured data and payloads; NaN and infinities
+raise `ValueError`, having no JSON form.
+
+Building an object from invalid values (an empty entry name, a malformed id, duplicate names or
+parents) raises `ValueError`. The same problems found in bytes read back from storage raise
+`CorruptObjectError`.
 
 ## Repositories
 
@@ -167,6 +172,6 @@ All derive from `CasError` (an `InfraError`).
 |-------|-------------|
 | `ObjectNotFoundError` | An object an operation needs is missing |
 | `ObjectTypeError` | An object has another type than required |
-| `CorruptObjectError` | Stored bytes do not parse as an object |
+| `CorruptObjectError` | Stored bytes do not parse as a valid object or do not match their id; carries `repo` and `object_id` when known |
 | `RefConflictError` | `commit()` found its ref moved by another writer |
 | `InvalidNameError` | A repository or ref name is empty, `.`, `..`, contains NUL, is too long or not UTF-8, or an id is malformed (also a `ValueError`) |
