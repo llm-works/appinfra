@@ -473,6 +473,7 @@ class JSONLoggingBuilder(LoggingBuilder):
     def _add_regular_console_handler(self, logger: Logger, config: LogConfig) -> None:
         """Add regular (non-JSON) console handler."""
         console_handler = logging.StreamHandler(sys.stdout)
+        console_handler.setLevel(config.level)
 
         from ..formatters import LogFormatter
 
@@ -485,6 +486,7 @@ class JSONLoggingBuilder(LoggingBuilder):
     ) -> None:
         """Add JSON console handler."""
         json_console_handler = logging.StreamHandler(sys.stdout)
+        json_console_handler.setLevel(config.level)
         json_console_handler.setFormatter(json_formatter)
         logger.addHandler(json_console_handler)
 
@@ -500,6 +502,7 @@ class JSONLoggingBuilder(LoggingBuilder):
             path.parent.mkdir(parents=True, exist_ok=True)
 
         json_file_handler = logging.FileHandler(self._json_file, **self._file_kwargs)
+        json_file_handler.setLevel(config.level)
         json_file_handler.setFormatter(json_formatter)
         logger.addHandler(json_file_handler)
 

@@ -19,7 +19,6 @@ import logging
 import pytest
 
 from appinfra.log import Logger
-from appinfra.log.builder import LoggingBuilder
 from appinfra.log.config import LogConfig
 from appinfra.log.config_holder import LogConfigHolder
 from appinfra.log.errors import LogConfigError, LoggerExistsError, LoggerNotFoundError
@@ -295,20 +294,6 @@ class TestReconfigure:
 
         out = capsys.readouterr().out
         assert "before" not in out and "after" in out
-
-    def test_keeps_a_handler_level_set_explicitly(self, unique_logger_name):
-        """A handler built with its own level keeps it across reconfigure."""
-        logger = (
-            LoggingBuilder(unique_logger_name)
-            .with_level("info")
-            .with_console_handler(level="error")
-            .build()
-        )
-
-        LoggerFactory.reconfigure(unique_logger_name, LogConfig.from_params("debug"))
-
-        assert logger.level == logging.DEBUG
-        assert [h.level for h in logger.handlers] == [logging.ERROR]
 
     def test_disabling(self, log_config, unique_logger_name):
         """level=False disables the logger, as at creation."""

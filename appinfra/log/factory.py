@@ -78,12 +78,9 @@ class LoggerFactory:
 
     @staticmethod
     def _console_handler(holder: LogConfigHolder) -> logging.Handler:
-        """Return a stdout handler formatting through ``holder`` (hot-reload support).
-
-        It has no level of its own: the logger's level, and a view's topic level,
-        decide what it prints.
-        """
+        """Return a stdout handler formatting through ``holder`` (hot-reload support)."""
         handler = logging.StreamHandler(sys.stdout)
+        handler.setLevel(holder.config.level)
         handler.setFormatter(LogFormatter(holder))
         return handler
 
@@ -100,6 +97,9 @@ class LoggerFactory:
         lg._config = config
         lg._logging_disabled = config.level is False
         lg.setLevel(effective.level)
+        # Handlers carry the logger's level, as LogConfigReloader sets them on reload
+        for handler in lg.handlers:
+            handler.setLevel(effective.level)
         if lg._holder is None:
             lg._holder = LogConfigHolder(effective)
         else:
@@ -197,8 +197,8 @@ class LoggerFactory:
         """
         Apply ``config`` (level, location, micros, colors) to the existing logger ``name``.
 
-        The logger is changed in place: everyone holding it sees the new settings.
-        Handlers are left as they are.
+        The logger is changed in place: everyone holding it sees the new settings. Its
+        handlers get the new level too, as on a hot-reload of the config.
 
         Raises:
             LoggerNotFoundError: No appinfra logger named ``name`` exists.

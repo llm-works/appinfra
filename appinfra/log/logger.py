@@ -417,6 +417,7 @@ class Logger(logging.Logger):
 
         # Add queue handler
         handler = MPQueueHandler(queue)
+        handler.setLevel(level)
         logger.addHandler(handler)
 
         logger.propagate = False

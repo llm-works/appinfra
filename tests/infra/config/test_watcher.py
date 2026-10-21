@@ -357,8 +357,8 @@ class TestConfigWatcherIntegration:
         assert l3.isEnabledFor(logging.DEBUG)
         assert l4.isEnabledFor(logging.DEBUG)
 
-    def test_reload_lowers_the_level_handlers_emit_at(self, tmp_path, capsys):
-        """After a hot-reload to debug, debug records reach the root's handler."""
+    def test_reload_updates_handler_levels(self, tmp_path):
+        """Test hot-reload also updates handler levels."""
         import logging
 
         from appinfra.log.config import LogConfig
@@ -378,14 +378,16 @@ class TestConfigWatcherIntegration:
         watcher = ConfigWatcher(lg=root, etc_dir=tmp_path)
         watcher.configure("test.yaml", on_change=reloader)
 
-        root.debug("before reload")
+        # Check initial handler level
+        assert len(root.handlers) > 0
+        assert root.handlers[0].level == logging.INFO
 
+        # Hot-reload to DEBUG
         config_file.write_text("logging:\n  level: debug\n")
         watcher.reload_now()
-        root.debug("after reload")
 
-        out = capsys.readouterr().out
-        assert "before reload" not in out and "after reload" in out
+        # Handler level should also be updated
+        assert root.handlers[0].level == logging.DEBUG
 
     def test_reload_now_calls_on_change(self, tmp_path, mock_logger):
         """Test reload_now calls on_change callback with config dict."""

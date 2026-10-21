@@ -433,8 +433,11 @@ class LogLevelManager:
             if self._matches_pattern(logger_name, pattern):
                 logger = py_logging.getLogger(logger_name)
                 if hasattr(logger, "setLevel"):
-                    # Handlers keep their own level; one without follows this
                     logger.setLevel(numeric_level)
+
+                    # Also update handlers
+                    for handler in logger.handlers:
+                        handler.setLevel(numeric_level)
 
     # -------------------------------------------------------------------------
     # Serialization for multiprocessing

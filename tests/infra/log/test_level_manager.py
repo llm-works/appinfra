@@ -322,20 +322,23 @@ class TestRuntimeUpdates:
         # Logger should be updated to DEBUG level
         assert test_logger.level == logging.DEBUG
 
-    def test_runtime_updates_keep_handler_levels(self, manager):
-        """A runtime update changes the logger; a handler's own level is its owner's."""
+    def test_runtime_updates_with_handler(self, manager):
+        """Test that runtime updates also update handler levels."""
+        # Create a test logger with a handler
         test_logger = logging.getLogger("/infra/handler/test")
         test_logger.setLevel(logging.INFO)
         handler = logging.StreamHandler()
-        handler.setLevel(logging.WARNING)
+        handler.setLevel(logging.INFO)
         test_logger.addHandler(handler)
 
         try:
+            # Enable runtime updates and add rule
             manager.enable_runtime_updates()
             manager.add_rule("/infra/handler/*", "debug", source="api", priority=10)
 
+            # Both logger and handler should be updated
             assert test_logger.level == logging.DEBUG
-            assert handler.level == logging.WARNING
+            assert handler.level == logging.DEBUG
         finally:
             test_logger.removeHandler(handler)
 

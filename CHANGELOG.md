@@ -31,9 +31,6 @@ For API stability guarantees and deprecation policy, see
   is removed; an app destroys its root logger at shutdown.
 - **Breaking:** `App.subprocess_context()` is a context manager only: it creates the process's root
   logger on entry and destroys it on exit, so a worker can enter it once per task.
-- **Breaking:** a log handler created without its own `level` stays at `NOTSET` and follows its
-  logger's level, including after `reconfigure()`, hot-reload and topic-level updates, none of
-  which change handler levels any more. An explicit handler level is kept.
 - Tool loggers follow the tool tree: a subtool added with `add_tool()` gets the group's tool as
   parent and logs as `/<tool>/<subtool>`; a tool outside an app logs as `/<tool name>`. Both
   logged as `/` before.

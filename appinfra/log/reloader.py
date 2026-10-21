@@ -82,8 +82,10 @@ class LogConfigReloader:
         old_location = holder.location
         holder.update(new_config)
 
-        # Handlers keep their own level; one without follows the logger's
+        # Update logger and handler levels
         self._root_logger.setLevel(new_config.level)
+        for handler in self._root_logger.handlers:
+            handler.setLevel(new_config.level)
 
         self._root_logger.debug(
             "config reloaded",
