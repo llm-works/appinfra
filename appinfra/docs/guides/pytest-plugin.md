@@ -62,7 +62,9 @@ reported.
 logger one test leaves behind fails the next test in the same process that creates the same name.
 This fixture runs around every test: it records `LoggerFactory.names()` before the test and
 destroys the names added during it. Loggers created before the test, by session or module
-fixtures, stay.
+fixtures, stay. A logger shared across tests some other way (a cached helper, a module global)
+is destroyed after the test that first creates it, and later tests get the destroyed object, which
+has no handlers; create such a logger in a session-scoped fixture instead.
 
 Nothing to add to your tests: loading the plugin is enough. A fixture that builds a logger can
 create it with a fixed name:

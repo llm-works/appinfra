@@ -40,6 +40,7 @@ dev = [
     "ruff>=0.1.0,<1.0.0",
     "mypy>=1.9.0,<2.0.0",
     "types-PyYAML>=6.0.0,<7.0.0",
+    "types-setuptools>=80.0.0,<85.0.0",
     "pytest>=8.0.0,<10.0.0",
     "pytest-asyncio>=0.21.0,<2.0.0",
     "pytest-cov>=4.0.0,<8.0.0",
@@ -155,8 +156,14 @@ python_version = "3.11"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
-ignore_missing_imports = true
 exclude = ["tests/", "scripts/", ".build/", ".dist/", ".cover/", ".htmlcov/", ".site/"]
+
+# No usable type information. sqlalchemy_utils has no py.typed, and its only stub package
+# (types-sqlalchemy-utils) is built on the SQLAlchemy 1.4 stubs, not SQLAlchemy 2.0's own types.
+# pgvector has no py.typed or stubs; it is in no extra (db/pg/vector.py imports it lazily).
+[[tool.mypy.overrides]]
+module = ["sqlalchemy_utils", "pgvector.*"]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
