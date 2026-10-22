@@ -110,6 +110,9 @@ class LoggerFactory:
     def destroy_if_exists(name: str) -> bool: ...
 
     @staticmethod
+    def names() -> set[str]: ...
+
+    @staticmethod
     def derive(parent: Logger, tags: str | list[str]) -> Logger: ...
 
     @staticmethod
@@ -126,7 +129,15 @@ closes the logger's handlers and removes it with every logger derived from it, o
 `create_or_replace()` does that and creates the name anew. `reconfigure()` and `destroy()` raise
 `LoggerNotFoundError` for a name that does not exist; `destroy_if_exists()` returns whether there
 was one instead. A handler whose `close()` fails does not stop `destroy()`: the cleanup completes,
-then the first such error is raised.
+then the first such error is raised. `names()` lists the names the factory holds in this process,
+created loggers and their views; the `appinfra.testing` pytest plugin uses it to destroy the
+loggers each test leaves behind (see the [pytest plugin guide](../guides/pytest-plugin.md)).
+
+Code that runs inside another program's process takes its logger from the host instead of creating
+one. An alembic `env.py`, a plugin or a hook that calls `create_root()` works when run on its own,
+but raises `LoggerExistsError` when an app that already holds `/` runs it in-process. The host
+passes a logger made with `derive()` (for alembic, through `config.attributes`), and the code
+creates its own root only when none was passed.
 
 `derive()` and `create_child()` are lookups: they return an existing view of the same name.
 

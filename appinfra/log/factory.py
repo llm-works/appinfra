@@ -287,6 +287,21 @@ class LoggerFactory:
         return True
 
     @staticmethod
+    def names() -> set[str]:
+        """
+        Return the names of the loggers the factory made in this process.
+
+        These are the names :meth:`create` refuses and :meth:`destroy` accepts: created
+        loggers and the views derived from them. Library loggers, and appinfra loggers a
+        parent process created before a fork, are not included.
+        """
+        return {
+            name
+            for name in list(logging.root.manager.loggerDict)
+            if LoggerFactory._owned(name) is not None
+        }
+
+    @staticmethod
     def _registered(name: str) -> logging.Logger | None:
         """
         Return the logger this process registered as ``name``, or ``None``.
