@@ -8,7 +8,6 @@ This module provides central pytest configuration, custom markers,
 and shared fixtures for the infra test suite.
 """
 
-import logging
 import os
 import shutil
 import sys
@@ -18,7 +17,6 @@ from pathlib import Path
 
 import pytest
 
-from appinfra.log import Logger, LoggerFactory
 from tests.helpers.pg.probe import (
     PG_SKIP_REASON,
     PG_STATUS_KEY,
@@ -34,6 +32,7 @@ from tests.helpers.pg.probe import (
 # Register integration test fixtures and appinfra testing utilities
 pytest_plugins = [
     "appinfra.testing",
+    "pytester",
     "tests.fixtures.pg_integration",
     "tests.fixtures.sqlite_integration",
     "tests.fixtures.logging",
@@ -79,35 +78,6 @@ def pytest_configure(config):
 # =============================================================================
 # Shared Fixtures
 # =============================================================================
-
-
-def _factory_logger_names() -> set[str]:
-    """Names of the loggers LoggerFactory created in this process.
-
-    Factory loggers carry a config holder; a library's logging.getLogger() result
-    may be an appinfra Logger too (setLoggerClass is global) but has none.
-    """
-    return {
-        name
-        for name, lg in logging.root.manager.loggerDict.items()
-        if isinstance(lg, Logger)
-        and lg._holder is not None
-        and lg._owner_pid == os.getpid()
-    }
-
-
-@pytest.fixture(autouse=True)
-def _destroy_test_loggers() -> Generator[None, None, None]:
-    """Destroy the factory loggers a test created and left registered.
-
-    LoggerFactory.create raises for a taken name, so a logger one test leaves behind
-    would fail another test in the same xdist worker that creates the same name.
-    """
-    before = _factory_logger_names()
-    yield
-    for name in _factory_logger_names() - before:
-        # destroying a parent already removed the loggers derived from it
-        LoggerFactory.destroy_if_exists(name)
 
 
 @pytest.fixture

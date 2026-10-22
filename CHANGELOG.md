@@ -15,6 +15,9 @@ For API stability guarantees and deprecation policy, see
   refs, ancestry and pruning; in-memory and file stores. See `docs/api/cas.md`.
 - `ChannelResponseError` (a `ChannelError`): raised by `submit()` and `submit_stream()` for a
   response with `error` set; its `response` attribute holds the full message.
+- `LoggerFactory.names()`: the names of the loggers the factory created in this process. The
+  `appinfra.testing` pytest plugin uses it in a new autouse fixture, `destroy_test_loggers`, that
+  destroys the loggers each test leaves behind, so the next test can create the same names.
 
 ### Changed
 - **Breaking:** servers built with `ServerBuilder` no longer serve `/docs`, `/redoc`

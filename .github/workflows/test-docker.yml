@@ -37,7 +37,8 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e ".[dev]"
+          # all extras: mypy checks the optional modules against their libraries' types
+          python -m pip install -e ".[all]"
           python -m pip install zizmor==1.31.1 actionlint-py==1.7.12.25
 
       - name: Lint workflows

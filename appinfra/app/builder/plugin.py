@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any
 from ..core.app import App
 
 if TYPE_CHECKING:
-    from .builder import AppBuilder
+    from .app import AppBuilder
 
 
 class Plugin(ABC):

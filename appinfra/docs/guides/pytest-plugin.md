@@ -1,7 +1,7 @@
 # Pytest Plugin (`appinfra.testing`)
 
 The `appinfra.testing` module provides pytest utilities for common testing patterns. Use it as a
-pytest plugin to access custom markers and hooks.
+pytest plugin to access custom markers, hooks and fixtures.
 
 ## Setup
 
@@ -53,6 +53,34 @@ def test_cleanup_at_session_start(pg_session):
 When a test with `expected_skip` is skipped, the plugin prefixes the skip reason with `[expected]`.
 The `check.sh` script filters these from the warning summary, so only unexpected skips are
 reported.
+
+## Fixtures
+
+### `destroy_test_loggers` (autouse)
+
+`LoggerFactory.create()` raises `LoggerExistsError` for a name this process already holds, so a
+logger one test leaves behind fails the next test in the same process that creates the same name.
+This fixture runs around every test: it records `LoggerFactory.names()` before the test and
+destroys the names added during it. Loggers created before the test, by session or module
+fixtures, stay. A logger shared across tests some other way (a cached helper, a module global)
+is destroyed after the test that first creates it, and later tests get the destroyed object, which
+has no handlers; create such a logger in a session-scoped fixture instead.
+
+Nothing to add to your tests: loading the plugin is enough. A fixture that builds a logger can
+create it with a fixed name:
+
+```python
+import logging
+
+import pytest
+
+from appinfra.log import LogConfig, LoggerFactory
+
+
+@pytest.fixture
+def lg():
+    return LoggerFactory.create("/test", LogConfig(level=logging.DEBUG))
+```
 
 ## Integration with `check.sh`
 

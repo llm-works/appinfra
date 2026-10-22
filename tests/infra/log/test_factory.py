@@ -423,6 +423,43 @@ class TestDestroy:
         assert LoggerFactory.destroy_if_exists(unique_logger_name) is False
 
 
+@pytest.mark.unit
+class TestNames:
+    """names() lists what create() refuses and destroy() accepts in this process."""
+
+    def test_created_and_derived_loggers(self, log_config, unique_logger_name):
+        """A created logger and the views derived from it are listed; destroyed ones are not."""
+        parent = LoggerFactory.create(unique_logger_name, log_config)
+        view = LoggerFactory.derive(parent, "db")
+
+        assert {parent.name, view.name} <= LoggerFactory.names()
+
+        LoggerFactory.destroy(unique_logger_name)
+
+        assert not {parent.name, view.name} & LoggerFactory.names()
+
+    @pytest.mark.parametrize(
+        "cls", [logging.Logger, Logger], ids=["stdlib", "appinfra"]
+    )
+    def test_library_logger_is_not_listed(self, unique_logger_name, cls):
+        """A library's logger is not the factory's, even with appinfra's class."""
+        _library_logger(unique_logger_name, cls)
+
+        assert unique_logger_name not in LoggerFactory.names()
+
+    def test_logger_of_another_process_is_not_listed(
+        self, log_config, unique_logger_name
+    ):
+        """A logger inherited across a fork belongs to the parent process."""
+        lg = LoggerFactory.create(unique_logger_name, log_config)
+        owner = lg._owner_pid
+        lg._owner_pid = -1  # as seen from a forked child
+        try:
+            assert unique_logger_name not in LoggerFactory.names()
+        finally:
+            lg._owner_pid = owner
+
+
 class _RecordingHandler(logging.Handler):
     """A handler that remembers whether it was closed."""
 
