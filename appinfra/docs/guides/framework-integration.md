@@ -179,11 +179,12 @@ make check.summary  # Summaries only
 ./scripts/check.sh
 ```
 
-The summary of a failed run shows only the failed test ids and their first `E` lines. The full
-output of each failed check is kept in `.build/check/`, in a file named after the check (for
-example `.build/check/type-checking-examples.log`), and the summary prints that path. This is the
-only record of a failure that does not reproduce on rerun. Each run of `make check`, a concurrent
-one included, empties the directory first, so copy a log elsewhere before running it again. The
+With fail-fast (`make check`), the summary of a failed run shows only the failed test ids and
+their first `E` lines; `make check.all` shows only which checks failed. The full output of each
+failed check is kept in `.build/check/`, in a file named after the check (for example
+`.build/check/type-checking-examples.log`), and the summary prints that path. This is the only
+record of a failure that does not reproduce on rerun. Each run of `make check`, a concurrent one
+included, empties the directory first, so copy a log elsewhere before running it again. The
 directory carries its own `.gitignore`.
 
 ## Handling Empty Test Directories
