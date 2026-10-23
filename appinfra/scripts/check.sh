@@ -146,7 +146,8 @@ DISPLAY_LOCK="/tmp/infra-check-display-lock-${MAIN_PID}"
 STATUS_DIR="/tmp/infra-check-status-${MAIN_PID}"
 mkdir -p "$STATUS_DIR"
 # Failed checks' full output, copied out of STATUS_DIR (removed on exit) so a failure that
-# does not reproduce on rerun can still be read. Each run replaces the previous run's logs.
+# does not reproduce on rerun can still be read. Each run, a concurrent one included, replaces
+# the previous run's logs; concurrent runs in one tree also share .coverage and .mypy_cache.
 FAILED_LOG_DIR="${PROJECT_ROOT}/.build/check"
 
 # Coverage tracer: on Python 3.12+, use sys.monitoring (PEP 669) via
@@ -397,12 +398,16 @@ format_log_output() {
 }
 
 # Copy a failed check's log to FAILED_LOG_DIR and print the copy's path relative to
-# PROJECT_ROOT. The directory ignores itself, so projects need no .gitignore entry.
+# PROJECT_ROOT. The file is named after the check's display name, which is unique (make
+# targets are not: both mypy checks use "type"). The directory ignores itself, so projects
+# need no .gitignore entry.
 keep_failed_log() {
-    local logfile="$1" make_target="$2"
+    local logfile="$1" name="$2"
     mkdir -p "$FAILED_LOG_DIR"
     [ -f "${FAILED_LOG_DIR}/.gitignore" ] || echo "*" > "${FAILED_LOG_DIR}/.gitignore"
-    local kept="${FAILED_LOG_DIR}/${make_target:-$(basename "$logfile" .log)}.log"
+    local slug
+    slug=$(echo "$name" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-|-$//g')
+    local kept="${FAILED_LOG_DIR}/${slug}.log"
     cp "$logfile" "$kept" && echo "${kept#"$PROJECT_ROOT"/}"
 }
 
@@ -416,7 +421,7 @@ display_failures() {
         [ -n "$fix_target" ] && echo -e "→ To fix: ${UI_YELLOW}make ${fix_target}${UI_RESET}"
         if [ -n "$logfile" ] && [ -f "$logfile" ]; then
             local kept
-            kept=$(keep_failed_log "$logfile" "$make_target") && echo -e "→ Full output: ${UI_YELLOW}${kept}${UI_RESET}"
+            kept=$(keep_failed_log "$logfile" "$name") && echo -e "→ Full output: ${UI_YELLOW}${kept}${UI_RESET}"
             [ "$FAIL_FAST" = true ] && format_log_output "$logfile" "$MAX_INLINE_LINES"
         fi
         echo ""
