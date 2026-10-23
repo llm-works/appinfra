@@ -50,6 +50,7 @@ export INFRA_DEV_MYPY_FLAGS
 export INFRA_DEFAULT_CONFIG_FILE
 export INFRA_PYTEST_COVERAGE_MARKERS
 export INFRA_PYTEST_COVERAGE_THRESHOLD
+export INFRA_PYTEST_HANG_DUMP_SECONDS
 
 # Expand CQ_EXCLUDE patterns to --exclude flags (empty if no exclusions)
 _CQ_EXCLUDE_FLAGS := $(if $(INFRA_DEV_CQ_EXCLUDE),$(foreach pat,$(INFRA_DEV_CQ_EXCLUDE),--exclude "$(pat)"))

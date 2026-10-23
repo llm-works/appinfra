@@ -455,6 +455,7 @@ All configuration variables follow the `INFRA_<MODULE>_<VAR>` naming convention.
 | `INFRA_PYTEST_TESTS_DIR` | `tests` | Tests directory |
 | `INFRA_PYTEST_WORKERS` | (empty) | pytest-xdist worker count (`auto` or N) for `test.*` targets; empty runs pytest in-process. Never applied to `test.perf*`. `make check` ignores it: `check.sh` runs suites concurrently with its own per-suite worker heuristic |
 | `INFRA_PYTEST_ARGS` | (empty) | Additional pytest arguments |
+| `INFRA_PYTEST_HANG_DUMP_SECONDS` | `120` | In `make check`, a test still running after this many seconds gets a row below the checklist and its process's stacks in the check's log; the test is neither stopped nor failed. `0` disables it |
 
 **Documentation (DOCS):**
 

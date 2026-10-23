@@ -260,7 +260,7 @@ def discover(examples_dir: Path, only: str | None) -> list[Path]:
     return files
 
 
-def run_case(spec: Spec, args: str) -> Result:
+def run_case(spec: Spec, args: str, full_output: bool) -> Result:
     """Run one case in its own process group and classify the outcome."""
     scratch = Path(tempfile.mkdtemp(prefix="example-"))
     proc = _spawn([sys.executable, str(spec.path), *shlex.split(args)], scratch)
@@ -280,10 +280,23 @@ def run_case(spec: Spec, args: str) -> Result:
             reader.join(timeout=2.0)
         shutil.rmtree(scratch, ignore_errors=True)
     if status == "FAIL":
-        output = "".join(err_chunks) or "".join(out_chunks)
-        tail = "\n".join(output.splitlines()[-_OUTPUT_TAIL_LINES:])
-        detail = f"{detail}\n{tail}"
+        output = _failure_output("".join(out_chunks), "".join(err_chunks), full_output)
+        detail = f"{detail}\n{output}"
     return Result(spec, args, status, detail)
+
+
+def _failure_output(out: str, err: str, full_output: bool) -> str:
+    """The output shown for a failed case.
+
+    By default the last lines of stderr, or of stdout when stderr is empty.
+    With ``full_output``, both streams whole, each under a label.
+    """
+    if not full_output:
+        return "\n".join((err or out).splitlines()[-_OUTPUT_TAIL_LINES:])
+    streams = (("stdout", out), ("stderr", err))
+    return "\n".join(
+        f"--- {name} ---\n{text.rstrip()}" for name, text in streams if text
+    )
 
 
 def _spawn(cmd: list[str], scratch: Path) -> subprocess.Popen[str]:
@@ -368,7 +381,10 @@ def _kill_group(proc: subprocess.Popen[str]) -> None:
 
 
 def run_spec(
-    spec: Spec, unmet: dict[str, str], locks: dict[str, threading.Lock]
+    spec: Spec,
+    unmet: dict[str, str],
+    locks: dict[str, threading.Lock],
+    full_output: bool,
 ) -> list[Result]:
     """Run every case of one file in order, or skip the file.
 
@@ -387,7 +403,7 @@ def run_spec(
     for lock in held:
         lock.acquire()
     try:
-        return [run_case(spec, args) for args in spec.cases]
+        return [run_case(spec, args, full_output) for args in spec.cases]
     finally:
         for lock in reversed(held):
             lock.release()
@@ -398,6 +414,7 @@ def run_all(
     unmet: dict[str, str],
     jobs: int,
     report: Callable[[Result], None],
+    full_output: bool,
 ) -> list[Result]:
     """Run files ``jobs`` at a time; report results in discovery order.
 
@@ -410,7 +427,9 @@ def run_all(
     locks = {key: threading.Lock() for key in declared}
     results: list[Result] = []
     with ThreadPoolExecutor(max_workers=jobs) as pool:
-        futures = [pool.submit(run_spec, spec, unmet, locks) for spec in specs]
+        futures = [
+            pool.submit(run_spec, spec, unmet, locks, full_output) for spec in specs
+        ]
         for future in futures:
             for result in future.result():
                 report(result)
@@ -486,10 +505,21 @@ def _build_parser() -> argparse.ArgumentParser:
         "(default: INFRA_PGSERVER_HOST/PORT, else "
         f"{_DEFAULT_PG_HOST}:{_DEFAULT_PG_PORT})",
     )
+    _add_output_args(parser)
+    return parser
+
+
+def _add_output_args(parser: argparse.ArgumentParser) -> None:
+    """Add the options that set how much each case prints."""
     parser.add_argument(
         "-v", "--verbose", action="store_true", help="print details for every case"
     )
-    return parser
+    parser.add_argument(
+        "--full-output",
+        action="store_true",
+        help="print a failed case's whole stdout and stderr, not the last "
+        f"{_OUTPUT_TAIL_LINES} lines of one of them",
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -513,7 +543,11 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     jobs = ns.jobs or os.cpu_count() or 1
     results = run_all(
-        specs, unmet, jobs, lambda r: print_result(r, ns.examples_dir, ns.verbose)
+        specs,
+        unmet,
+        jobs,
+        lambda r: print_result(r, ns.examples_dir, ns.verbose),
+        ns.full_output,
     )
     print_summary(results, unmet, time.monotonic() - start)
     return 1 if any(r.status in _FAILING for r in results) else 0

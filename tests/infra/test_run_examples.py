@@ -45,3 +45,48 @@ def test_examples_import_uninstalled_project_from_source_tree(tmp_path: Path) ->
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert "1 passed, 0 failed" in result.stdout
+
+
+def _run_failing_example(tmp_path: Path, *flags: str) -> str:
+    examples_dir = tmp_path / "examples"
+    examples_dir.mkdir()
+    (examples_dir / "fails.py").write_text(
+        "import sys\n"
+        "for i in range(30):\n"
+        "    print(f'stdout line {i}')\n"
+        "sys.exit('the root cause')\n"
+    )
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(RUN_EXAMPLES_PY),
+            str(examples_dir),
+            "--jobs",
+            "1",
+            *flags,
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert result.returncode == 1, result.stdout + result.stderr
+    return result.stdout
+
+
+@pytest.mark.unit
+def test_failed_example_shows_a_tail_of_stderr_by_default(tmp_path: Path) -> None:
+    out = _run_failing_example(tmp_path)
+
+    assert "the root cause" in out
+    assert "stdout line 0" not in out  # stdout is dropped when stderr has output
+
+
+@pytest.mark.unit
+def test_full_output_shows_both_streams_whole(tmp_path: Path) -> None:
+    out = _run_failing_example(tmp_path, "--full-output")
+
+    assert "--- stdout ---" in out
+    assert all(f"stdout line {i}\n" in out for i in range(30))
+    assert "--- stderr ---" in out
+    assert "the root cause" in out
