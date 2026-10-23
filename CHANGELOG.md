@@ -18,6 +18,8 @@ For API stability guarantees and deprecation policy, see
 - `LoggerFactory.names()`: the names of the loggers the factory created in this process. The
   `appinfra.testing` pytest plugin uses it in a new autouse fixture, `destroy_test_loggers`, that
   destroys the loggers each test leaves behind, so the next test can create the same names.
+- `make check` keeps the full output of each failed check in `.build/check/<target>.log` and
+  prints its path; each run starts with the directory empty.
 
 ### Changed
 - **Breaking:** servers built with `ServerBuilder` no longer serve `/docs`, `/redoc`

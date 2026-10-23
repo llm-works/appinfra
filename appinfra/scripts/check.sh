@@ -145,6 +145,9 @@ MAIN_PID=$$
 DISPLAY_LOCK="/tmp/infra-check-display-lock-${MAIN_PID}"
 STATUS_DIR="/tmp/infra-check-status-${MAIN_PID}"
 mkdir -p "$STATUS_DIR"
+# Failed checks' full output, copied out of STATUS_DIR (removed on exit) so a failure that
+# does not reproduce on rerun can still be read. Each run replaces the previous run's logs.
+FAILED_LOG_DIR="${PROJECT_ROOT}/.build/check"
 
 # Coverage tracer: on Python 3.12+, use sys.monitoring (PEP 669) via
 # COVERAGE_CORE=sysmon — roughly 2x faster than the default C-tracer on
@@ -393,6 +396,16 @@ format_log_output() {
     fi
 }
 
+# Copy a failed check's log to FAILED_LOG_DIR and print the copy's path relative to
+# PROJECT_ROOT. The directory ignores itself, so projects need no .gitignore entry.
+keep_failed_log() {
+    local logfile="$1" make_target="$2"
+    mkdir -p "$FAILED_LOG_DIR"
+    [ -f "${FAILED_LOG_DIR}/.gitignore" ] || echo "*" > "${FAILED_LOG_DIR}/.gitignore"
+    local kept="${FAILED_LOG_DIR}/${make_target:-$(basename "$logfile" .log)}.log"
+    cp "$logfile" "$kept" && echo "${kept#"$PROJECT_ROOT"/}"
+}
+
 display_failures() {
     [ -f "${STATUS_DIR}/failures" ] || return 0
 
@@ -401,7 +414,11 @@ display_failures() {
         [ -n "$extra" ] && echo -e "→ ${extra}"
         [ -n "$make_target" ] && echo -e "→ To investigate: ${UI_YELLOW}make ${make_target}${UI_RESET}"
         [ -n "$fix_target" ] && echo -e "→ To fix: ${UI_YELLOW}make ${fix_target}${UI_RESET}"
-        [ "$FAIL_FAST" = true ] && [ -n "$logfile" ] && [ -f "$logfile" ] && format_log_output "$logfile" "$MAX_INLINE_LINES"
+        if [ -n "$logfile" ] && [ -f "$logfile" ]; then
+            local kept
+            kept=$(keep_failed_log "$logfile" "$make_target") && echo -e "→ Full output: ${UI_YELLOW}${kept}${UI_RESET}"
+            [ "$FAIL_FAST" = true ] && format_log_output "$logfile" "$MAX_INLINE_LINES"
+        fi
         echo ""
     done < "${STATUS_DIR}/failures"
 }
@@ -882,6 +899,7 @@ run_raw() {
 
 main() {
     cd "$PROJECT_ROOT"
+    rm -rf "$FAILED_LOG_DIR"
 
     [ "$RAW" = true ] && { run_raw; return $?; }
 
