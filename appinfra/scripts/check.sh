@@ -145,6 +145,39 @@ MAIN_PID=$$
 DISPLAY_LOCK="/tmp/infra-check-display-lock-${MAIN_PID}"
 STATUS_DIR="/tmp/infra-check-status-${MAIN_PID}"
 mkdir -p "$STATUS_DIR"
+# Full output of failed checks and of checks with slow tests, copied out of STATUS_DIR (removed
+# on exit) so a failure or hang that does not reproduce on rerun can still be read. Each run, a
+# concurrent one included, replaces the previous run's logs; concurrent runs in one tree also
+# share .coverage and .mypy_cache.
+KEPT_LOG_DIR="${PROJECT_ROOT}/.build/check"
+# Rows added below the checklist (add_display_row). The count lives in a file because every
+# check draws from its own background process and needs the current count to find its line.
+DISPLAY_ROWS="${STATUS_DIR}/display-rows"
+
+# A test still running after this many seconds is reported by check_pytest/pytest_hang.py: its
+# node id and the stacks of its process go to the check's log, and the check gets a row below
+# the checklist. The test is neither stopped nor failed, so on a slow machine this only adds
+# rows. 0 disables it.
+HANG_DUMP_SECONDS="${INFRA_PYTEST_HANG_DUMP_SECONDS:-120}"
+if ! [[ "$HANG_DUMP_SECONDS" =~ ^[0-9]+$ ]]; then
+    echo "Error: Invalid INFRA_PYTEST_HANG_DUMP_SECONDS: $HANG_DUMP_SECONDS" >&2
+    exit 1
+fi
+export INFRA_PYTEST_HANG_DUMP_SECONDS="$HANG_DUMP_SECONDS"
+# Prefix for the pytest commands. The plugin is a file of its own next to this script, not part
+# of the appinfra package: -p imports a plugin before pytest-cov starts, and importing anything
+# under appinfra that early would leave the package's module-level lines unmeasured. Its
+# directory holds only the plugin, so nothing else becomes importable in the tests.
+PYTEST_HANG="PYTHONPATH=$(printf '%q' "${SCRIPT_DIR}/check_pytest${PYTHONPATH:+:${PYTHONPATH}}") "
+PYTEST_HANG_FLAG="-p pytest_hang"
+
+# Terminal width for fit_slow_row, read here because stdout is the terminal only at the top
+# level: inside $(...) it is a pipe. Empty without a terminal (CI), where rows are not cut.
+DISPLAY_COLS=""
+if [ -t 1 ]; then
+    DISPLAY_COLS=$(stty size < /dev/tty 2>/dev/null | awk '{print $2}')
+    [ "$DISPLAY_COLS" != 0 ] || DISPLAY_COLS=""  # a pseudo-terminal with no size set
+fi
 
 # Coverage tracer: on Python 3.12+, use sys.monitoring (PEP 669) via
 # COVERAGE_CORE=sysmon — roughly 2x faster than the default C-tracer on
@@ -262,7 +295,7 @@ _pytest_cmd_for() {
     local suite="$1" marker="$2" flags="$3"
     case " $_MARKERS_FOUND " in
         *" $marker "*)
-            echo "INFRA_CHECK_PYTEST_SUITE=$suite ${PYTHON} -m pytest tests/ -m $marker $flags"
+            echo "${PYTEST_HANG}INFRA_CHECK_PYTEST_SUITE=$suite ${PYTHON} -m pytest tests/ -m $marker ${PYTEST_HANG_FLAG} $flags"
             ;;
         *)
             echo "(exit 5)"
@@ -291,8 +324,8 @@ declare -a TEST_SUBCHECKS_RAW=()
 # parallel group; leading the list keeps its running/completed state
 # obvious. Uses NPROC/2 workers (see PYTEST_PARALLEL_COVERAGE above).
 if awk "BEGIN {exit !($COVERAGE_TARGET > 0)}" 2>/dev/null; then
-    TEST_SUBCHECKS+=("${COVERAGE_LABEL}|test.coverage|${COVERAGE_CORE_ENV}INFRA_CHECK_PYTEST_SUITE=cov ${PYTHON} -m pytest tests/ ${COVERAGE_MARKER_ARG} --cov=${PKG_NAME} --cov-report=term -q -rEfs ${PYTEST_PARALLEL_COVERAGE}|${COVERAGE_TARGET}")
-    TEST_SUBCHECKS_RAW+=("${COVERAGE_LABEL}|test.coverage|${COVERAGE_CORE_ENV}INFRA_CHECK_PYTEST_SUITE=cov ${PYTHON} -m pytest tests/ ${COVERAGE_MARKER_ARG} --cov=${PKG_NAME} --cov-report=term-missing -rEfs ${PYTEST_PARALLEL_COVERAGE}|${COVERAGE_TARGET}")
+    TEST_SUBCHECKS+=("${COVERAGE_LABEL}|test.coverage|${PYTEST_HANG}${COVERAGE_CORE_ENV}INFRA_CHECK_PYTEST_SUITE=cov ${PYTHON} -m pytest tests/ ${COVERAGE_MARKER_ARG} ${PYTEST_HANG_FLAG} --cov=${PKG_NAME} --cov-report=term -q -rEfs ${PYTEST_PARALLEL_COVERAGE}|${COVERAGE_TARGET}")
+    TEST_SUBCHECKS_RAW+=("${COVERAGE_LABEL}|test.coverage|${PYTEST_HANG}${COVERAGE_CORE_ENV}INFRA_CHECK_PYTEST_SUITE=cov ${PYTHON} -m pytest tests/ ${COVERAGE_MARKER_ARG} ${PYTEST_HANG_FLAG} --cov=${PKG_NAME} --cov-report=term-missing -rEfs ${PYTEST_PARALLEL_COVERAGE}|${COVERAGE_TARGET}")
 fi
 
 _standalone_suite unit        "Unit tests"        test.unit        unit
@@ -309,7 +342,8 @@ TEST_SUBCHECKS_RAW+=("Performance tests|test.perf.v|$(_pytest_cmd_for perf perfo
 # (INFRA_DEV_CHECK_EXAMPLES=true) and an examples directory exists. Same
 # runner and flags as `make examples.check`; raw mode adds -v.
 if [ "$CHECK_EXAMPLES" = "true" ] && [ -n "$EXAMPLES_DIR" ]; then
-    EXAMPLES_CMD="${PYTHON} ${SCRIPT_DIR}/run_examples.py ${EXAMPLES_DIR}${EXAMPLES_PG:+ --pg ${EXAMPLES_PG}}"
+    # --full-output: the runner prints a failed example's whole output, so the kept log has it
+    EXAMPLES_CMD="${PYTHON} ${SCRIPT_DIR}/run_examples.py ${EXAMPLES_DIR} --full-output${EXAMPLES_PG:+ --pg ${EXAMPLES_PG}}"
     TEST_SUBCHECKS+=("Examples|examples.check|${EXAMPLES_CMD}|")
     TEST_SUBCHECKS_RAW+=("Examples|examples.check|${EXAMPLES_CMD} -v|")
 fi
@@ -321,47 +355,142 @@ INTERRUPTED=false
 
 # === CLEANUP ===
 
+# Every process under check.sh, comma-separated, from one ps snapshot of the process table
+process_tree() {
+    ps -e -o pid= -o ppid= | awk -v root="$MAIN_PID" '
+        { parent[$1] = $2 }
+        END {
+            for (pid in parent) {
+                p = parent[pid]
+                while (p != root && p in parent && p > 1) p = parent[p]
+                if (p == root) list = list (list ? "," : "") pid
+            }
+            print list
+        }'
+}
+
+# Stop every process check.sh started, at once, with KILL: pytest, the examples runner and the
+# tools have no TERM cleanup worth waiting for. The tree is listed before the signal, from one
+# snapshot. Signalling the background jobs alone is not enough: bash starts them with SIGINT
+# ignored, and a signal to a check's subshell does not reach the pytest, xdist workers or
+# examples runner running under it.
+stop_children() {
+    local pids
+    pids=$(process_tree)
+    # Bash reports a job killed by KILL ("line N: PID Killed run_check ..."), which is noise
+    # to the user and moves the cursor under the display; a disowned job is not reported
+    disown -a 2>/dev/null || true
+    [ -z "$pids" ] || kill -KILL ${pids//,/ } 2>/dev/null || true
+}
+
 cleanup() {
     if [ "$BASHPID" -eq "$MAIN_PID" ]; then
-        jobs -p | xargs -r kill -TERM 2>/dev/null || true
-        sleep 0.1
-        jobs -p | xargs -r kill -KILL 2>/dev/null || true
+        stop_children
         # Reap direct children before removing STATUS_DIR so killed bg subshells
         # can't still be in the middle of writing to it.
         wait 2>/dev/null || true
-        rm -rf "$STATUS_DIR" "$DISPLAY_LOCK" 2>/dev/null || true
+        close_display
+        rm -rf "$STATUS_DIR" "$DISPLAY_LOCK" "${DISPLAY_LOCK}.d" 2>/dev/null || true
     fi
 }
 
 handle_interrupt() {
     INTERRUPTED=true
-    jobs -p | xargs -r kill -TERM 2>/dev/null || true
+    stop_children
 }
 
 check_interrupted() {
     if [ "$INTERRUPTED" = true ]; then
-        cleanup
+        close_display
         tput cnorm 2>/dev/null || printf "\033[?25h"
         echo ""
         echo -e "${UI_MARK_FAIL} Interrupted by user"
+        display_slow_logs
+        cleanup
         exit 130
     fi
 }
 
 trap cleanup EXIT
-trap handle_interrupt INT TERM
+trap handle_interrupt INT TERM HUP
 
 # === DISPLAY HELPERS ===
+
+# Serialize drawing. Every cursor move is relative to the bottom of the display, which moves
+# when a row is added, so a writer holds the lock while it reads the row count and draws.
+# flock where it exists; macOS has none, so fall back to a mkdir lock, waited on for at most 2s
+# so a writer killed while holding it cannot freeze the display. Call inside a block that
+# opens fd 200 on DISPLAY_LOCK.
+lock_display() {
+    if command -v flock &>/dev/null; then
+        flock -x 200
+        return 0
+    fi
+    local tries=200
+    until mkdir "${DISPLAY_LOCK}.d" 2>/dev/null; do
+        tries=$((tries - 1))
+        [ "$tries" -gt 0 ] || return 0
+        sleep 0.01
+    done
+}
+
+# flock's lock goes with fd 200 at the end of the block; the mkdir lock is removed here
+unlock_display() {
+    command -v flock &>/dev/null || rmdir "${DISPLAY_LOCK}.d" 2>/dev/null || true
+}
+
+# True while checks may draw: until main prints below the display (close_display), and until
+# STATUS_DIR, which holds the row count, is gone
+display_open() {
+    [ -d "$STATUS_DIR" ] && [ ! -e "${STATUS_DIR}/display-closed" ]
+}
+
+# Once main prints below the display, its last line is no longer where the row count says, so
+# nothing may draw any more
+close_display() {
+    {
+        lock_display
+        [ -d "$STATUS_DIR" ] && : > "${STATUS_DIR}/display-closed"
+        unlock_display
+    } 200>"$DISPLAY_LOCK"
+}
 
 update_line() {
     local line_num=$1 status=$2 name=$3 extra=$4
     {
-        command -v flock &>/dev/null && flock -x 200
-        local lines_up=$((TOTAL_LINES - line_num))
-        [ $lines_up -gt 0 ] && printf "\033[${lines_up}A"
-        printf "\r%b%s  %s%b\n" "$UI_CLEAR" "$status" "$name" "$extra"
-        [ $lines_up -gt 1 ] && printf "\033[$((lines_up - 1))B"
-        printf "\r"
+        lock_display
+        if display_open; then
+            local added
+            added=$(cat "$DISPLAY_ROWS" 2>/dev/null) || added=0
+            local lines_up=$((TOTAL_LINES + added - line_num))
+            [ $lines_up -gt 0 ] && printf "\033[${lines_up}A"
+            printf "\r%b%s  %s%b\n" "$UI_CLEAR" "$status" "$name" "$extra"
+            [ $lines_up -gt 1 ] && printf "\033[$((lines_up - 1))B"
+            printf "\r"
+        fi
+        unlock_display
+    } 200>"$DISPLAY_LOCK"
+}
+
+# Add a row below the checklist, the first after a blank line that sets the rows apart, and set
+# ADDED_ROW to its line number for update_line (0 if the display is closed)
+add_display_row() {
+    local status=$1 text=$2 extra=$3
+    ADDED_ROW=0
+    {
+        lock_display
+        if display_open; then
+            local added
+            added=$(cat "$DISPLAY_ROWS" 2>/dev/null) || added=0
+            if [ "$added" -eq 0 ]; then
+                printf "\r%b\n" "$UI_CLEAR"
+                added=1
+            fi
+            printf "\r%b%s  %s%b\n" "$UI_CLEAR" "$status" "$text" "$extra"
+            ADDED_ROW=$((TOTAL_LINES + added))
+            echo "$((added + 1))" > "$DISPLAY_ROWS"
+        fi
+        unlock_display
     } 200>"$DISPLAY_LOCK"
 }
 
@@ -393,6 +522,90 @@ format_log_output() {
     fi
 }
 
+# Copy a check's log to KEPT_LOG_DIR and print the copy's path relative to PROJECT_ROOT. The
+# file is named after the check's display name, which is unique (make targets are not: both
+# mypy checks use "type"). The directory ignores itself, so projects need no .gitignore entry.
+keep_log() {
+    local logfile="$1" name="$2"
+    mkdir -p "$KEPT_LOG_DIR"
+    [ -f "${KEPT_LOG_DIR}/.gitignore" ] || echo "*" > "${KEPT_LOG_DIR}/.gitignore"
+    local slug
+    slug=$(echo "$name" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-|-$//g')
+    local kept="${KEPT_LOG_DIR}/${slug}.log"
+    cp "$logfile" "$kept" && echo "${kept#"$PROJECT_ROOT"/}"
+}
+
+# Fit a slow-test row to the terminal: a wrapped row would shift every line below it. The node
+# id loses its start, so the file and test name stay. Without a terminal (CI) the row is kept
+# whole: a log has no width, and a CI log keeps every row even when the job is killed.
+fit_slow_row() {
+    local name="$1" test_id="$2" extra_len="$3"
+    if [ -n "$DISPLAY_COLS" ]; then
+        # 5: "[⚠]  "; 2: ": "; 1: margin, so the row never touches the last column
+        local room=$((DISPLAY_COLS - 5 - ${#name} - 2 - extra_len - 1))
+        if [ "${#test_id}" -gt "$room" ] && [ "$room" -gt 3 ]; then
+            test_id="...${test_id: -$((room - 3))}"
+        fi
+    fi
+    echo "${name}: ${test_id}"
+}
+
+# While a pytest check runs, turn the lines pytest_hang writes to its log into rows below the
+# checklist: a row for each test reported running past HANG_DUMP_SECONDS, rewritten once the
+# test ends. A check with a report has its log, which holds the stacks, kept and recorded for
+# display_slow_logs. run_check's TERM means the command ended: one last pass reads what it
+# wrote last.
+watch_slow_tests() {
+    local logfile="$1" name="$2"
+    local stop=0 seen=0 line test_id took text kept=""
+    local -A rows=()
+    # The node id runs to the closing " ===": parametrized ids can contain spaces
+    local report_re='=== test running >[0-9.]+s: (.+) ===' done_re='=== test done after ([0-9.]+s): (.+) ==='
+    trap 'stop=1' TERM
+    while :; do
+        sleep 1 &
+        wait $! 2>/dev/null || true
+        display_open || return 0
+        local lines=()
+        mapfile -t lines < <(grep -oE "${report_re}|${done_re}" "$logfile" 2>/dev/null)
+        for line in "${lines[@]:$seen}"; do
+            if [[ "$line" =~ $report_re ]]; then
+                test_id="${BASH_REMATCH[1]}"
+                # 16: room for the longer note, " running >NNNNs" or " took NNNN.Ns"
+                text=$(fit_slow_row "$name" "$test_id" 16)
+                add_display_row "${UI_MARK_WARN}" "$text" " ${UI_YELLOW}running >${HANG_DUMP_SECONDS}s${UI_RESET}"
+                rows["$test_id"]=$ADDED_ROW
+            elif [[ "$line" =~ $done_re ]] && [ -n "${rows[${BASH_REMATCH[2]}]:-}" ]; then
+                took="${BASH_REMATCH[1]}"
+                test_id="${BASH_REMATCH[2]}"
+                text=$(fit_slow_row "$name" "$test_id" 16)
+                update_line "${rows[$test_id]}" "${UI_MARK_WARN}" "$text" " ${UI_GRAY}took ${took}${UI_RESET}"
+            fi
+        done
+        # Copy on news, and once more at the end for the complete log; record the first copy
+        # at once, so an interrupt that stops this loop early still lists it
+        if [ "${#lines[@]}" -gt "$seen" ] || { [ "$stop" -eq 1 ] && [ -n "$kept" ]; }; then
+            seen=${#lines[@]}
+            if [ -n "$kept" ]; then
+                keep_log "$logfile" "$name" > /dev/null || true
+            else
+                kept=$(keep_log "$logfile" "$name") || kept=""
+                [ -z "$kept" ] || echo "${name}|${kept}" >> "${STATUS_DIR}/slow"
+            fi
+        fi
+        [ "$stop" -eq 0 ] || break
+    done
+}
+
+# Name the kept logs of the checks that had slow tests; their rows are on the display above
+display_slow_logs() {
+    [ -f "${STATUS_DIR}/slow" ] || return 0
+    local name kept
+    while IFS='|' read -r name kept; do
+        echo -e "→ ${name}: stacks of the slow tests in ${UI_YELLOW}${kept}${UI_RESET}"
+    done < "${STATUS_DIR}/slow"
+}
+
 display_failures() {
     [ -f "${STATUS_DIR}/failures" ] || return 0
 
@@ -401,7 +614,11 @@ display_failures() {
         [ -n "$extra" ] && echo -e "→ ${extra}"
         [ -n "$make_target" ] && echo -e "→ To investigate: ${UI_YELLOW}make ${make_target}${UI_RESET}"
         [ -n "$fix_target" ] && echo -e "→ To fix: ${UI_YELLOW}make ${fix_target}${UI_RESET}"
-        [ "$FAIL_FAST" = true ] && [ -n "$logfile" ] && [ -f "$logfile" ] && format_log_output "$logfile" "$MAX_INLINE_LINES"
+        if [ -n "$logfile" ] && [ -f "$logfile" ]; then
+            local kept
+            kept=$(keep_log "$logfile" "$name") && echo -e "→ Full output: ${UI_YELLOW}${kept}${UI_RESET}"
+            [ "$FAIL_FAST" = true ] && format_log_output "$logfile" "$MAX_INLINE_LINES"
+        fi
         echo ""
     done < "${STATUS_DIR}/failures"
 }
@@ -561,7 +778,16 @@ run_check() {
     local tmpfile="${STATUS_DIR}/check-${check_id}.log"
     local exit_code=0
     local _start=$SECONDS
+    local watch_pid=""
+    if [[ "$cmd" == *" -m pytest "* ]] && [ "$HANG_DUMP_SECONDS" -gt 0 ]; then
+        watch_slow_tests "$tmpfile" "$name" &
+        watch_pid=$!
+    fi
     eval "$cmd" > "$tmpfile" 2>&1 || exit_code=$?
+    if [ -n "$watch_pid" ]; then
+        kill -TERM "$watch_pid" 2>/dev/null || true
+        wait "$watch_pid" 2>/dev/null || true
+    fi
     local _elapsed=$((SECONDS - _start))
 
     # Timing suffix appended to every result line for this check. Muted
@@ -661,8 +887,8 @@ monitor_jobs() {
         if ! wait -n 2>/dev/null; then
             any_failed=true
             if [ "$FAIL_FAST" = true ]; then
-                # Kill remaining background jobs immediately
-                jobs -p | xargs -r kill -TERM 2>/dev/null || true
+                # Stop the remaining checks, and everything they started, immediately
+                stop_children
                 break
             fi
         fi
@@ -882,6 +1108,7 @@ run_raw() {
 
 main() {
     cd "$PROJECT_ROOT"
+    rm -rf "$KEPT_LOG_DIR"
 
     [ "$RAW" = true ] && { run_raw; return $?; }
 
@@ -927,6 +1154,7 @@ main() {
     run_checks || success=false
 
     check_interrupted
+    close_display
 
     # Show cursor and display results
     tput cnorm 2>/dev/null || printf "\033[?25h"
@@ -938,6 +1166,7 @@ main() {
         echo -e "${UI_MARK_FAIL} ${failure_count} check(s) failed ${UI_GRAY}after ${elapsed}s${UI_RESET}"
         echo ""
         display_failures
+        display_slow_logs
         display_skip_summary
         exit 1
     else
@@ -948,6 +1177,7 @@ main() {
         else
             echo -e "${UI_MARK_OK} All checks passed ${UI_GRAY}in ${elapsed}s${UI_RESET}"
         fi
+        display_slow_logs
         display_skip_summary
     fi
 }

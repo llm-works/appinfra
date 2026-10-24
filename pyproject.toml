@@ -188,7 +188,8 @@ markers = [
 
 [tool.coverage.run]
 source = ["appinfra"]
-omit = ["*/test/*", "*/tests/*", "*_test.py", "*/testing.py"]
+# Pytest plugins are imported before coverage starts, so their module-level lines never count.
+omit = ["*/test/*", "*/tests/*", "*_test.py", "*/testing.py", "*/scripts/check_pytest/*"]
 
 [tool.coverage.report]
 precision = 2
@@ -232,6 +233,7 @@ appinfra = [
     "scripts/make/*",
     "scripts/*.sh",
     "scripts/*.py",
+    "scripts/check_pytest/*.py",
     "scripts/docker/**/*",
     "etc/*.yaml",
     "etc/README.md",

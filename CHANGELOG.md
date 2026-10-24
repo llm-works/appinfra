@@ -18,6 +18,13 @@ For API stability guarantees and deprecation policy, see
 - `LoggerFactory.names()`: the names of the loggers the factory created in this process. The
   `appinfra.testing` pytest plugin uses it in a new autouse fixture, `destroy_test_loggers`, that
   destroys the loggers each test leaves behind, so the next test can create the same names.
+- `make check` keeps the full output of each failed check in `.build/check/`, named after the
+  check, and prints its path; each run starts with the directory empty.
+- `make check` names a test still running after `INFRA_PYTEST_HANG_DUMP_SECONDS` (default 120)
+  in a row below its checklist, with the stacks of its process in the check's kept log; the
+  test is not stopped.
+- `run_examples.py --full-output` prints a failed example's whole stdout and stderr; `make check`
+  uses it, so the kept Examples log holds them.
 
 ### Changed
 - **Breaking:** servers built with `ServerBuilder` no longer serve `/docs`, `/redoc`
@@ -52,6 +59,8 @@ For API stability guarantees and deprecation policy, see
   worker process raises one to its parent.
 - App shutdown puts back the SIGTERM and SIGINT handlers it installed, so the process, and
   children it forks afterwards, no longer turn those signals into `KeyboardInterrupt`.
+- Interrupting `make check`, or a fail-fast stop, kills pytest, its workers and the examples
+  runner instead of leaving them running after `make check` exits.
 
 ## [0.12.0] - 2026-10-10
 

@@ -179,6 +179,32 @@ make check.summary  # Summaries only
 ./scripts/check.sh
 ```
 
+With fail-fast (`make check`), the summary of a failed run shows only the failed test ids and
+their first `E` lines; `make check.all` shows only which checks failed. The full output of each
+failed check is kept in `.build/check/`, in a file named after the check (for example
+`.build/check/type-checking-examples.log`), and the summary prints that path. This is the only
+record of a failure that does not reproduce on rerun. Each run of `make check`, a concurrent one
+included, empties the directory first, so copy a log elsewhere before running it again. The
+directory carries its own `.gitignore`. A failed example's whole stdout and stderr are in the
+Examples log: `make check` runs the examples with `run_examples.py --full-output`.
+
+A test still running after `INFRA_PYTEST_HANG_DUMP_SECONDS` (default 120) gets a row below the
+checklist, after a blank line:
+
+```text
+[⚠]  Unit & E2E & Coverage tests: tests/test_server.py::test_shutdown running >120s
+```
+
+The row changes to `took 131.4s` if the test ends; a row still saying `running` when the run
+ends or is interrupted is a hung test. The test's node id and the stack of every thread in its
+process go to the check's log, which is kept in `.build/check/` and named in the summary. The
+test is neither stopped nor failed, so a slow machine only gets more rows. In a terminal the
+node id is shortened from the start to fit the width; without one (CI) it is printed whole, and
+the CI log keeps the rows even when the job is killed by its timeout.
+
+Interrupting `make check` (Ctrl-C, `TERM`, a closed terminal), or a fail-fast stop, kills every
+process it started at once: pytest and its workers, the tools and the examples runner.
+
 ## Handling Empty Test Directories
 
 The framework handles pytest exit code 5 (no tests collected) gracefully. Running `make test.unit`
