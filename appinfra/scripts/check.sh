@@ -559,7 +559,8 @@ watch_slow_tests() {
     local logfile="$1" name="$2"
     local stop=0 seen=0 line test_id took text kept=""
     local -A rows=()
-    local report_re='=== test running >[0-9.]+s: ([^ ]+) ===' done_re='=== test done after ([0-9.]+s): ([^ ]+) ==='
+    # The node id runs to the closing " ===": parametrized ids can contain spaces
+    local report_re='=== test running >[0-9.]+s: (.+) ===' done_re='=== test done after ([0-9.]+s): (.+) ==='
     trap 'stop=1' TERM
     while :; do
         sleep 1 &

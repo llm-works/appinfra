@@ -279,7 +279,7 @@ def run_case(spec: Spec, args: str, full_output: bool) -> Result:
         for reader in readers:
             reader.join(timeout=2.0)
         shutil.rmtree(scratch, ignore_errors=True)
-    if status == "FAIL":
+    if status in _FAILING:
         output = _failure_output("".join(out_chunks), "".join(err_chunks), full_output)
         detail = f"{detail}\n{output}"
     return Result(spec, args, status, detail)

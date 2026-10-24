@@ -47,15 +47,18 @@ def test_examples_import_uninstalled_project_from_source_tree(tmp_path: Path) ->
     assert "1 passed, 0 failed" in result.stdout
 
 
-def _run_failing_example(tmp_path: Path, *flags: str) -> str:
+_FAILS = (
+    "import sys\n"
+    "for i in range(30):\n"
+    "    print(f'stdout line {i}')\n"
+    "sys.exit('the root cause')\n"
+)
+
+
+def _run_failing_example(tmp_path: Path, source: str, *flags: str) -> str:
     examples_dir = tmp_path / "examples"
     examples_dir.mkdir()
-    (examples_dir / "fails.py").write_text(
-        "import sys\n"
-        "for i in range(30):\n"
-        "    print(f'stdout line {i}')\n"
-        "sys.exit('the root cause')\n"
-    )
+    (examples_dir / "fails.py").write_text(source)
     result = subprocess.run(
         [
             sys.executable,
@@ -76,7 +79,7 @@ def _run_failing_example(tmp_path: Path, *flags: str) -> str:
 
 @pytest.mark.unit
 def test_failed_example_shows_a_tail_of_stderr_by_default(tmp_path: Path) -> None:
-    out = _run_failing_example(tmp_path)
+    out = _run_failing_example(tmp_path, _FAILS)
 
     assert "the root cause" in out
     assert "stdout line 0" not in out  # stdout is dropped when stderr has output
@@ -84,9 +87,24 @@ def test_failed_example_shows_a_tail_of_stderr_by_default(tmp_path: Path) -> Non
 
 @pytest.mark.unit
 def test_full_output_shows_both_streams_whole(tmp_path: Path) -> None:
-    out = _run_failing_example(tmp_path, "--full-output")
+    out = _run_failing_example(tmp_path, _FAILS, "--full-output")
 
     assert "--- stdout ---" in out
     assert all(f"stdout line {i}\n" in out for i in range(30))
     assert "--- stderr ---" in out
     assert "the root cause" in out
+
+
+@pytest.mark.unit
+def test_full_output_shows_a_timed_out_example(tmp_path: Path) -> None:
+    """A hung example's output is the one that explains it."""
+    source = (
+        "# ci-timeout: 1\n"
+        "import time\n"
+        "print('waiting on a server that never answers')\n"
+        "time.sleep(30)\n"
+    )
+    out = _run_failing_example(tmp_path, source, "--full-output")
+
+    assert "no exit within 1s" in out
+    assert "waiting on a server that never answers" in out
