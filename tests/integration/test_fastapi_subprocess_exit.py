@@ -125,6 +125,10 @@ def _pid_gone(pid: int) -> bool:
     try:
         with open(f"/proc/{pid}/stat") as f:
             return f.read().rsplit(")", 1)[1].split()[0] == "Z"
+    except (FileNotFoundError, ProcessLookupError):
+        # reaped between the kill and the read: a zombie whose parent died is
+        # reaped by whatever adopted it, at any moment
+        return True
     except OSError:
         return False
 
@@ -263,13 +267,17 @@ class TestSubprocessExit:
             killed_at = time.monotonic()
             os.kill(parent.pid, signal.SIGKILL)
             parent.join(timeout=5.0)
+            # Keep the first observation: an exiting process passes through
+            # short states (zombie, reaped) that a second look can misread
             deadline = killed_at + 10.0
-            while not _pid_gone(child_pid) and time.monotonic() < deadline:
+            gone = _pid_gone(child_pid)
+            while not gone and time.monotonic() < deadline:
                 time.sleep(0.05)
+                gone = _pid_gone(child_pid)
             exited_in = time.monotonic() - killed_at
             thread.join(timeout=5.0)
 
-            assert _pid_gone(child_pid), "child outlived its parent"
+            assert gone, "child outlived its parent"
             assert exited_in < 8.0
             assert result["done_at"] - killed_at < 8.0
             assert _port_bindable(port)
