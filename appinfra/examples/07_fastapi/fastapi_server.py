@@ -6,8 +6,8 @@
 # ci-run:
 # ci-run: --subprocess
 # ci-stop: 4
-# ci-requires: port:8000
-# ci-requires: port:8001
+# ci-requires: port:25442
+# ci-requires: port:25443
 
 """
 FastAPI Server Framework Examples.
@@ -61,7 +61,7 @@ def echo_handler(message: str = "hello") -> dict[str, str]:
 # -----------------------------------------------------------------------------
 
 
-def create_simple_server(port: int = 8000) -> Server:
+def create_simple_server(port: int = 25442) -> Server:
     """
     Create a simple server running in direct mode.
 
@@ -106,7 +106,7 @@ class WorkResponse:
 def create_subprocess_server(
     request_q: mp.Queue[Any],
     response_q: mp.Queue[Any],
-    port: int = 8001,
+    port: int = 25443,
 ) -> Server:
     """
     Create a server running in subprocess mode with IPC.
@@ -197,7 +197,7 @@ def main() -> int:
         "--subprocess", action="store_true", help="Run subprocess mode demo"
     )
     parser.add_argument(
-        "--port", type=int, default=8000, help="Port for direct mode (default: 8000)"
+        "--port", type=int, default=25442, help="Port for direct mode (default: 25442)"
     )
     args = parser.parse_args()
 

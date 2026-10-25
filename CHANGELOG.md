@@ -10,6 +10,60 @@ For API stability guarantees and deprecation policy, see
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-10-25
+
+### Added
+- `appinfra.cas`: content-addressed store of blobs, trees and commits with compare-and-set
+  refs, ancestry and pruning; in-memory and file stores. See `docs/api/cas.md`.
+- `ChannelResponseError` (a `ChannelError`): raised by `submit()` and `submit_stream()` for a
+  response with `error` set; its `response` attribute holds the full message.
+- `LoggerFactory.names()`: the names of the loggers the factory created in this process. The
+  `appinfra.testing` pytest plugin uses it in a new autouse fixture, `destroy_test_loggers`, that
+  destroys the loggers each test leaves behind, so the next test can create the same names.
+- `make check` keeps the full output of each failed check in `.build/check/`, named after the
+  check, and prints its path; each run starts with the directory empty.
+- `make check` names a test still running after `INFRA_PYTEST_HANG_DUMP_SECONDS` (default 120)
+  in a row below its checklist, with the stacks of its process in the check's kept log; the
+  test is not stopped.
+- `run_examples.py --full-output` prints a failed example's whole stdout and stderr; `make check`
+  uses it, so the kept Examples log holds them.
+
+### Changed
+- **Breaking:** servers built with `ServerBuilder` no longer serve `/docs`, `/redoc`
+  and `/openapi.json`. `with_docs()` turns them back on; the paths are set by the
+  new `ApiConfig` fields `docs_url`, `redoc_url` and `openapi_url`.
+- **Breaking:** channel and transport `send()` take `timeout=None`. On a full bounded
+  queue, a channel's `send()` raises the new `ChannelFullError` after the timeout
+  (`timeout=0` does not wait), and `ChannelClosedError` if the channel closes meanwhile.
+  Custom transports must accept and honor `timeout`.
+- **Breaking:** `LoggerFactory.create()`, `create_root()` and logging builders' `build()`
+  raise `LoggerExistsError` for a name an appinfra logger in this process holds; a library's
+  stdlib logger under the name is taken over in place. New: `reconfigure()`,
+  `destroy()`, `destroy_if_exists()`, `create_or_replace()`. `App.setup_logging_from_config()`
+  is removed; an app destroys its root logger at shutdown.
+- **Breaking:** `App.subprocess_context()` is a context manager only: it creates the process's root
+  logger on entry and destroys it on exit, so a worker can enter it once per task.
+- Tool loggers follow the tool tree: a subtool added with `add_tool()` gets the group's tool as
+  parent and logs as `/<tool>/<subtool>`; a tool outside an app logs as `/<tool name>`. Both
+  logged as `/` before.
+- The FastAPI and TCP server examples listen on 25442/25443 and 25444 instead of 8000/8001 and
+  9001, next to the pg ports.
+
+### Fixed
+- `select_scrollable` and `select_table`: Esc followed quickly by `q` or Enter no longer
+  raises "Return value already set" in the event loop.
+- The FastAPI server subprocess exits when its parent dies, and `Server.stop()` no longer
+  waits its full timeout before SIGTERM. Requests waiting on IPC fail at once with
+  `ChannelClosedError` instead of holding the shutdown.
+- `AsyncProcessQueueTransport` raises `ChannelClosedError`, not `ValueError`, for a send
+  or receive that was still queued when the channel closed.
+- `InvalidLogLevelError` and `ReservedKeyError` keep their message when pickled, as when a
+  worker process raises one to its parent.
+- App shutdown puts back the SIGTERM and SIGINT handlers it installed, so the process, and
+  children it forks afterwards, no longer turn those signals into `KeyboardInterrupt`.
+- Interrupting `make check`, or a fail-fast stop, kills pytest, its workers and the examples
+  runner instead of leaving them running after `make check` exits.
+
 ## [0.12.0] - 2026-10-10
 
 ### Changed
@@ -1017,7 +1071,8 @@ as config. Affected: `ConfigValidator`, `PG.readonly`, `PG.migrate()`,
 ### Changed
 - Package renamed to `appinfra` (install and import both use `appinfra`)
 
-[Unreleased]: https://github.com/llm-works/appinfra/compare/v0.12.0...HEAD
+[Unreleased]: https://github.com/llm-works/appinfra/compare/v0.13.0...HEAD
+[0.13.0]: https://github.com/llm-works/appinfra/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/llm-works/appinfra/compare/v0.11.1...v0.12.0
 [0.11.1]: https://github.com/llm-works/appinfra/compare/v0.11.0...v0.11.1
 [0.11.0]: https://github.com/llm-works/appinfra/compare/v0.10.5...v0.11.0

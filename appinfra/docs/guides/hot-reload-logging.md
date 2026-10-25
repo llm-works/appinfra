@@ -228,8 +228,9 @@ config watcher since file watchers don't cross process boundaries.
 
 ### Using app.subprocess_context() (Recommended)
 
-The simplest approach uses the `app.subprocess_context()` helper, which creates a fresh logger and
-wires up config watching automatically:
+The simplest approach uses the `app.subprocess_context()` helper, which creates the process's root
+logger, wires up config watching automatically, and destroys the root logger as the last step when
+the block exits, so a worker running several tasks can enter it once per task:
 
 ```python
 import multiprocessing

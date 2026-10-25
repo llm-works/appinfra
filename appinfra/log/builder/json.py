@@ -457,7 +457,7 @@ class JSONLoggingBuilder(LoggingBuilder):
             colors=self._colors,
         )
 
-        # Create logger
+        # Create logger; raises LoggerExistsError if the name is taken
         logger = LoggerFactory.create(
             self._name, config, self._logger_class, self._extra
         )

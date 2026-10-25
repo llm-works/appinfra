@@ -32,6 +32,7 @@ from tests.helpers.pg.probe import (
 # Register integration test fixtures and appinfra testing utilities
 pytest_plugins = [
     "appinfra.testing",
+    "pytester",
     "tests.fixtures.pg_integration",
     "tests.fixtures.sqlite_integration",
     "tests.fixtures.logging",

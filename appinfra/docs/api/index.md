@@ -17,6 +17,7 @@ The Infra framework is organized into several major modules, each providing spec
 | [Security](security.md) | Secret masking for logs and console output |
 | [UI Components](ui.md) | Rich terminal output, progress bars, spinners, and prompts |
 | [Database Layer](database.md) | PostgreSQL interface with connection pooling and query monitoring |
+| [Content-Addressed Store](cas.md) | Blobs, trees and commits with compare-and-set refs |
 | [Network](net.md) | TCP/HTTP server with background ticker support |
 | [Time & Scheduling](time.md) | Periodic execution, scheduling, and time utilities |
 | [Version Tracking](version.md) | Git commit tracking for installed packages |
@@ -47,6 +48,7 @@ appinfra/
 │   ├── cli/         # Command-line interface
 │   ├── server/      # HTTP server (experimental)
 │   └── decorators/  # Decorator-based API
+├── cas/              # Content-addressed store: objects, refs, history
 ├── cli/              # CLI output abstractions and built-in tools
 ├── config/           # Configuration loading, watching, validation
 ├── db/               # Database layer
@@ -156,6 +158,7 @@ def get(self, path: str, default: Any = None) -> Any:
 ### Configuration & Data
 - [Configuration](config.md) - Config loading, hot-reload
 - [Database Layer](database.md) - PostgreSQL interface
+- [Content-Addressed Store](cas.md) - Blobs, trees, commits and refs
 
 ### Logging & Security
 - [Logging System](logging.md) - Advanced logging

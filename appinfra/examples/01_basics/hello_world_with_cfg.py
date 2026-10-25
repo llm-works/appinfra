@@ -46,8 +46,9 @@ class HelloWorldWithConfigApp(App):
     def _run(self) -> int:
         """Run the hello world application with config-based logging."""
 
-        # Set up logging from the config the spec resolved to during setup
-        logger, _ = self.setup_logging_from_config(self.config)
+        # setup() built this logger from the config's logging section, with the
+        # command-line overrides applied
+        logger = self.lg
 
         # Log the greeting to demonstrate multiple handlers
         logger.info("Hello, World!")

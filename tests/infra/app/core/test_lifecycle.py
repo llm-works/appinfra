@@ -10,7 +10,9 @@ Tests key functionality including:
 - Finalization
 """
 
+import logging
 import os
+import signal
 import time as std_time
 from unittest.mock import Mock, patch
 
@@ -31,6 +33,17 @@ def create_test_tool(name: str):
 
     config = ToolConfig(name=name)
     return TestTool(config=config)
+
+
+class _FailingCloseHandler(logging.Handler):
+    """A handler whose close() fails, as a file handler's final flush can."""
+
+    def emit(self, record: logging.LogRecord) -> None:
+        pass
+
+    def close(self) -> None:
+        super().close()
+        raise OSError("disk full")
 
 
 # =============================================================================
@@ -518,6 +531,48 @@ class TestShutdown:
         result = manager.shutdown(42)
 
         assert result == 42
+
+    def test_shutdown_releases_the_root_logger(self):
+        """After shutdown the root name is free, and a second shutdown does nothing."""
+        config = DotDict(logging=DotDict(level="info", location=0, micros=False))
+        manager = LifecycleManager(Mock())
+        manager.initialize(config)
+
+        manager.shutdown(0)
+        assert "/" not in logging.root.manager.loggerDict
+        assert manager.shutdown(3) == 3  # no second teardown
+
+        next_manager = LifecycleManager(Mock())
+        next_manager.initialize(config)  # creates "/" again without a conflict
+        next_manager.shutdown(0)
+
+    def test_shutdown_restores_the_signal_handlers(self):
+        """The handlers initialize() installed do not outlive the lifecycle."""
+        before = signal.getsignal(signal.SIGTERM)
+        config = DotDict(logging=DotDict(level="info", location=0, micros=False))
+        manager = LifecycleManager(Mock())
+        try:
+            manager.initialize(config)
+            assert signal.getsignal(signal.SIGTERM) != before
+
+            manager.shutdown(0)
+
+            assert signal.getsignal(signal.SIGTERM) == before
+        finally:
+            signal.signal(signal.SIGTERM, before)
+
+    def test_shutdown_raises_a_handler_close_error_once(self):
+        """The root logger is still released, and a second shutdown does nothing."""
+        config = DotDict(logging=DotDict(level="info", location=0, micros=False))
+        manager = LifecycleManager(Mock())
+        manager.initialize(config)
+        manager._logger.addHandler(_FailingCloseHandler())
+
+        with pytest.raises(OSError, match="disk full"):
+            manager.shutdown(0)
+
+        assert "/" not in logging.root.manager.loggerDict
+        assert manager.shutdown(3) == 3
 
 
 @pytest.mark.unit

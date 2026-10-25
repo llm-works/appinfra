@@ -40,6 +40,7 @@ class LifecycleManager:
             None  # Derived logger for lifecycle messages at /infra/app/lifecycle
         )
         self._handler_registry: HandlerRegistry | None = None
+        self._shut_down = False
         self._start_time: float | None = None
 
         # Component registrations for shutdown
@@ -302,10 +303,14 @@ class LifecycleManager:
         Args:
             return_code: Exit code for the application
 
+        Puts back the SIGTERM and SIGINT handlers initialize() replaced, then ends by
+        destroying the root logger this lifecycle created (and the loggers derived from
+        it), so the process is free to set up logging again. A second call does nothing.
+
         Returns:
             Final return code after cleanup
         """
-        if not self._logger:
+        if not self._logger or self._shut_down:
             return return_code
 
         assert self._lifecycle_logger is not None  # Set during initialization
@@ -324,7 +329,14 @@ class LifecycleManager:
         # Finalize and log completion
         self.finalize(return_code)
         self._log_shutdown_complete(return_code)
+        if self._shutdown_manager is not None:
+            self._shutdown_manager.restore_signal_handlers()
 
+        # Done even if a handler fails to close below: that error propagates, chained
+        # to any exception the shutdown runs under. A missing logger is not an error:
+        # raising for it would hide the exception a shutdown on an error path follows.
+        self._shut_down = True
+        LoggerFactory.destroy_if_exists(self._logger.name)
         return return_code
 
     def _log_shutdown_complete(self, return_code: int) -> None:

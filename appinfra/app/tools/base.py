@@ -361,8 +361,9 @@ class Tool(Traceable, ToolProtocol):
                 if log_level_str.lower() == "false":
                     log_level = False
 
+                # Its own name, not the root: the root logger belongs to an app
                 config = LogConfig.from_params(log_level)
-                self._logger = LoggerFactory.create_root(config)
+                self._logger = LoggerFactory.create(f"/{self.name}", config)
         except Exception as e:
             # If logger creation fails, raise a descriptive error
             raise LifecycleError(

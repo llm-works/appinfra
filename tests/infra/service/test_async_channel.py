@@ -14,7 +14,7 @@ from appinfra.service import (
     AsyncQueueChannelFactory,
     ChannelClosedError,
     ChannelConfig,
-    ChannelError,
+    ChannelResponseError,
     ChannelTimeoutError,
     Message,
 )
@@ -174,8 +174,11 @@ class TestAsyncThreadChannel:
 
         task = asyncio.create_task(responder())
 
-        with pytest.raises(ChannelError, match="something failed"):
+        with pytest.raises(ChannelResponseError, match="something failed") as exc:
             await parent.submit(Request(id="1", data="test"), timeout=1.0)
+        assert exc.value.response == Response(
+            id="1", result="", error="something failed"
+        )
 
         await task
 
@@ -309,6 +312,51 @@ class TestAsyncProcessChannel:
         assert parent.is_closed
         assert child.is_closed
 
+    @pytest.mark.asyncio
+    async def test_close_fails_pending_submits_with_closed_error(self) -> None:
+        """Every submit pending at close() raises ChannelClosedError.
+
+        More submits than executor threads leaves recv calls queued in the
+        executor, so they reach mp.Queue.get() only after close().
+        """
+        pair = AsyncProcessQueueChannelFactory().create_pair()
+        tasks = [
+            asyncio.create_task(
+                pair.parent.submit(Request(id=str(i), data="x"), timeout=30.0)
+            )
+            for i in range(100)
+        ]
+        await asyncio.sleep(0.3)
+
+        await pair.parent.close()
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        assert {type(r) for r in results} == {ChannelClosedError}
+        pair.child.close()
+
+    @pytest.mark.asyncio
+    async def test_close_fails_queued_sends_with_closed_error(self) -> None:
+        """A send still queued in the executor at close() raises ChannelClosedError."""
+        pair = AsyncProcessQueueChannelFactory().create_pair()
+        submits = [
+            asyncio.create_task(
+                pair.parent.submit(Request(id=str(i), data="x"), timeout=30.0)
+            )
+            for i in range(100)
+        ]
+        await asyncio.sleep(0.3)  # executor is now busy with recv polls
+
+        sends = [
+            asyncio.create_task(pair.parent.send(Request(id=f"s{i}", data="x")))
+            for i in range(10)
+        ]
+        await asyncio.sleep(0)  # sends reach the executor queue
+        await pair.parent.close()
+        results = await asyncio.gather(*sends, *submits, return_exceptions=True)
+
+        assert {type(r) for r in results} == {ChannelClosedError}
+        pair.child.close()
+
 
 class TestAsyncThreadChannelClosedDrain:
     """Tests for draining closed async channels."""
@@ -435,11 +483,12 @@ class TestAsyncChannelStreaming:
 
         task = asyncio.create_task(responder())
 
-        with pytest.raises(ChannelError, match="stream failed"):
+        with pytest.raises(ChannelResponseError, match="stream failed") as exc:
             async for _ in parent.submit_stream(
                 Request(id="1", data="test"), timeout=1.0
             ):
                 pass
+        assert exc.value.response == Response(id="1", result="", error="stream failed")
 
         await task
 

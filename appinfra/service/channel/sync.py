@@ -35,8 +35,8 @@ import threading
 import time
 from typing import Any, Generic, Protocol, TypeVar, cast, runtime_checkable
 
-from ..errors import ChannelClosedError, ChannelTimeoutError
-from .base import RedeliveryBuffer, validate_response
+from ..errors import ChannelClosedError, ChannelFullError, ChannelTimeoutError
+from .base import RedeliveryBuffer, send_slice, validate_response
 
 TRequest = TypeVar("TRequest")
 TResponse = TypeVar("TResponse")
@@ -54,8 +54,12 @@ class Channel(Protocol):
     management.
     """
 
-    def send(self, message: Any) -> None:
-        """Send message without waiting for response."""
+    def send(self, message: Any, timeout: float | None = None) -> None:
+        """Send message without waiting for response.
+
+        Raises ``ChannelFullError`` if there is no room within *timeout*
+        seconds (None waits until there is, 0 does not wait).
+        """
         ...
 
     def recv(self, timeout: float | None = None) -> Any:
@@ -89,8 +93,23 @@ class Transport(Protocol):
     satisfying the protocol is accepted.
     """
 
-    def send(self, message: Any) -> None:
-        """Send a message over the wire."""
+    def send(self, message: Any, timeout: float | None = None) -> None:
+        """
+        Send a message over the wire.
+
+        Important:
+            Implementations **must** honor the *timeout* parameter like
+            ``recv()``: ``BufferedChannel`` sends in short slices to check for
+            close while the wire is full.
+
+        Args:
+            message: Message to send.
+            timeout: Maximum seconds to wait for room. None means block
+                indefinitely; 0 means do not wait.
+
+        Raises:
+            ChannelFullError: If there is no room within timeout.
+        """
         ...
 
     def recv(self, timeout: float | None = None) -> Any:
@@ -179,11 +198,32 @@ class BufferedChannel(Generic[TRequest, TResponse]):
         """True if the channel or its transport has been closed."""
         return self._closed or self._transport.is_closed
 
-    def send(self, message: TRequest) -> None:
-        """Send message without waiting for response."""
-        if self.is_closed:
-            raise ChannelClosedError("Channel is closed")
-        self._transport.send(message)
+    def send(self, message: TRequest, timeout: float | None = None) -> None:
+        """
+        Send message without waiting for response.
+
+        While the transport is full, retries in short slices so that
+        ``close()`` interrupts the wait.
+
+        Args:
+            message: Message to send.
+            timeout: Maximum seconds to wait for room. None waits until there
+                is room or the channel closes; 0 tries once.
+
+        Raises:
+            ChannelClosedError: If the channel is closed, or closes while waiting.
+            ChannelFullError: If the transport stays full for *timeout* seconds.
+        """
+        deadline = None if timeout is None else time.monotonic() + timeout
+        while True:
+            if self.is_closed:
+                raise ChannelClosedError("Channel is closed")
+            try:
+                self._transport.send(message, send_slice(deadline))
+                return
+            except ChannelFullError:
+                if deadline is not None and time.monotonic() >= deadline:
+                    raise ChannelFullError(f"Channel full for {timeout}s") from None
 
     def recv(self, timeout: float | None = None) -> TResponse:
         """
@@ -206,7 +246,11 @@ class BufferedChannel(Generic[TRequest, TResponse]):
         return self._recv_poll(timeout)
 
     def submit(self, request: TRequest, timeout: float | None = None) -> TResponse:
-        """Send request and wait for matching response."""
+        """Send request and wait for matching response.
+
+        *timeout* covers both waiting for room to send and waiting for the
+        response.
+        """
         if self.is_closed:
             raise ChannelClosedError("Channel is closed")
         if not hasattr(request, "id"):
@@ -214,9 +258,10 @@ class BufferedChannel(Generic[TRequest, TResponse]):
 
         request_id = request.id  # type: ignore[union-attr]
         effective_timeout = timeout if timeout is not None else self._response_timeout
+        deadline = time.monotonic() + effective_timeout
 
-        self.send(request)
-        return self._poll_for_response(request_id, effective_timeout)
+        self.send(request, effective_timeout)
+        return self._poll_for_response(request_id, deadline, effective_timeout)
 
     def close(self) -> None:
         """Close the channel and its transport."""
@@ -258,9 +303,10 @@ class BufferedChannel(Generic[TRequest, TResponse]):
                 if deadline is not None and time.monotonic() >= deadline:
                     return self._drain_or_timeout(timeout)
 
-    def _poll_for_response(self, request_id: str, timeout: float) -> TResponse:
-        """Poll for a response with the given request_id."""
-        deadline = time.monotonic() + timeout
+    def _poll_for_response(
+        self, request_id: str, deadline: float, timeout: float
+    ) -> TResponse:
+        """Poll for a response with the given request_id until *deadline*."""
         poll_interval = 0.05
 
         while True:
@@ -325,9 +371,12 @@ class QueueTransport(Generic[TRequest, TResponse]):
         self._inbound = inbound
         self._closed = False
 
-    def send(self, message: TRequest) -> None:
-        """Put message on the outbound queue."""
-        self._outbound.put(message)
+    def send(self, message: TRequest, timeout: float | None = None) -> None:
+        """Put message on the outbound queue, waiting up to *timeout* for room."""
+        try:
+            self._outbound.put(message, timeout=timeout)
+        except queue.Full:
+            raise ChannelFullError(f"Queue full ({timeout}s)") from None
 
     def recv(self, timeout: float | None = None) -> TResponse:
         """Get next message from the inbound queue."""
@@ -358,9 +407,17 @@ class ProcessQueueTransport(Generic[TRequest, TResponse]):
         self._inbound = inbound
         self._closed = False
 
-    def send(self, message: TRequest) -> None:
-        """Put message on the outbound mp.Queue."""
-        self._outbound.put(message)
+    def send(self, message: TRequest, timeout: float | None = None) -> None:
+        """Put message on the outbound mp.Queue, waiting up to *timeout* for room."""
+        try:
+            self._outbound.put(message, timeout=timeout)
+        except queue.Full:
+            raise ChannelFullError(f"Queue full ({timeout}s)") from None
+        except ValueError as e:
+            # mp.Queue.put() raises ValueError once close() has run.
+            if self._closed:
+                raise ChannelClosedError("Channel is closed") from e
+            raise
 
     def recv(self, timeout: float | None = None) -> TResponse:
         """Get next message from the inbound mp.Queue."""
@@ -374,6 +431,9 @@ class ProcessQueueTransport(Generic[TRequest, TResponse]):
         self._closed = True
         try:
             self._outbound.close()
+        except Exception:
+            pass
+        try:
             self._inbound.close()
         except Exception:
             pass

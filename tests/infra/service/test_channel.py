@@ -12,7 +12,7 @@ from appinfra.service import (
     Channel,
     ChannelClosedError,
     ChannelConfig,
-    ChannelError,
+    ChannelResponseError,
     ChannelTimeoutError,
     Message,
     ProcessQueueChannelFactory,
@@ -141,10 +141,11 @@ class TestValidateResponse:
         assert validate_response(msg) is msg
 
     def test_raises_on_error(self) -> None:
-        """Message with error raises ChannelError."""
+        """Message with error raises ChannelResponseError with response attached."""
         msg = Message(error="fail")
-        with pytest.raises(ChannelError, match="fail"):
+        with pytest.raises(ChannelResponseError, match="fail") as exc:
             validate_response(msg)
+        assert exc.value.response is msg
 
 
 class TestQueueChannel:
@@ -295,8 +296,11 @@ class TestQueueChannel:
         t = threading.Thread(target=responder)
         t.start()
 
-        with pytest.raises(ChannelError, match="something failed"):
+        with pytest.raises(ChannelResponseError, match="something failed") as exc:
             parent.submit(Request(id="1", data="test"), timeout=1.0)
+        assert exc.value.response == Response(
+            id="1", result="", error="something failed"
+        )
 
         t.join()
 

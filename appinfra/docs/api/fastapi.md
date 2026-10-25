@@ -121,9 +121,20 @@ server = (
     .with_timeout(30.0)
     # Bulk configuration
     .with_config(ApiConfig(...))
+    # Serve /docs, /redoc and /openapi.json (off by default)
+    .with_docs()
     .build()
 )
 ```
+
+### API Docs and OpenAPI Schema
+
+The Swagger UI (`/docs`, with `/docs/oauth2-redirect`), ReDoc (`/redoc`) and the
+OpenAPI schema (`/openapi.json`) are not served by default: the schema lists every
+route, including internal and token-protected ones. `with_docs()` serves all three at
+FastAPI's default paths; `with_docs(False)` drops them again. For other paths, set
+`docs_url`, `redoc_url` and `openapi_url` on `ApiConfig`, where `None` drops a route.
+Both docs pages load the schema, so they need `openapi_url` set to render.
 
 ### Route Configuration
 
@@ -473,7 +484,7 @@ Access via `.uvicorn`:
 ```python
 server = (
     ServerBuilder(lg, "myapi")
-    .uvicorn.with_workers(4)
+    .uvicorn.with_workers(1)  # subprocess mode requires 1
     .with_log_level("info")
     .with_access_log(True)
     .with_ssl("/path/to/key.pem", "/path/to/cert.pem")
@@ -487,6 +498,10 @@ server = (
     .build()
 )
 ```
+
+Subprocess mode requires `workers=1`: uvicorn runs multiple workers only from an import string,
+and the subprocess passes it the built app. Other values make `start_subprocess()` raise
+`SetupError`.
 
 ## Server
 
@@ -509,6 +524,21 @@ server.start()  # Run server (blocking)
 server.start_subprocess()  # Start in subprocess (non-blocking, returns Process)
 server.stop()  # Stop subprocess
 ```
+
+### Subprocess Shutdown
+
+The server subprocess exits when:
+
+- `server.stop()` sets its shutdown event. `stop()` escalates to SIGTERM, then SIGKILL, only if the
+  subprocess is still running after `timeout` (default 5s).
+- The parent process exits, including by SIGKILL. The subprocess checks for this every 0.1s, so an
+  orphaned server releases its port instead of running on.
+- It receives SIGTERM or SIGINT (uvicorn's own signal handling).
+
+In the first two cases the IPC channel closes before uvicorn drains in-flight requests: handlers
+waiting in `ipc.submit()` or `ipc.submit_stream()` raise `ChannelClosedError` (from
+`appinfra.service`) at once instead of holding the shutdown for the response timeout. Unhandled,
+it becomes a 500; an exception handler can map it to another status such as 503.
 
 ## IPCChannel
 

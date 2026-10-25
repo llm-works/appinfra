@@ -13,6 +13,10 @@ Markers:
     expected_skip: Mark tests where skipping is expected/acceptable.
         These skips won't appear in check.sh warning summaries.
 
+Fixtures:
+    destroy_test_loggers (autouse): destroys the loggers a test created with
+        LoggerFactory and left registered, so the next test can create the same names.
+
 Example:
     @pytest.mark.expected_skip
     @pytest.mark.skipif(sys.platform != "win32", reason="Windows-only test")
@@ -26,6 +30,8 @@ from collections.abc import Generator
 from typing import TYPE_CHECKING
 
 import pytest
+
+from .log import LoggerFactory
 
 if TYPE_CHECKING:
     from _pytest.config import Config
@@ -45,6 +51,22 @@ def pytest_configure(config: Config) -> None:
         "expected_skip: Mark test where skipping is expected/acceptable. "
         "These skips won't appear in check.sh warning summaries.",
     )
+
+
+@pytest.fixture(autouse=True)
+def destroy_test_loggers() -> Generator[None, None, None]:
+    """
+    Destroy the loggers a test created with LoggerFactory and left registered.
+
+    LoggerFactory.create() raises for a name this process already holds, so a logger
+    one test leaves behind fails the next test in the same process that creates the
+    same name. Loggers that existed before the test (session or module fixtures) stay.
+    """
+    before = LoggerFactory.names()
+    yield
+    for name in LoggerFactory.names() - before:
+        # destroying a parent already removed the loggers derived from it
+        LoggerFactory.destroy_if_exists(name)
 
 
 @pytest.hookimpl(wrapper=True)

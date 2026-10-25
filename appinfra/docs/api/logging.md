@@ -92,11 +92,65 @@ Factory for creating and managing loggers.
 ```python
 class LoggerFactory:
     @staticmethod
-    def create_root(config: LogConfig) -> Logger: ...
+    def create_root(config: LogConfig) -> Logger: ...  # create("/", config)
 
     @staticmethod
-    def derive(parent: Logger, name: str) -> Logger: ...
+    def create(name: str, config: LogConfig) -> Logger: ...
+
+    @staticmethod
+    def create_or_replace(name: str, config: LogConfig) -> Logger: ...
+
+    @staticmethod
+    def reconfigure(name: str, config: LogConfig) -> Logger: ...
+
+    @staticmethod
+    def destroy(name: str) -> None: ...
+
+    @staticmethod
+    def destroy_if_exists(name: str) -> bool: ...
+
+    @staticmethod
+    def names() -> set[str]: ...
+
+    @staticmethod
+    def derive(parent: Logger, tags: str | list[str]) -> Logger: ...
+
+    @staticmethod
+    def create_child(parent: Logger, name: str) -> Logger: ...
 ```
+
+A logger name belongs to whoever created it. `create()` (and `create_root()`, and every builder's
+`build()`) raises `LoggerExistsError` when the name is taken, whatever the config: a name used
+twice is almost always an accident, and changing the first logger would surprise its owner. To
+change a live logger on purpose, `reconfigure()` applies a new level, location, micros and colors
+in place; it raises `LogConfigError` for a view made by `derive()` or `create_child()`, which
+shares its root's settings, so the root is the logger to reconfigure. To start over, `destroy()`
+closes the logger's handlers and removes it with every logger derived from it, or
+`create_or_replace()` does that and creates the name anew. `reconfigure()` and `destroy()` raise
+`LoggerNotFoundError` for a name that does not exist; `destroy_if_exists()` returns whether there
+was one instead. A handler whose `close()` fails does not stop `destroy()`: the cleanup completes,
+then the first such error is raised. `names()` lists the names the factory holds in this process,
+created loggers and their views; the `appinfra.testing` pytest plugin uses it to destroy the
+loggers each test leaves behind (see the [pytest plugin guide](../guides/pytest-plugin.md)).
+
+Code that runs inside another program's process takes its logger from the host instead of creating
+one. An alembic `env.py`, a plugin or a hook that calls `create_root()` works when run on its own,
+but raises `LoggerExistsError` when an app that already holds `/` runs it in-process. The host
+passes a logger made with `derive()` (for alembic, through `config.attributes`), and the code
+creates its own root only when none was passed.
+
+`derive()` and `create_child()` are lookups: they return an existing view of the same name.
+
+A library's own logger under the name does not block `create()`: a plain stdlib logger (or one
+`logging.getLogger()` made with appinfra's logger class) is taken over in place. The library keeps
+logging through the same object, and through its child loggers, now with the given config and
+appinfra's format; its own handlers and filters are dropped. A library's own `Logger` subclass is
+not taken over, since rewriting its class would break the library's calls to it, so `create()`
+raises `LoggerExistsError` for it.
+
+A logger belongs to the process that created it. A forked child inherits its parent's loggers
+but may create their names anew; the inherited objects keep working for code that holds them. An
+`App` creates the root logger `/` in `setup()` and destroys it at the end of `shutdown()`.
 
 ## File Logging with Rotation
 

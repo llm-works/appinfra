@@ -63,6 +63,8 @@ from .errors import (
     InvalidLogLevelError,
     LogConfigError,
     LogError,
+    LoggerExistsError,
+    LoggerNotFoundError,
     ReservedKeyError,
 )
 from .factory import LoggerFactory
@@ -166,8 +168,9 @@ def create_lg(
     Create a logger with the specified configuration.
 
     Convenience function that wraps LoggerFactory.create() with simplified
-    parameter passing. Recommended for simple logger creation without needing
-    to construct a LogConfig object explicitly.
+    parameter passing, for creating a logger without constructing a LogConfig.
+    Like create(), it claims ``name`` for this process: call it once per name and
+    get sub-loggers from LoggerFactory.derive().
 
     Args:
         name: Logger name
@@ -178,6 +181,9 @@ def create_lg(
 
     Returns:
         Logger: Configured logger instance
+
+    Raises:
+        LoggerExistsError: An appinfra logger in this process already holds ``name``.
 
     Example:
         >>> lg = create_lg("myapp", "info", location=1)
@@ -325,6 +331,8 @@ __all__ = [
     "LogError",
     "InvalidLogLevelError",
     "LogConfigError",
+    "LoggerExistsError",
+    "LoggerNotFoundError",
     "FormatterError",
     "CallbackError",
     "ReservedKeyError",
