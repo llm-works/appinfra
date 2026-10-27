@@ -236,8 +236,8 @@ if [ -n "${INFRA_DEV_CQ_EXCLUDE:-}" ]; then
 fi
 
 # Extra ruff rules reported over the package as warnings, never failing: a comma-separated list
-# of rule codes (empty = off, hence "-" not ":-"). Rules that should fail the build belong in the
-# project's ruff config.
+# of rule codes (empty or false = off; "-" not ":-" keeps an empty value). Rules that should fail
+# the build belong in the project's ruff config.
 CQ_LINT_SELECT="${INFRA_DEV_CQ_LINT_SELECT-C90,SIM,RET,PIE,PERF,FURB,C4}"
 
 # Duplicated code (pylint) and dead private code checks over the package. Each takes false (off),
@@ -256,7 +256,7 @@ done
 # Linting: the project's ruff rules fail the check; the CQ_LINT_SELECT rules only warn.
 lint_check() {
     eval "${PYTHON} -m ruff check ." || return 1
-    [ -n "$CQ_LINT_SELECT" ] || return 0
+    [ -n "$CQ_LINT_SELECT" ] && [ "$CQ_LINT_SELECT" != false ] || return 0
     local out count
     out=$(eval "${PYTHON} -m ruff check ${PKG_NAME}/ --select ${CQ_LINT_SELECT} --no-fix --exit-zero --output-format concise") || return 1
     count=$(printf '%s\n' "$out" | grep -cE '^[^ ].*:[0-9]+:[0-9]+: ' || true)

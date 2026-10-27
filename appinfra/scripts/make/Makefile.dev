@@ -14,7 +14,7 @@
 #                             (default: false; opt-in for open-source Apache-2.0 repos)
 #   INFRA_DEV_CQ_LINT_SELECT - Extra ruff rule codes (comma-separated) that the Linting check
 #                             reports over the package as warnings, never failing
-#                             (default: C90,SIM,RET,PIE,PERF,FURB,C4; empty turns it off)
+#                             (default: C90,SIM,RET,PIE,PERF,FURB,C4; empty or false turns it off)
 #   INFRA_DEV_CQ_DUP        - Duplicated code in the Code quality check (pylint duplicate-code):
 #                             false, warn (show the count) or strict (fail on findings)
 #                             (default: warn; needs pylint, part of the check extra)
@@ -133,7 +133,7 @@ ifeq ($(INFRA_DRY_RUN),1)
 else
 	@echo "* running linter..."
 	@${PYTHON} -m ruff check .
-ifneq ($(INFRA_DEV_CQ_LINT_SELECT),)
+ifneq ($(filter-out false,$(INFRA_DEV_CQ_LINT_SELECT)),)
 	@echo "* warning rules (INFRA_DEV_CQ_LINT_SELECT, do not fail):"
 	@${PYTHON} -m ruff check $(INFRA_DEV_PKG_NAME)/ --select $(INFRA_DEV_CQ_LINT_SELECT) --no-fix --exit-zero --statistics
 endif
