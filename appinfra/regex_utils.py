@@ -43,13 +43,9 @@ from typing import Any
 class RegexTimeoutError(TimeoutError):
     """Raised when regex matching exceeds timeout limit."""
 
-    pass
-
 
 class RegexComplexityError(ValueError):
     """Raised when regex pattern is too complex."""
-
-    pass
 
 
 # Maximum pattern length to prevent extremely long patterns

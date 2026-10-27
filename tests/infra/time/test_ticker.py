@@ -917,9 +917,7 @@ class TestTickerIterator:
         ticker = Ticker(mock_logger, secs=0.01)
         ticker.stop()
 
-        ticks = []
-        for tick in ticker:
-            ticks.append(tick)
+        ticks = list(ticker)
         # Should not yield anything since stopped before iteration
         assert ticks == []
 

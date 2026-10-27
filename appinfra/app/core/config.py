@@ -103,7 +103,7 @@ class ConfigLoader:
             Updated config object
         """
         # Start with existing config or create default
-        config = existing_config if existing_config else DotDict()
+        config = existing_config or DotDict()
 
         # Ensure logging section exists with defaults
         ConfigLoader._ensure_nested_section(config, "logging")

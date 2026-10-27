@@ -62,7 +62,7 @@ class TestDoctorTool:
         mock_version.major = 3
         mock_version.minor = 10
         mock_version.micro = 0
-        mock_version.__ge__ = lambda self, other: (3, 10, 0) >= other
+        mock_version.__ge__ = lambda self, other: other <= (3, 10, 0)
 
         with patch(
             "appinfra.cli.tools.doctor_tool.sys.version_info",

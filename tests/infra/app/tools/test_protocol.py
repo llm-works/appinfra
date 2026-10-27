@@ -11,6 +11,7 @@ Tests key functionality including:
 """
 
 import argparse
+import contextlib
 from unittest.mock import Mock
 
 import pytest
@@ -49,47 +50,35 @@ class ConcreteToolProtocol(ToolProtocol):
     @property
     def name(self) -> str:
         # Call parent to cover the pass statement (typically not done but for coverage)
-        try:
+        with contextlib.suppress(AttributeError):
             super().name
-        except AttributeError:
-            pass
         return self._name
 
     @property
     def cmd(self):
-        try:
+        with contextlib.suppress(AttributeError):
             super().cmd
-        except AttributeError:
-            pass
         return (["test-tool"], {"help": "Test tool"})
 
     @property
     def initialized(self) -> bool:
-        try:
+        with contextlib.suppress(AttributeError):
             super().initialized
-        except AttributeError:
-            pass
         return self._initialized
 
     def add_args(self, parser):
-        try:
+        with contextlib.suppress(AttributeError):
             super().add_args(parser)
-        except AttributeError:
-            pass
         parser.add_argument("--test")
 
     def setup(self, **kwargs):
-        try:
+        with contextlib.suppress(AttributeError):
             super().setup(**kwargs)
-        except AttributeError:
-            pass
         self._initialized = True
 
     def run(self, **kwargs):
-        try:
+        with contextlib.suppress(AttributeError):
             super().run(**kwargs)
-        except AttributeError:
-            pass
         return 0
 
 
@@ -240,69 +229,69 @@ class TestToolProtocolDefaultProperties:
 # =============================================================================
 
 
+class _CompleteTool(ToolProtocol):
+    def __init__(self):
+        self._logger = Mock()
+        self._args = None
+        self._kwargs = {}
+        self._initialized = False
+        self._parser = None
+
+    @property
+    def name(self):
+        return "complete-tool"
+
+    @property
+    def cmd(self):
+        return (
+            ["complete-tool"],
+            {"help": "A complete tool", "aliases": ["ct"]},
+        )
+
+    @property
+    def lg(self):
+        return self._logger
+
+    @property
+    def args(self):
+        return self._args
+
+    @property
+    def kwargs(self):
+        return self._kwargs
+
+    @property
+    def initialized(self):
+        return self._initialized
+
+    @property
+    def arg_prs(self):
+        return self._parser
+
+    def add_args(self, parser):
+        self._parser = parser
+        parser.add_argument("--verbose", "-v", action="store_true")
+        parser.add_argument("--output", "-o")
+
+    def setup(self, **kwargs):
+        self._kwargs = kwargs
+        self._initialized = True
+
+    def run(self, **kwargs):
+        if not self.initialized:
+            return 1
+        self.lg.info(f"Running with kwargs: {kwargs}")
+        return 0
+
+
 @pytest.mark.integration
 class TestToolProtocolIntegration:
     """Integration tests for ToolProtocol."""
 
     def test_full_tool_lifecycle(self):
         """Test complete tool lifecycle with protocol implementation."""
-
-        class CompleteTool(ToolProtocol):
-            def __init__(self):
-                self._logger = Mock()
-                self._args = None
-                self._kwargs = {}
-                self._initialized = False
-                self._parser = None
-
-            @property
-            def name(self):
-                return "complete-tool"
-
-            @property
-            def cmd(self):
-                return (
-                    ["complete-tool"],
-                    {"help": "A complete tool", "aliases": ["ct"]},
-                )
-
-            @property
-            def lg(self):
-                return self._logger
-
-            @property
-            def args(self):
-                return self._args
-
-            @property
-            def kwargs(self):
-                return self._kwargs
-
-            @property
-            def initialized(self):
-                return self._initialized
-
-            @property
-            def arg_prs(self):
-                return self._parser
-
-            def add_args(self, parser):
-                self._parser = parser
-                parser.add_argument("--verbose", "-v", action="store_true")
-                parser.add_argument("--output", "-o")
-
-            def setup(self, **kwargs):
-                self._kwargs = kwargs
-                self._initialized = True
-
-            def run(self, **kwargs):
-                if not self.initialized:
-                    return 1
-                self.lg.info(f"Running with kwargs: {kwargs}")
-                return 0
-
         # Create tool
-        tool = CompleteTool()
+        tool = _CompleteTool()
         assert tool.name == "complete-tool"
         assert tool.initialized is False
 

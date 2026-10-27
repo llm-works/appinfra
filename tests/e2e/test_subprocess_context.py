@@ -233,11 +233,13 @@ class TestSubprocessContextHotReload:
         config = LogConfig.from_params(level="info", location=0)
         lg = LoggerFactory.create_root(config)
 
-        with patch.object(signal, "signal") as mock_signal:
-            with SubprocessContext(lg=lg, handle_signals=False) as ctx:
-                # Signal handlers should not be installed
-                mock_signal.assert_not_called()
-                assert ctx.running is True
+        with (
+            patch.object(signal, "signal") as mock_signal,
+            SubprocessContext(lg=lg, handle_signals=False) as ctx,
+        ):
+            # Signal handlers should not be installed
+            mock_signal.assert_not_called()
+            assert ctx.running is True
 
         lg.handlers.clear()
 

@@ -62,15 +62,14 @@ def _setup_single_database(
 ) -> bool:
     """Set up a single database connection based on URL type."""
     url = cfg.url
-    if url.startswith("postgresql") or url.startswith("postgres://"):
+    if url.startswith(("postgresql", "postgres://")):
         _setup_postgresql_database(name, cfg, lg, lg_level, dbs)
         return True
-    elif url.startswith("sqlite"):
+    if url.startswith("sqlite"):
         _setup_sqlite_database(name, cfg, lg, dbs)
         return True
-    else:
-        _handle_unknown_db_type(name, url, lg, errors)
-        return False
+    _handle_unknown_db_type(name, url, lg, errors)
+    return False
 
 
 def _check_setup_results(successful_count: int, setup_errors: dict, lg: Any) -> None:
@@ -204,8 +203,7 @@ class Manager:
                 raise RuntimeError(
                     f"Database '{name}' setup failed: {self._setup_errors[name]}"
                 )
-            else:
-                raise KeyError(f"Database connection '{name}' not found")
+            raise KeyError(f"Database connection '{name}' not found")
 
         return self._dbs[name]
 

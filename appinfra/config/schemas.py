@@ -254,17 +254,11 @@ except ImportError:
     class InfraConfig:  # type: ignore[no-redef]
         """Dummy config class when pydantic not available."""
 
-        pass
-
     class LoggingConfig:  # type: ignore[no-redef]
         """Dummy logging config class."""
 
-        pass
-
     class DatabaseConfig:  # type: ignore[no-redef]
         """Dummy database config class."""
-
-        pass
 
     def validate_config(config_dict: dict[str, Any]) -> dict[str, Any]:  # type: ignore[no-redef,misc]
         """No-op validation when pydantic not installed."""

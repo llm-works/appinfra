@@ -187,21 +187,20 @@ class TestPgMigrateFactory:
             id = Column(Integer, primary_key=True)
             name = Column(String(50))
 
-        with pg_migrate_factory(Base) as pg:
-            # Verify table exists in correct schema
-            with pg.engine.connect() as conn:
-                result = conn.execute(
-                    text(
-                        """
-                        SELECT COUNT(*)
-                        FROM information_schema.tables
-                        WHERE table_schema = :schema
-                        AND table_name = 'factory_test_table'
-                        """
-                    ),
-                    {"schema": pg.schema},
-                )
-                assert result.scalar() == 1
+        # Verify table exists in correct schema
+        with pg_migrate_factory(Base) as pg, pg.engine.connect() as conn:
+            result = conn.execute(
+                text(
+                    """
+                    SELECT COUNT(*)
+                    FROM information_schema.tables
+                    WHERE table_schema = :schema
+                    AND table_name = 'factory_test_table'
+                    """
+                ),
+                {"schema": pg.schema},
+            )
+            assert result.scalar() == 1
 
     def test_factory_cleans_up_on_exit(self, pg_migrate_factory, pg_test_schema):
         """Test that pg_migrate_factory cleans up schema on context exit."""

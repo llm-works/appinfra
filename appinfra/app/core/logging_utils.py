@@ -148,9 +148,7 @@ def _build_config_overrides(
 
     # Apply kwargs overrides (highest precedence)
     valid_keys = {"level", "location", "micros", "colors", "location_color"}
-    for key, value in kwargs.items():
-        if key in valid_keys:
-            config_overrides[key] = value
+    config_overrides.update({k: v for k, v in kwargs.items() if k in valid_keys})
 
     return config_overrides
 
@@ -251,16 +249,15 @@ def _extract_topics_dict(topics_attr: Any) -> dict:
     # Try various dict conversion methods
     if hasattr(topics_attr, "to_dict"):
         return dict(topics_attr.to_dict())
-    elif hasattr(topics_attr, "dict"):
+    if hasattr(topics_attr, "dict"):
         return dict(topics_attr.dict())
-    elif isinstance(topics_attr, dict):
+    if isinstance(topics_attr, dict):
         return dict(topics_attr)
-    else:
-        # Fallback: attempt conversion
-        try:
-            return dict(topics_attr)
-        except (TypeError, ValueError):
-            return {}
+    # Fallback: attempt conversion
+    try:
+        return dict(topics_attr)
+    except (TypeError, ValueError):
+        return {}
 
 
 def _load_topic_levels(config: Any, args_dict: dict | None) -> None:

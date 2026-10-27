@@ -32,7 +32,7 @@ class DictInterface(ABC):
         Returns:
             dict_keys: All keys in the object
         """
-        pass  # pragma: no cover
+        # pragma: no cover
 
     @abstractmethod
     def values(self) -> ValuesView[Any]:
@@ -42,7 +42,7 @@ class DictInterface(ABC):
         Returns:
             dict_values: All values in the object
         """
-        pass  # pragma: no cover
+        # pragma: no cover
 
     @abstractmethod
     def items(self) -> ItemsView[str, Any]:
@@ -52,7 +52,7 @@ class DictInterface(ABC):
         Returns:
             dict_items: All key-value pairs in the object
         """
-        pass  # pragma: no cover
+        # pragma: no cover
 
     @abstractmethod
     def __contains__(self, key: Any) -> bool:
@@ -65,7 +65,7 @@ class DictInterface(ABC):
         Returns:
             bool: True if key exists, False otherwise
         """
-        pass  # pragma: no cover
+        # pragma: no cover
 
     @abstractmethod
     def __getitem__(self, key: str) -> Any:
@@ -81,7 +81,7 @@ class DictInterface(ABC):
         Raises:
             KeyError: If key is not found
         """
-        pass  # pragma: no cover
+        # pragma: no cover
 
     @abstractmethod
     def __setitem__(self, key: str, val: Any) -> None:
@@ -92,7 +92,7 @@ class DictInterface(ABC):
             key: Key to set
             val: Value to associate with the key
         """
-        pass  # pragma: no cover
+        # pragma: no cover
 
     @abstractmethod
     def has(self, key: str) -> bool:
@@ -108,7 +108,7 @@ class DictInterface(ABC):
         Returns:
             bool: True if key exists, False otherwise
         """
-        pass  # pragma: no cover
+        # pragma: no cover
 
     @abstractmethod
     def __len__(self) -> int:
@@ -118,4 +118,4 @@ class DictInterface(ABC):
         Returns:
             int: Number of key-value pairs in the object
         """
-        pass  # pragma: no cover
+        # pragma: no cover

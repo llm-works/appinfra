@@ -363,14 +363,14 @@ def _resolve_variables_in_data(
             )
             for k, v in data.items()
         }
-    elif isinstance(data, list):
+    if isinstance(data, list):
         return [
             _resolve_variables_in_data(
                 item, context, pass_through_undefined, env_overrides
             )
             for item in data
         ]
-    elif isinstance(data, str):
+    if isinstance(data, str):
         return _substitute_vars_in_string(
             data, context, pass_through_undefined, env_overrides
         )

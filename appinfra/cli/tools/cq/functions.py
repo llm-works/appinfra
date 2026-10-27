@@ -408,10 +408,10 @@ class FunctionReporter:
     def _format_moderate_section(self, moderate: list[FunctionInfo]) -> list[str]:
         """Format moderate functions section."""
         lines = [f"MODERATE ({self.limit}-50 lines):"]
-        for func in moderate[:5]:  # Show top 5
-            lines.append(
-                f"  ├─ {func.file_path}:{func.line_number} - {func.name}() - {func.code_lines} lines"
-            )
+        lines.extend(
+            f"  ├─ {func.file_path}:{func.line_number} - {func.name}() - {func.code_lines} lines"
+            for func in moderate[:5]  # Show top 5
+        )
         if len(moderate) > 5:
             lines.append(f"  └─ ... and {len(moderate) - 5} more")
         lines.append("")

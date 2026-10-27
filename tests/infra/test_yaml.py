@@ -511,9 +511,11 @@ class TestCircularDependencies:
         """Test circular includes are detected."""
         circular_file = yaml_files_dir / "circular_a.yaml"
 
-        with open(circular_file) as f:
-            with pytest.raises(yaml.YAMLError, match="Circular include detected"):
-                load(f, current_file=circular_file)
+        with (
+            open(circular_file) as f,
+            pytest.raises(yaml.YAMLError, match="Circular include detected"),
+        ):
+            load(f, current_file=circular_file)
 
     def test_detect_self_include(self, yaml_files_dir):
         """Test self-inclusion is detected as circular."""
@@ -524,9 +526,11 @@ data: !include "./self.yaml"
 """
         )
 
-        with open(self_include_file) as f:
-            with pytest.raises(yaml.YAMLError, match="Circular include detected"):
-                load(f, current_file=self_include_file)
+        with (
+            open(self_include_file) as f,
+            pytest.raises(yaml.YAMLError, match="Circular include detected"),
+        ):
+            load(f, current_file=self_include_file)
 
 
 # =============================================================================
@@ -555,11 +559,11 @@ class TestIncludeDepthLimit:
             files.append(file_path)
 
         # Try to load the first file with default depth limit (10)
-        with open(files[0]) as f:
-            with pytest.raises(
-                yaml.YAMLError, match="Include depth exceeds maximum of 10"
-            ):
-                load(f, current_file=files[0])
+        with (
+            open(files[0]) as f,
+            pytest.raises(yaml.YAMLError, match="Include depth exceeds maximum of 10"),
+        ):
+            load(f, current_file=files[0])
 
     def test_depth_limit_allows_shallow_nesting(self, tmp_path):
         """Test that shallow nesting within limit is allowed."""
@@ -598,11 +602,11 @@ class TestIncludeDepthLimit:
             files.append(file_path)
 
         # Should fail with custom limit of 2
-        with open(files[0]) as f:
-            with pytest.raises(
-                yaml.YAMLError, match="Include depth exceeds maximum of 2"
-            ):
-                load(f, current_file=files[0], max_include_depth=2)
+        with (
+            open(files[0]) as f,
+            pytest.raises(yaml.YAMLError, match="Include depth exceeds maximum of 2"),
+        ):
+            load(f, current_file=files[0], max_include_depth=2)
 
         # Should succeed with custom limit of 5
         with open(files[0]) as f:
@@ -624,9 +628,8 @@ class TestIncludeDepthLimit:
             files.append(file_path)
 
         # Error message should include the include chain
-        with open(files[0]) as f:
-            with pytest.raises(yaml.YAMLError) as exc_info:
-                load(f, current_file=files[0])
+        with open(files[0]) as f, pytest.raises(yaml.YAMLError) as exc_info:
+            load(f, current_file=files[0])
 
         error_msg = str(exc_info.value)
         assert "Include chain:" in error_msg
@@ -724,9 +727,11 @@ data: !include "../../outside.yaml"
         )
 
         # Should raise security error
-        with open(main_config) as f:
-            with pytest.raises(yaml.YAMLError, match="Security.*outside origin"):
-                load(f, current_file=main_config, origin=origin)
+        with (
+            open(main_config) as f,
+            pytest.raises(yaml.YAMLError, match="Security.*outside origin"),
+        ):
+            load(f, current_file=main_config, origin=origin)
 
     def test_path_traversal_protection_allows_within_root(self, tmp_path):
         """Test that includes within the origin work when origin is set."""
@@ -796,9 +801,11 @@ data: !include "{outside_file}"
         )
 
         # Should raise security error
-        with open(main_config) as f:
-            with pytest.raises(yaml.YAMLError, match="Security.*outside origin"):
-                load(f, current_file=main_config, origin=origin)
+        with (
+            open(main_config) as f,
+            pytest.raises(yaml.YAMLError, match="Security.*outside origin"),
+        ):
+            load(f, current_file=main_config, origin=origin)
 
 
 # =============================================================================
@@ -1816,9 +1823,11 @@ server:
         file_a.write_text('!include "./b.yaml"\nfrom_a: true\n')
         file_b.write_text('!include "./a.yaml"\nfrom_b: true\n')
 
-        with open(file_a) as f:
-            with pytest.raises(yaml.YAMLError, match="Circular include detected"):
-                load(f, current_file=file_a)
+        with (
+            open(file_a) as f,
+            pytest.raises(yaml.YAMLError, match="Circular include detected"),
+        ):
+            load(f, current_file=file_a)
 
     def test_document_level_include_security(self, tmp_path):
         """Test that document-level includes respect origin."""
@@ -1832,9 +1841,11 @@ server:
         main_file = origin / "main.yaml"
         main_file.write_text('!include "../outside.yaml"\n')
 
-        with open(main_file) as f:
-            with pytest.raises(yaml.YAMLError, match="Security.*outside origin"):
-                load(f, current_file=main_file, origin=origin)
+        with (
+            open(main_file) as f,
+            pytest.raises(yaml.YAMLError, match="Security.*outside origin"),
+        ):
+            load(f, current_file=main_file, origin=origin)
 
     def test_document_level_include_source_tracking(self, tmp_path):
         """Test source tracking with document-level includes."""
@@ -1868,9 +1879,11 @@ name: app
         main_file = tmp_path / "main.yaml"
         main_file.write_text('!include "./nonexistent.yaml"\n')
 
-        with open(main_file) as f:
-            with pytest.raises(yaml.YAMLError, match="Include file not found"):
-                load(f, current_file=main_file)
+        with (
+            open(main_file) as f,
+            pytest.raises(yaml.YAMLError, match="Include file not found"),
+        ):
+            load(f, current_file=main_file)
 
     def test_document_level_include_without_context(self, tmp_path):
         """Test that relative document-level includes fail without file context."""
@@ -1993,9 +2006,11 @@ class TestIncludePathEdgeCases:
         main_file = tmp_path / "main.yaml"
         main_file.write_text('root: !include "./level10.yaml"\n')
 
-        with open(main_file) as f:
-            with pytest.raises(yaml.YAMLError, match="Include depth exceeds maximum"):
-                load(f, current_file=main_file)
+        with (
+            open(main_file) as f,
+            pytest.raises(yaml.YAMLError, match="Include depth exceeds maximum"),
+        ):
+            load(f, current_file=main_file)
 
     def test_include_depth_exceeded_with_custom_limit(self, tmp_path):
         """Test error when include depth exceeds custom maximum."""
@@ -2012,9 +2027,11 @@ class TestIncludePathEdgeCases:
         main_file.write_text('root: !include "./level3.yaml"\n')
 
         # With max_include_depth=3, this should fail
-        with open(main_file) as f:
-            with pytest.raises(yaml.YAMLError, match="Include depth exceeds maximum"):
-                load(f, current_file=main_file, max_include_depth=3)
+        with (
+            open(main_file) as f,
+            pytest.raises(yaml.YAMLError, match="Include depth exceeds maximum"),
+        ):
+            load(f, current_file=main_file, max_include_depth=3)
 
     def test_document_level_include_depth_exceeded(self, tmp_path):
         """Test error when document-level include depth exceeds maximum."""
@@ -2032,9 +2049,11 @@ class TestIncludePathEdgeCases:
         main_file.write_text('!include "./doc3.yaml"\n\nname: app\n')
 
         # With max_include_depth=2, this should fail
-        with open(main_file) as f:
-            with pytest.raises(yaml.YAMLError, match="Include depth exceeds maximum"):
-                load(f, current_file=main_file, max_include_depth=2)
+        with (
+            open(main_file) as f,
+            pytest.raises(yaml.YAMLError, match="Include depth exceeds maximum"),
+        ):
+            load(f, current_file=main_file, max_include_depth=2)
 
 
 @pytest.mark.unit
@@ -2055,9 +2074,11 @@ class TestIncludeSecurityEdgeCases:
         main_file = project / "main.yaml"
         main_file.write_text('data: !include "../outside.yaml"\n')
 
-        with open(main_file) as f:
-            with pytest.raises(yaml.YAMLError, match="outside origin"):
-                load(f, current_file=main_file, origin=project)
+        with (
+            open(main_file) as f,
+            pytest.raises(yaml.YAMLError, match="outside origin"),
+        ):
+            load(f, current_file=main_file, origin=project)
 
 
 @pytest.mark.unit
@@ -2080,9 +2101,11 @@ root:
         # Try to navigate through the list (items.first doesn't work on list)
         main_file.write_text('data: !include "./included.yaml#root.items.first"\n')
 
-        with open(main_file) as f:
-            with pytest.raises(yaml.YAMLError, match="is not a mapping"):
-                load(f, current_file=main_file)
+        with (
+            open(main_file) as f,
+            pytest.raises(yaml.YAMLError, match="is not a mapping"),
+        ):
+            load(f, current_file=main_file)
 
     def test_section_path_not_found(self, tmp_path):
         """Test error when section path key not found."""
@@ -2098,9 +2121,8 @@ config:
         main_file = tmp_path / "main.yaml"
         main_file.write_text('data: !include "./included.yaml#config.nonexistent"\n')
 
-        with open(main_file) as f:
-            with pytest.raises(yaml.YAMLError, match="not found"):
-                load(f, current_file=main_file)
+        with open(main_file) as f, pytest.raises(yaml.YAMLError, match="not found"):
+            load(f, current_file=main_file)
 
     def test_section_with_source_tracking(self, tmp_path):
         """Test section extraction with source tracking enabled."""
@@ -2202,9 +2224,11 @@ data:
         main_file = tmp_path / "main.yaml"
         main_file.write_text('!include "./included.yaml#data.items.key"\n\nname: app\n')
 
-        with open(main_file) as f:
-            with pytest.raises(yaml.YAMLError, match="is not a mapping"):
-                load(f, current_file=main_file)
+        with (
+            open(main_file) as f,
+            pytest.raises(yaml.YAMLError, match="is not a mapping"),
+        ):
+            load(f, current_file=main_file)
 
     def test_document_include_section_not_found(self, tmp_path):
         """Test error when document-level section path key not found."""
@@ -2221,9 +2245,8 @@ config:
         main_file = tmp_path / "main.yaml"
         main_file.write_text('!include "./included.yaml#config.missing"\n\nname: app\n')
 
-        with open(main_file) as f:
-            with pytest.raises(yaml.YAMLError, match="not found"):
-                load(f, current_file=main_file)
+        with open(main_file) as f, pytest.raises(yaml.YAMLError, match="not found"):
+            load(f, current_file=main_file)
 
     def test_document_include_section_with_source_tracking(self, tmp_path):
         """Test document-level section include with source tracking."""

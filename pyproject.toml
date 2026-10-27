@@ -111,12 +111,18 @@ select = [
     "N",     # pep8-naming
     "UP",    # pyupgrade
     "UP037", # Remove quotes from annotations (explicit for policy enforcement)
+    "C90",   # mccabe complexity
+    "SIM",   # flake8-simplify
+    "RET",   # flake8-return
+    "PIE",   # flake8-pie
+    "PERF",  # perflint
+    "FURB",  # refurb
+    "C4",    # flake8-comprehensions
 ]
 ignore = [
     "E501",  # line too long (handled by formatter)
 ]
 
-# For C901 when selected (INFRA_DEV_CQ_LINT_SELECT in the Makefile reports it as a warning)
 [tool.ruff.lint.mccabe]
 max-complexity = 10
 

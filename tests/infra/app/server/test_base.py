@@ -366,9 +366,11 @@ class TestLockHelper:
         lg = Mock()
         lg.error = Mock()
 
-        with pytest.raises(TimeoutError) as exc_info:
-            with lock_helper(lock, lg, where="test_location", timeout=0.01):
-                pass
+        with (
+            pytest.raises(TimeoutError) as exc_info,
+            lock_helper(lock, lg, where="test_location", timeout=0.01),
+        ):
+            pass
 
         assert "test_location" in str(exc_info.value)
         lock.release()
@@ -414,9 +416,11 @@ class TestLockHelper:
         lock = threading.Lock()
         lg = Mock()
 
-        with pytest.raises(ValueError):
-            with lock_helper(lock, lg, where="test", timeout=5.0):
-                raise ValueError("test error")
+        with (
+            pytest.raises(ValueError),
+            lock_helper(lock, lg, where="test", timeout=5.0),
+        ):
+            raise ValueError("test error")
 
         assert not lock.locked()
 

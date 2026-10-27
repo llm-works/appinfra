@@ -8,6 +8,7 @@ This module defines the data structure for storing version and commit
 information about installed packages.
 """
 
+import contextlib
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -150,12 +151,8 @@ class BuildInfo:
 
         build_time = None
         if build_time_str:
-            try:
-                build_time = datetime.fromisoformat(
-                    build_time_str.replace("Z", "+00:00")
-                )
-            except ValueError:
-                pass
+            with contextlib.suppress(ValueError):
+                build_time = datetime.fromisoformat(build_time_str)
 
         return cls(
             commit=commit_short or commit_full[:7],
@@ -269,12 +266,10 @@ class PackageVersionInfo:
 
     def __post_init__(self) -> None:
         """Validate and normalize the data after initialization."""
-        # Ensure commit_full is set if commit is provided
-        if self.commit and not self.commit_full:
-            # If only short hash provided, use it as full (unusual but allowed)
-            if len(self.commit) == 40:
-                self.commit_full = self.commit
-                self.commit = self.commit[:7]
+        # A full hash given as commit becomes commit_full, and commit its short form
+        if self.commit and not self.commit_full and len(self.commit) == 40:
+            self.commit_full = self.commit
+            self.commit = self.commit[:7]
 
         # Derive short commit from full if not set
         if self.commit_full and not self.commit:

@@ -179,8 +179,7 @@ class RichHelpFormatter(argparse.HelpFormatter):
                 opts += f" {getattr(action.type, '__name__', 'VALUE').upper()}"
             help_text = action.help or ""
             if action.default and action.default != argparse.SUPPRESS:
-                if action.default is not None:
-                    help_text += f" [dim](default: {action.default})[/dim]"
+                help_text += f" [dim](default: {action.default})[/dim]"
             table.add_row(opts, help_text)
         console.print(table)
 

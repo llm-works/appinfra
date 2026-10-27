@@ -133,12 +133,12 @@ class DocsGenerator:
         subtools = list(tool._group._tools.values())
         if subtools:
             output.write("**Subcommands:**\n\n")
-            for subtool in subtools:
-                output.write(
-                    self.generate_tool_doc(
-                        subtool, app_name=f"{app_name} {name}", depth=depth + 1
-                    )
+            output.writelines(
+                self.generate_tool_doc(
+                    subtool, app_name=f"{app_name} {name}", depth=depth + 1
                 )
+                for subtool in subtools
+            )
 
     def generate_tool_doc(
         self, tool: Tool, *, app_name: str = "app", depth: int = 0

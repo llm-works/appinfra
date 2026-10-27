@@ -28,7 +28,6 @@ class ConcretePlugin(Plugin):
 
     def configure(self, builder):
         """Configure implementation for tests."""
-        pass
 
 
 @pytest.mark.unit

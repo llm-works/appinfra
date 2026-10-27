@@ -97,9 +97,13 @@ def _add_exception_fields(
 
 def _add_custom_fields(data: dict[str, Any], formatter: Any) -> None:
     """Add custom fields defined in formatter configuration."""
-    for key, value in formatter.custom_fields.items():
-        if formatter.should_include_field(key):
-            data[key] = value
+    data.update(
+        {
+            key: value
+            for key, value in formatter.custom_fields.items()
+            if formatter.should_include_field(key)
+        }
+    )
 
 
 class JSONFormatter(logging.Formatter):
@@ -170,10 +174,7 @@ class JSONFormatter(logging.Formatter):
             return False
 
         # If include_fields is specified, only include fields in the list
-        if self.include_fields and field_name not in self.include_fields:
-            return False
-
-        return True
+        return not self.include_fields or field_name in self.include_fields
 
     def format(self, record: logging.LogRecord) -> str:
         """
@@ -220,13 +221,12 @@ class JSONFormatter(logging.Formatter):
 
         if self.timestamp_format == "iso":
             return datetime.fromtimestamp(record.created).isoformat()
-        elif self.timestamp_format == "unix":
+        if self.timestamp_format == "unix":
             return str(record.created)
-        elif self.timestamp_format == "epoch":
+        if self.timestamp_format == "epoch":
             return str(int(record.created))
-        else:
-            # Default to ISO format
-            return datetime.fromtimestamp(record.created).isoformat()
+        # Default to ISO format
+        return datetime.fromtimestamp(record.created).isoformat()
 
     def _sanitize_extra_fields(self, extra: dict[str, Any]) -> dict[str, Any]:
         """Sanitize extra fields to ensure JSON serializability.
@@ -264,7 +264,7 @@ class JSONFormatter(logging.Formatter):
             # Fallback to standard attributes for non-appinfra loggers
             locations.append(f"{record.pathname}:{record.lineno}")
 
-        return locations if locations else None
+        return locations or None
 
     def _format_exception(self, exc_info: Any) -> str | None:
         """Format exception traceback as string."""
@@ -282,8 +282,7 @@ class JSONFormatter(logging.Formatter):
         """Convert dictionary to JSON string."""
         if self.pretty_print:
             return json.dumps(data, indent=2, ensure_ascii=False)
-        else:
-            return json.dumps(data, ensure_ascii=False)
+        return json.dumps(data, ensure_ascii=False)
 
 
 class JSONLoggingBuilder(LoggingBuilder):

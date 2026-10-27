@@ -505,8 +505,7 @@ def _append_group(lines: list[str], label: str, items: list[str]) -> None:
         lines.append(f"    {label} (none)")
         return
     lines.append(f"    {label} {items[0]}")
-    for extra in items[1:]:
-        lines.append(f"{pad}{extra}")
+    lines.extend(f"{pad}{extra}" for extra in items[1:])
 
 
 def _prompt_erase_confirm() -> int | None:

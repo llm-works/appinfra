@@ -157,7 +157,6 @@ class TickerHandler:
             *args: Positional arguments passed to ticker
             **kwargs: Keyword arguments passed to ticker
         """
-        pass
 
     def ticker_before_first_tick(self, *args: Any, **kwargs: Any) -> None:
         """
@@ -167,7 +166,6 @@ class TickerHandler:
             *args: Positional arguments passed to ticker
             **kwargs: Keyword arguments passed to ticker
         """
-        pass
 
     def ticker_tick(self) -> None:
         """
@@ -175,7 +173,6 @@ class TickerHandler:
 
         This method should contain the periodic work to be performed.
         """
-        pass
 
     def ticker_stop(self) -> None:
         """
@@ -183,7 +180,6 @@ class TickerHandler:
 
         This method is called when the ticker is stopped gracefully.
         """
-        pass
 
 
 class _CallableWrapper(TickerHandler):
@@ -521,10 +517,10 @@ class Ticker:
 
         if self._mode == TickerMode.FLEX:
             return self._delay_flex_mode(tick_start_time, tick_end_time)
-        elif self._mode == TickerMode.STRICT:
+        if self._mode == TickerMode.STRICT:
             return self._delay_strict_mode(tick_end_time)
-        else:  # TickerMode.SPACED
-            return self._delay_spaced_mode(tick_end_time)
+        # TickerMode.SPACED
+        return self._delay_spaced_mode(tick_end_time)
 
     def _delay_flex_mode(self, tick_start_time: float, tick_end_time: float) -> float:
         """
@@ -551,10 +547,9 @@ class Ticker:
             # Late - reset timing from now to prevent catch-up
             self._last_tick_time = tick_end_time
             return self._secs
-        else:
-            # On time - maintain interval from last tick start
-            self._last_tick_time = tick_start_time
-            return next_tick_time - tick_end_time
+        # On time - maintain interval from last tick start
+        self._last_tick_time = tick_start_time
+        return next_tick_time - tick_end_time
 
     def _delay_strict_mode(self, tick_end_time: float) -> float:
         """Calculate delay for STRICT mode (maintains average rate)."""

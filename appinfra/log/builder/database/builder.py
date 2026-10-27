@@ -335,8 +335,7 @@ def load_database_logging_config(
     """
     if handler_config:
         return _load_config_from_handler(handler_config)
-    else:
-        return _load_config_from_top_level(config_dict)
+    return _load_config_from_top_level(config_dict)
 
 
 def create_database_logger_from_config(

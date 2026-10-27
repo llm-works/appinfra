@@ -411,13 +411,15 @@ class TestManagerHealthCheckFailure:
         mgr.add_service(svc)
 
         # Patch wait_healthy to use short timeout
-        with patch.object(
-            ThreadRunner,
-            "wait_healthy",
-            side_effect=HealthTimeoutError("unhealthy", 0.1),
+        with (
+            patch.object(
+                ThreadRunner,
+                "wait_healthy",
+                side_effect=HealthTimeoutError("unhealthy", 0.1),
+            ),
+            pytest.raises(HealthTimeoutError),
         ):
-            with pytest.raises(HealthTimeoutError):
-                mgr.start()
+            mgr.start()
 
         # Service should be tracked as failed and teardown called
         assert "unhealthy" in mgr._failed

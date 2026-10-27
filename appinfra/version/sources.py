@@ -205,7 +205,7 @@ class BuildInfoSource(VersionSource):
         if not build_time_str:
             return None
         try:
-            return datetime.fromisoformat(build_time_str.replace("Z", "+00:00"))
+            return datetime.fromisoformat(build_time_str)
         except ValueError:
             return None
 

@@ -667,28 +667,23 @@ class FastAPIAdapter:
         Adding a new callable-carrying definition type? Extend this walker.
         See the module docstring's invariant.
         """
-        for r in self._routes:
-            _resolve_field(r, "handler")
-        for rd in self._routers:
-            _resolve_field(rd, "router")
-        for mw in self._middleware:
-            _resolve_field(mw, "middleware_class")
-        for eh in self._exception_handlers:
-            _resolve_field(eh, "handler")
-        for su_cb in self._startup_callbacks:
-            _resolve_field(su_cb, "callback")
-        for sd_cb in self._shutdown_callbacks:
-            _resolve_field(sd_cb, "callback")
+        definitions: list[tuple[list[Any], str]] = [
+            (self._routes, "handler"),
+            (self._routers, "router"),
+            (self._middleware, "middleware_class"),
+            (self._exception_handlers, "handler"),
+            (self._startup_callbacks, "callback"),
+            (self._shutdown_callbacks, "callback"),
+            (self._request_callbacks, "callback"),
+            (self._response_callbacks, "callback"),
+            (self._exception_callbacks, "callback"),
+            (self._rate_limiters, "limiter"),
+        ]
+        for items, field_name in definitions:
+            for item in items:
+                _resolve_field(item, field_name)
         if self._lifespan is not None:
             _resolve_field(self._lifespan, "lifespan")
-        for req_cb in self._request_callbacks:
-            _resolve_field(req_cb, "callback")
-        for resp_cb in self._response_callbacks:
-            _resolve_field(resp_cb, "callback")
-        for exc_cb in self._exception_callbacks:
-            _resolve_field(exc_cb, "callback")
-        for rl in self._rate_limiters:
-            _resolve_field(rl, "limiter")
 
     def inject_subprocess_logger(self, lg: Logger) -> None:
         """Inject subprocess logger into adapter and LoggerInjectable handlers.

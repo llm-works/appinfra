@@ -65,8 +65,9 @@ class TestSignalRegistration:
             def signal_side_effect(signum, handler):
                 if signum == signal.SIGTERM:
                     return mock_term_handler
-                elif signum == signal.SIGINT:
+                if signum == signal.SIGINT:
                     return mock_int_handler
+                return None
 
             mock_signal.side_effect = signal_side_effect
             manager.register_signal_handlers()

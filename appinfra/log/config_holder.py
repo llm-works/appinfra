@@ -11,6 +11,7 @@ indirectly, enabling hot-reload without replacing formatter instances.
 
 from __future__ import annotations
 
+import contextlib
 import threading
 from collections.abc import Callable
 from typing import TYPE_CHECKING
@@ -111,10 +112,9 @@ class LogConfigHolder:
 
         # Notify listeners outside lock to avoid deadlock
         for callback in callbacks:
-            try:
+            # Don't let callback errors break update
+            with contextlib.suppress(Exception):
                 callback(new_config)
-            except Exception:
-                pass  # Don't let callback errors break update
 
     def add_update_callback(self, callback: Callable[[LogConfig], None]) -> None:
         """
@@ -134,8 +134,6 @@ class LogConfigHolder:
         Args:
             callback: Callback function to remove
         """
-        with self._lock:
-            try:
-                self._callbacks.remove(callback)
-            except ValueError:
-                pass  # Callback not found, ignore
+        # Callback not found, ignore
+        with self._lock, contextlib.suppress(ValueError):
+            self._callbacks.remove(callback)

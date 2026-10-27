@@ -439,32 +439,25 @@ class ServerBuilder:
 
     def _configure_adapter(self, adapter: FastAPIAdapter) -> None:
         """Configure adapter with routes, middleware, handlers, and lifecycle callbacks."""
-        for route in self._routes:
-            adapter.add_route(route)
-        for router in self._routers:
-            adapter.add_router(router)
-        for mw in self._middleware:
-            adapter.add_middleware(mw)
-        for handler in self._exception_handlers:
-            adapter.add_exception_handler(handler)
+        additions: list[tuple[list[Any], Callable[[Any], None]]] = [
+            (self._routes, adapter.add_route),
+            (self._routers, adapter.add_router),
+            (self._middleware, adapter.add_middleware),
+            (self._exception_handlers, adapter.add_exception_handler),
+            (self._startup_callbacks, adapter.add_startup_callback),
+            (self._shutdown_callbacks, adapter.add_shutdown_callback),
+            (self._request_callbacks, adapter.add_request_callback),
+            (self._response_callbacks, adapter.add_response_callback),
+            (self._exception_callbacks, adapter.add_exception_callback),
+            (self._rate_limiters, adapter.add_rate_limiter),
+        ]
+        for items, add in additions:
+            for item in items:
+                add(item)
         if self._cors:
             adapter.set_cors(self._cors)
-
-        # Lifecycle callbacks
-        for startup_cb in self._startup_callbacks:
-            adapter.add_startup_callback(startup_cb)
-        for shutdown_cb in self._shutdown_callbacks:
-            adapter.add_shutdown_callback(shutdown_cb)
         if self._lifespan:
             adapter.set_lifespan(self._lifespan)
-        for request_cb in self._request_callbacks:
-            adapter.add_request_callback(request_cb)
-        for response_cb in self._response_callbacks:
-            adapter.add_response_callback(response_cb)
-        for exception_cb in self._exception_callbacks:
-            adapter.add_exception_callback(exception_cb)
-        for rl in self._rate_limiters:
-            adapter.add_rate_limiter(rl)
 
     def _is_subprocess_mode(self) -> bool:
         """Check if subprocess mode is configured."""

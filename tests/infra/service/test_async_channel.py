@@ -407,11 +407,12 @@ class TestAsyncChannelStreaming:
 
         task = asyncio.create_task(responder())
 
-        chunks = []
-        async for chunk in parent.submit_stream(
-            Request(id="req-1", data="test"), timeout=1.0
-        ):
-            chunks.append(chunk.data)
+        chunks = [
+            chunk.data
+            async for chunk in parent.submit_stream(
+                Request(id="req-1", data="test"), timeout=1.0
+            )
+        ]
 
         await task
 
@@ -429,11 +430,12 @@ class TestAsyncChannelStreaming:
 
         task = asyncio.create_task(responder())
 
-        chunks = []
-        async for chunk in parent.submit_stream(
-            Request(id="req-1", data="test"), timeout=1.0
-        ):
-            chunks.append(chunk.data)
+        chunks = [
+            chunk.data
+            async for chunk in parent.submit_stream(
+                Request(id="req-1", data="test"), timeout=1.0
+            )
+        ]
 
         await task
 
@@ -505,11 +507,12 @@ class TestAsyncChannelStreaming:
 
         task = asyncio.create_task(responder())
 
-        chunks = []
-        async for chunk in parent.submit_stream(
-            Request(id="req-1", data="test"), timeout=1.0
-        ):
-            chunks.append(chunk)
+        chunks = [
+            chunk
+            async for chunk in parent.submit_stream(
+                Request(id="req-1", data="test"), timeout=1.0
+            )
+        ]
 
         await task
 

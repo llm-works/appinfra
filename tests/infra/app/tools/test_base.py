@@ -75,8 +75,6 @@ class ConcreteTool(Tool):
 class ConfiglessTool(Tool):
     """Tool without _create_config override."""
 
-    pass
-
 
 # =============================================================================
 # Test Tool Initialization
@@ -705,17 +703,19 @@ class TestToolSetupLg:
         """Test creates standalone logger when no parent."""
         tool = ConcreteTool()
 
-        with patch("appinfra.app.tools.base.LoggerFactory") as MockFactory:
-            with patch("appinfra.log.LogConfig") as MockLogConfig:
-                mock_logger = Mock()
-                MockFactory.create.return_value = mock_logger
-                mock_config = Mock()
-                MockLogConfig.from_params.return_value = mock_config
+        with (
+            patch("appinfra.app.tools.base.LoggerFactory") as MockFactory,
+            patch("appinfra.log.LogConfig") as MockLogConfig,
+        ):
+            mock_logger = Mock()
+            MockFactory.create.return_value = mock_logger
+            mock_config = Mock()
+            MockLogConfig.from_params.return_value = mock_config
 
-                tool.setup_lg()
+            tool.setup_lg()
 
-                # Its own name, not the root logger an app owns
-                MockFactory.create.assert_called_once_with(f"/{tool.name}", mock_config)
+            # Its own name, not the root logger an app owns
+            MockFactory.create.assert_called_once_with(f"/{tool.name}", mock_config)
 
     def test_raises_lifecycle_error_on_failure(self):
         """Test raises LifecycleError when logger creation fails."""

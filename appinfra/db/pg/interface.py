@@ -29,7 +29,7 @@ class Interface(abc.ABC):
         Returns:
             Configuration object for the database
         """
-        pass  # pragma: no cover
+        # pragma: no cover
 
     @property
     @abc.abstractmethod
@@ -40,7 +40,7 @@ class Interface(abc.ABC):
         Returns:
             str: Database connection URL
         """
-        pass  # pragma: no cover
+        # pragma: no cover
 
     @property
     @abc.abstractmethod
@@ -51,7 +51,7 @@ class Interface(abc.ABC):
         Returns:
             sqlalchemy.Engine: Database engine instance
         """
-        pass  # pragma: no cover
+        # pragma: no cover
 
     @abc.abstractmethod
     def connect(self) -> Any:
@@ -61,14 +61,14 @@ class Interface(abc.ABC):
         Returns:
             Database connection object
         """
-        pass  # pragma: no cover
+        # pragma: no cover
 
     @abc.abstractmethod
     def migrate(self) -> None:
         """
         Run database migrations.
         """
-        pass  # pragma: no cover
+        # pragma: no cover
 
     @abc.abstractmethod
     def session(self, autocommit: bool = False) -> Any:
@@ -82,4 +82,4 @@ class Interface(abc.ABC):
         Yields:
             Database session instance
         """
-        pass  # pragma: no cover
+        # pragma: no cover

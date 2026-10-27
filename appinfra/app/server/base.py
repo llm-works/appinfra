@@ -83,7 +83,6 @@ class Server(Traceable):
         Args:
             manager: Server manager instance
         """
-        pass
 
     def server_tick(self) -> None:
         """
@@ -91,7 +90,6 @@ class Server(Traceable):
 
         Called periodically to perform maintenance tasks or background processing.
         """
-        pass
 
     def server_do_GET(self, req: Any, **kwargs: Any) -> Any:
         """
@@ -104,7 +102,6 @@ class Server(Traceable):
         Returns:
             Response data
         """
-        pass
 
     def server_do_POST(self, req: Any, **kwargs: Any) -> Any:
         """
@@ -117,7 +114,6 @@ class Server(Traceable):
         Returns:
             Response data
         """
-        pass
 
     def server_do_PUT(self, req: Any, **kwargs: Any) -> Any:
         """
@@ -130,7 +126,6 @@ class Server(Traceable):
         Returns:
             Response data
         """
-        pass
 
     def server_do_DELETE(self, req: Any, **kwargs: Any) -> Any:
         """
@@ -143,7 +138,6 @@ class Server(Traceable):
         Returns:
             Response data
         """
-        pass
 
     async def handle_request(self, request: Any) -> Any:
         """

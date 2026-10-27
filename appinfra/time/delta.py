@@ -36,8 +36,6 @@ MICROSECONDS_PER_SECOND = 1_000_000
 class InvalidDurationError(Exception):
     """Raised when an invalid duration value or string is provided."""
 
-    pass
-
 
 def _validate_duration_input(secs: float | None) -> None:
     """
@@ -127,20 +125,18 @@ def _format_only_fractional(fractional: float, precise: bool) -> str:
 
     if precise:
         return f"{msecs_part}.{usecs_part:03d}ms"
-    else:
-        # For precise=False: if ms < 10, show fractional; if ms >= 10, show integer
-        msecs = fractional * MILLISECONDS_PER_SECOND
-        if msecs < 10:
-            # Show fractional milliseconds, strip trailing zeros
-            msec_str = f"{msecs:.3f}".rstrip("0").rstrip(".")
-            return f"{msec_str}ms"
-        else:
-            # Show integer milliseconds, but convert to seconds if >= 1000ms
-            rounded_ms = round(msecs)
-            if rounded_ms >= 1000:
-                # >= 1000ms becomes 1 second (no fractional part)
-                return "1s"
-            return f"{rounded_ms}ms"
+    # For precise=False: if ms < 10, show fractional; if ms >= 10, show integer
+    msecs = fractional * MILLISECONDS_PER_SECOND
+    if msecs < 10:
+        # Show fractional milliseconds, strip trailing zeros
+        msec_str = f"{msecs:.3f}".rstrip("0").rstrip(".")
+        return f"{msec_str}ms"
+    # Show integer milliseconds, but convert to seconds if >= 1000ms
+    rounded_ms = round(msecs)
+    if rounded_ms >= 1000:
+        # >= 1000ms becomes 1 second (no fractional part)
+        return "1s"
+    return f"{rounded_ms}ms"
 
 
 def _format_precise_seconds(
@@ -160,12 +156,11 @@ def _format_standard_seconds(isecs: int, msecs: int, precise: bool) -> str:
     """Format seconds with millisecond precision."""
     if precise:
         return f"{isecs}.{msecs:03d}s"
-    elif isecs < 10:
+    if isecs < 10:
         # Show fractional for seconds < 10 (always 3 decimal places)
         return f"{isecs}.{msecs:03d}s"
-    else:
-        # Hide fractional for seconds >= 10
-        return f"{isecs}s"
+    # Hide fractional for seconds >= 10
+    return f"{isecs}s"
 
 
 def _format_seconds_with_fractional(
@@ -184,10 +179,9 @@ def _format_seconds_with_fractional(
 
     if fractional > 0 and precise:
         return _format_precise_seconds(isecs, fractional, has_higher_unit)
-    elif msecs > 0:
+    if msecs > 0:
         return _format_standard_seconds(isecs, msecs, precise)
-    else:
-        return f"{isecs}s"
+    return f"{isecs}s"
 
 
 def _format_seconds_component(
@@ -293,7 +287,7 @@ def _format_duration_components(
     else:
         result = _format_components_standard(days, hours, minutes, isecs, fractional)
 
-    return result if result else "0s"
+    return result or "0s"
 
 
 def delta_str(secs: float | None, precise: bool = False) -> str:
@@ -393,15 +387,15 @@ def _convert_unit_to_seconds(value_str: str, unit: str, seen_units: set) -> floa
     # Convert to seconds
     if unit == "d":
         return value * SECONDS_PER_DAY
-    elif unit == "h":
+    if unit == "h":
         return value * SECONDS_PER_HOUR
-    elif unit == "m":
+    if unit == "m":
         return value * SECONDS_PER_MINUTE
-    elif unit == "s":
+    if unit == "s":
         return value
-    elif unit == "ms":
+    if unit == "ms":
         return value / MILLISECONDS_PER_SECOND
-    elif unit == "μs":
+    if unit == "μs":
         return value / MICROSECONDS_PER_SECOND
     return 0.0
 
@@ -505,11 +499,8 @@ def validate_duration(secs: int | float) -> bool:
     if secs < 0:
         return False
 
-    # Check for unreasonably large values (more than 1000 years)
-    if secs > 365.25 * 24 * 3600 * 1000:
-        return False
-
-    return True
+    # Reject unreasonably large values (more than 1000 years)
+    return secs <= 365.25 * 24 * 3600 * 1000
 
 
 # Public API

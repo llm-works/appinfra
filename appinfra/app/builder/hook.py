@@ -331,7 +331,6 @@ class BuiltinHooks:
     def cleanup_resources(context: HookContext) -> None:
         """Clean up resources on shutdown."""
         # This would be implemented based on specific application needs
-        pass
 
 
 def create_logging_hooks() -> HookBuilder:

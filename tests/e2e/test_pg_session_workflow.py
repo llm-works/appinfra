@@ -91,12 +91,11 @@ class TestPGSessionWorkflow:
             )
 
         # Try to update but raise exception - should rollback
-        with pytest.raises(RuntimeError):
-            with self.pg.session() as session:
-                session.execute(
-                    text(f"UPDATE {table_name} SET value = 'modified' WHERE id = 1")
-                )
-                raise RuntimeError("Simulated error")
+        with pytest.raises(RuntimeError), self.pg.session() as session:
+            session.execute(
+                text(f"UPDATE {table_name} SET value = 'modified' WHERE id = 1")
+            )
+            raise RuntimeError("Simulated error")
 
         # Verify original value remains
         with self.pg.session() as session:

@@ -145,11 +145,13 @@ class TestSQLiteSession:
 
     def test_session_autocommit_raises_not_implemented(self, sqlite_db):
         """Test session(autocommit=True) raises NotImplementedError."""
-        with pytest.raises(
-            NotImplementedError, match="SQLite does not support AUTOCOMMIT"
+        with (
+            pytest.raises(
+                NotImplementedError, match="SQLite does not support AUTOCOMMIT"
+            ),
+            sqlite_db.session(autocommit=True),
         ):
-            with sqlite_db.session(autocommit=True):
-                pass
+            pass
 
 
 def _sqlite_with_row(mock_logger, tmp_path, **cfg_fields):

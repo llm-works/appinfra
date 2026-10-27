@@ -18,6 +18,7 @@ Run with:
 
 from __future__ import annotations
 
+import contextlib
 import threading
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -246,10 +247,9 @@ class TestEnsureObjectConcurrent:
                     nonlocal create_calls
                     # Wait for all workers to reach create_fn before any
                     # proceeds — ensures contention on the advisory lock.
-                    try:
+                    # A broken barrier means other workers already proceeded; fine.
+                    with contextlib.suppress(threading.BrokenBarrierError):
                         create_barrier.wait()
-                    except threading.BrokenBarrierError:
-                        pass  # Other workers already proceeded; fine.
                     with create_lock:
                         create_calls += 1
                     session.execute(

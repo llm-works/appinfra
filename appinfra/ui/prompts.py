@@ -78,8 +78,6 @@ def _get_non_interactive() -> bool:
 class NonInteractiveError(Exception):
     """Raised when interactive input is required but not available."""
 
-    pass
-
 
 def _confirm_fallback(message: str, default: bool) -> bool:
     """Fallback confirmation using standard input."""
@@ -190,7 +188,7 @@ def _password_questionary(message: str, do_confirm: bool) -> str:
         pwd2_result = questionary.password(
             "Confirm password:", style=PROMPT_STYLE
         ).ask()
-        if str(pwd2_result) if pwd2_result else "" != pwd:
+        if str(pwd2_result) if pwd2_result else pwd != "":
             print("Passwords do not match. Please try again.")
             return _password_questionary(message, do_confirm)
     return pwd
@@ -200,10 +198,9 @@ def _password_getpass(message: str, do_confirm: bool) -> str:
     """Get password using getpass fallback."""
     while True:
         pwd = getpass.getpass(f"{message} ")
-        if do_confirm:
-            if getpass.getpass("Confirm password: ") != pwd:
-                print("Passwords do not match. Please try again.")
-                continue
+        if do_confirm and getpass.getpass("Confirm password: ") != pwd:
+            print("Passwords do not match. Please try again.")
+            continue
         return pwd
 
 

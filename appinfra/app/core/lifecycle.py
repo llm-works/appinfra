@@ -503,7 +503,6 @@ class LifecycleManager:
         final "done" message is logged.
         """
         # Reserved for future finalization logic if needed
-        pass
 
     @property
     def logger(self) -> Logger | None:

@@ -135,8 +135,7 @@ def _rewrite_line(line: str) -> str:
         if close_idx is not None:
             return line
     line = _CHAIN_PREFIX_PATTERN.sub(_sub_prefix, line)
-    line = _CHAIN_POSTFIX_PATTERN.sub(_sub_postfix, line)
-    return line
+    return _CHAIN_POSTFIX_PATTERN.sub(_sub_postfix, line)
 
 
 def _find_closing_quote(s: str, quote: str) -> int | None:
@@ -176,8 +175,7 @@ def preprocess_deep_tags(content: str) -> str:
     - Tag chains (!P !SOURCE ARG or !SOURCE ARG !P) -> !chain:source+policies ARG
     """
     content = _DEEP_ANCHOR_PATTERN.sub(r"!deep \1", content)
-    content = preprocess_tag_chains(content)
-    return content
+    return preprocess_tag_chains(content)
 
 
 class Loader(yaml.SafeLoader):
@@ -312,9 +310,11 @@ class Loader(yaml.SafeLoader):
         Returns:
             Converted key (string if date/numeric, otherwise unchanged)
         """
-        if isinstance(key, datetime.date):
-            return str(key)
-        elif not isinstance(key, bool) and isinstance(key, (int, float)):
+        if (
+            isinstance(key, datetime.date)
+            or not isinstance(key, bool)
+            and isinstance(key, (int, float))
+        ):
             return str(key)
         return key
 
@@ -369,7 +369,7 @@ class Loader(yaml.SafeLoader):
             self._path_stack.pop()
             return value
 
-        elif isinstance(value_node, yaml.SequenceNode):
+        if isinstance(value_node, yaml.SequenceNode):
             # Track list items with indexed paths
             value = self.construct_sequence(value_node, deep=True)
             for idx in range(len(value)):
@@ -377,9 +377,8 @@ class Loader(yaml.SafeLoader):
                 self.source_map[item_path] = self.current_file
             return value
 
-        else:
-            # Scalar or !include tag
-            return self.construct_object(value_node, deep=True)
+        # Scalar or !include tag
+        return self.construct_object(value_node, deep=True)
 
     def _merge_include_source_maps(self, value: Any, full_path: str) -> None:
         """
@@ -404,10 +403,7 @@ class Loader(yaml.SafeLoader):
 
         # Test data check (not real YAML nodes)
         first_item = node.value[0] if node.value else None
-        if first_item and not isinstance(first_item[0], yaml.Node):
-            return True
-
-        return False
+        return bool(first_item and not isinstance(first_item[0], yaml.Node))
 
     def _process_mapping_key_value(
         self, key_node: Any, value_node: Any
@@ -1050,11 +1046,10 @@ class Loader(yaml.SafeLoader):
                 value = self._construct_node_directly(value_node)
                 pairs.append((key, value))
             return dict(pairs)
-        elif isinstance(node, yaml.SequenceNode):
+        if isinstance(node, yaml.SequenceNode):
             return [self._construct_node_directly(item) for item in node.value]
-        else:
-            # Scalar - use normal construction
-            return self.construct_object(node, deep=False)
+        # Scalar - use normal construction
+        return self.construct_object(node, deep=False)
 
     def flatten_mapping(self, node: yaml.MappingNode) -> None:
         """
@@ -1175,9 +1170,8 @@ class Loader(yaml.SafeLoader):
             # !deep on inline mapping
             data = self._construct_node_directly(node)
             return self._wrap_deep_merge(data, node)
-        else:
-            # Regular merge - use _construct_node_directly to bypass cache
-            return self._construct_node_directly(node)
+        # Regular merge - use _construct_node_directly to bypass cache
+        return self._construct_node_directly(node)
 
     def _wrap_deep_merge(self, data: Any, node: yaml.Node) -> DeepMergeWrapper:
         """Wrap data in DeepMergeWrapper, converting TypeError to YAMLError."""
@@ -1248,9 +1242,12 @@ class Loader(yaml.SafeLoader):
         result = doc_value
 
         # First, merge with base (document wins over base)
-        if key in merge_base and isinstance(merge_base[key], dict):
-            if isinstance(result, dict):
-                result = deep_merge_func(merge_base[key], result)
+        if (
+            key in merge_base
+            and isinstance(merge_base[key], dict)
+            and isinstance(result, dict)
+        ):
+            result = deep_merge_func(merge_base[key], result)
 
         # Then, merge with override (override wins over document)
         if key in override_base and isinstance(override_base[key], dict):
@@ -1453,28 +1450,27 @@ class Loader(yaml.SafeLoader):
                 value_node = self._value_to_node(v)
                 pairs.append((key_node, value_node))
             return yaml.MappingNode(tag="tag:yaml.org,2002:map", value=pairs)
-        elif isinstance(value, list):
+        if isinstance(value, list):
             items = [self._value_to_node(item) for item in value]
             return yaml.SequenceNode(tag="tag:yaml.org,2002:seq", value=items)
-        elif isinstance(value, bool):
+        if isinstance(value, bool):
             return yaml.ScalarNode(
                 tag="tag:yaml.org,2002:bool", value=str(value).lower()
             )
-        elif isinstance(value, int):
+        if isinstance(value, int):
             return yaml.ScalarNode(tag="tag:yaml.org,2002:int", value=str(value))
-        elif isinstance(value, float):
+        if isinstance(value, float):
             return yaml.ScalarNode(tag="tag:yaml.org,2002:float", value=str(value))
-        elif value is None:
+        if value is None:
             return yaml.ScalarNode(tag="tag:yaml.org,2002:null", value="null")
-        elif isinstance(value, SecretStr):
+        if isinstance(value, SecretStr):
             # Intern SecretStr (str() masks to "***") and emit !__literal__ placeholder.
             token = f"lit-{len(self._literal_values)}"
             self._literal_values[token] = value
             node = yaml.ScalarNode(tag="!__literal__", value=token)
             self._literal_node_ids.add(id(node))
             return node
-        else:
-            return yaml.ScalarNode(tag="tag:yaml.org,2002:str", value=str(value))
+        return yaml.ScalarNode(tag="tag:yaml.org,2002:str", value=str(value))
 
     def literal_constructor(self, node: Any) -> Any:
         """

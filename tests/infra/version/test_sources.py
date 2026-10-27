@@ -352,9 +352,9 @@ class TestGitRuntimeSource:
                     returncode=0,
                     stdout="abc123def456789012345678901234567890abcd\n",
                 )
-            elif "--format=%s" in args:
+            if "--format=%s" in args:
                 return MagicMock(returncode=0, stdout="Test commit\n")
-            elif "--format=%cI" in args:
+            if "--format=%cI" in args:
                 return MagicMock(returncode=0, stdout="2025-12-01T10:30:00+00:00\n")
             return MagicMock(returncode=1)
 

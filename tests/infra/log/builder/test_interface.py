@@ -187,8 +187,6 @@ class TestLoggingBuilderInterface:
         class IncompleteBuilder(LoggingBuilderInterface):
             """Incomplete implementation missing abstract methods."""
 
-            pass
-
         with pytest.raises(TypeError):
             IncompleteBuilder()
 
@@ -265,111 +263,18 @@ class TestAbstractMethodCoverage:
         with pytest.raises(TypeError, match="abstract"):
             PartialHandlerConfig()
 
-    def test_abstract_with_level_not_implemented(self):
-        """Test with_level is abstract."""
-
-        class PartialBuilder(LoggingBuilderInterface):
-            def with_location(self, location):
-                return self
-
-            def with_micros(self, micros=True):
-                return self
-
-            def with_colors(self, enabled=True):
-                return self
-
-            def with_options(self, config):
-                return self
-
-            def with_separator(self):
-                return self
-
-            def with_extra(self, **kwargs):
-                return self
-
-            def with_handler(self, handler_config):
-                return self
-
-            def with_console_handler(self, stream=None, level=None):
-                return self
-
-            def with_file_handler(self, file_path, level=None, **kwargs):
-                return self
-
-            def with_rotating_file_handler(
-                self, file_path, max_bytes=0, backup_count=0, level=None, **kwargs
-            ):
-                return self
-
-            def with_timed_rotating_file_handler(
-                self,
-                file_path,
-                when="h",
-                interval=1,
-                backup_count=0,
-                level=None,
-                **kwargs,
-            ):
-                return self
-
-            def build(self):
-                return None
+    @pytest.mark.parametrize("missing", ["with_level", "with_location"])
+    def test_abstract_method_not_implemented(self, missing: str):
+        """A builder implementing every abstract method but one cannot be instantiated."""
+        stubs = {
+            name: lambda self, *args, **kwargs: self
+            for name in LoggingBuilderInterface.__abstractmethods__
+            if name != missing
+        }
+        partial_builder = type("PartialBuilder", (LoggingBuilderInterface,), stubs)
 
         with pytest.raises(TypeError, match="abstract"):
-            PartialBuilder()
-
-    def test_abstract_with_location_not_implemented(self):
-        """Test with_location is abstract."""
-
-        class PartialBuilder(LoggingBuilderInterface):
-            def with_level(self, level):
-                return self
-
-            def with_micros(self, micros=True):
-                return self
-
-            def with_colors(self, enabled=True):
-                return self
-
-            def with_options(self, config):
-                return self
-
-            def with_separator(self):
-                return self
-
-            def with_extra(self, **kwargs):
-                return self
-
-            def with_handler(self, handler_config):
-                return self
-
-            def with_console_handler(self, stream=None, level=None):
-                return self
-
-            def with_file_handler(self, file_path, level=None, **kwargs):
-                return self
-
-            def with_rotating_file_handler(
-                self, file_path, max_bytes=0, backup_count=0, level=None, **kwargs
-            ):
-                return self
-
-            def with_timed_rotating_file_handler(
-                self,
-                file_path,
-                when="h",
-                interval=1,
-                backup_count=0,
-                level=None,
-                **kwargs,
-            ):
-                return self
-
-            def build(self):
-                return None
-
-        with pytest.raises(TypeError, match="abstract"):
-            PartialBuilder()
+            partial_builder()
 
 
 # =============================================================================

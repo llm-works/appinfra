@@ -14,6 +14,7 @@ Tests key scheduler features including:
 - Status monitoring and control
 """
 
+import contextlib
 import datetime
 import time
 from unittest.mock import Mock, patch
@@ -500,10 +501,8 @@ class TestSchedRun:
 
         # Stop and cleanup
         sched.stop()
-        try:
+        with contextlib.suppress(StopIteration):
             next(gen)
-        except StopIteration:
-            pass
 
     def test_run_yields_timestamps(self, mock_logger):
         """Test run() yields timestamps when triggered."""
@@ -517,10 +516,8 @@ class TestSchedRun:
         assert timestamp > 0
 
         sched.stop()
-        try:
+        with contextlib.suppress(StopIteration):
             next(gen)
-        except StopIteration:
-            pass
 
 
 # =============================================================================
@@ -646,10 +643,8 @@ class TestIntegrationScenarios:
         assert timestamp > 0
 
         sched.stop()
-        try:
+        with contextlib.suppress(StopIteration):
             next(gen)
-        except StopIteration:
-            pass
 
 
 # =============================================================================

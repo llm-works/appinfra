@@ -160,7 +160,6 @@ class UvicornService(Service):
 
     def teardown(self) -> None:
         """Cleanup - uvicorn shuts itself down (see ``execute``)."""
-        pass
 
     def is_healthy(self) -> bool:
         """Check if uvicorn is accepting connections."""

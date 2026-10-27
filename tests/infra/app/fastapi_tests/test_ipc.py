@@ -208,9 +208,7 @@ class TestIPCChannelStreaming:
 
         task = asyncio.create_task(send_chunks())
 
-        chunks = []
-        async for chunk in channel.submit_stream(request, timeout=1.0):
-            chunks.append(chunk)
+        chunks = [chunk async for chunk in channel.submit_stream(request, timeout=1.0)]
 
         assert len(chunks) == 2
         assert chunks[0].data == "chunk1"

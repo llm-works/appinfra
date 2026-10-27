@@ -81,8 +81,6 @@ class IPCResponse:
 class _TestSubprocessError(Exception):
     """Test exception for subprocess handler test."""
 
-    pass
-
 
 from appinfra.app.fastapi.handlers import ExceptionHandler
 

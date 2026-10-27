@@ -146,7 +146,7 @@ class VersionTool(Tool):
             print("true" if value else "false" if value is False else "unknown")
         else:
             value = build.get(field)
-            print(value if value else "")
+            print(value or "")
         return 0
 
     def _output_default(self, semver: str, build: dict[str, Any]) -> int:

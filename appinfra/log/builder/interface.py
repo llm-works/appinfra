@@ -31,7 +31,7 @@ class HandlerConfig(ABC):
             config: Logger configuration
             logger: Optional logger instance for error logging (required for DatabaseHandler)
         """
-        pass  # pragma: no cover
+        # pragma: no cover
 
     @abstractmethod
     def to_dict(self) -> dict[str, Any]:
@@ -43,7 +43,7 @@ class HandlerConfig(ABC):
         Returns:
             Dictionary with handler type and all parameters
         """
-        pass  # pragma: no cover
+        # pragma: no cover
 
 
 class LoggingBuilderInterface(ABC):
@@ -65,7 +65,7 @@ class LoggingBuilderInterface(ABC):
         Returns:
             Self for method chaining
         """
-        pass  # pragma: no cover
+        # pragma: no cover
 
     @abstractmethod
     def with_location(self, location: bool | int) -> Self:
@@ -78,7 +78,7 @@ class LoggingBuilderInterface(ABC):
         Returns:
             Self for method chaining
         """
-        pass  # pragma: no cover
+        # pragma: no cover
 
     @abstractmethod
     def with_micros(self, micros: bool = True) -> Self:
@@ -91,7 +91,7 @@ class LoggingBuilderInterface(ABC):
         Returns:
             Self for method chaining
         """
-        pass  # pragma: no cover
+        # pragma: no cover
 
     @abstractmethod
     def with_colors(self, enabled: bool = True) -> Self:
@@ -104,7 +104,7 @@ class LoggingBuilderInterface(ABC):
         Returns:
             Self for method chaining
         """
-        pass  # pragma: no cover
+        # pragma: no cover
 
     @abstractmethod
     def with_options(self, options: dict[str, Any]) -> Self:
@@ -122,7 +122,7 @@ class LoggingBuilderInterface(ABC):
         Returns:
             Self for method chaining
         """
-        pass  # pragma: no cover
+        # pragma: no cover
 
     @abstractmethod
     def with_extra(self, **kwargs: Any) -> Self:
@@ -138,7 +138,7 @@ class LoggingBuilderInterface(ABC):
         Returns:
             Self for method chaining
         """
-        pass  # pragma: no cover
+        # pragma: no cover
 
     @abstractmethod
     def with_handler(self, handler_config: HandlerConfig) -> Self:
@@ -151,7 +151,7 @@ class LoggingBuilderInterface(ABC):
         Returns:
             Self for method chaining
         """
-        pass  # pragma: no cover
+        # pragma: no cover
 
     @abstractmethod
     def with_console_handler(
@@ -167,7 +167,7 @@ class LoggingBuilderInterface(ABC):
         Returns:
             Self for method chaining
         """
-        pass  # pragma: no cover
+        # pragma: no cover
 
     @abstractmethod
     def with_file_handler(
@@ -187,7 +187,7 @@ class LoggingBuilderInterface(ABC):
         Returns:
             Self for method chaining
         """
-        pass  # pragma: no cover
+        # pragma: no cover
 
     @abstractmethod
     def with_rotating_file_handler(
@@ -211,7 +211,7 @@ class LoggingBuilderInterface(ABC):
         Returns:
             Self for method chaining
         """
-        pass  # pragma: no cover
+        # pragma: no cover
 
     @abstractmethod
     def with_timed_rotating_file_handler(
@@ -237,7 +237,7 @@ class LoggingBuilderInterface(ABC):
         Returns:
             Self for method chaining
         """
-        pass  # pragma: no cover
+        # pragma: no cover
 
     @abstractmethod
     def build(self) -> Logger:
@@ -247,4 +247,4 @@ class LoggingBuilderInterface(ABC):
         Returns:
             Configured logger instance
         """
-        pass  # pragma: no cover
+        # pragma: no cover

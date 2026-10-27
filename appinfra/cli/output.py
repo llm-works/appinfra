@@ -78,15 +78,12 @@ class NullOutput:
 
     def write(self, text: str = "") -> None:
         """Discard text."""
-        pass
 
     def write_raw(self, text: str) -> None:
         """Discard text."""
-        pass
 
     def flush(self) -> None:
         """No-op flush."""
-        pass
 
 
 class BufferedOutput:
