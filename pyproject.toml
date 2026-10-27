@@ -43,7 +43,9 @@ check = [
     "pytest-cov>=4.0.0,<8.0.0",
     "pytest-xdist>=3.2.0,<4.0.0",
     "interrogate>=1.5.0,<2.0.0",
-    "pylint>=3.0.0,<5.0.0",  # --output-format=json2 since 3.0
+    # 4.1 made duplicate-code fast on large trees. Capped at the tested minor: cq dup's plugin
+    # patches astroid, whose version pylint pins.
+    "pylint>=4.1.0,<4.2",
 ]
 dev = [
     "appinfra[check]",
@@ -177,8 +179,9 @@ exclude = ["tests/", "scripts/", ".build/", ".dist/", ".cover/", ".htmlcov/", ".
 # No usable type information. sqlalchemy_utils has no py.typed, and its only stub package
 # (types-sqlalchemy-utils) is built on the SQLAlchemy 1.4 stubs, not SQLAlchemy 2.0's own types.
 # pgvector has no py.typed or stubs; it is in no extra (db/pg/vector.py imports it lazily).
+# astroid has no py.typed or stubs; cq's pylint plugin imports it.
 [[tool.mypy.overrides]]
-module = ["sqlalchemy_utils", "pgvector.*"]
+module = ["sqlalchemy_utils", "pgvector.*", "astroid.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

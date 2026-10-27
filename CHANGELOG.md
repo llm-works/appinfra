@@ -29,7 +29,8 @@ earlier: pre-release builds (0.13.1.devN) would not satisfy it. -->
 
 ### Changed
 - `make check`: the "Function size check" row is now "Code quality check" and also runs
-  `cq dup` and `cq dead` when enabled; the "Running code quality checks..." banner is gone.
+  `cq dup` and `cq dead` when enabled; the "Running code quality checks..." banner is gone. A
+  cq tool that fails to run only warns, unless that tool is set to strict.
 - A bare `make` shows the help screen instead of `make config`'s output.
 - `make setup` installs the tools `make check` runs (the new `check` extra: ruff, mypy, pytest,
   coverage, interrogate, pylint) in every project, not only those its own dependencies list.
