@@ -225,13 +225,14 @@ if [ -n "${INFRA_DEV_CQ_EXCLUDE:-}" ]; then
 fi
 
 # Extra ruff rules reported over the package as warnings, never failing: a comma-separated list
-# of rule codes (empty = off). Rules that should fail the build belong in the project's ruff config.
-CQ_LINT_SELECT="${INFRA_DEV_CQ_LINT_SELECT:-}"
+# of rule codes (empty = off, hence "-" not ":-"). Rules that should fail the build belong in the
+# project's ruff config.
+CQ_LINT_SELECT="${INFRA_DEV_CQ_LINT_SELECT-C90,SIM,RET,PIE,PERF,FURB,C4}"
 
-# Duplicated code (pylint) and dead private code checks over the package, opt-in per project.
-# Each takes false (default), warn (report the count, never fail) or strict (fail on findings).
-CQ_DUP="${INFRA_DEV_CQ_DUP:-false}"
-CQ_DEAD="${INFRA_DEV_CQ_DEAD:-false}"
+# Duplicated code (pylint) and dead private code checks over the package. Each takes false (off),
+# warn (default: report the count, never fail) or strict (fail on findings).
+CQ_DUP="${INFRA_DEV_CQ_DUP:-warn}"
+CQ_DEAD="${INFRA_DEV_CQ_DEAD:-warn}"
 for _cq_var in INFRA_DEV_CQ_DUP:"$CQ_DUP" INFRA_DEV_CQ_DEAD:"$CQ_DEAD"; do
     case "${_cq_var#*:}" in
         false|warn|strict) ;;

@@ -13,12 +13,13 @@
 #                             (Python, shell, Makefile, Dockerfile) in `make check`
 #                             (default: false; opt-in for open-source Apache-2.0 repos)
 #   INFRA_DEV_CQ_LINT_SELECT - Extra ruff rule codes (comma-separated) that the Linting check
-#                             reports over the package as warnings, never failing (default: empty)
+#                             reports over the package as warnings, never failing
+#                             (default: C90,SIM,RET,PIE,PERF,FURB,C4; empty turns it off)
 #   INFRA_DEV_CQ_DUP        - Duplicated code in the Code quality check (pylint duplicate-code):
 #                             false, warn (show the count) or strict (fail on findings)
-#                             (default: false; needs pylint, part of the dev extra)
+#                             (default: warn; needs pylint, part of the dev extra)
 #   INFRA_DEV_CQ_DEAD       - Dead private code in the Code quality check: false, warn or strict
-#                             (default: false)
+#                             (default: warn)
 #   INFRA_DEV_CHECK_EXAMPLES - Run every example script as a `make check` test
 #                             subcheck, the same run as `make examples.check`
 #                             (default: false; opt-in because it executes the

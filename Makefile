@@ -16,11 +16,11 @@ INFRA_DEV_CQ_SPDX := true
 
 # Ruff rules reported as warnings in make check (complexity, simplify, return, pie, perflint,
 # refurb, comprehensions); a rule moves to pyproject's select once the code is clean of it
-#INFRA_DEV_CQ_LINT_SELECT := C90,SIM,RET,PIE,PERF,FURB,C4
+INFRA_DEV_CQ_LINT_SELECT := C90,SIM,RET,PIE,PERF,FURB,C4
 
 # Duplicated code and dead private code checks: false, warn or strict
-#INFRA_DEV_CQ_DUP := warn
-#INFRA_DEV_CQ_DEAD := warn
+INFRA_DEV_CQ_DUP := warn
+INFRA_DEV_CQ_DEAD := warn
 
 # Run every example script as a test subcheck of `make check`
 INFRA_DEV_CHECK_EXAMPLES := true
