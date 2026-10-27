@@ -17,6 +17,8 @@ For API stability guarantees and deprecation policy, see
   is `warn` or `strict` (default `false`).
 - `INFRA_DEV_CQ_LINT_SELECT`: extra ruff rule codes that `make check` reports under Linting as
   warnings, without failing.
+- `make check` names a non-daemon thread a test left running at exit, with the test it appeared
+  in; its stack goes to the kept log. Such a thread holds a pytest-xdist worker for 10s.
 
 ### Changed
 - `make check`: the "Function size check" row is now "Code quality check" and also runs

@@ -71,6 +71,42 @@ def test_report_starts_on_its_own_line(run_with_plugin) -> None:
     assert any(line.startswith("=== test running >0.3s: ") for line in lines)
 
 
+_THREAD_TESTS = """
+import threading
+
+stop = threading.Event()
+
+def test_leaves_a_thread():
+    threading.Thread(target=stop.wait, args=(1.0,), name="lingerer").start()
+
+def test_leaves_a_daemon():
+    threading.Thread(target=stop.wait, args=(1.0,), name="daemonic", daemon=True).start()
+
+def test_joins_its_thread():
+    thread = threading.Thread(target=lambda: None, name="joined")
+    thread.start()
+    thread.join()
+"""
+
+
+@pytest.mark.unit
+def test_thread_left_running_is_reported_with_its_test(
+    run_with_plugin, pytester: pytest.Pytester
+) -> None:
+    pytester.makepyfile(test_inner=_THREAD_TESTS)
+    result = run_with_plugin("60")
+
+    result.assert_outcomes(passed=3)
+    err = result.stderr.str()
+    assert (
+        "=== thread alive at exit: lingerer, started in "
+        "test_inner.py::test_leaves_a_thread ===" in err
+    )
+    assert ", in wait\n" in err  # the thread's own stack follows
+    assert "daemonic" not in err  # a daemon thread does not hold up the exit
+    assert "joined" not in err  # nor does one that ended
+
+
 @pytest.mark.unit
 def test_nothing_without_the_variable(run_with_plugin) -> None:
     for seconds in (None, "0"):

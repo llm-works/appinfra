@@ -21,6 +21,13 @@ The report neither stops nor fails the test. The stacks are read with the GIL he
 them from a C watchdog thread instead and can crash the process it dumps. A test stuck in C
 code that holds the GIL gets no report.
 
+A non-daemon thread a test started and left running keeps its process from exiting: the
+interpreter waits for it, and a pytest-xdist worker in that state is killed only after the
+controller's exit timeout (10s). When pytest finishes, each such thread still alive gets a
+report with its stack, naming the test it appeared in:
+
+    === thread alive at exit: Thread-3 (pump), started in tests/test_proc.py::test_stream ===
+
 check.sh puts this file's directory on PYTHONPATH, loads the plugin with ``-p pytest_hang``,
 sets the variable, and turns the report's first line and the closing line into a row below its
 checklist.
@@ -45,6 +52,8 @@ ENV_VAR = "INFRA_PYTEST_HANG_DUMP_SECONDS"
 _seconds_key = pytest.StashKey[float]()
 _fd_key = pytest.StashKey[int]()
 _reported_key = pytest.StashKey[bool]()
+# non-daemon threads that appeared during a test, mapped to that test's node id
+_started_key = pytest.StashKey[dict[threading.Thread, str]]()
 # one writer at a time, so a report and a closing line never interleave
 _write_lock = threading.Lock()
 
@@ -58,8 +67,9 @@ def pytest_configure(config: pytest.Config) -> None:
 
 
 def pytest_unconfigure(config: pytest.Config) -> None:
-    """Close the stderr copy."""
+    """Report the test-started threads still alive, then close the stderr copy."""
     if _fd_key in config.stash:
+        _report_lingering_threads(config)
         os.close(config.stash[_fd_key])
         del config.stash[_fd_key]
 
@@ -71,6 +81,7 @@ def pytest_runtest_protocol(item: pytest.Item) -> Generator[None, object, object
     if seconds <= 0:
         return (yield)
     start = time.monotonic()
+    before = set(threading.enumerate())
     timer = threading.Timer(seconds, _report, (item, seconds))
     timer.daemon = True
     timer.start()
@@ -79,6 +90,7 @@ def pytest_runtest_protocol(item: pytest.Item) -> Generator[None, object, object
     finally:
         timer.cancel()
         timer.join()  # a report being written finishes before the closing line
+        _record_new_threads(item, before)
     # Only a test that ended gets the closing line. One unwinding from an interrupt (a SIGTERM
     # handler raising KeyboardInterrupt, say) did not, and must still read as running.
     if item.stash.get(_reported_key, False):
@@ -100,6 +112,29 @@ def _report(item: pytest.Item, seconds: float) -> None:
     lines.append("\n")
     _write(item.config, "".join(lines))
     item.stash[_reported_key] = True
+
+
+def _record_new_threads(item: pytest.Item, before: set[threading.Thread]) -> None:
+    """Remember the non-daemon threads that appeared while the test ran."""
+    started = item.config.stash.setdefault(_started_key, {})
+    for thread in threading.enumerate():
+        if thread not in before and not thread.daemon:
+            started.setdefault(thread, item.nodeid)
+
+
+def _report_lingering_threads(config: pytest.Config) -> None:
+    """Write a report for each recorded thread that is still alive: it holds up the exit."""
+    frames = sys._current_frames()
+    for thread, nodeid in config.stash.get(_started_key, {}).items():
+        if not thread.is_alive():
+            continue
+        lines = [
+            f"\n=== thread alive at exit: {thread.name}, started in {nodeid} ===\n"
+        ]
+        frame = frames.get(thread.ident) if thread.ident is not None else None
+        if frame is not None:
+            lines.extend(traceback.format_stack(frame))
+        _write(config, "".join(lines))
 
 
 def _write(config: pytest.Config, text: str) -> None:

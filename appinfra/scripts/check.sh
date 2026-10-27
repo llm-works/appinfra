@@ -608,24 +608,29 @@ fit_slow_row() {
 
 # While a pytest check runs, turn the lines pytest_hang writes to its log into rows below the
 # checklist: a row for each test reported running past HANG_DUMP_SECONDS, rewritten once the
-# test ends. A check with a report has its log, which holds the stacks, kept and recorded for
-# display_slow_logs. run_check's TERM means the command ended: one last pass reads what it
-# wrote last.
+# test ends, and one for each thread a test left running at exit. A check with a report has
+# its log, which holds the stacks, kept and recorded for display_slow_logs. run_check's TERM
+# means the command ended: one last pass reads what it wrote last.
 watch_slow_tests() {
     local logfile="$1" name="$2"
     local stop=0 seen=0 line test_id took text kept=""
     local -A rows=()
     # The node id runs to the closing " ===": parametrized ids can contain spaces
     local report_re='=== test running >[0-9.]+s: (.+) ===' done_re='=== test done after ([0-9.]+s): (.+) ==='
+    local thread_re='=== thread alive at exit: (.+) ==='
     trap 'stop=1' TERM
     while :; do
         sleep 1 &
         wait $! 2>/dev/null || true
         display_open || return 0
         local lines=()
-        mapfile -t lines < <(grep -oE "${report_re}|${done_re}" "$logfile" 2>/dev/null)
+        mapfile -t lines < <(grep -oE "${report_re}|${done_re}|${thread_re}" "$logfile" 2>/dev/null)
         for line in "${lines[@]:$seen}"; do
-            if [[ "$line" =~ $report_re ]]; then
+            if [[ "$line" =~ $thread_re ]]; then
+                # 14: room for " alive at exit"
+                text=$(fit_slow_row "$name" "thread ${BASH_REMATCH[1]}" 14)
+                add_display_row "${UI_MARK_WARN}" "$text" " ${UI_YELLOW}alive at exit${UI_RESET}"
+            elif [[ "$line" =~ $report_re ]]; then
                 test_id="${BASH_REMATCH[1]}"
                 # 16: room for the longer note, " running >NNNNs" or " took NNNN.Ns"
                 text=$(fit_slow_row "$name" "$test_id" 16)
