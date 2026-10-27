@@ -10,6 +10,11 @@ For API stability guarantees and deprecation policy, see
 
 ## [Unreleased]
 
+<!-- RELEASE TODO (remove when done): before tagging 0.14.0, change FRAMEWORK_TOOLS in
+appinfra/scripts/install_deps.py to "appinfra[check]>=0.14.0". Without the floor, a project
+pinning an older appinfra resolves a release with no `check` extra and pip only warns. Not set
+earlier: pre-release builds (0.13.1.devN) would not satisfy it. -->
+
 ### Added
 - `appinfra cq dup` reports duplicated code blocks (pylint's duplicate-code; pylint joins the
   `check` extra). `appinfra cq dead` reports private definitions nothing refers to. `# cq: keep
