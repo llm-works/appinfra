@@ -18,8 +18,8 @@ INFRA_DEV_CQ_SPDX := true
 INFRA_DEV_CQ_LINT_SELECT :=
 
 # Duplicated code and dead private code checks: false, warn or strict
-INFRA_DEV_CQ_DUP := warn
-INFRA_DEV_CQ_DEAD := warn
+INFRA_DEV_CQ_DUP := strict
+INFRA_DEV_CQ_DEAD := strict
 
 # Run every example script as a test subcheck of `make check`
 INFRA_DEV_CHECK_EXAMPLES := true
