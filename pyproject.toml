@@ -37,7 +37,7 @@ Issues = "https://github.com/llm-works/appinfra/issues"
 # The tools the Makefile framework's checks run; `make setup` installs them in every project
 check = [
     "coverage>=7.4.0,<8.0.0",
-    "ruff>=0.2.0,<1.0.0",  # --output-format=concise since 0.2
+    "ruff>=0.16.0,<1.0.0",  # 0.16 is the first to format-check the Python blocks in .md files
     "mypy>=1.9.0,<2.0.0",
     "pytest>=8.0.0,<10.0.0",
     "pytest-cov>=4.0.0,<8.0.0",
