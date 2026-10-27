@@ -77,15 +77,30 @@ import threading
 stop = threading.Event()
 
 def test_leaves_a_thread():
-    threading.Thread(target=stop.wait, args=(1.0,), name="lingerer").start()
+    threading.Thread(target=stop.wait, args=(30.0,), name="lingerer").start()
 
 def test_leaves_a_daemon():
-    threading.Thread(target=stop.wait, args=(1.0,), name="daemonic", daemon=True).start()
+    threading.Thread(target=stop.wait, args=(30.0,), name="daemonic", daemon=True).start()
 
 def test_joins_its_thread():
     thread = threading.Thread(target=lambda: None, name="joined")
     thread.start()
     thread.join()
+"""
+
+# Releases the inner threads only after pytest_hang has reported them: trylast runs this
+# pytest_unconfigure after the plugin's, so the threads are alive when it looks, however slow
+# the machine, and the inner run does not wait out their timeout
+_RELEASE_THREADS = """
+import sys
+
+import pytest
+
+@pytest.hookimpl(trylast=True)
+def pytest_unconfigure(config):
+    module = sys.modules.get("test_inner")
+    if module is not None:
+        module.stop.set()
 """
 
 
@@ -94,6 +109,7 @@ def test_thread_left_running_is_reported_with_its_test(
     run_with_plugin, pytester: pytest.Pytester
 ) -> None:
     pytester.makepyfile(test_inner=_THREAD_TESTS)
+    pytester.makeconftest(_RELEASE_THREADS)
     result = run_with_plugin("60")
 
     result.assert_outcomes(passed=3)
