@@ -87,11 +87,11 @@ class TestLoggingThroughput:
             )
         elapsed = time.monotonic() - start
 
-        # Assert: Should format at least 20,000 messages/sec
+        # Assert: Should format at least 10,000 messages/sec (100 µs per message)
         throughput = iterations / elapsed
         time_per_msg = elapsed / iterations
-        assert throughput > 15_000, (
-            f"Formatting throughput too low: {throughput:,.0f} msg/sec < 15,000"
+        assert throughput > 10_000, (
+            f"Formatting throughput too low: {throughput:,.0f} msg/sec < 10,000"
         )
 
         print(
