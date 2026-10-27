@@ -24,9 +24,11 @@ code that holds the GIL gets no report.
 A non-daemon thread a test started and left running keeps its process from exiting: the
 interpreter waits for it, and a pytest-xdist worker in that state is killed only after the
 controller's exit timeout (10s). When pytest finishes, each such thread still alive gets a
-report with its stack, naming the test it appeared in:
+report naming the test it appeared in, then the thread and its stack:
 
-    === thread alive at exit: Thread-3 (pump), started in tests/test_proc.py::test_stream ===
+    === thread left running by tests/test_proc.py::test_stream ===
+    Thread 140235 (Thread-3 (pump)):
+      ...
 
 check.sh puts this file's directory on PYTHONPATH, loads the plugin with ``-p pytest_hang``,
 sets the variable, and turns the report's first line and the closing line into a row below its
@@ -129,7 +131,8 @@ def _report_lingering_threads(config: pytest.Config) -> None:
         if not thread.is_alive():
             continue
         lines = [
-            f"\n=== thread alive at exit: {thread.name}, started in {nodeid} ===\n"
+            f"\n=== thread left running by {nodeid} ===\n",
+            f"Thread {thread.ident} ({thread.name}):\n",
         ]
         frame = frames.get(thread.ident) if thread.ident is not None else None
         if frame is not None:

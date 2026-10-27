@@ -98,11 +98,9 @@ def test_thread_left_running_is_reported_with_its_test(
 
     result.assert_outcomes(passed=3)
     err = result.stderr.str()
-    assert (
-        "=== thread alive at exit: lingerer, started in "
-        "test_inner.py::test_leaves_a_thread ===" in err
-    )
-    assert ", in wait\n" in err  # the thread's own stack follows
+    assert "=== thread left running by test_inner.py::test_leaves_a_thread ===" in err
+    assert "(lingerer):\n" in err  # the thread follows, then its own stack
+    assert ", in wait\n" in err
     assert "daemonic" not in err  # a daemon thread does not hold up the exit
     assert "joined" not in err  # nor does one that ended
 

@@ -204,11 +204,11 @@ the CI log keeps the rows even when the job is killed by its timeout.
 
 A non-daemon thread a test starts and leaves running holds up its process's exit; a
 pytest-xdist worker in that state is killed only after a 10s timeout, which the check's time
-includes. When pytest finishes, each such thread gets a row naming the test it appeared in, and
-its stack goes to the kept log:
+includes. The test that started such a thread gets a row below the checklist, and the thread's
+name and stack go to the kept log:
 
 ```text
-[⚠] Unit & E2E & Coverage tests: thread Thread-3 (pump), started in tests/test_proc.py::test_stream alive at exit
+[⚠] Unit & E2E & Coverage tests: tests/test_proc.py::test_stream thread left running
 ```
 
 Interrupting `make check` (Ctrl-C, `TERM`, a closed terminal), or a fail-fast stop, kills every
