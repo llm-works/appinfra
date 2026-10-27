@@ -43,6 +43,15 @@ def _factory_accepts_none(cfg):
     return f"config-is-none:{cfg is None}"
 
 
+_RESOLVED: list[str] = []
+
+
+def _factory_records(tag):
+    """Factory that records the order factories resolve in."""
+    _RESOLVED.append(tag)
+    return tag
+
+
 def _factory_returns_router():
     return MagicMock()
 
@@ -1528,6 +1537,26 @@ class TestResolveLazy:
             patch("appinfra.app.fastapi.runtime.adapter.CORSMiddleware"),
         ):
             yield FastAPIAdapter(ApiConfig())
+
+    def test_lifespan_resolves_between_shutdown_and_request_callbacks(self, adapter):
+        """Factories resolve in a fixed order: one may use state an earlier one set up."""
+
+        def lazy(tag):
+            return Lazy(f"{__name__}:_factory_records", tag)
+
+        adapter.add_rate_limiter(RateLimitDefinition(limiter=lazy("limiter")))
+        adapter.add_request_callback(
+            RequestCallbackDefinition(callback=lazy("request"))
+        )
+        adapter.set_lifespan(LifespanDefinition(lifespan=lazy("lifespan")))
+        adapter.add_shutdown_callback(
+            LifecycleCallbackDefinition(callback=lazy("shutdown"))
+        )
+        _RESOLVED.clear()
+
+        adapter._resolve_lazy()
+
+        assert _RESOLVED == ["shutdown", "lifespan", "request", "limiter"]
 
     def test_resolves_route_handler(self, adapter):
         adapter.add_route(

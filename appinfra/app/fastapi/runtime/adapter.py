@@ -677,6 +677,7 @@ class FastAPIAdapter:
             (self._defs.exception_handlers, "handler"),
             (self._defs.startup_callbacks, "callback"),
             (self._defs.shutdown_callbacks, "callback"),
+            ([self._defs.lifespan] if self._defs.lifespan else [], "lifespan"),
             (self._defs.request_callbacks, "callback"),
             (self._defs.response_callbacks, "callback"),
             (self._defs.exception_callbacks, "callback"),
@@ -685,8 +686,6 @@ class FastAPIAdapter:
         for items, field_name in definitions:
             for item in items:
                 _resolve_field(item, field_name)
-        if self._defs.lifespan is not None:
-            _resolve_field(self._defs.lifespan, "lifespan")
 
     def inject_subprocess_logger(self, lg: Logger) -> None:
         """Inject subprocess logger into adapter and LoggerInjectable handlers.
