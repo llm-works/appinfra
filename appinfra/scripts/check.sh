@@ -520,7 +520,7 @@ update_line() {
             added=$(cat "$DISPLAY_ROWS" 2>/dev/null) || added=0
             local lines_up=$((TOTAL_LINES + added - line_num))
             [ $lines_up -gt 0 ] && printf "\033[${lines_up}A"
-            printf "\r%b%s  %s%b\n" "$UI_CLEAR" "$status" "$name" "$extra"
+            printf "\r%b%s %s%b\n" "$UI_CLEAR" "$status" "$name" "$extra"
             [ $lines_up -gt 1 ] && printf "\033[$((lines_up - 1))B"
             printf "\r"
         fi
@@ -542,7 +542,7 @@ add_display_row() {
                 printf "\r%b\n" "$UI_CLEAR"
                 added=1
             fi
-            printf "\r%b%s  %s%b\n" "$UI_CLEAR" "$status" "$text" "$extra"
+            printf "\r%b%s %s%b\n" "$UI_CLEAR" "$status" "$text" "$extra"
             ADDED_ROW=$((TOTAL_LINES + added))
             echo "$((added + 1))" > "$DISPLAY_ROWS"
         fi
@@ -1186,12 +1186,12 @@ main() {
     # Print initial checkboxes
     for check_def in "${CHECKS[@]}"; do
         IFS='|' read -r name _ _ _ <<< "$check_def"
-        printf "%b  %s\n" "$UI_MARK_PENDING" "$name"
+        printf "%b %s\n" "$UI_MARK_PENDING" "$name"
 
         if [[ "$name" == "Test suite" ]]; then
             for subcheck_def in "${TEST_SUBCHECKS[@]}"; do
                 IFS='|' read -r subname _ _ _ <<< "$subcheck_def"
-                printf "%b    %s\n" "$UI_MARK_PENDING" "$subname"
+                printf "%b   %s\n" "$UI_MARK_PENDING" "$subname"
             done
         fi
     done
