@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: Copyright 2026 The appinfra Authors
 
 """
-Tests for app/tools/check_functions.py.
+Tests for appinfra/cli/tools/cq/functions.py.
 
 Tests key functionality including:
 - FunctionInfo dataclass
@@ -20,7 +20,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from appinfra.cli.tools.check_functions import (
+from appinfra.cli.tools.cq.functions import (
     EXIT_CODE_WARNING,
     CheckFunctionsTool,
     FunctionAnalyzer,
@@ -936,137 +936,6 @@ class TestCheckFunctionsToolAddArgs:
 
         calls = [c[0][0] for c in parser.add_argument.call_args_list]
         assert "--include-tests" in calls
-
-
-# =============================================================================
-# Test CheckFunctionsTool._should_exclude
-# =============================================================================
-
-
-@pytest.mark.unit
-class TestShouldExclude:
-    """Test CheckFunctionsTool._should_exclude method."""
-
-    def test_excludes_test_directory(self):
-        """Test excludes files in /tests/ directory by default."""
-        tool = CheckFunctionsTool()
-        tool._logger = Mock()
-
-        result = tool._should_exclude(Path("/project/tests/test_foo.py"), [], False)
-
-        assert result is True
-
-    def test_excludes_test_prefix(self):
-        """Test excludes files starting with test_."""
-        tool = CheckFunctionsTool()
-        tool._logger = Mock()
-
-        result = tool._should_exclude(Path("/project/test_foo.py"), [], False)
-
-        assert result is True
-
-    def test_includes_test_files_when_flag_set(self):
-        """Test includes test files when include_tests=True."""
-        tool = CheckFunctionsTool()
-        tool._logger = Mock()
-
-        result = tool._should_exclude(Path("/project/tests/test_foo.py"), [], True)
-
-        assert result is False
-
-    def test_excludes_custom_patterns(self):
-        """Test excludes files matching custom patterns."""
-        tool = CheckFunctionsTool()
-        tool._logger = Mock()
-
-        result = tool._should_exclude(
-            Path("/project/vendor/lib.py"), ["vendor/*"], False
-        )
-
-        assert result is True
-
-    def test_includes_regular_files(self):
-        """Test includes regular Python files."""
-        tool = CheckFunctionsTool()
-        tool._logger = Mock()
-
-        result = tool._should_exclude(Path("/project/infra/app.py"), [], False)
-
-        assert result is False
-
-
-# =============================================================================
-# Test CheckFunctionsTool._collect_python_files
-# =============================================================================
-
-
-@pytest.mark.unit
-class TestCollectPythonFiles:
-    """Test CheckFunctionsTool._collect_python_files method."""
-
-    def test_collects_files_in_directory(self):
-        """Test collects all .py files in directory."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            # Create some Python files
-            (Path(tmpdir) / "file1.py").touch()
-            (Path(tmpdir) / "file2.py").touch()
-            (Path(tmpdir) / "readme.txt").touch()
-
-            tool = CheckFunctionsTool()
-            tool._logger = Mock()
-
-            files = tool._collect_python_files([tmpdir], [], False)
-
-            assert len(files) == 2
-            assert all(f.suffix == ".py" for f in files)
-
-    def test_excludes_test_files_by_default(self):
-        """Test excludes test files by default."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            (Path(tmpdir) / "app.py").touch()
-            (Path(tmpdir) / "test_app.py").touch()
-
-            tool = CheckFunctionsTool()
-            tool._logger = Mock()
-
-            files = tool._collect_python_files([tmpdir], [], False)
-
-            assert len(files) == 1
-            assert files[0].name == "app.py"
-
-    def test_includes_test_files_when_flag_set(self):
-        """Test includes test files when include_tests=True."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            (Path(tmpdir) / "app.py").touch()
-            (Path(tmpdir) / "test_app.py").touch()
-
-            tool = CheckFunctionsTool()
-            tool._logger = Mock()
-
-            files = tool._collect_python_files([tmpdir], [], True)
-
-            assert len(files) == 2
-
-    def test_handles_nonexistent_path(self):
-        """Test logs warning for nonexistent paths."""
-        tool = CheckFunctionsTool()
-        tool._logger = Mock()
-
-        files = tool._collect_python_files(["/nonexistent/path"], [], False)
-
-        assert len(files) == 0
-        tool._logger.warning.assert_called()
-
-    def test_collects_single_file(self):
-        """Test can collect a single .py file."""
-        with tempfile.NamedTemporaryFile(suffix=".py", delete=False) as f:
-            tool = CheckFunctionsTool()
-            tool._logger = Mock()
-
-            files = tool._collect_python_files([f.name], [], False)
-
-            assert len(files) == 1
-            assert files[0].name == Path(f.name).name
 
 
 # =============================================================================

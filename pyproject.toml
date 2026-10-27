@@ -48,6 +48,7 @@ dev = [
     "hypothesis>=6.0.0,<7.0.0",
     "pip-audit>=2.0.0,<3.0.0",
     "interrogate>=1.5.0,<2.0.0",
+    "pylint>=3.0.0,<5.0.0",  # --output-format=json2 since 3.0
     "httpx>=0.24.0,<1.0.0",
 ]
 validation = [
@@ -115,6 +116,10 @@ ignore = [
     "E501",  # line too long (handled by formatter)
 ]
 
+# For C901 when selected (INFRA_DEV_CQ_LINT_SELECT in the Makefile reports it as a warning)
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
 [tool.ruff.lint.isort]
 known-first-party = ["appinfra"]
 
@@ -123,6 +128,7 @@ known-first-party = ["appinfra"]
     "E402",  # Module import not at top (examples modify sys.path)
     "F841",  # Unused variables (demonstration code)
     "F821",  # Undefined names (examples may use forward references)
+    "C90", "SIM", "RET", "PIE", "PERF", "FURB", "C4",  # code-quality rules: core code only
 ]
 "tests/**/*.py" = [
     "N806",  # Variable name should be lowercase (Mock classes in tests)

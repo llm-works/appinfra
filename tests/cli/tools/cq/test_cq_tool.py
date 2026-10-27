@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: Copyright 2026 The appinfra Authors
 
 """
-Tests for app/tools/code_quality.py.
+Tests for appinfra/cli/tools/cq/tool.py.
 
 Tests CodeQualityTool parent command functionality:
 - Tool initialization and configuration
@@ -14,7 +14,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from appinfra.cli.tools.code_quality import CodeQualityTool
+from appinfra.cli.tools.cq import CodeQualityTool
 
 
 @pytest.mark.unit
