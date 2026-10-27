@@ -193,8 +193,19 @@ fi
 DOCSTRING_THRESHOLD="${INFRA_DEV_DOCSTRING_THRESHOLD:-80}"
 MAX_INLINE_LINES=30
 
-# Check definitions: "Name|Make Target|Command|Fix Target"
-declare -a CHECKS=(
+# Check definitions: "Name|Make Target|Command|Fix Target", listed from a file's outside in
+# (license header, layout, lint, types, docstrings), then the slow ones: code quality, tests
+declare -a CHECKS=()
+
+# SPDX header check only if opted in (INFRA_DEV_CQ_SPDX=true).
+# Off by default so closed-source repos that reuse this framework don't
+# fail on files without SPDX-License-Identifier headers.
+CQ_SPDX="${INFRA_DEV_CQ_SPDX:-false}"
+if [ "$CQ_SPDX" = "true" ]; then
+    CHECKS+=("SPDX header check|cq.spdx|${PYTHON} -m appinfra.cli.cli -l error cq spdx|")
+fi
+
+CHECKS+=(
     "Formatting check|fmt.check|${PYTHON} -m ruff format --check .|fmt"
     "Linting|lint|lint_check|lint.fix"
     "Type checking|type|${PYTHON} -m mypy ${PKG_NAME}/ --exclude 'examples/' --cache-dir .mypy_cache/pkg ${MYPY_FLAGS}|"
@@ -295,23 +306,15 @@ CQ_TARGET="cq"
 # Docstring coverage check command (only if threshold > 0)
 DOCSTRING_CMD="${PYTHON} -m interrogate -v ${PKG_NAME}/ --ignore-init-module --ignore-init-method --fail-under=${DOCSTRING_THRESHOLD}"
 
-# Add remaining checks
-CHECKS+=(
-    "Code quality check|${CQ_TARGET}|cq_check|"
-)
-
-# Add SPDX header check only if opted in (INFRA_DEV_CQ_SPDX=true).
-# Off by default so closed-source repos that reuse this framework don't
-# fail on files without SPDX-License-Identifier headers.
-CQ_SPDX="${INFRA_DEV_CQ_SPDX:-false}"
-if [ "$CQ_SPDX" = "true" ]; then
-    CHECKS+=("SPDX header check|cq.spdx|${PYTHON} -m appinfra.cli.cli -l error cq spdx|")
-fi
-
 # Add docstring check only if threshold > 0
 if awk "BEGIN {exit !($DOCSTRING_THRESHOLD > 0)}" 2>/dev/null; then
     CHECKS+=("Docstring coverage|cq.docstring.strict|${DOCSTRING_CMD}|docstring:${DOCSTRING_THRESHOLD}")
 fi
+
+# The slowest checks last: the rows above finish first, top down
+CHECKS+=(
+    "Code quality check|${CQ_TARGET}|cq_check|"
+)
 
 # Add test suite check only if not skipped
 if [ "$SKIP_TESTS" = false ]; then
