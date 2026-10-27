@@ -20,7 +20,9 @@ class DefaultsHelpFormatter(argparse.HelpFormatter):
     the default behavior of command-line arguments.
     """
 
-    def _get_help_string(self, action: argparse.Action) -> str:
+    def _get_help_string(  # cq: keep argparse hook
+        self, action: argparse.Action
+    ) -> str:
         """
         Get the help string for an action with default value appended.
 

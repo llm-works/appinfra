@@ -174,14 +174,3 @@ class ColorManager:
                 ),  # Blue-gray for TRACE
             }
         )
-
-
-# Helper functions for backward compatibility
-def _create_gray_level(level: int) -> str:
-    """Create gray level color (internal helper)."""
-    return ColorManager.create_gray_level(level)
-
-
-def _create_color_256(color_code: int) -> str:
-    """Create 256-color (internal helper)."""
-    return ColorManager.create_color_256(color_code)

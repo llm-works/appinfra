@@ -110,7 +110,6 @@ class Console:
         if force_terminal is None:
             force_terminal = _is_interactive()
 
-        self._no_color = no_color
         self._force_terminal = force_terminal
 
         # Initialize rich console if available and appropriate

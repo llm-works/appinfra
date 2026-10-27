@@ -158,12 +158,6 @@ class FunctionAnalyzer:
             # Would have been a violation without custom limit - track as exempt
             self._exempt_functions.append(info)
 
-    def _is_method(self, node: ast.FunctionDef) -> bool:
-        """Check if a function node is a method inside a class."""
-        # This is a simple heuristic; ast.walk doesn't maintain parent info
-        # In practice, we handle this by processing class bodies explicitly
-        return False
-
     def _analyze_function(
         self, node: ast.FunctionDef, file_path: Path, is_method: bool
     ) -> FunctionInfo | None:

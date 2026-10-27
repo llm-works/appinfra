@@ -13,11 +13,7 @@ import logging
 
 import pytest
 
-from appinfra.log.colors import (
-    ColorManager,
-    _create_color_256,
-    _create_gray_level,
-)
+from appinfra.log.colors import ColorManager
 from appinfra.log.constants import LogConstants
 
 # =============================================================================
@@ -129,25 +125,3 @@ class TestColorManager:
         """Test from_name handles whitespace."""
         assert ColorManager.from_name("  cyan  ") == ColorManager.CYAN
         assert ColorManager.from_name(" gray-12 ") == ColorManager.create_gray_level(12)
-
-
-# =============================================================================
-# Test Helper Functions
-# =============================================================================
-
-
-@pytest.mark.unit
-class TestHelperFunctions:
-    """Test backward compatibility helper functions."""
-
-    def test_create_gray_level_helper(self):
-        """Test _create_gray_level helper (line 110)."""
-        color = _create_gray_level(10)
-        # Should delegate to ColorManager
-        assert color == ColorManager.create_gray_level(10)
-
-    def test_create_color_256_helper(self):
-        """Test _create_color_256 helper (line 115)."""
-        color = _create_color_256(100)
-        # Should delegate to ColorManager
-        assert color == ColorManager.create_color_256(100)

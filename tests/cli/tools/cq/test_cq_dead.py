@@ -124,6 +124,21 @@ class TestDeadCodeAnalyzer:
         src = "def _hook(): pass  # cq: keep called by the stdlib\n"
         assert _unused(tmp_path, a=src) == []
 
+    def test_keep_directive_covers_every_store_in_the_file(self, tmp_path: Path):
+        src = """
+            class C:
+                def __init__(self):
+                    self._held = None  # cq: keep read elsewhere
+                def set(self, x):
+                    self._held = x
+        """
+        other = """
+            class D:
+                def set(self, x):
+                    self._held = x
+        """
+        assert _unused(tmp_path, a=src, b=other) == [("instance attribute", "_held")]
+
     def test_dunder_and_sunder_not_reported(self, tmp_path: Path):
         src = """
             class C:

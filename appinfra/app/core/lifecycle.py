@@ -39,7 +39,7 @@ class LifecycleManager:
         self._lifecycle_logger: Logger | None = (
             None  # Derived logger for lifecycle messages at /infra/app/lifecycle
         )
-        self._handler_registry: HandlerRegistry | None = None
+        self._handler_registry: HandlerRegistry | None = None  # cq: keep tests read it
         self._shut_down = False
         self._start_time: float | None = None
 

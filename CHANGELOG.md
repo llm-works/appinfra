@@ -28,6 +28,7 @@ For API stability guarantees and deprecation policy, see
 - A bare `make` shows the help screen instead of `make config`'s output.
 - **Breaking:** `appinfra.cli.tools.code_quality`, `check_functions` and `check_spdx` moved to
   `appinfra.cli.tools.cq` (`tool`, `functions`, `spdx`).
+- **Breaking:** `GitRuntimeSource()` no longer takes `check_dirty`; the parameter had no effect.
 
 ### Fixed
 - `StoreConformance`'s racing-prune test no longer stalls for seconds under load, and it races

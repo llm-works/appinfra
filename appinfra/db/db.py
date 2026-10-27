@@ -30,7 +30,6 @@ class UnknownDBTypeException(Exception):
             url (str): Database URL that is not supported
         """
         super().__init__(f"Unknown database type: {url}")
-        self._url = url
 
 
 # Helper functions for Manager.setup()

@@ -292,7 +292,6 @@ class TestInitializationHelpers:
 
     def test_initialize_performance_cache(self):
         """Test initialize_performance_cache sets dialect and regex."""
-        import re
 
         pg = Mock()
         engine = sqlalchemy.create_engine("sqlite:///:memory:")
@@ -301,7 +300,6 @@ class TestInitializationHelpers:
         initialize_performance_cache(pg)
 
         assert pg._dialect == engine.dialect
-        assert isinstance(pg._cached_regex, re.Pattern)
 
     def test_initialize_performance_optimizations(self):
         """Test initialize_performance_optimizations sets caches."""

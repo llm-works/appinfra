@@ -414,15 +414,6 @@ def multiselect(
     return _multiselect_fallback(message, choice_list, default)
 
 
-def _require_term_menu() -> None:
-    """Raise ImportError if simple-term-menu is not installed."""
-    if not TERM_MENU_AVAILABLE:
-        raise ImportError(
-            "Scrollable selection requires simple-term-menu. "
-            "Install with: pip install appinfra[ui]"
-        )
-
-
 def _display_fallback_page(
     choices: list[str], start: int, end: int, default_index: int
 ) -> None:

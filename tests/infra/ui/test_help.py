@@ -40,7 +40,6 @@ class TestRichHelpFormatterInit:
         """Test formatter initializes with default params."""
         formatter = RichHelpFormatter("test_prog")
         assert formatter._prog == "test_prog"
-        assert formatter._rich_output == []
 
     def test_init_custom_params(self):
         """Test formatter initializes with custom params."""

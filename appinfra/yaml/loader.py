@@ -1508,19 +1508,25 @@ Loader.add_multi_constructor("!chain:", Loader.chain_constructor)
 
 
 @register_chain("include", "deep")
-def _compose_include_deep(loader: Loader, node: yaml.Node) -> DeepMergeWrapper:
+def _compose_include_deep(  # cq: keep registered by @register_chain
+    loader: Loader, node: yaml.Node
+) -> DeepMergeWrapper:
     """!deep !include "x.yaml" or !include "x.yaml" !deep — deep-merged include."""
     return loader._construct_deep_include(node, optional=False)
 
 
 @register_chain("include?", "deep")
-def _compose_include_optional_deep(loader: Loader, node: yaml.Node) -> DeepMergeWrapper:
+def _compose_include_optional_deep(  # cq: keep registered by @register_chain
+    loader: Loader, node: yaml.Node
+) -> DeepMergeWrapper:
     """!deep !include? "x.yaml" or !include? "x.yaml" !deep — optional deep include."""
     return loader._construct_deep_include(node, optional=True)
 
 
 @register_chain("env", "secret")
-def _compose_env_secret(loader: Loader, node: yaml.Node) -> SecretStr:
+def _compose_env_secret(  # cq: keep registered by @register_chain
+    loader: Loader, node: yaml.Node
+) -> SecretStr:
     """!secret !env VAR or !env VAR !secret — resolve VAR, wrap masked."""
     value = loader._construct_env(node, optional=False)
     assert value is not None  # non-optional path raises otherwise
@@ -1528,7 +1534,9 @@ def _compose_env_secret(loader: Loader, node: yaml.Node) -> SecretStr:
 
 
 @register_chain("env?", "secret")
-def _compose_env_optional_secret(loader: Loader, node: yaml.Node) -> SecretStr | None:
+def _compose_env_optional_secret(  # cq: keep registered by @register_chain
+    loader: Loader, node: yaml.Node
+) -> SecretStr | None:
     """!secret !env? VAR or !env? VAR !secret — resolve VAR, wrap masked, None if missing."""
     value = loader._construct_env(node, optional=True)
     return SecretStr(value) if value is not None else None

@@ -123,25 +123,6 @@ class TestJSONFormatterInit:
         assert formatter.timestamp_format == "unix"
         assert formatter.custom_fields == {"app": "test_app"}
 
-    def test_standard_fields_defined(self):
-        """Test that standard fields are properly defined."""
-        formatter = JSONFormatter()
-        expected_fields = {
-            "timestamp",
-            "level",
-            "logger",
-            "message",
-            "module",
-            "function",
-            "line",
-            "process_id",
-            "thread_id",
-            "extra",
-            "exception",
-            "location",
-        }
-        assert formatter._standard_fields == expected_fields
-
 
 # =============================================================================
 # Test should_include_field

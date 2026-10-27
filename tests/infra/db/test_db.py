@@ -740,7 +740,6 @@ class TestUnknownDBTypeException:
         exc = UnknownDBTypeException(url)
 
         assert str(exc) == f"Unknown database type: {url}"
-        assert exc._url == url
 
     def test_exception_inheritance(self):
         """Test exception inherits from Exception."""

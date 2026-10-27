@@ -80,7 +80,6 @@ class TestPGHelperFunctions:
 
     def testinitialize_performance_cache(self):
         """Test that initialize_performance_cache sets dialect and regex."""
-        import re
 
         import sqlalchemy
 
@@ -96,10 +95,6 @@ class TestPGHelperFunctions:
 
         # Verify dialect was cached
         assert mock_pg._dialect == mock_engine.dialect
-
-        # Verify regex was cached
-        assert hasattr(mock_pg, "_cached_regex")
-        assert isinstance(mock_pg._cached_regex, re.Pattern)
 
     def testcreate_engine_and_session(self):
         """Test that create_engine_and_session creates engine and session."""

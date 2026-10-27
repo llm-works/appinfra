@@ -151,22 +151,6 @@ class JSONFormatter(logging.Formatter):
         self.timestamp_format = timestamp_format
         self.custom_fields = custom_fields or {}
 
-        # Standard fields that are always included unless explicitly excluded
-        self._standard_fields = {
-            "timestamp",
-            "level",
-            "logger",
-            "message",
-            "module",
-            "function",
-            "line",
-            "process_id",
-            "thread_id",
-            "extra",
-            "exception",
-            "location",
-        }
-
     def should_include_field(self, field_name: str) -> bool:
         """Check if a field should be included in JSON output."""
         # If exclude_fields is specified and field is in it, exclude

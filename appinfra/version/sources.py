@@ -233,16 +233,6 @@ class GitRuntimeSource(VersionSource):
     Runs `git rev-parse HEAD` in the package's source directory.
     """
 
-    def __init__(self, check_dirty: bool = False):
-        """
-        Initialize the git runtime source.
-
-        Args:
-            check_dirty: If True, also check if the working tree is dirty.
-                         This adds overhead as it runs `git status`.
-        """
-        self._check_dirty = check_dirty
-
     def get_info(self, package_name: str) -> PackageVersionInfo | None:
         """Get version info by running git commands."""
         from .info import PackageVersionInfo

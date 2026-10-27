@@ -48,7 +48,6 @@ class RichHelpFormatter(argparse.HelpFormatter):
     ):
         """Initialize the formatter."""
         super().__init__(prog, indent_increment, max_help_position, width)
-        self._rich_output: list[Any] = []
 
     def _build_rich_help(self, console: Any) -> None:
         """Build rich help output to console."""

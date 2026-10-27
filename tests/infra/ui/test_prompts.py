@@ -1021,24 +1021,3 @@ class TestInquirerSelectKeys:
     def test_enter_then_esc_keeps_the_answer(self):
         """A skip key after Enter does not replace the selected choice."""
         assert _run_select_with_keys("\r\x1b") == ("a", [])
-
-
-class TestRequireTermMenu:
-    """Tests for _require_term_menu function."""
-
-    def test_raises_when_not_available(self):
-        """Test raises ImportError when not available."""
-        from appinfra.ui.prompts import _require_term_menu
-
-        with (
-            patch.object(prompts, "TERM_MENU_AVAILABLE", False),
-            pytest.raises(ImportError, match="simple-term-menu"),
-        ):
-            _require_term_menu()
-
-    def test_no_raise_when_available(self):
-        """Test does not raise when available."""
-        from appinfra.ui.prompts import _require_term_menu
-
-        with patch.object(prompts, "TERM_MENU_AVAILABLE", True):
-            _require_term_menu()  # Should not raise
