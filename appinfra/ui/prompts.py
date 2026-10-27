@@ -188,7 +188,7 @@ def _password_questionary(message: str, do_confirm: bool) -> str:
         pwd2_result = questionary.password(
             "Confirm password:", style=PROMPT_STYLE
         ).ask()
-        if str(pwd2_result) if pwd2_result else pwd != "":
+        if (str(pwd2_result) if pwd2_result else "") != pwd:
             print("Passwords do not match. Please try again.")
             return _password_questionary(message, do_confirm)
     return pwd

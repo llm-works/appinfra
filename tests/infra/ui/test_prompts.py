@@ -603,6 +603,25 @@ class TestQuestionaryIntegration:
         assert mock_questionary.password.call_count == 1
         assert result == "secretpass"
 
+    def test_password_questionary_confirm_matching(self, mock_questionary):
+        """A matching confirmation returns the password without prompting again."""
+        mock_questionary.password.return_value.ask.side_effect = ["secret", "secret"]
+        result = password("Password:", confirm=True)
+        assert mock_questionary.password.call_count == 2
+        assert result == "secret"
+
+    def test_password_questionary_confirm_mismatch_prompts_again(
+        self, mock_questionary
+    ):
+        """A mismatched confirmation prompts for both again."""
+        ask = mock_questionary.password.return_value.ask
+        ask.side_effect = ["secret", "other", "secret", "secret"]
+        with patch("builtins.print") as mock_print:
+            result = password("Password:", confirm=True)
+        mock_print.assert_called_once_with("Passwords do not match. Please try again.")
+        assert mock_questionary.password.call_count == 4
+        assert result == "secret"
+
 
 class TestDisplayFallbackPage:
     """Tests for _display_fallback_page function."""

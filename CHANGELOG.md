@@ -31,6 +31,8 @@ For API stability guarantees and deprecation policy, see
 - **Breaking:** `GitRuntimeSource()` no longer takes `check_dirty`; the parameter had no effect.
 
 ### Fixed
+- `password(confirm=True)` accepts a matching confirmation; with questionary installed it always
+  reported a mismatch and prompted again.
 - `JSONLoggingBuilder` and `DatabaseLoggingBuilder` apply the location color; a database handler
   that fails to build raises `LogConfigError`, as with the other builders.
 - `StoreConformance`'s racing-prune test no longer stalls for seconds under load, and it races
