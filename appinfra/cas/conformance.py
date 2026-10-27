@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import contextlib
 import threading
+import time
 from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 
@@ -87,6 +88,9 @@ def _pruning(repo: Repo) -> Iterator[None]:
         try:
             while not stop.is_set():
                 repo.prune(expire=0)
+                # Without a yield the loop keeps the GIL and wins every lock it frees, so the
+                # writers stall for seconds and seldom meet a prune at all
+                time.sleep(0)
         except BaseException as e:
             error = e
 
@@ -596,7 +600,12 @@ class StoreConformance:
         def writer(i: int) -> None:
             for n in range(10):
                 try:
-                    repo.commit(f"w{i}", _tree(repo, f=f"{i}-{n}".encode()))
+                    tree_id = _tree(repo, f=f"{i}-{n}".encode())
+                    if n % 2 == 0:
+                        # Let a prune run between storing the tree and committing it; only
+                        # every other commit, so half of them still succeed and leave history
+                        time.sleep(0)
+                    repo.commit(f"w{i}", tree_id)
                 except ObjectNotFoundError:
                     pass  # prune took an object this writer had not referenced yet
 
