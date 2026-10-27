@@ -17,9 +17,6 @@ from . import pg, sqlite
 class UnknownDBTypeException(Exception):
     """
     Exception raised when an unsupported database type is encountered.
-
-    Attributes:
-        _url: The database URL that caused the exception
     """
 
     def __init__(self, url: str) -> None:
