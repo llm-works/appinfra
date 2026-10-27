@@ -272,13 +272,17 @@ cq_strict_flag() {
 }
 
 # Run one cq subcommand: a warning adds "<count> <label>" to CQ_SUMMARY, a failure sets CQ_FAILED.
+# Without --strict, findings exit with EXIT_CODE_WARNING, so another nonzero exit is the tool
+# failing; that only warns too, so a broken tool does not fail make check.
 cq_tool() {
-    local label="$1" args="$2" out rc=0 count
-    out=$(eval "${PYTHON} -m appinfra.cli.cli -l error cq ${args}" 2>&1) || rc=$?
+    local label="$1" strict="$2" args="$3" out rc=0 count
+    out=$(eval "${PYTHON} -m appinfra.cli.cli -l error cq ${args} ${strict}" 2>&1) || rc=$?
     printf '%s\n' "$out"
     if [ "$rc" -eq "$EXIT_CODE_WARNING" ]; then
         count=$(printf '%s\n' "$out" | sed -nE 's/.*Violations( found)?: ([0-9]+).*/\2/p' | head -1)
         CQ_SUMMARY+=("${count:-?} ${label}")
+    elif [ "$rc" -ne 0 ] && [ -z "$strict" ]; then
+        CQ_SUMMARY+=("${label} did not run")
     elif [ "$rc" -ne 0 ]; then
         CQ_FAILED=true
     fi
@@ -289,9 +293,9 @@ cq_tool() {
 cq_check() {
     CQ_SUMMARY=()
     CQ_FAILED=false
-    cq_tool size "cf $(cq_strict_flag "$CQ_STRICT") ${CQ_EXCLUDE_FLAGS}"
-    [ "$CQ_DUP" = "false" ] || cq_tool dup "dup ${PKG_NAME}/ $(cq_strict_flag "$CQ_DUP") ${CQ_EXCLUDE_FLAGS}"
-    [ "$CQ_DEAD" = "false" ] || cq_tool dead "dead ${PKG_NAME}/ $(cq_strict_flag "$CQ_DEAD") ${CQ_EXCLUDE_FLAGS}"
+    cq_tool size "$(cq_strict_flag "$CQ_STRICT")" "cf ${CQ_EXCLUDE_FLAGS}"
+    [ "$CQ_DUP" = "false" ] || cq_tool dup "$(cq_strict_flag "$CQ_DUP")" "dup ${PKG_NAME}/ ${CQ_EXCLUDE_FLAGS}"
+    [ "$CQ_DEAD" = "false" ] || cq_tool dead "$(cq_strict_flag "$CQ_DEAD")" "dead ${PKG_NAME}/ ${CQ_EXCLUDE_FLAGS}"
     [ "$CQ_FAILED" = false ] || return 1
     [ "${#CQ_SUMMARY[@]}" -gt 0 ] || return 0
     local summary

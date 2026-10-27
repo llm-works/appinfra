@@ -11,7 +11,8 @@ blocks that differ only in those still count as duplicates. A group is kept,
 not reported, when one of its reported copies has ``# cq: keep`` on a line
 within the reported range, followed by the reason. pylint may report only two
 copies of a block found in three or more places, so the directive goes on every
-copy. pylint must be installed; it is part of the ``check`` extra.
+copy. pylint runs with ``pylint_plugin``, which turns off attribute inference the
+check does not use. pylint must be installed; it is part of the ``check`` extra.
 
 Exit Codes:
     0: No duplicates
@@ -23,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
@@ -50,6 +52,14 @@ _LOCATION = re.compile(r"^==(?P<module>[^:\s]+):\[(?P<start>\d+):(?P<end>\d+)\]$
 # pylint exit status bits that mean it did not complete (fatal, usage error)
 _PYLINT_FAILED = 1 | 32
 
+# Skips astroid's attribute inference, which can import large dependencies whole
+_PLUGIN = f"{__package__}.pylint_plugin"
+
+# Directory holding the appinfra package this module belongs to: a checkout's root or
+# site-packages. pylint drops the working directory from sys.path, so a checkout's
+# appinfra is not importable there unless this is on PYTHONPATH.
+_PACKAGE_ROOT = Path(__file__).resolve().parents[len(__name__.split(".")) - 1]
+
 
 @dataclass(frozen=True)
 class Block:
@@ -72,6 +82,7 @@ def pylint_command(files: list[Path], min_lines: int, jobs: int) -> list[str]:
         "-m",
         "pylint",
         f"--jobs={jobs}",
+        f"--load-plugins={_PLUGIN}",
         "--disable=all",
         "--enable=duplicate-code",
         "--output-format=json2",
@@ -83,6 +94,17 @@ def pylint_command(files: list[Path], min_lines: int, jobs: int) -> list[str]:
         "--ignore-signatures=y",
         *(str(f) for f in files),
     ]
+
+
+def pylint_env() -> dict[str, str]:
+    """Return the environment for pylint, with this appinfra first on PYTHONPATH.
+
+    pylint then loads the plugin from the same appinfra that runs cq dup.
+    """
+    env = dict(os.environ)
+    paths = [str(_PACKAGE_ROOT), env.get("PYTHONPATH", "")]
+    env["PYTHONPATH"] = os.pathsep.join(p for p in paths if p)
+    return env
 
 
 def module_paths(files: list[Path]) -> dict[str, Path]:
@@ -120,6 +142,16 @@ def parse_groups(output: str, paths: dict[str, Path]) -> list[list[Block]]:
         if m.get("symbol") == "duplicate-code"
     ]
     return [g for g in groups if g]
+
+
+def plugin_errors(output: str) -> list[str]:
+    """Return pylint's messages for plugins it could not load; it still exits 0 then.
+
+    Each pylint process reports the failure, so a message repeats once per job.
+    """
+    messages = json.loads(output).get("messages", [])
+    errors = [m["message"] for m in messages if m.get("symbol") == "bad-plugin-value"]
+    return list(dict.fromkeys(errors))
 
 
 def _kept_lines(location: str, cache: dict[str, set[int]]) -> set[int]:
@@ -232,16 +264,20 @@ class CheckDupTool(Tool):
         return 1 if self.args.strict else EXIT_CODE_WARNING
 
     def _run_pylint(self, files: list[Path]) -> subprocess.CompletedProcess[str] | None:
-        """Run pylint; log and return None if it is missing or did not complete."""
+        """Run pylint; log and return None if it did not complete or ran without its plugin."""
         cmd = pylint_command(files, self.args.min_lines, self.args.jobs)
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        result = subprocess.run(cmd, capture_output=True, text=True, env=pylint_env())
         if result.returncode & _PYLINT_FAILED or not result.stdout:
-            self.lg.warning(
+            self.lg.error(
                 "pylint did not complete (is it installed?)",
                 extra={
                     "returncode": result.returncode,
                     "stderr": result.stderr[-2000:],
                 },
             )
+            return None
+        errors = plugin_errors(result.stdout)
+        if errors:
+            self.lg.error("pylint could not load its plugin", extra={"errors": errors})
             return None
         return result

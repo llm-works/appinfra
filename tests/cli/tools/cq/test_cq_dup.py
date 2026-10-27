@@ -5,12 +5,14 @@
 
 import argparse
 import json
+import os
 import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+import appinfra
 from appinfra.cli.tools.cq.common import EXIT_CODE_WARNING
 from appinfra.cli.tools.cq.dup import (
     Block,
@@ -20,6 +22,7 @@ from appinfra.cli.tools.cq.dup import (
     module_paths,
     parse_groups,
     pylint_command,
+    pylint_env,
 )
 
 # A body long enough to pass the default 8-line threshold
@@ -188,12 +191,31 @@ class TestCheckDupTool:
         tool = _make_tool(tmp_path)
         with patch("appinfra.cli.tools.cq.dup.subprocess.run", return_value=failed):
             assert tool.run() == 1
-        tool._logger.warning.assert_called()
+        tool._logger.error.assert_called()
+
+    def test_plugin_load_failure_exits_one(self, tmp_path: Path):
+        (tmp_path / "a.py").write_text("x = 1\n")
+        message = {"symbol": "bad-plugin-value", "message": "Plugin 'p' is impossible"}
+        output = json.dumps({"messages": [message, message]})
+        loaded = subprocess.CompletedProcess([], 0, stdout=output, stderr="")
+        tool = _make_tool(tmp_path)
+        with patch("appinfra.cli.tools.cq.dup.subprocess.run", return_value=loaded):
+            assert tool.run() == 1
+        errors = tool._logger.error.call_args.kwargs["extra"]["errors"]
+        assert errors == ["Plugin 'p' is impossible"]
+
+    def test_env_puts_this_appinfra_first_on_pythonpath(self, monkeypatch):
+        root = str(Path(appinfra.__file__).resolve().parent.parent)
+        monkeypatch.setenv("PYTHONPATH", "/elsewhere")
+        assert pylint_env()["PYTHONPATH"] == f"{root}{os.pathsep}/elsewhere"
+        monkeypatch.delenv("PYTHONPATH")
+        assert pylint_env()["PYTHONPATH"] == root
 
     def test_command_passes_threshold_jobs_and_files(self):
         cmd = pylint_command([Path("a.py")], 6, 4)
         assert "--min-similarity-lines=6" in cmd
         assert "--jobs=4" in cmd
+        assert "--load-plugins=appinfra.cli.tools.cq.pylint_plugin" in cmd
         assert cmd[-1] == "a.py"
 
     def test_args(self):
