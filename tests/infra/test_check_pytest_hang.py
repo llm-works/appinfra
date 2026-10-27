@@ -86,21 +86,36 @@ def test_joins_its_thread():
     thread = threading.Thread(target=lambda: None, name="joined")
     thread.start()
     thread.join()
+
+def test_stops_its_thread_in_a_cleanup(request):
+    done = threading.Event()
+    thread = threading.Thread(target=done.wait, args=(30.0,), name="cleaned-up")
+    thread.start()
+
+    def stop():
+        done.set()
+        thread.join()
+
+    request.config.add_cleanup(stop)
 """
 
-# Releases the inner threads only after pytest_hang has reported them: trylast runs this
-# pytest_unconfigure after the plugin's, so the threads are alive when it looks, however slow
-# the machine, and the inner run does not wait out their timeout
+# Releases the inner threads only after pytest_hang has reported them. Cleanups run last-
+# registered first; registered from a tryfirst pytest_configure, before the plugin's, this one
+# runs after the report, so the threads are alive when it looks, however slow the machine, and
+# the inner run does not wait out their timeout
 _RELEASE_THREADS = """
 import sys
 
 import pytest
 
-@pytest.hookimpl(trylast=True)
-def pytest_unconfigure(config):
+def _release():
     module = sys.modules.get("test_inner")
     if module is not None:
         module.stop.set()
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_configure(config):
+    config.add_cleanup(_release)
 """
 
 
@@ -112,13 +127,14 @@ def test_thread_left_running_is_reported_with_its_test(
     pytester.makeconftest(_RELEASE_THREADS)
     result = run_with_plugin("60")
 
-    result.assert_outcomes(passed=3)
+    result.assert_outcomes(passed=4)
     err = result.stderr.str()
     assert "=== thread left running by test_inner.py::test_leaves_a_thread ===" in err
     assert "(lingerer):\n" in err  # the thread follows, then its own stack
     assert ", in wait\n" in err
     assert "daemonic" not in err  # a daemon thread does not hold up the exit
     assert "joined" not in err  # nor does one that ended
+    assert "cleaned-up" not in err  # nor one a config cleanup stops before the report
 
 
 @pytest.mark.unit

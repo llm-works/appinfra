@@ -203,7 +203,7 @@ node id is shortened from the start to fit the width; without one (CI) it is pri
 the CI log keeps the rows even when the job is killed by its timeout.
 
 A non-daemon thread a test starts and leaves running holds up its process's exit; a
-pytest-xdist worker in that state is killed only after a 10s timeout, which the check's time
+pytest-xdist worker in that state waits for it up to a 10s timeout, which the check's time
 includes. The test that started such a thread gets a row below the checklist, and the thread's
 name and stack go to the kept log:
 
