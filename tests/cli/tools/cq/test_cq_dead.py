@@ -124,6 +124,10 @@ class TestDeadCodeAnalyzer:
         src = "def _hook(): pass  # cq: keep called by the stdlib\n"
         assert _unused(tmp_path, a=src) == []
 
+    def test_keep_directive_in_a_string_does_not_count(self, tmp_path: Path):
+        src = 'def _hook(): return "# cq: keep is only text here"\n'
+        assert _unused(tmp_path, a=src) == [("function", "_hook")]
+
     def test_keep_directive_covers_every_store_in_the_file(self, tmp_path: Path):
         src = """
             class C:

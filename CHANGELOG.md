@@ -12,8 +12,8 @@ For API stability guarantees and deprecation policy, see
 
 ### Added
 - `appinfra cq dup` reports duplicated code blocks (pylint's duplicate-code; pylint joins the
-  `dev` extra). `appinfra cq dead` reports private definitions nothing refers to. `# cq: keep
-  <reason>` exempts a finding, on the definition line or within one copy of a block. `make
+  `check` extra). `appinfra cq dead` reports private definitions nothing refers to. `# cq: keep
+  <reason>` exempts a finding, on the definition line or within every copy of a block. `make
   check` runs them per `INFRA_DEV_CQ_DUP` / `INFRA_DEV_CQ_DEAD`:
   `false`, `warn` (default) or `strict`.
 - `INFRA_DEV_CQ_LINT_SELECT`: extra ruff rule codes that `make check` reports under Linting as
@@ -26,6 +26,8 @@ For API stability guarantees and deprecation policy, see
 - `make check`: the "Function size check" row is now "Code quality check" and also runs
   `cq dup` and `cq dead` when enabled; the "Running code quality checks..." banner is gone.
 - A bare `make` shows the help screen instead of `make config`'s output.
+- `make setup` installs the tools `make check` runs (the new `check` extra: ruff, mypy, pytest,
+  coverage, interrogate, pylint) in every project, not only those its own dependencies list.
 - **Breaking:** `appinfra.cli.tools.code_quality`, `check_functions` and `check_spdx` moved to
   `appinfra.cli.tools.cq` (`tool`, `functions`, `spdx`).
 - **Breaking:** `GitRuntimeSource()` no longer takes `check_dirty`; the parameter had no effect.

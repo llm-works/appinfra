@@ -30,7 +30,7 @@ beta = ["my-pkg[alpha]", "dep-c"]
 all = ["My.Pkg[beta]>=0.1", "my_pkg[alpha] ; python_version >= '3.11'"]
 """
 
-EXPECTED_DEPS = ["dep-a>=1", "my-pkg-extra>=1", "dep-b>=2", "dep-c"]
+EXPECTED_DEPS = ["dep-a>=1", "my-pkg-extra>=1", "dep-b>=2", "dep-c", "appinfra[check]"]
 
 
 @pytest.fixture
@@ -65,6 +65,20 @@ def test_requirement_name(
 def test_collect_deps_drops_self_references(install_deps: ModuleType) -> None:
     project: dict[str, Any] = tomllib.loads(PYPROJECT)["project"]
     assert install_deps.collect_deps(project) == EXPECTED_DEPS
+
+
+@pytest.mark.unit
+def test_appinfra_itself_gets_no_framework_tools(install_deps: ModuleType) -> None:
+    """appinfra installs its own extras directly; appinfra[check] would hit the index."""
+    project = {
+        "name": "appinfra",
+        "dependencies": ["PyYAML"],
+        "optional-dependencies": {
+            "check": ["ruff"],
+            "dev": ["appinfra[check]", "httpx"],
+        },
+    }
+    assert install_deps.collect_deps(project) == ["PyYAML", "ruff", "httpx"]
 
 
 @pytest.mark.unit

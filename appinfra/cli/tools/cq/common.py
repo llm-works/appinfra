@@ -3,7 +3,9 @@
 
 """File selection, exit codes and the keep directive shared by the cq checks."""
 
+import io
 import re
+import tokenize
 from pathlib import Path
 
 from ....log import Logger
@@ -15,12 +17,31 @@ EXIT_CODE_WARNING = 42
 KEEP_DIRECTIVE = re.compile(r"#\s*cq:\s*keep\b", re.IGNORECASE)
 
 
-def has_keep(lines: list[str], first_line: int, last_line: int) -> bool:
-    """True if a line in first_line..last_line (1-based, inclusive) carries the keep directive."""
-    return any(
-        KEEP_DIRECTIVE.search(line)
-        for line in lines[max(first_line - 1, 0) : last_line]
-    )
+def read_source(path: Path) -> str:
+    """Read a Python file with its declared encoding, as the interpreter and pylint do."""
+    with tokenize.open(path) as f:
+        return f.read()
+
+
+def keep_lines(source: str) -> set[int]:
+    """Return the numbers of the lines whose comment carries the keep directive.
+
+    Only comments count: the directive's text inside a string literal does not.
+    """
+    try:
+        tokens = list(tokenize.generate_tokens(io.StringIO(source).readline))
+    except (SyntaxError, tokenize.TokenError):
+        return set()
+    return {
+        token.start[0]
+        for token in tokens
+        if token.type == tokenize.COMMENT and KEEP_DIRECTIVE.search(token.string)
+    }
+
+
+def has_keep(kept: set[int], first_line: int, last_line: int) -> bool:
+    """True if a line in first_line..last_line (1-based, inclusive) is in kept."""
+    return any(first_line <= line <= last_line for line in kept)
 
 
 # Default directories to exclude (build artifacts, caches, virtual envs)

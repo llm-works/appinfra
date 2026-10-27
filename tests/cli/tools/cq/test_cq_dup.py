@@ -88,6 +88,24 @@ class TestDropKept:
 
         assert drop_kept(groups) == []
 
+    def test_keep_in_a_file_with_a_declared_encoding(self, tmp_path: Path):
+        a = tmp_path / "a.py"
+        a.write_bytes(
+            b"# -*- coding: latin-1 -*-\n"
+            b"x = '\xe9'  # cq: keep same shape on purpose\n"
+            b"y = 2\n"
+        )
+        groups = [[Block(str(a), 2, 3), Block("missing.py", 1, 2)]]
+
+        assert drop_kept(groups) == []
+
+    def test_keep_in_a_string_does_not_count(self, tmp_path: Path):
+        a = tmp_path / "a.py"
+        a.write_text("x = '# cq: keep is only text here'\ny = 2\n")
+        groups = [[Block(str(a), 1, 2), Block("missing.py", 1, 2)]]
+
+        assert drop_kept(groups) == groups
+
     def test_keep_outside_the_range_does_not(self, tmp_path: Path):
         a = tmp_path / "a.py"
         a.write_text("# cq: keep\nx = 1\ny = 2\n")

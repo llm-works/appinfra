@@ -39,7 +39,13 @@ from pathlib import Path
 from typing import Any
 
 from ....app.tools import Tool, ToolConfig
-from .common import EXIT_CODE_WARNING, collect_python_files, has_keep
+from .common import (
+    EXIT_CODE_WARNING,
+    collect_python_files,
+    has_keep,
+    keep_lines,
+    read_source,
+)
 
 
 @dataclass(frozen=True)
@@ -141,12 +147,12 @@ class DeadCodeAnalyzer:
     def add_file(self, file_path: Path) -> None:
         """Parse one file and record its private definitions and its uses."""
         try:
-            source = file_path.read_text(encoding="utf-8")
+            source = read_source(file_path)
             tree = ast.parse(source, filename=str(file_path))
         except (OSError, UnicodeDecodeError, SyntaxError):
             self.unparsable.append(file_path)
             return
-        lines = source.splitlines()
+        kept_lines = keep_lines(source)
         found = [
             *_scope_definitions(tree.body, in_class=False),
             *_self_attribute_stores(tree),
@@ -155,7 +161,7 @@ class DeadCodeAnalyzer:
             line_number = node.lineno  # type: ignore[attr-defined]
             if not is_private(name):
                 continue
-            if has_keep(lines, line_number, line_number):
+            if has_keep(kept_lines, line_number, line_number):
                 self.kept.add((name, file_path))
             else:
                 self.definitions.append(Definition(name, kind, file_path, line_number))
