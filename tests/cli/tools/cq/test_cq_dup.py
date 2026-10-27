@@ -15,6 +15,7 @@ from appinfra.cli.tools.cq.common import EXIT_CODE_WARNING
 from appinfra.cli.tools.cq.dup import (
     Block,
     CheckDupTool,
+    drop_kept,
     format_report,
     module_paths,
     parse_groups,
@@ -68,6 +69,26 @@ class TestParsing:
 
 
 @pytest.mark.unit
+class TestDropKept:
+    """Test drop_kept()."""
+
+    def test_keep_within_one_copy_drops_the_group(self, tmp_path: Path):
+        a, b = tmp_path / "a.py", tmp_path / "b.py"
+        a.write_text("x = 1\ny = 2  # cq: keep mirrors b.py on purpose\nz = 3\n")
+        b.write_text("x = 1\ny = 2\nz = 3\n")
+        groups = [[Block(str(a), 1, 3), Block(str(b), 1, 3)]]
+
+        assert drop_kept(groups) == []
+
+    def test_keep_outside_the_range_does_not(self, tmp_path: Path):
+        a = tmp_path / "a.py"
+        a.write_text("# cq: keep\nx = 1\ny = 2\n")
+        groups = [[Block(str(a), 2, 3), Block("missing.py", 1, 2)]]
+
+        assert drop_kept(groups) == groups
+
+
+@pytest.mark.unit
 class TestFormatReport:
     """Test format_report()."""
 
@@ -115,6 +136,16 @@ class TestCheckDupTool:
                 f"def {name}(total):\n{_BODY}\n    return total\n"
             )
         assert _make_tool(tmp_path, strict=True).run() == 1
+
+    def test_kept_duplicate_is_not_reported(self, tmp_path: Path, capsys):
+        for name, keep in (("a", "  # cq: keep same shape on purpose"), ("b", "")):
+            (tmp_path / f"{name}.py").write_text(
+                f"def {name}(total):\n    total = total + 1{keep}\n{_BODY}\n"
+                "    return total\n"
+            )
+
+        assert _make_tool(tmp_path).run() == 0
+        assert "Violations: 0" in capsys.readouterr().out
 
     def test_clean_tree_exits_zero(self, tmp_path: Path):
         (tmp_path / "a.py").write_text("x = 1\n")

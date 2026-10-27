@@ -1,14 +1,27 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright 2026 The appinfra Authors
 
-"""File selection and exit codes shared by the cq checks."""
+"""File selection, exit codes and the keep directive shared by the cq checks."""
 
+import re
 from pathlib import Path
 
 from ....log import Logger
 
 # Exit code for "warnings but ok" - findings in non-strict mode
 EXIT_CODE_WARNING = 42
+
+# Marks a finding as intended, followed by the reason: "# cq: keep <reason>"
+KEEP_DIRECTIVE = re.compile(r"#\s*cq:\s*keep\b", re.IGNORECASE)
+
+
+def has_keep(lines: list[str], first_line: int, last_line: int) -> bool:
+    """True if a line in first_line..last_line (1-based, inclusive) carries the keep directive."""
+    return any(
+        KEEP_DIRECTIVE.search(line)
+        for line in lines[max(first_line - 1, 0) : last_line]
+    )
+
 
 # Default directories to exclude (build artifacts, caches, virtual envs)
 # These are matched against individual path components

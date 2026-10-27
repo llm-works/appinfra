@@ -7,8 +7,10 @@ Duplicated code check.
 Runs pylint's duplicate-code checker (``R0801``) over the selected files and
 reports each group of similar blocks as ``path:first-last`` locations. Comments,
 docstrings, imports and function signatures are ignored when comparing, so
-blocks that differ only in those still count as duplicates. pylint must be
-installed; it is part of the ``dev`` extra.
+blocks that differ only in those still count as duplicates. A group is kept,
+not reported, when one of its copies has ``# cq: keep`` on a line within the
+reported range, followed by the reason. pylint must be installed; it is part of
+the ``dev`` extra.
 
 Exit Codes:
     0: No duplicates
@@ -28,7 +30,7 @@ from pathlib import Path
 from typing import Any
 
 from ....app.tools import Tool, ToolConfig
-from .common import EXIT_CODE_WARNING, collect_python_files
+from .common import EXIT_CODE_WARNING, collect_python_files, has_keep
 
 DEFAULT_MIN_LINES = 8
 
@@ -106,6 +108,29 @@ def parse_groups(output: str, paths: dict[str, Path]) -> list[list[Block]]:
     return [g for g in groups if g]
 
 
+def _source_lines(location: str, cache: dict[str, list[str]]) -> list[str]:
+    """Return a block's file as lines, read once; an unreadable file has none."""
+    if location not in cache:
+        try:
+            cache[location] = Path(location).read_text(encoding="utf-8").splitlines()
+        except (OSError, UnicodeDecodeError):
+            cache[location] = []
+    return cache[location]
+
+
+def drop_kept(groups: list[list[Block]]) -> list[list[Block]]:
+    """Drop the groups that have a keep directive within one of their blocks."""
+    cache: dict[str, list[str]] = {}
+    return [
+        group
+        for group in groups
+        if not any(
+            has_keep(_source_lines(b.location, cache), b.first_line, b.last_line)
+            for b in group
+        )
+    ]
+
+
 def format_report(groups: list[list[Block]], files_checked: int) -> str:
     """Render each group as its locations, largest first, plus totals.
 
@@ -138,7 +163,8 @@ class CheckDupTool(Tool):
             description=(
                 "Report blocks of similar lines found in more than one place, "
                 "using pylint's duplicate-code checker. Comments, docstrings, "
-                "imports and signatures are ignored when comparing."
+                "imports and signatures are ignored when comparing. Mark intended "
+                "ones with '# cq: keep <reason>' within one of the copies."
             ),
         )
         super().__init__(parent, config)
@@ -179,7 +205,7 @@ class CheckDupTool(Tool):
         result = self._run_pylint(files)
         if result is None:
             return 1
-        groups = parse_groups(result.stdout, module_paths(files))
+        groups = drop_kept(parse_groups(result.stdout, module_paths(files)))
         sys.stdout.write(format_report(groups, len(files)) + "\n")
         if not groups:
             return 0

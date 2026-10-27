@@ -31,7 +31,6 @@ from __future__ import annotations
 
 import argparse
 import ast
-import re
 import sys
 from collections.abc import Iterator
 from dataclasses import dataclass
@@ -39,9 +38,7 @@ from pathlib import Path
 from typing import Any
 
 from ....app.tools import Tool, ToolConfig
-from .common import EXIT_CODE_WARNING, collect_python_files
-
-KEEP_DIRECTIVE = re.compile(r"#\s*cq:\s*keep\b", re.IGNORECASE)
+from .common import EXIT_CODE_WARNING, collect_python_files, has_keep
 
 
 @dataclass(frozen=True)
@@ -154,7 +151,7 @@ class DeadCodeAnalyzer:
         ]
         for name, kind, node in found:
             line_number = node.lineno  # type: ignore[attr-defined]
-            if is_private(name) and not _has_keep(lines, line_number):
+            if is_private(name) and not has_keep(lines, line_number, line_number):
                 self.definitions.append(Definition(name, kind, file_path, line_number))
         self.used.update(_used_names(tree))
 
@@ -169,13 +166,6 @@ class DeadCodeAnalyzer:
                 seen.add((d.name, d.file_path))
                 result.append(d)
         return result
-
-
-def _has_keep(lines: list[str], line_number: int) -> bool:
-    """True if the definition's line carries a ``# cq: keep`` directive."""
-    if not 0 < line_number <= len(lines):
-        return False
-    return KEEP_DIRECTIVE.search(lines[line_number - 1]) is not None
 
 
 def format_report(findings: list[Definition], files_checked: int) -> str:

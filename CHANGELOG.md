@@ -12,8 +12,9 @@ For API stability guarantees and deprecation policy, see
 
 ### Added
 - `appinfra cq dup` reports duplicated code blocks (pylint's duplicate-code; pylint joins the
-  `dev` extra). `appinfra cq dead` reports private definitions nothing refers to; `# cq: keep
-  <reason>` exempts one. `make check` runs them per `INFRA_DEV_CQ_DUP` / `INFRA_DEV_CQ_DEAD`:
+  `dev` extra). `appinfra cq dead` reports private definitions nothing refers to. `# cq: keep
+  <reason>` exempts a finding, on the definition line or within one copy of a block. `make
+  check` runs them per `INFRA_DEV_CQ_DUP` / `INFRA_DEV_CQ_DEAD`:
   `false`, `warn` (default) or `strict`.
 - `INFRA_DEV_CQ_LINT_SELECT`: extra ruff rule codes that `make check` reports under Linting as
   warnings, without failing (default `C90,SIM,RET,PIE,PERF,FURB,C4`).
