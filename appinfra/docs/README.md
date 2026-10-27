@@ -189,6 +189,8 @@ appinfra docs search <text># Search documentation (supports --fuzzy)
 appinfra scaffold <name>   # Generate a new project
 appinfra config [file]     # Show resolved configuration
 appinfra cq cf             # Check function sizes
+appinfra cq dup            # Report duplicated code blocks (pylint)
+appinfra cq dead           # Report private definitions nothing refers to
 appinfra doctor            # Run project health checks
 ```
 

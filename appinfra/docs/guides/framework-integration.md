@@ -192,7 +192,7 @@ A test still running after `INFRA_PYTEST_HANG_DUMP_SECONDS` (default 120) gets a
 checklist, after a blank line:
 
 ```text
-[⚠]  Unit & E2E & Coverage tests: tests/test_server.py::test_shutdown running >120s
+[⚠] Unit & E2E & Coverage tests: tests/test_server.py::test_shutdown running >120s
 ```
 
 The row changes to `took 131.4s` if the test ends; a row still saying `running` when the run

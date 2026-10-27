@@ -21,22 +21,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from ...app.tools import Tool, ToolConfig
-
-# Exit code for "warnings but ok" - violations found in non-strict mode
-EXIT_CODE_WARNING = 42
+from ....app.tools import Tool, ToolConfig
+from .common import EXIT_CODE_WARNING, collect_python_files
 
 # Regex pattern for parsing cq directive comments
 # Matches: # cq: max-lines=N or # cq: exempt
 CQ_DIRECTIVE_PATTERN = re.compile(
     r"#\s*cq:\s*(?:max-lines=(\d+)|exempt)", re.IGNORECASE
 )
-
-# Default directories to exclude (build artifacts, caches, virtual envs)
-# These are matched against individual path components
-DEFAULT_EXCLUDE_DIRS = [
-    "__pycache__",
-]
 
 
 @dataclass
@@ -733,8 +725,8 @@ class CheckFunctionsTool(Tool):
         limit = self.args.limit
         self.lg.info("checking function sizes", extra={"limit": limit})  # type: ignore[union-attr]
 
-        python_files = self._collect_python_files(
-            [self.args.dir], self.args.exclude or [], self.args.include_tests
+        python_files = collect_python_files(
+            self.lg, [self.args.dir], self.args.exclude or [], self.args.include_tests
         )
         self.lg.debug(  # type: ignore[union-attr]
             "found Python files to analyze", extra={"files": len(python_files)}
@@ -753,79 +745,3 @@ class CheckFunctionsTool(Tool):
         self._log_summary(len(all_violations), limit)
 
         return self._get_exit_code(all_violations, self.args.strict)
-
-    def _collect_python_files(
-        self, paths: list[str], exclude_patterns: list[str], include_tests: bool
-    ) -> list[Path]:
-        """
-        Collect all Python files to analyze.
-
-        Args:
-            paths: List of file or directory paths
-            exclude_patterns: Patterns to exclude
-            include_tests: Whether to include test files
-
-        Returns:
-            List of Python file paths
-        """
-        python_files = []
-
-        for path_str in paths:
-            path = Path(path_str)
-
-            if not path.exists():
-                self.lg.warning("path does not exist", extra={"path": path})  # type: ignore[union-attr]
-                continue
-
-            if path.is_file():
-                if path.suffix == ".py":
-                    if not self._should_exclude(path, exclude_patterns, include_tests):
-                        python_files.append(path)
-            elif path.is_dir():
-                # Recursively find .py files
-                for py_file in path.rglob("*.py"):
-                    if not self._should_exclude(
-                        py_file, exclude_patterns, include_tests
-                    ):
-                        python_files.append(py_file)
-
-        return python_files
-
-    def _should_exclude(
-        self, file_path: Path, patterns: list[str], include_tests: bool
-    ) -> bool:
-        """
-        Check if file should be excluded.
-
-        Args:
-            file_path: Path to check
-            patterns: Exclusion patterns
-            include_tests: Whether to include test files
-
-        Returns:
-            True if file should be excluded
-        """
-        file_str = str(file_path)
-
-        # Exclude hidden directories and default exclude dirs
-        # Note: skip "." (current dir) to allow "./file.py" paths
-        for part in file_path.parts:
-            if (part != "." and part.startswith(".")) or part in DEFAULT_EXCLUDE_DIRS:
-                return True
-
-        # Exclude test files by default
-        if not include_tests:
-            if (
-                "/test/" in file_str
-                or "/tests/" in file_str
-                or file_path.name.startswith("test_")
-                or file_path.name.endswith("_test.py")
-            ):
-                return True
-
-        # Check custom exclusion patterns
-        for pattern in patterns:
-            if file_path.match(pattern):
-                return True
-
-        return False

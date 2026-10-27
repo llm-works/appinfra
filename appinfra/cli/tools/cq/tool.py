@@ -10,8 +10,8 @@ complexity checking, import analysis, etc.
 
 from typing import Any
 
-from ...app.tools import Tool, ToolConfig
-from ...app.tracing.traceable import Traceable
+from ....app.tools import Tool, ToolConfig
+from ....app.tracing.traceable import Traceable
 
 
 class CodeQualityTool(Tool):
@@ -22,6 +22,8 @@ class CodeQualityTool(Tool):
     Available subcommands:
     - check-funcs (cf): Check function sizes against guidelines
     - check-spdx (spdx): Check SPDX license headers on tracked .py files
+    - check-dead (dead): Report private definitions nothing refers to
+    - check-dup (dup): Report duplicated code blocks
     """
 
     def __init__(self, parent: Traceable | None = None):
@@ -44,12 +46,16 @@ class CodeQualityTool(Tool):
         super().__init__(parent, config)
 
         # Import here to avoid circular dependency
-        from .check_functions import CheckFunctionsTool
-        from .check_spdx import CheckSpdxTool
+        from .dead import CheckDeadTool
+        from .dup import CheckDupTool
+        from .functions import CheckFunctionsTool
+        from .spdx import CheckSpdxTool
 
         # Add subtools (no default - requires explicit subcommand)
         self.add_tool(CheckFunctionsTool(self), default=None)
         self.add_tool(CheckSpdxTool(self), default=None)
+        self.add_tool(CheckDeadTool(self), default=None)
+        self.add_tool(CheckDupTool(self), default=None)
 
     def run(self, **kwargs: Any) -> int:
         """

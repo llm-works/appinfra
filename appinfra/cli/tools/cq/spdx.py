@@ -33,7 +33,7 @@ import tomllib
 from pathlib import Path
 from typing import Any
 
-from ...app.tools import Tool, ToolConfig
+from ....app.tools import Tool, ToolConfig
 
 REQUIRED_MARKERS: tuple[str, ...] = (
     "SPDX-License-Identifier: Apache-2.0",

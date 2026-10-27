@@ -196,7 +196,7 @@ MAX_INLINE_LINES=30
 # Check definitions: "Name|Make Target|Command|Fix Target"
 declare -a CHECKS=(
     "Formatting check|fmt.check|${PYTHON} -m ruff format --check .|fmt"
-    "Linting|lint|${PYTHON} -m ruff check .|lint.fix"
+    "Linting|lint|lint_check|lint.fix"
     "Type checking|type|${PYTHON} -m mypy ${PKG_NAME}/ --exclude 'examples/' --cache-dir .mypy_cache/pkg ${MYPY_FLAGS}|"
 )
 
@@ -224,23 +224,79 @@ if [ -n "${INFRA_DEV_CQ_EXCLUDE:-}" ]; then
     )
 fi
 
-# Build CQ command and label based on strictness setting
-if [ "$CQ_STRICT" = "true" ]; then
-    CQ_CMD="${PYTHON} -m appinfra.cli.cli -l error cq cf --strict ${CQ_EXCLUDE_FLAGS}"
-    CQ_LABEL="Function size check (strict)"
-    CQ_TARGET="cq.strict"
-else
-    CQ_CMD="${PYTHON} -m appinfra.cli.cli -l error cq cf ${CQ_EXCLUDE_FLAGS}"
-    CQ_LABEL="Function size check (non-strict)"
-    CQ_TARGET="cq"
-fi
+# Extra ruff rules reported over the package as warnings, never failing: a comma-separated list
+# of rule codes (empty = off). Rules that should fail the build belong in the project's ruff config.
+CQ_LINT_SELECT="${INFRA_DEV_CQ_LINT_SELECT:-}"
+
+# Duplicated code (pylint) and dead private code checks over the package, opt-in per project.
+# Each takes false (default), warn (report the count, never fail) or strict (fail on findings).
+CQ_DUP="${INFRA_DEV_CQ_DUP:-false}"
+CQ_DEAD="${INFRA_DEV_CQ_DEAD:-false}"
+for _cq_var in INFRA_DEV_CQ_DUP:"$CQ_DUP" INFRA_DEV_CQ_DEAD:"$CQ_DEAD"; do
+    case "${_cq_var#*:}" in
+        false|warn|strict) ;;
+        *) echo "Error: ${_cq_var%%:*} must be false, warn or strict, got: ${_cq_var#*:}" >&2; exit 1 ;;
+    esac
+done
+
+# A check that warns ends its output with "Warnings: <summary>", which its line shows.
+
+# Linting: the project's ruff rules fail the check; the CQ_LINT_SELECT rules only warn.
+lint_check() {
+    eval "${PYTHON} -m ruff check ." || return 1
+    [ -n "$CQ_LINT_SELECT" ] || return 0
+    local out count
+    out=$(eval "${PYTHON} -m ruff check ${PKG_NAME}/ --select ${CQ_LINT_SELECT} --no-fix --exit-zero --output-format concise") || return 1
+    count=$(printf '%s\n' "$out" | grep -cE '^[^ ].*:[0-9]+:[0-9]+: ' || true)
+    [ "$count" -gt 0 ] || return 0
+    printf '%s\n' "$out"
+    echo "Warnings: ${count} warnings"
+    return "$EXIT_CODE_WARNING"
+}
+
+# --strict for a cq tool whose mode is strict (true for INFRA_DEV_CQ_STRICT)
+cq_strict_flag() {
+    case "$1" in strict|true) echo "--strict" ;; esac
+}
+
+# Run one cq subcommand: a warning adds "<count> <label>" to CQ_SUMMARY, a failure sets CQ_FAILED.
+cq_tool() {
+    local label="$1" args="$2" out rc=0 count
+    out=$(eval "${PYTHON} -m appinfra.cli.cli -l error cq ${args}" 2>&1) || rc=$?
+    printf '%s\n' "$out"
+    if [ "$rc" -eq "$EXIT_CODE_WARNING" ]; then
+        count=$(printf '%s\n' "$out" | sed -nE 's/.*Violations( found)?: ([0-9]+).*/\2/p' | head -1)
+        CQ_SUMMARY+=("${count:-?} ${label}")
+    elif [ "$rc" -ne 0 ]; then
+        CQ_FAILED=true
+    fi
+}
+
+# Code quality: function size (cq cf), plus duplicated and dead code when enabled. Every enabled
+# tool runs; the check fails if one failed, and otherwise warns with a count per tool.
+cq_check() {
+    CQ_SUMMARY=()
+    CQ_FAILED=false
+    cq_tool size "cf $(cq_strict_flag "$CQ_STRICT") ${CQ_EXCLUDE_FLAGS}"
+    [ "$CQ_DUP" = "false" ] || cq_tool dup "dup ${PKG_NAME}/ $(cq_strict_flag "$CQ_DUP") ${CQ_EXCLUDE_FLAGS}"
+    [ "$CQ_DEAD" = "false" ] || cq_tool dead "dead ${PKG_NAME}/ $(cq_strict_flag "$CQ_DEAD") ${CQ_EXCLUDE_FLAGS}"
+    [ "$CQ_FAILED" = false ] || return 1
+    [ "${#CQ_SUMMARY[@]}" -gt 0 ] || return 0
+    local summary
+    printf -v summary '%s, ' "${CQ_SUMMARY[@]}"
+    echo "Warnings: ${summary%, }"
+    return "$EXIT_CODE_WARNING"
+}
+
+CQ_TARGET="cq"
+[ "$CQ_STRICT" = "true" ] && CQ_TARGET="cq.strict"
 
 # Docstring coverage check command (only if threshold > 0)
 DOCSTRING_CMD="${PYTHON} -m interrogate -v ${PKG_NAME}/ --ignore-init-module --ignore-init-method --fail-under=${DOCSTRING_THRESHOLD}"
 
 # Add remaining checks
 CHECKS+=(
-    "${CQ_LABEL}|${CQ_TARGET}|${CQ_CMD}|"
+    "Code quality check|${CQ_TARGET}|cq_check|"
 )
 
 # Add SPDX header check only if opted in (INFRA_DEV_CQ_SPDX=true).
@@ -464,7 +520,7 @@ update_line() {
             added=$(cat "$DISPLAY_ROWS" 2>/dev/null) || added=0
             local lines_up=$((TOTAL_LINES + added - line_num))
             [ $lines_up -gt 0 ] && printf "\033[${lines_up}A"
-            printf "\r%b%s  %s%b\n" "$UI_CLEAR" "$status" "$name" "$extra"
+            printf "\r%b%s %s%b\n" "$UI_CLEAR" "$status" "$name" "$extra"
             [ $lines_up -gt 1 ] && printf "\033[$((lines_up - 1))B"
             printf "\r"
         fi
@@ -486,7 +542,7 @@ add_display_row() {
                 printf "\r%b\n" "$UI_CLEAR"
                 added=1
             fi
-            printf "\r%b%s  %s%b\n" "$UI_CLEAR" "$status" "$text" "$extra"
+            printf "\r%b%s %s%b\n" "$UI_CLEAR" "$status" "$text" "$extra"
             ADDED_ROW=$((TOTAL_LINES + added))
             echo "$((added + 1))" > "$DISPLAY_ROWS"
         fi
@@ -852,14 +908,14 @@ run_check() {
             update_line "$line_num" "${UI_MARK_PENDING}" "${prefix}${name}" " ${UI_GRAY}(no tests)${UI_RESET}${timing_suffix}"
             rm -f "$tmpfile"
             ;;
-        42)  # Warning: violations found but non-strict mode (EXIT_CODE_WARNING)
-            # Extract violation count from output if available
-            local warning_count=$(grep -oP '(?<=Violations found: )\d+|(?<=Violations: )\d+' "$tmpfile" 2>/dev/null | head -1)
-            if [ -n "$warning_count" ]; then
-                update_line "$line_num" "${UI_MARK_WARN}" "${prefix}${name}" " ${UI_GRAY}(${warning_count} violations, run make cq)${UI_RESET}${timing_suffix}"
-                record_warning "$name" "$warning_count"
+        42)  # Warning: findings that do not fail the build (EXIT_CODE_WARNING)
+            # The check's "Warnings: <summary>" line, e.g. "9 dup, 22 dead"
+            local warning_summary=$(sed -n 's/^Warnings: //p' "$tmpfile" 2>/dev/null | tail -1)
+            if [ -n "$warning_summary" ]; then
+                update_line "$line_num" "${UI_MARK_WARN}" "${prefix}${name}" " ${UI_GRAY}(${warning_summary}, run make ${make_target})${UI_RESET}${timing_suffix}"
+                record_warning "$name" "$warning_summary"
             else
-                update_line "$line_num" "${UI_MARK_WARN}" "${prefix}${name}" " ${UI_GRAY}(run make cq)${UI_RESET}${timing_suffix}"
+                update_line "$line_num" "${UI_MARK_WARN}" "${prefix}${name}" " ${UI_GRAY}(run make ${make_target})${UI_RESET}${timing_suffix}"
                 record_warning "$name"
             fi
             rm -f "$tmpfile"
@@ -1030,8 +1086,6 @@ run_checks() {
 
 run_raw() {
     cd "$PROJECT_ROOT"
-    echo "Running code quality checks (raw mode)..."
-    echo ""
 
     local start_time=$(date +%s.%N)
     local failed=false
@@ -1079,7 +1133,7 @@ run_raw() {
             if [ $cmd_exit_code -eq 0 ]; then
                 echo "${UI_MARK_OK} $name passed"
             elif [ $cmd_exit_code -eq 42 ]; then  # EXIT_CODE_WARNING
-                echo "${UI_MARK_WARN} $name (warnings, run make cq)"
+                echo "${UI_MARK_WARN} $name (warnings, run make ${make_target})"
                 has_warnings=true
                 # Don't fail on warnings in non-strict mode
             else
@@ -1112,11 +1166,8 @@ main() {
 
     [ "$RAW" = true ] && { run_raw; return $?; }
 
-    echo "Running code quality checks..."
-    echo ""
-
     # Calculate line numbers for cursor positioning
-    local current_line=3
+    local current_line=1
     for check_def in "${CHECKS[@]}"; do
         IFS='|' read -r name _ _ _ <<< "$check_def"
         CHECK_LINES["$name"]=$current_line
@@ -1135,12 +1186,12 @@ main() {
     # Print initial checkboxes
     for check_def in "${CHECKS[@]}"; do
         IFS='|' read -r name _ _ _ <<< "$check_def"
-        printf "%b  %s\n" "$UI_MARK_PENDING" "$name"
+        printf "%b %s\n" "$UI_MARK_PENDING" "$name"
 
         if [[ "$name" == "Test suite" ]]; then
             for subcheck_def in "${TEST_SUBCHECKS[@]}"; do
                 IFS='|' read -r subname _ _ _ <<< "$subcheck_def"
-                printf "%b    %s\n" "$UI_MARK_PENDING" "$subname"
+                printf "%b   %s\n" "$UI_MARK_PENDING" "$subname"
             done
         fi
     done

@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright 2026 The appinfra Authors
 
-"""Tests for appinfra/cli/tools/check_spdx.py."""
+"""Tests for appinfra/cli/tools/cq/spdx.py."""
 
 import argparse
 from pathlib import Path
@@ -9,7 +9,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from appinfra.cli.tools.check_spdx import (
+from appinfra.cli.tools.cq.spdx import (
     DEFAULT_PATTERNS,
     EXCLUDE_PATTERNS,
     HEADER_SCAN_LINES,
@@ -285,7 +285,7 @@ class TestTrackedSourceFiles:
         result = MagicMock()
         result.stdout = "foo.py\nbar.sh\nREADME.md\nMakefile\n"
         monkeypatch.setattr(
-            "appinfra.cli.tools.check_spdx.subprocess.run",
+            "appinfra.cli.tools.cq.spdx.subprocess.run",
             lambda *a, **kw: result,
         )
         files = tracked_source_files()
@@ -383,7 +383,7 @@ class TestCheckSpdxToolMethods:
         result = MagicMock()
         result.stdout = ""
         monkeypatch.setattr(
-            "appinfra.cli.tools.check_spdx.subprocess.run",
+            "appinfra.cli.tools.cq.spdx.subprocess.run",
             lambda *a, **kw: result,
         )
         tool = _make_tool(fix=True, dry_run=True, package="foo", year=2026)
@@ -393,7 +393,7 @@ class TestCheckSpdxToolMethods:
         result = MagicMock()
         result.stdout = ""
         monkeypatch.setattr(
-            "appinfra.cli.tools.check_spdx.subprocess.run",
+            "appinfra.cli.tools.cq.spdx.subprocess.run",
             lambda *a, **kw: result,
         )
         tool = _make_tool(fix=False)

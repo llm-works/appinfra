@@ -12,6 +12,13 @@
 #   INFRA_DEV_CQ_SPDX       - Enforce SPDX license headers on tracked source files
 #                             (Python, shell, Makefile, Dockerfile) in `make check`
 #                             (default: false; opt-in for open-source Apache-2.0 repos)
+#   INFRA_DEV_CQ_LINT_SELECT - Extra ruff rule codes (comma-separated) that the Linting check
+#                             reports over the package as warnings, never failing (default: empty)
+#   INFRA_DEV_CQ_DUP        - Duplicated code in the Code quality check (pylint duplicate-code):
+#                             false, warn (show the count) or strict (fail on findings)
+#                             (default: false; needs pylint, part of the dev extra)
+#   INFRA_DEV_CQ_DEAD       - Dead private code in the Code quality check: false, warn or strict
+#                             (default: false)
 #   INFRA_DEV_CHECK_EXAMPLES - Run every example script as a `make check` test
 #                             subcheck, the same run as `make examples.check`
 #                             (default: false; opt-in because it executes the
@@ -41,6 +48,9 @@ PYTHON_ENVS ?= $(PYTHON)
 export INFRA_DEV_PKG_NAME
 export INFRA_DEV_CQ_STRICT
 export INFRA_DEV_CQ_SPDX
+export INFRA_DEV_CQ_LINT_SELECT
+export INFRA_DEV_CQ_DUP
+export INFRA_DEV_CQ_DEAD
 export INFRA_DEV_CHECK_EXAMPLES
 export INFRA_DEV_CQ_EXCLUDE
 export INFRA_DEV_DOCSTRING_THRESHOLD
@@ -122,6 +132,10 @@ ifeq ($(INFRA_DRY_RUN),1)
 else
 	@echo "* running linter..."
 	@${PYTHON} -m ruff check .
+ifneq ($(INFRA_DEV_CQ_LINT_SELECT),)
+	@echo "* warning rules (INFRA_DEV_CQ_LINT_SELECT, do not fail):"
+	@${PYTHON} -m ruff check $(INFRA_DEV_PKG_NAME)/ --select $(INFRA_DEV_CQ_LINT_SELECT) --no-fix --exit-zero --statistics
+endif
 	@echo "* linter done"
 endif
 endif # skip lint
@@ -170,19 +184,31 @@ examples.check:: ## Run every example script; fail on errors or timeouts
 	else echo "No examples directory found"; fi
 .PHONY: examples.check
 
+# cq tools over the package. Exit status 42 means findings in report mode.
+_CQ_DUP_CMD = $(PYTHON) -m appinfra.cli.cli -l error cq dup $(INFRA_DEV_PKG_NAME)/ $(_CQ_EXCLUDE_FLAGS)
+_CQ_DEAD_CMD = $(PYTHON) -m appinfra.cli.cli -l error cq dead $(INFRA_DEV_PKG_NAME)/ $(_CQ_EXCLUDE_FLAGS)
+# Run command $(1) in mode $(2): strict fails on findings, warn reports them, false skips
+_cq_run = $(if $(filter strict,$(2)),$(1) --strict,$(if $(filter warn,$(2)),$(1) || [ $$? -eq 42 ],:))
+# Report-only mode for a tool that is enabled at all
+_cq_report = $(if $(filter warn strict,$(1)),warn,false)
+
 ifeq ($(filter cq,$(INFRA_DEV_SKIP_TARGETS)),)
-cq:: ## Check function sizes (reports violations, does not fail)
-	@echo "* checking function sizes..."
-	@$(PYTHON) -m appinfra.cli.cli -l error cq cf $(_CQ_EXCLUDE_FLAGS)
-	@echo "* function size check done"
+cq:: ## Code quality: function sizes, plus duplicated/dead code when enabled (reports only)
+	@echo "* checking code quality..."
+	@$(PYTHON) -m appinfra.cli.cli -l error cq cf $(_CQ_EXCLUDE_FLAGS) || [ $$? -eq 42 ]
+	@$(call _cq_run,$(_CQ_DUP_CMD),$(call _cq_report,$(INFRA_DEV_CQ_DUP)))
+	@$(call _cq_run,$(_CQ_DEAD_CMD),$(call _cq_report,$(INFRA_DEV_CQ_DEAD)))
+	@echo "* code quality check done"
 endif # skip cq
 .PHONY: cq
 
 ifeq ($(filter cq,$(INFRA_DEV_SKIP_TARGETS)),)
-cq.strict:: ## Check function sizes (fails on violations)
-	@echo "* checking function sizes (strict mode)..."
+cq.strict:: ## Code quality: fails on function sizes, and on duplicated/dead code set to strict
+	@echo "* checking code quality (strict mode)..."
 	@$(PYTHON) -m appinfra.cli.cli -l error cq cf --strict $(_CQ_EXCLUDE_FLAGS)
-	@echo "* function size check passed"
+	@$(call _cq_run,$(_CQ_DUP_CMD),$(INFRA_DEV_CQ_DUP))
+	@$(call _cq_run,$(_CQ_DEAD_CMD),$(INFRA_DEV_CQ_DEAD))
+	@echo "* code quality check passed"
 endif # skip cq.strict
 .PHONY: cq.strict
 
@@ -193,6 +219,15 @@ cq.spdx:: ## Check SPDX license headers on tracked source files
 	@echo "* SPDX header check passed"
 endif # skip cq.spdx
 .PHONY: cq.spdx
+
+ifeq ($(filter cq,$(INFRA_DEV_SKIP_TARGETS)),)
+cq.dup:: ## Report duplicated code blocks (pylint duplicate-code)
+	@$(call _cq_run,$(_CQ_DUP_CMD),warn)
+
+cq.dead:: ## Report private definitions nothing refers to
+	@$(call _cq_run,$(_CQ_DEAD_CMD),warn)
+endif # skip cq.dup cq.dead
+.PHONY: cq.dup cq.dead
 
 ifeq ($(filter cq,$(INFRA_DEV_SKIP_TARGETS)),)
 cq.docstring:: ## Check docstring coverage (reports only)
