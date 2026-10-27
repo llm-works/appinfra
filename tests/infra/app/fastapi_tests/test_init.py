@@ -62,12 +62,6 @@ class TestFastAPIImports:
             assert name in fastapi_module.__all__
             assert hasattr(fastapi_module, name)
 
-    def test_has_fastapi_flag(self):
-        """Test _HAS_FASTAPI flag is True when FastAPI is installed."""
-        import appinfra.app.fastapi as fastapi_module
-
-        assert fastapi_module._HAS_FASTAPI is True
-
 
 @pytest.mark.unit
 class TestFastAPIStubs:
@@ -140,7 +134,6 @@ class TestFastAPIStubs:
 from typing import Any
 
 _INSTALL_MSG = "FastAPI is not installed. Install with: pip install appinfra[fastapi]"
-_HAS_FASTAPI = False
 
 class ServerBuilder:
     """Stub for ServerBuilder when FastAPI is not installed."""
@@ -160,9 +153,6 @@ class IPCChannel:
         # Execute the stub code in a namespace
         stub_namespace: dict = {}
         exec(stub_code, stub_namespace)
-
-        # Verify _HAS_FASTAPI is False
-        assert stub_namespace["_HAS_FASTAPI"] is False
 
         # Try to instantiate each stub - should raise ImportError
         with pytest.raises(ImportError) as exc_info:

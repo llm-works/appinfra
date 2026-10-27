@@ -60,12 +60,15 @@ class SessionManager:
 
         Proactively reconnects if auto_reconnect enabled and connection unhealthy.
         """
-        if self._auto_reconnect and not self._connection_healthy:
-            if self._reconnect_strategy:
-                if not self._reconnect_strategy.check_connection():
-                    self._lg.info("connection unhealthy, attempting reconnect")
-                    self._reconnect_strategy.reconnect()
-                    self._connection_healthy = self._reconnect_strategy.is_healthy()
+        if (
+            self._auto_reconnect
+            and not self._connection_healthy
+            and self._reconnect_strategy
+            and not self._reconnect_strategy.check_connection()
+        ):
+            self._lg.info("connection unhealthy, attempting reconnect")
+            self._reconnect_strategy.reconnect()
+            self._connection_healthy = self._reconnect_strategy.is_healthy()
 
     def create_session_with_retry(self) -> Any:
         """
@@ -85,8 +88,7 @@ class SessionManager:
             self._connection_healthy = False
             if self._auto_reconnect:
                 return self._retry_session_after_reconnect(e)
-            else:
-                return self._raise_session_error(e)
+            return self._raise_session_error(e)
 
     def _retry_session_after_reconnect(self, original_error: Exception) -> Any:
         """

@@ -15,6 +15,7 @@ from appinfra.cli.tools.cq.common import EXIT_CODE_WARNING
 from appinfra.cli.tools.cq.dup import (
     Block,
     CheckDupTool,
+    drop_kept,
     format_report,
     module_paths,
     parse_groups,
@@ -56,7 +57,15 @@ class TestParsing:
 
         groups = parse_groups(output, module_paths(files))
 
-        assert groups == [[Block("pkg/my-script.py", 1, 9), Block("pkg/b.py", 1, 9)]]
+        assert groups == [[Block("pkg/b.py", 1, 9), Block("pkg/my-script.py", 1, 9)]]
+
+    def test_parse_groups_sorts_blocks_by_location(self):
+        files = [Path("pkg/a.py"), Path("pkg/b.py")]
+        output = json.dumps({"messages": [_r0801("==pkg.b:[0:9]", "==pkg.a:[4:13]")]})
+
+        groups = parse_groups(output, module_paths(files))
+
+        assert groups == [[Block("pkg/a.py", 5, 13), Block("pkg/b.py", 1, 9)]]
 
     def test_parse_groups_keeps_unknown_module_name(self):
         output = json.dumps({"messages": [_r0801("==other.mod:[0:9]")]})
@@ -65,6 +74,44 @@ class TestParsing:
     def test_parse_groups_skips_other_messages(self):
         output = json.dumps({"messages": [{"symbol": "unused-import", "message": "x"}]})
         assert parse_groups(output, {}) == []
+
+
+@pytest.mark.unit
+class TestDropKept:
+    """Test drop_kept()."""
+
+    def test_keep_within_one_copy_drops_the_group(self, tmp_path: Path):
+        a, b = tmp_path / "a.py", tmp_path / "b.py"
+        a.write_text("x = 1\ny = 2  # cq: keep mirrors b.py on purpose\nz = 3\n")
+        b.write_text("x = 1\ny = 2\nz = 3\n")
+        groups = [[Block(str(a), 1, 3), Block(str(b), 1, 3)]]
+
+        assert drop_kept(groups) == []
+
+    def test_keep_in_a_file_with_a_declared_encoding(self, tmp_path: Path):
+        a = tmp_path / "a.py"
+        a.write_bytes(
+            b"# -*- coding: latin-1 -*-\n"
+            b"x = '\xe9'  # cq: keep same shape on purpose\n"
+            b"y = 2\n"
+        )
+        groups = [[Block(str(a), 2, 3), Block("missing.py", 1, 2)]]
+
+        assert drop_kept(groups) == []
+
+    def test_keep_in_a_string_does_not_count(self, tmp_path: Path):
+        a = tmp_path / "a.py"
+        a.write_text("x = '# cq: keep is only text here'\ny = 2\n")
+        groups = [[Block(str(a), 1, 2), Block("missing.py", 1, 2)]]
+
+        assert drop_kept(groups) == groups
+
+    def test_keep_outside_the_range_does_not(self, tmp_path: Path):
+        a = tmp_path / "a.py"
+        a.write_text("# cq: keep\nx = 1\ny = 2\n")
+        groups = [[Block(str(a), 2, 3), Block("missing.py", 1, 2)]]
+
+        assert drop_kept(groups) == groups
 
 
 @pytest.mark.unit
@@ -88,7 +135,7 @@ class TestFormatReport:
 def _make_tool(tmp_path: Path, strict: bool = False) -> CheckDupTool:
     tool = CheckDupTool(parent=None)
     tool._parsed_args = argparse.Namespace(
-        dir=str(tmp_path), min_lines=8, strict=strict, exclude=None
+        dir=str(tmp_path), min_lines=8, jobs=1, strict=strict, exclude=None
     )
     tool._logger = MagicMock()
     return tool
@@ -116,6 +163,16 @@ class TestCheckDupTool:
             )
         assert _make_tool(tmp_path, strict=True).run() == 1
 
+    def test_kept_duplicate_is_not_reported(self, tmp_path: Path, capsys):
+        for name, keep in (("a", "  # cq: keep same shape on purpose"), ("b", "")):
+            (tmp_path / f"{name}.py").write_text(
+                f"def {name}(total):\n    total = total + 1{keep}\n{_BODY}\n"
+                "    return total\n"
+            )
+
+        assert _make_tool(tmp_path).run() == 0
+        assert "Violations: 0" in capsys.readouterr().out
+
     def test_clean_tree_exits_zero(self, tmp_path: Path):
         (tmp_path / "a.py").write_text("x = 1\n")
         assert _make_tool(tmp_path).run() == 0
@@ -133,13 +190,15 @@ class TestCheckDupTool:
             assert tool.run() == 1
         tool._logger.warning.assert_called()
 
-    def test_command_passes_threshold_and_files(self):
-        cmd = pylint_command([Path("a.py")], 6)
+    def test_command_passes_threshold_jobs_and_files(self):
+        cmd = pylint_command([Path("a.py")], 6, 4)
         assert "--min-similarity-lines=6" in cmd
+        assert "--jobs=4" in cmd
         assert cmd[-1] == "a.py"
 
     def test_args(self):
         parser = argparse.ArgumentParser()
         CheckDupTool(parent=None).add_args(parser)
-        args = parser.parse_args(["pkg", "--min-lines", "5", "--strict"])
-        assert (args.dir, args.min_lines, args.strict) == ("pkg", 5, True)
+        args = parser.parse_args(["pkg", "--min-lines", "5", "--jobs", "2", "--strict"])
+        assert (args.dir, args.min_lines, args.jobs, args.strict) == ("pkg", 5, 2, True)
+        assert parser.parse_args([]).jobs == 4

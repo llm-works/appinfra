@@ -417,11 +417,8 @@ class TestThreadSafety:
             for i in range(10):
                 manager.add_rule(f"/test/{i}", "debug", source="api", priority=10)
 
-        threads = []
-        for _ in range(3):
-            threads.append(threading.Thread(target=read_level))
-        for _ in range(2):
-            threads.append(threading.Thread(target=write_rule))
+        threads = [threading.Thread(target=read_level) for _ in range(3)]
+        threads.extend(threading.Thread(target=write_rule) for _ in range(2))
 
         for t in threads:
             t.start()

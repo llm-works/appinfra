@@ -379,7 +379,9 @@ def _xdg_config_dirs() -> list[Path]:
     home = home_env if home_env and Path(home_env).is_absolute() else None
     dirs = [Path(home) if home else Path.home() / ".config"]
     system = os.environ.get("XDG_CONFIG_DIRS") or "/etc/xdg"
-    for entry in system.split(":"):
-        if entry and Path(entry).is_absolute():
-            dirs.append(Path(entry))
+    dirs.extend(
+        Path(entry)
+        for entry in system.split(":")
+        if entry and Path(entry).is_absolute()
+    )
     return dirs

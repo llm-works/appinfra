@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import multiprocessing as mp
 import threading
 import time
@@ -252,10 +253,8 @@ class ProcessRunner(Runner):
             self._error_queue = None
         # Stop log listener
         if self._log_listener is not None:
-            try:
+            with contextlib.suppress(Exception):
                 self._log_listener.stop()
-            except Exception:
-                pass
             self._log_listener = None
         if self._log_queue is not None:
             try:
@@ -360,12 +359,8 @@ def _process_entry(
         _start_health_poller(service, shutdown_event, healthy_event)
         service.execute()
     except BaseException as e:
-        try:
+        with contextlib.suppress(Exception):
             error_queue.put(e)
-        except Exception:
-            pass
     finally:
-        try:
+        with contextlib.suppress(Exception):
             service.teardown()
-        except Exception:
-            pass

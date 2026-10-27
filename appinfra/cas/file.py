@@ -201,11 +201,13 @@ class FileStore(Store):
         prefix = f"{repo_dir.name}{_DELETED}"
         doomed = repo_dir.with_name(f"{prefix}{uuid.uuid4().hex}")
         if repo_dir.is_dir():
-            with self.lock(name, exclusive=True):
-                with contextlib.suppress(FileNotFoundError):
-                    repo_dir.rename(doomed)
-                    _fsync_dir(self._root, self._fsync)
-                    self._lg.debug("deleted repository", extra={"repo": name})
+            with (
+                self.lock(name, exclusive=True),
+                contextlib.suppress(FileNotFoundError),
+            ):
+                repo_dir.rename(doomed)
+                _fsync_dir(self._root, self._fsync)
+                self._lg.debug("deleted repository", extra={"repo": name})
         if self._root.is_dir():
             for leftover in self._root.iterdir():
                 if leftover.name.startswith(prefix):

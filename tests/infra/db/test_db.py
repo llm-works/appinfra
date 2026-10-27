@@ -8,6 +8,7 @@ Comprehensive tests for the database Manager class, covering initialization,
 setup, connection management, health checks, and error handling.
 """
 
+import contextlib
 from unittest.mock import Mock, patch
 
 import pytest
@@ -263,15 +264,17 @@ class TestManagerSetup:
         }
         del cfg.logging  # No logging section
 
-        with patch("appinfra.db.db.LoggerFactory.derive", return_value=mock_logger):
-            with patch("appinfra.db.db.pg.PG"):
-                manager = Manager(mock_logger, cfg)
-                manager.setup()
+        with (
+            patch("appinfra.db.db.LoggerFactory.derive", return_value=mock_logger),
+            patch("appinfra.db.db.pg.PG"),
+        ):
+            manager = Manager(mock_logger, cfg)
+            manager.setup()
 
-                # Should warn about missing logging config
-                mock_logger.warning.assert_any_call(
-                    "no logging configuration found, using defaults"
-                )
+            # Should warn about missing logging config
+            mock_logger.warning.assert_any_call(
+                "no logging configuration found, using defaults"
+            )
 
 
 # =============================================================================
@@ -316,10 +319,8 @@ class TestDatabaseAccess:
         with patch("appinfra.db.db.LoggerFactory.derive", return_value=mock_logger):
             manager = Manager(mock_logger, config_with_invalid_url)
 
-            try:
+            with contextlib.suppress(RuntimeError):  # Expected failure
                 manager.setup()
-            except RuntimeError:
-                pass  # Expected failure
 
             with pytest.raises(RuntimeError, match="Database 'bad_db' setup failed"):
                 manager.db("bad_db")
@@ -367,13 +368,15 @@ class TestErrorTracking:
 
     def test_get_setup_errors_empty(self, mock_logger, valid_pg_config):
         """Test get_setup_errors returns empty dict for successful setup."""
-        with patch("appinfra.db.db.LoggerFactory.derive", return_value=mock_logger):
-            with patch("appinfra.db.db.pg.PG"):
-                manager = Manager(mock_logger, valid_pg_config)
-                manager.setup()
+        with (
+            patch("appinfra.db.db.LoggerFactory.derive", return_value=mock_logger),
+            patch("appinfra.db.db.pg.PG"),
+        ):
+            manager = Manager(mock_logger, valid_pg_config)
+            manager.setup()
 
-                errors = manager.get_setup_errors()
-                assert errors == {}
+            errors = manager.get_setup_errors()
+            assert errors == {}
 
     def test_get_setup_errors_returns_failures(
         self, mock_logger, config_with_invalid_url
@@ -382,10 +385,8 @@ class TestErrorTracking:
         with patch("appinfra.db.db.LoggerFactory.derive", return_value=mock_logger):
             manager = Manager(mock_logger, config_with_invalid_url)
 
-            try:
+            with contextlib.suppress(RuntimeError):
                 manager.setup()
-            except RuntimeError:
-                pass
 
             errors = manager.get_setup_errors()
             assert len(errors) == 1
@@ -398,10 +399,8 @@ class TestErrorTracking:
         with patch("appinfra.db.db.LoggerFactory.derive", return_value=mock_logger):
             manager = Manager(mock_logger, config_with_invalid_url)
 
-            try:
+            with contextlib.suppress(RuntimeError):
                 manager.setup()
-            except RuntimeError:
-                pass
 
             errors = manager.get_setup_errors()
             errors["new_key"] = "modified"
@@ -481,14 +480,16 @@ class TestHealthCheck:
 
     def test_health_check_nonexistent_database(self, mock_logger, valid_pg_config):
         """Test health_check for non-existent database returns empty results."""
-        with patch("appinfra.db.db.LoggerFactory.derive", return_value=mock_logger):
-            with patch("appinfra.db.db.pg.PG"):
-                manager = Manager(mock_logger, valid_pg_config)
-                manager.setup()
+        with (
+            patch("appinfra.db.db.LoggerFactory.derive", return_value=mock_logger),
+            patch("appinfra.db.db.pg.PG"),
+        ):
+            manager = Manager(mock_logger, valid_pg_config)
+            manager.setup()
 
-                results = manager.health_check(name="nonexistent")
+            results = manager.health_check(name="nonexistent")
 
-                assert results == {}
+            assert results == {}
 
 
 # =============================================================================
@@ -589,10 +590,8 @@ class TestStatistics:
         with patch("appinfra.db.db.LoggerFactory.derive", return_value=mock_logger):
             manager = Manager(mock_logger, config_with_invalid_url)
 
-            try:
+            with contextlib.suppress(RuntimeError):
                 manager.setup()
-            except RuntimeError:
-                pass
 
             stats = manager.get_stats()
 
@@ -741,7 +740,6 @@ class TestUnknownDBTypeException:
         exc = UnknownDBTypeException(url)
 
         assert str(exc) == f"Unknown database type: {url}"
-        assert exc._url == url
 
     def test_exception_inheritance(self):
         """Test exception inherits from Exception."""

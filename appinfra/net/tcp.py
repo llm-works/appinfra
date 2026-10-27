@@ -116,7 +116,6 @@ class _Server(socketserver.TCPServer):
 
         Currently a no-op, can be overridden for periodic maintenance tasks.
         """
-        pass
 
 
 # Helper functions for Server._run_multiprocessing()

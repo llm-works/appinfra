@@ -98,7 +98,7 @@ class ColorManager:
     @staticmethod
     def _parse_gray_level(name: str) -> str | None:
         """Parse gray/grey level from name (e.g., 'gray-12')."""
-        if name.startswith("gray-") or name.startswith("grey-"):
+        if name.startswith(("gray-", "grey-")):
             try:
                 level_str = name.split("-", 1)[1]
                 level = int(level_str)
@@ -174,14 +174,3 @@ class ColorManager:
                 ),  # Blue-gray for TRACE
             }
         )
-
-
-# Helper functions for backward compatibility
-def _create_gray_level(level: int) -> str:
-    """Create gray level color (internal helper)."""
-    return ColorManager.create_gray_level(level)
-
-
-def _create_color_256(color_code: int) -> str:
-    """Create 256-color (internal helper)."""
-    return ColorManager.create_color_256(color_code)

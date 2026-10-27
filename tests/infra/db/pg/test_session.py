@@ -18,9 +18,7 @@ from appinfra.db.pg.session import SessionManager
 @pytest.fixture
 def mock_session_cls():
     """Create mock sessionmaker."""
-    session = Mock()
-    session_cls = Mock(return_value=session)
-    return session_cls
+    return Mock(return_value=Mock())
 
 
 @pytest.fixture

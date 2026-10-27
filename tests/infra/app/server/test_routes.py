@@ -277,7 +277,7 @@ class TestListRoutes:
         result = manager.list_routes()
 
         # Pattern routes are listed with "PATTERN:" prefix
-        pattern_key = [k for k in result.keys() if k.startswith("PATTERN:")][0]
+        pattern_key = [k for k in result if k.startswith("PATTERN:")][0]
         assert "GET" in result[pattern_key]
 
     def test_list_mixed_routes(self):
@@ -289,7 +289,7 @@ class TestListRoutes:
         result = manager.list_routes()
 
         assert "/api/users" in result
-        pattern_keys = [k for k in result.keys() if k.startswith("PATTERN:")]
+        pattern_keys = [k for k in result if k.startswith("PATTERN:")]
         assert len(pattern_keys) == 1
 
 

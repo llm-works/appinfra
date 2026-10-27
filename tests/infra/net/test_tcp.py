@@ -98,13 +98,15 @@ class TestServerClass:
 
     def test_init_failure_raises_startup_error(self, mock_logger, mock_handler):
         """Test _Server initialization failure raises ServerStartupError."""
-        with patch.object(
-            socketserver.TCPServer,
-            "__init__",
-            side_effect=Exception("socket error"),
+        with (
+            patch.object(
+                socketserver.TCPServer,
+                "__init__",
+                side_effect=Exception("socket error"),
+            ),
+            pytest.raises(ServerStartupError, match="initialization failed"),
         ):
-            with pytest.raises(ServerStartupError, match="initialization failed"):
-                _Server(mock_logger, mock_handler, ("localhost", 8080), RequestHandler)
+            _Server(mock_logger, mock_handler, ("localhost", 8080), RequestHandler)
 
     def test_allow_reuse_address_returns_true(self, mock_logger, mock_handler):
         """Test allow_reuse_address always returns True."""

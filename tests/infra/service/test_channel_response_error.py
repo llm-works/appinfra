@@ -123,8 +123,9 @@ class TestAsyncSubmit:
         chunks: list[Response] = []
 
         async def consume() -> None:
+            # A loop, not a comprehension: the chunks before the error must stay collected
             async for chunk in pair.parent.submit_stream(Request("1"), timeout=2.0):
-                chunks.append(chunk)
+                chunks.append(chunk)  # noqa: PERF401
 
         pending = asyncio.create_task(consume())
         await asyncio.sleep(0.1)  # let submit_stream() send the request

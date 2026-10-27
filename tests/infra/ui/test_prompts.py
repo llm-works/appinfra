@@ -221,9 +221,11 @@ class TestConfirm:
 
     def test_confirm_non_interactive_raises_when_auto_confirm_false(self):
         """Test non-interactive mode raises when auto_confirm=False."""
-        with patch.object(prompts, "_is_interactive", return_value=False):
-            with pytest.raises(NonInteractiveError):
-                confirm("Continue?", auto_confirm=False)
+        with (
+            patch.object(prompts, "_is_interactive", return_value=False),
+            pytest.raises(NonInteractiveError),
+        ):
+            confirm("Continue?", auto_confirm=False)
 
     def test_confirm_uses_fallback_when_no_questionary(self):
         """Test confirm uses fallback when questionary not available."""
@@ -284,9 +286,11 @@ class TestText:
 
     def test_text_non_interactive_raises_without_default(self):
         """Test non-interactive mode raises without default."""
-        with patch.object(prompts, "_is_interactive", return_value=False):
-            with pytest.raises(NonInteractiveError):
-                text("Name:")
+        with (
+            patch.object(prompts, "_is_interactive", return_value=False),
+            pytest.raises(NonInteractiveError),
+        ):
+            text("Name:")
 
     def test_text_uses_fallback_when_no_questionary(self):
         """Test text uses fallback when questionary not available."""
@@ -332,9 +336,11 @@ class TestPassword:
 
     def test_password_non_interactive_raises(self):
         """Test non-interactive mode raises."""
-        with patch.object(prompts, "_is_interactive", return_value=False):
-            with pytest.raises(NonInteractiveError):
-                password("Password:")
+        with (
+            patch.object(prompts, "_is_interactive", return_value=False),
+            pytest.raises(NonInteractiveError),
+        ):
+            password("Password:")
 
     def test_password_uses_getpass_when_no_questionary(self):
         """Test password uses getpass when questionary not available."""
@@ -410,9 +416,11 @@ class TestSelect:
 
     def test_select_non_interactive_raises_without_default(self):
         """Test non-interactive mode raises without default."""
-        with patch.object(prompts, "_is_interactive", return_value=False):
-            with pytest.raises(NonInteractiveError):
-                select("Choose:", ["a", "b"])
+        with (
+            patch.object(prompts, "_is_interactive", return_value=False),
+            pytest.raises(NonInteractiveError),
+        ):
+            select("Choose:", ["a", "b"])
 
     def test_select_uses_fallback_when_no_questionary(self):
         """Test select uses fallback when questionary not available."""
@@ -483,9 +491,11 @@ class TestMultiselect:
 
     def test_multiselect_non_interactive_raises_without_default(self):
         """Test non-interactive mode raises without default."""
-        with patch.object(prompts, "_is_interactive", return_value=False):
-            with pytest.raises(NonInteractiveError):
-                multiselect("Choose:", ["a", "b"])
+        with (
+            patch.object(prompts, "_is_interactive", return_value=False),
+            pytest.raises(NonInteractiveError),
+        ):
+            multiselect("Choose:", ["a", "b"])
 
     def test_multiselect_uses_fallback_when_no_questionary(self):
         """Test multiselect uses fallback when questionary not available."""
@@ -592,6 +602,25 @@ class TestQuestionaryIntegration:
         result = password("Password:", confirm=False)
         assert mock_questionary.password.call_count == 1
         assert result == "secretpass"
+
+    def test_password_questionary_confirm_matching(self, mock_questionary):
+        """A matching confirmation returns the password without prompting again."""
+        mock_questionary.password.return_value.ask.side_effect = ["secret", "secret"]
+        result = password("Password:", confirm=True)
+        assert mock_questionary.password.call_count == 2
+        assert result == "secret"
+
+    def test_password_questionary_confirm_mismatch_prompts_again(
+        self, mock_questionary
+    ):
+        """A mismatched confirmation prompts for both again."""
+        ask = mock_questionary.password.return_value.ask
+        ask.side_effect = ["secret", "other", "secret", "secret"]
+        with patch("builtins.print") as mock_print:
+            result = password("Password:", confirm=True)
+        mock_print.assert_called_once_with("Passwords do not match. Please try again.")
+        assert mock_questionary.password.call_count == 4
+        assert result == "secret"
 
 
 class TestDisplayFallbackPage:
@@ -793,9 +822,11 @@ class TestSelectScrollable:
         """Test non-interactive mode raises."""
         from appinfra.ui.prompts import select_scrollable
 
-        with patch.object(prompts, "_is_interactive", return_value=False):
-            with pytest.raises(NonInteractiveError):
-                select_scrollable("Choose:", ["a", "b"])
+        with (
+            patch.object(prompts, "_is_interactive", return_value=False),
+            pytest.raises(NonInteractiveError),
+        ):
+            select_scrollable("Choose:", ["a", "b"])
 
     def test_select_scrollable_uses_fallback(self):
         """Test uses fallback when InquirerPy not available."""
@@ -861,9 +892,11 @@ class TestSelectTable:
         """Test non-interactive mode raises."""
         from appinfra.ui.prompts import select_table
 
-        with patch.object(prompts, "_is_interactive", return_value=False):
-            with pytest.raises(NonInteractiveError):
-                select_table("Choose:", [{"id": 1}], ["id"])
+        with (
+            patch.object(prompts, "_is_interactive", return_value=False),
+            pytest.raises(NonInteractiveError),
+        ):
+            select_table("Choose:", [{"id": 1}], ["id"])
 
     def test_select_table_empty_rows_returns_none(self):
         """Test empty rows returns None."""
@@ -1007,22 +1040,3 @@ class TestInquirerSelectKeys:
     def test_enter_then_esc_keeps_the_answer(self):
         """A skip key after Enter does not replace the selected choice."""
         assert _run_select_with_keys("\r\x1b") == ("a", [])
-
-
-class TestRequireTermMenu:
-    """Tests for _require_term_menu function."""
-
-    def test_raises_when_not_available(self):
-        """Test raises ImportError when not available."""
-        from appinfra.ui.prompts import _require_term_menu
-
-        with patch.object(prompts, "TERM_MENU_AVAILABLE", False):
-            with pytest.raises(ImportError, match="simple-term-menu"):
-                _require_term_menu()
-
-    def test_no_raise_when_available(self):
-        """Test does not raise when available."""
-        from appinfra.ui.prompts import _require_term_menu
-
-        with patch.object(prompts, "TERM_MENU_AVAILABLE", True):
-            _require_term_menu()  # Should not raise

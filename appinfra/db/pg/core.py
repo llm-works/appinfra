@@ -35,7 +35,6 @@ def create_sqlalchemy_engine(url: str) -> sqlalchemy.engine.Engine:
 def initialize_performance_cache(pg_instance: Any) -> None:
     """Initialize performance-related cached attributes."""
     pg_instance._dialect = pg_instance._engine.dialect
-    pg_instance._cached_regex = re.compile(r"\n\s+")
 
 
 def create_engine_and_session(cfg: Any) -> tuple[sqlalchemy.engine.Engine, Any]:
@@ -131,8 +130,9 @@ class QueryLogger:
         self._query_lg_level = query_lg_level
         self._whitespace_regex = re.compile(r"\s+")
         self._dialect = sqlalchemy.dialects.postgresql.dialect()
-        self._before_cursor_listener: Any = None
-        self._after_execute_listener: Any = None
+        # Held so the listeners can be removed: event.remove needs the same function object
+        self._before_cursor_listener: Any = None  # cq: keep held for event.remove
+        self._after_execute_listener: Any = None  # cq: keep held for event.remove
 
     @lru_cache(maxsize=1000)
     def format_query_string(self, query_str: str) -> str:

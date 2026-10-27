@@ -304,15 +304,14 @@ class HandlerFactory:
         """
         if handler_class == FileHandlerConfigClass:
             return _create_file_handler(handler_class, config)
-        elif handler_class in [
+        if handler_class in [
             RotatingFileHandlerConfigClass,
             TimedRotatingFileHandlerConfigClass,
         ]:
             return _create_rotating_file_handler(handler_class, config)
-        elif handler_class == DatabaseHandlerConfig:
+        if handler_class == DatabaseHandlerConfig:
             return _create_database_handler(handler_class, config)
-        else:
-            return handler_class(**config)
+        return handler_class(**config)
 
     @classmethod
     def get_supported_types(cls) -> list:
@@ -423,14 +422,8 @@ class HandlerRegistry:
         Returns:
             List of enabled handler configurations
         """
-        enabled_handlers = []
-        for handler in self.handlers:
-            # Check if handler has 'enabled' field and it's True
-            # For handlers without explicit enabled field, assume enabled
-            if getattr(handler, "enabled", True):
-                enabled_handlers.append(handler)
-
-        return enabled_handlers
+        # A handler without an explicit enabled field counts as enabled
+        return [h for h in self.handlers if getattr(h, "enabled", True)]
 
     def iter_handlers(self) -> Any:
         """

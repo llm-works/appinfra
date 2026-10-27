@@ -438,9 +438,9 @@ All configuration variables follow the `INFRA_<MODULE>_<VAR>` naming convention.
 |----------|---------|-------------|
 | `INFRA_DEV_PKG_NAME` | `appinfra` | Package name for install, type, coverage |
 | `INFRA_DEV_CQ_STRICT` | `false` | Code quality: `true`=30-line, `false`=50-line |
-| `INFRA_DEV_CQ_LINT_SELECT` | (empty) | Extra ruff rule codes the Linting check reports as warnings, never failing (e.g., `C90,SIM`) |
-| `INFRA_DEV_CQ_DUP` | `false` | Duplicated code in the Code quality check (pylint): `false`, `warn` or `strict` |
-| `INFRA_DEV_CQ_DEAD` | `false` | Dead private code in the Code quality check: `false`, `warn` or `strict` |
+| `INFRA_DEV_CQ_LINT_SELECT` | `C90,SIM,RET,PIE,PERF,FURB,C4` | Extra ruff rule codes the Linting check reports as warnings, never failing (empty or `false` to turn off) |
+| `INFRA_DEV_CQ_DUP` | `warn` | Duplicated code in the Code quality check (pylint): `false`, `warn` or `strict` |
+| `INFRA_DEV_CQ_DEAD` | `warn` | Dead private code in the Code quality check: `false`, `warn` or `strict` |
 | `INFRA_DEV_DOCSTRING_THRESHOLD` | `80` | Docstring coverage threshold for `make check` (0 to disable) |
 | `INFRA_DEV_CHECK_EXAMPLES` | `false` | Run `examples.check` as a test subcheck of `make check` |
 | `INFRA_DEV_PROJECT_ROOT` | `$(CURDIR)` | Project root for check.sh |

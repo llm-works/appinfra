@@ -36,7 +36,7 @@ def reset_logging_state() -> Generator[None, None, None]:
 
     # Clear all custom loggers from loggerDict
     for name in list(logging.root.manager.loggerDict.keys()):
-        if name.startswith("/") or name.startswith("test"):
+        if name.startswith(("/", "test")):
             del logging.root.manager.loggerDict[name]
 
     # Restore root logger state

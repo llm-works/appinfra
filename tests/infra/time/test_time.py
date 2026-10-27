@@ -274,9 +274,8 @@ class TestTimeItContextManager:
         """Test time_it() calls callback even when exception occurs."""
         callback = Mock()
 
-        with pytest.raises(ValueError):
-            with time_it(callback):
-                raise ValueError("test error")
+        with pytest.raises(ValueError), time_it(callback):
+            raise ValueError("test error")
 
         callback.assert_called_once()
 
@@ -344,9 +343,8 @@ class TestTimeItLgContextManager:
         """Test time_it_lg() calls logger even when exception occurs."""
         log_func = Mock()
 
-        with pytest.raises(ValueError):
-            with time_it_lg(log_func, "test message"):
-                raise ValueError("test error")
+        with pytest.raises(ValueError), time_it_lg(log_func, "test message"):
+            raise ValueError("test error")
 
         log_func.assert_called_once()
 

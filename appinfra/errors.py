@@ -59,8 +59,6 @@ class ConfigError(InfraError):
         - Invalid configuration value type
     """
 
-    pass
-
 
 class UndeclaredConfigPathError(ConfigError):
     """
@@ -100,8 +98,6 @@ class DatabaseError(InfraError):
         - Health check failed
     """
 
-    pass
-
 
 class LoggingError(InfraError):
     """
@@ -115,8 +111,6 @@ class LoggingError(InfraError):
         - Formatter error
         - Callback registration error
     """
-
-    pass
 
 
 class ValidationError(InfraError):
@@ -133,8 +127,6 @@ class ValidationError(InfraError):
         - Value out of range
     """
 
-    pass
-
 
 class ToolError(InfraError):
     """
@@ -149,8 +141,6 @@ class ToolError(InfraError):
         - Tool execution failed
         - Missing required tool attribute
     """
-
-    pass
 
 
 class ServerError(InfraError):
@@ -167,8 +157,6 @@ class ServerError(InfraError):
         - Middleware error
     """
 
-    pass
-
 
 class ObservabilityError(InfraError):
     """
@@ -182,8 +170,6 @@ class ObservabilityError(InfraError):
         - Callback execution error
         - Invalid hook event type
     """
-
-    pass
 
 
 class TickerError(InfraError):
@@ -199,8 +185,6 @@ class TickerError(InfraError):
         - Configuration errors
     """
 
-    pass
-
 
 class TickerAPIError(TickerError):
     """
@@ -215,8 +199,6 @@ class TickerAPIError(TickerError):
         - Using iterator after run() started
     """
 
-    pass
-
 
 class TickerStateError(TickerError):
     """
@@ -228,8 +210,6 @@ class TickerStateError(TickerError):
         - Starting already running ticker
         - Invalid state transition
     """
-
-    pass
 
 
 class TickerConfigError(TickerError):
@@ -243,8 +223,6 @@ class TickerConfigError(TickerError):
         - Missing secs parameter for scheduled mode
         - Invalid mode or parameter combination
     """
-
-    pass
 
 
 class DependencyError(InfraError):

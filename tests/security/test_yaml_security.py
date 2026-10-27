@@ -262,21 +262,21 @@ def test_yaml_null_byte_in_include_path(payload: str, secure_temp_project: Path)
     config_path.write_text(malicious_config)
 
     # Attempt to load - should fail (null byte rejected by YAML reader)
-    with open(config_path) as f:
-        with pytest.raises(
-            (yaml.YAMLError, yaml.reader.ReaderError, ValueError, OSError)
-        ):
-            # Various possible errors depending on how null byte is handled:
-            # - yaml.reader.ReaderError: Null byte rejected by YAML reader during parsing (most common)
-            # - YAMLError: Include file not found
-            # - ValueError: Invalid path
-            # - OSError: Path contains null byte
-            loader = Loader(
-                f,
-                current_file=config_path,
-                origin=secure_temp_project,
-            )
-            loader.get_single_data()
+    with (
+        open(config_path) as f,
+        pytest.raises((yaml.YAMLError, yaml.reader.ReaderError, ValueError, OSError)),
+    ):
+        # Various possible errors depending on how null byte is handled:
+        # - yaml.reader.ReaderError: Null byte rejected by YAML reader during parsing (most common)
+        # - YAMLError: Include file not found
+        # - ValueError: Invalid path
+        # - OSError: Path contains null byte
+        loader = Loader(
+            f,
+            current_file=config_path,
+            origin=secure_temp_project,
+        )
+        loader.get_single_data()
 
 
 @pytest.mark.security

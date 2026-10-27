@@ -16,6 +16,7 @@ This module provides:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import multiprocessing as mp
 import queue
 import time
@@ -483,14 +484,10 @@ class AsyncProcessQueueTransport(Generic[TRequest, TResponse]):
     async def close(self) -> None:
         """Close both multiprocessing queues."""
         self._closed = True
-        try:
+        with contextlib.suppress(Exception):
             self._outbound.close()
-        except Exception:
-            pass
-        try:
+        with contextlib.suppress(Exception):
             self._inbound.close()
-        except Exception:
-            pass
 
     @property
     def is_closed(self) -> bool:

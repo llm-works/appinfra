@@ -372,11 +372,11 @@ class TestLoggingBlockFold:
         builder = AppBuilder("test")
         builder.logging.with_level("debug")
 
-        with patch("appinfra.app.builder.app.App"):
-            with pytest.raises(
-                ValueError, match="logging block opened at .* is still open"
-            ):
-                builder.build()
+        with (
+            patch("appinfra.app.builder.app.App"),
+            pytest.raises(ValueError, match="logging block opened at .* is still open"),
+        ):
+            builder.build()
 
         assert builder._config is None
 

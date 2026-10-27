@@ -472,8 +472,7 @@ class Config(DotDict):
         """
         if isinstance(content, dict):
             # Recursively resolve all dictionary values
-            keys = [k for k in content.keys()]
-            for k in keys:
+            for k in list(content):
                 content[k] = self._resolve(content[k])
         elif isinstance(content, str):
             # Replace ${variable_name} patterns with actual values
@@ -577,8 +576,7 @@ class Config(DotDict):
             List of path components (e.g., ['logging', 'level'])
         """
         # Remove prefix and split by underscore
-        path_parts = env_key[len(self._env_prefix) :].lower().split("_")
-        return path_parts
+        return env_key[len(self._env_prefix) :].lower().split("_")
 
     def _set_nested_value(self, data: dict, path: list[str], value: Any) -> None:
         """
@@ -704,7 +702,7 @@ class Config(DotDict):
             return (candidate_hyphenated, num_components)
 
         # Priority 3: Normalized match (handles mixed hyphens/underscores)
-        for key in data.keys():
+        for key in data:
             if key.replace("-", "_") == candidate_underscored:
                 return (key, num_components)
 
@@ -738,8 +736,7 @@ class Config(DotDict):
         try:
             if "." in value:
                 return float(value)
-            else:
-                return int(value)
+            return int(value)
         except ValueError:
             pass
 
@@ -809,11 +806,10 @@ class Config(DotDict):
             # Validate using pydantic schema
             if raise_on_error:
                 return validate_config(config_dict)
-            else:
-                try:
-                    return validate_config(config_dict)
-                except Exception:
-                    return False
+            try:
+                return validate_config(config_dict)
+            except Exception:
+                return False
 
         except ImportError:
             # Config schemas module not available

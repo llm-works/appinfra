@@ -185,12 +185,11 @@ class BuiltTool(Tool):
         """Run the tool."""
         if self._run_func:
             return cast(int, self._run_func(self, **kwargs))
-        elif self._group:
+        if self._group:
             return self._group.run(**kwargs)
-        else:
-            # Default behavior - just log that the tool ran
-            self.lg.info(f"running {self.name}...")
-            return 0
+        # Default behavior - just log that the tool ran
+        self.lg.info(f"running {self.name}...")
+        return 0
 
 
 class FunctionTool(Tool):

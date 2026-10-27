@@ -43,7 +43,7 @@ class RouteManager:
         if "*" in path or "{" in path or "[" in path:
             # Pattern-based route with ReDoS protection
             pattern = safe_compile(path, timeout=1.0)
-            route_info = {method: handler for method in methods}
+            route_info = dict.fromkeys(methods, handler)
             self._patterns.append((pattern, route_info))
         else:
             # Simple string route

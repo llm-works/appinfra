@@ -408,7 +408,7 @@ class LoggerFactory:
         logger's handlers via the _root_logger reference. They share the root's
         holder for hot-reload of location settings.
         """
-        root = parent._root_logger if parent._root_logger else parent
+        root = parent._root_logger or parent
         effective_config = LoggerFactory._get_view_logger_config(name, parent)
 
         logging.setLoggerClass(parent.__class__)

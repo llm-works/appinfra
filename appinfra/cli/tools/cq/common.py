@@ -1,14 +1,48 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright 2026 The appinfra Authors
 
-"""File selection and exit codes shared by the cq checks."""
+"""File selection, exit codes and the keep directive shared by the cq checks."""
 
+import io
+import re
+import tokenize
 from pathlib import Path
 
 from ....log import Logger
 
 # Exit code for "warnings but ok" - findings in non-strict mode
 EXIT_CODE_WARNING = 42
+
+# Marks a finding as intended, followed by the reason: "# cq: keep <reason>"
+KEEP_DIRECTIVE = re.compile(r"#\s*cq:\s*keep\b", re.IGNORECASE)
+
+
+def read_source(path: Path) -> str:
+    """Read a Python file with its declared encoding, as the interpreter and pylint do."""
+    with tokenize.open(path) as f:
+        return f.read()
+
+
+def keep_lines(source: str) -> set[int]:
+    """Return the numbers of the lines whose comment carries the keep directive.
+
+    Only comments count: the directive's text inside a string literal does not.
+    """
+    try:
+        tokens = list(tokenize.generate_tokens(io.StringIO(source).readline))
+    except (SyntaxError, tokenize.TokenError):
+        return set()
+    return {
+        token.start[0]
+        for token in tokens
+        if token.type == tokenize.COMMENT and KEEP_DIRECTIVE.search(token.string)
+    }
+
+
+def has_keep(kept: set[int], first_line: int, last_line: int) -> bool:
+    """True if a line in first_line..last_line (1-based, inclusive) is in kept."""
+    return any(first_line <= line <= last_line for line in kept)
+
 
 # Default directories to exclude (build artifacts, caches, virtual envs)
 # These are matched against individual path components

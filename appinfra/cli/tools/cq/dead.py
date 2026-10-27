@@ -19,7 +19,8 @@ any file loads that name, as a variable, an attribute, an import or a string
 literal (getattr, ``__all__``). Two unrelated definitions sharing a name hide
 each other. A definition used only through dynamic dispatch or by a base class
 outside the analyzed files (e.g. a stdlib hook) is kept with ``# cq: keep`` on
-its line, followed by the reason.
+its line, followed by the reason. One kept definition keeps the name throughout
+its file, so an attribute assigned in several places needs the directive once.
 
 Exit Codes:
     0: No findings
@@ -31,7 +32,6 @@ from __future__ import annotations
 
 import argparse
 import ast
-import re
 import sys
 from collections.abc import Iterator
 from dataclasses import dataclass
@@ -39,9 +39,13 @@ from pathlib import Path
 from typing import Any
 
 from ....app.tools import Tool, ToolConfig
-from .common import EXIT_CODE_WARNING, collect_python_files
-
-KEEP_DIRECTIVE = re.compile(r"#\s*cq:\s*keep\b", re.IGNORECASE)
+from .common import (
+    EXIT_CODE_WARNING,
+    collect_python_files,
+    has_keep,
+    keep_lines,
+    read_source,
+)
 
 
 @dataclass(frozen=True)
@@ -137,30 +141,35 @@ class DeadCodeAnalyzer:
         """Initialize empty definition and use sets."""
         self.definitions: list[Definition] = []
         self.used: set[str] = set()
+        self.kept: set[tuple[str, Path]] = set()
         self.unparsable: list[Path] = []
 
     def add_file(self, file_path: Path) -> None:
         """Parse one file and record its private definitions and its uses."""
         try:
-            source = file_path.read_text(encoding="utf-8")
+            source = read_source(file_path)
             tree = ast.parse(source, filename=str(file_path))
         except (OSError, UnicodeDecodeError, SyntaxError):
             self.unparsable.append(file_path)
             return
-        lines = source.splitlines()
+        kept_lines = keep_lines(source)
         found = [
             *_scope_definitions(tree.body, in_class=False),
             *_self_attribute_stores(tree),
         ]
         for name, kind, node in found:
             line_number = node.lineno  # type: ignore[attr-defined]
-            if is_private(name) and not _has_keep(lines, line_number):
+            if not is_private(name):
+                continue
+            if has_keep(kept_lines, line_number, line_number):
+                self.kept.add((name, file_path))
+            else:
                 self.definitions.append(Definition(name, kind, file_path, line_number))
         self.used.update(_used_names(tree))
 
     def unused(self) -> list[Definition]:
         """Return definitions whose name no analyzed file uses, one per name and file."""
-        seen: set[tuple[str, Path]] = set()
+        seen = set(self.kept)
         result = []
         for d in sorted(
             self.definitions, key=lambda d: (str(d.file_path), d.line_number)
@@ -169,13 +178,6 @@ class DeadCodeAnalyzer:
                 seen.add((d.name, d.file_path))
                 result.append(d)
         return result
-
-
-def _has_keep(lines: list[str], line_number: int) -> bool:
-    """True if the definition's line carries a ``# cq: keep`` directive."""
-    if not 0 < line_number <= len(lines):
-        return False
-    return KEEP_DIRECTIVE.search(lines[line_number - 1]) is not None
 
 
 def format_report(findings: list[Definition], files_checked: int) -> str:

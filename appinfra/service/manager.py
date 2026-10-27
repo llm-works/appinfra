@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import atexit
+import contextlib
 import threading
 from typing import TYPE_CHECKING, Self
 
@@ -186,7 +187,7 @@ class Manager:
         levels = self._get_dependency_levels()
         self._lg.debug(
             "starting services...",
-            extra={"levels": [[s for s in lvl] for lvl in levels]},
+            extra={"levels": [list(lvl) for lvl in levels]},
         )
 
         try:
@@ -331,10 +332,8 @@ class Manager:
     def _atexit_stop(self) -> None:
         """Stop services on interpreter exit."""
         if self._started:
-            try:
+            with contextlib.suppress(Exception):
                 self.stop()
-            except Exception:
-                pass
 
     def __enter__(self) -> Self:
         """Start all services."""

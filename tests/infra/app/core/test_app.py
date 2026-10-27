@@ -326,9 +326,8 @@ class TestSetup:
             patch.object(app, "configure") as mock_configure,
         ):
             # Disable print_help to prevent system exit
-            with patch.object(app.parser, "print_help"):
-                with patch("sys.exit"):
-                    app.setup()
+            with patch.object(app.parser, "print_help"), patch("sys.exit"):
+                app.setup()
 
             mock_create_tools.assert_called_once()
             mock_create_args.assert_called_once()
@@ -477,18 +476,20 @@ class TestMain:
         with (
             patch.object(app, "setup", side_effect=ValueError("test error")),
             patch.object(app.lifecycle, "finalize"),
+            pytest.raises(ValueError, match="test error"),
         ):
-            with pytest.raises(ValueError, match="test error"):
-                app.main()
+            app.main()
 
     def test_main_reraises_exception_before_logger_exists(self):
         """A failure inside setup() propagates as is; no logger exists yet to report it."""
         app = App()
         app.lifecycle._logger = None
 
-        with patch.object(app, "setup", side_effect=ValueError("test error")):
-            with pytest.raises(ValueError, match="test error"):
-                app.main()
+        with (
+            patch.object(app, "setup", side_effect=ValueError("test error")),
+            pytest.raises(ValueError, match="test error"),
+        ):
+            app.main()
 
         assert app.lifecycle.logger is None
 
@@ -1039,9 +1040,11 @@ class TestSubprocessContextMethod:
             Path("/etc/myapp/config.yaml"), Path("/etc/myapp"), rule=6
         )
 
-        with patch("appinfra.subprocess.SubprocessContext._start_config_watcher"):
-            with app.subprocess_context(handle_signals=False) as ctx:
-                assert ctx._config_files == ["/etc/myapp/config.yaml"]
+        with (
+            patch("appinfra.subprocess.SubprocessContext._start_config_watcher"),
+            app.subprocess_context(handle_signals=False) as ctx,
+        ):
+            assert ctx._config_files == ["/etc/myapp/config.yaml"]
 
     def test_subprocess_context_forwards_origin(self, tmp_path):
         """Test that subprocess_context() forwards the resolved include root."""
@@ -1053,9 +1056,11 @@ class TestSubprocessContextMethod:
         app._config_source = ConfigFile(etc / "config.yaml", etc, rule=6)
         app._origin = etc
 
-        with patch("appinfra.subprocess.SubprocessContext._start_config_watcher"):
-            with app.subprocess_context(handle_signals=False) as ctx:
-                assert ctx._origin == etc.resolve()
+        with (
+            patch("appinfra.subprocess.SubprocessContext._start_config_watcher"),
+            app.subprocess_context(handle_signals=False) as ctx,
+        ):
+            assert ctx._origin == etc.resolve()
 
     def test_subprocess_context_handles_missing_config(self):
         """Test subprocess_context() works without a resolved config file."""
@@ -1100,9 +1105,11 @@ class TestSubprocessContextMethod:
         app = App()
         app.config = DotDict(logging=DotDict(level="info", location=0))
 
-        with pytest.raises(RuntimeError, match="task failed"):
-            with app.subprocess_context(handle_signals=False):
-                raise RuntimeError("task failed")
+        with (
+            pytest.raises(RuntimeError, match="task failed"),
+            app.subprocess_context(handle_signals=False),
+        ):
+            raise RuntimeError("task failed")
 
         assert "/" not in logging.root.manager.loggerDict
 

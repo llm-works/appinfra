@@ -69,17 +69,17 @@ class PG(Interface):
 
     # Type annotations for instance attributes
     _dialect: Any
-    _cached_regex: Any
     _whitespace_regex: Any
     _lg_extra: dict[str, Any]
     _query_lg_level: int | bool | None
     _auto_reconnect: bool
     _max_retries: int
     _retry_delay: float
-    # Event listener attributes (set conditionally)
-    _readonly_listener: Any
-    _after_execute_listener: Any
-    _before_cursor_listener: Any
+    # Event listener attributes (set conditionally), held so the listeners can be removed:
+    # event.remove needs the same function object
+    _readonly_listener: Any  # cq: keep held for event.remove
+    _after_execute_listener: Any  # cq: keep held for event.remove
+    _before_cursor_listener: Any  # cq: keep held for event.remove
     # Lifecycle hooks
     _before_migrate_hooks: list[Callable[[Any], None]]
     _after_migrate_hooks: list[Callable[[Any], None]]

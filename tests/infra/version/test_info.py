@@ -188,7 +188,7 @@ BUILD_TIME = "invalid-time"
 class TestBuildInfoGitRuntime:
     """Test BuildInfo git runtime detection."""
 
-    @patch.object(BuildInfo, "_run_git")
+    @patch("appinfra.version.git.run_git")
     def test_from_git_runtime_success(self, mock_run_git, tmp_path):
         """Test _from_git_runtime with successful git commands."""
         git_dir = tmp_path / ".git"
@@ -213,7 +213,7 @@ class TestBuildInfoGitRuntime:
         result = BuildInfo._from_git_runtime(tmp_path)
         assert result is None
 
-    @patch.object(BuildInfo, "_run_git")
+    @patch("appinfra.version.git.run_git")
     def test_from_git_runtime_git_fails(self, mock_run_git, tmp_path):
         """Test _from_git_runtime handles git failure."""
         git_dir = tmp_path / ".git"
@@ -222,63 +222,6 @@ class TestBuildInfoGitRuntime:
         mock_run_git.return_value = None  # git command fails
 
         result = BuildInfo._from_git_runtime(tmp_path)
-        assert result is None
-
-
-@pytest.mark.unit
-class TestBuildInfoRunGit:
-    """Test BuildInfo._run_git static method."""
-
-    @patch("subprocess.run")
-    def test_run_git_success(self, mock_run, tmp_path):
-        """Test _run_git returns output on success."""
-        mock_run.return_value = MagicMock(returncode=0, stdout="output\n")
-
-        result = BuildInfo._run_git(tmp_path, ["status"])
-        assert result == "output"
-
-    @patch("subprocess.run")
-    def test_run_git_failure(self, mock_run, tmp_path):
-        """Test _run_git returns None on failure."""
-        mock_run.return_value = MagicMock(returncode=1)
-
-        result = BuildInfo._run_git(tmp_path, ["status"])
-        assert result is None
-
-    @patch("subprocess.run")
-    def test_run_git_exception(self, mock_run, tmp_path):
-        """Test _run_git handles exceptions."""
-        import subprocess
-
-        mock_run.side_effect = subprocess.SubprocessError("error")
-
-        result = BuildInfo._run_git(tmp_path, ["status"])
-        assert result is None
-
-    @patch("subprocess.run")
-    def test_run_git_file_not_found(self, mock_run, tmp_path):
-        """Test _run_git handles missing git command."""
-        mock_run.side_effect = FileNotFoundError("git not found")
-
-        result = BuildInfo._run_git(tmp_path, ["status"])
-        assert result is None
-
-
-@pytest.mark.unit
-class TestBuildInfoCheckGitModified:
-    """Test BuildInfo._check_git_modified method."""
-
-    @patch("subprocess.run")
-    def test_check_git_modified_exception(self, mock_run, tmp_path):
-        """Test _check_git_modified handles exceptions."""
-        import subprocess
-
-        mock_run.side_effect = subprocess.SubprocessError("error")
-
-        info = BuildInfo(
-            commit="abc", commit_full="abc123", _source_path=tmp_path / "file.py"
-        )
-        result = info._check_git_modified(tmp_path)
         assert result is None
 
 
@@ -442,41 +385,8 @@ class TestPackageVersionInfoModifiedEdgeCases:
             source_type=PackageVersionInfo.SOURCE_EDITABLE_GIT,
             _package_path=tmp_path,
         )
-        # No .git directory, so _find_git_root returns None
+        # No .git directory, so find_git_root returns None
         assert info.modified is None
-
-    def test_find_git_root_traverses_parents(self, tmp_path):
-        """Test _find_git_root traverses parent directories."""
-        git_dir = tmp_path / ".git"
-        git_dir.mkdir()
-        nested = tmp_path / "a" / "b" / "c"
-        nested.mkdir(parents=True)
-
-        info = PackageVersionInfo(
-            name="pkg",
-            version="1.0.0",
-            source_type=PackageVersionInfo.SOURCE_EDITABLE_GIT,
-            _package_path=nested,
-        )
-        result = info._find_git_root(nested)
-        assert result == tmp_path
-
-    def test_find_git_root_no_git(self, tmp_path):
-        """Test _find_git_root returns None without .git."""
-        info = PackageVersionInfo(name="pkg", version="1.0.0")
-        result = info._find_git_root(tmp_path)
-        assert result is None
-
-    @patch("subprocess.run")
-    def test_check_git_modified_exception(self, mock_run, tmp_path):
-        """Test _check_git_modified handles subprocess exception."""
-        import subprocess
-
-        mock_run.side_effect = subprocess.SubprocessError("error")
-
-        info = PackageVersionInfo(name="pkg", version="1.0.0")
-        result = info._check_git_modified(tmp_path)
-        assert result is None
 
     def test_message_short_exact_limit(self):
         """Test message_short at exactly 20 chars returns unchanged."""

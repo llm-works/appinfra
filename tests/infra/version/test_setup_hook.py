@@ -88,9 +88,9 @@ class TestGetGitInfo:
         def run_side_effect(*args, **kwargs):
             if "rev-parse" in args:
                 return "abc123def456789012345678901234567890abcd"
-            elif "--format=%s" in args:
+            if "--format=%s" in args:
                 return "Test commit"
-            elif "--porcelain" in args:
+            if "--porcelain" in args:
                 return ""  # Clean repo
             return None
 
@@ -120,9 +120,9 @@ class TestGetGitInfo:
         def run_side_effect(*args, **kwargs):
             if "rev-parse" in args:
                 return "abc123def456789012345678901234567890abcd"
-            elif "--format=%s" in args:
+            if "--format=%s" in args:
                 return "Test commit"
-            elif "--porcelain" in args:
+            if "--porcelain" in args:
                 return " M file.py"  # Modified file
             return None
 

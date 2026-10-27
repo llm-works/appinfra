@@ -296,7 +296,6 @@ class Tool(Traceable, ToolProtocol):
 
         Override this method in subclasses to add tool-specific arguments.
         """
-        pass
 
     def add_group_args(self, subs: Any) -> None:
         """
@@ -377,7 +376,6 @@ class Tool(Traceable, ToolProtocol):
 
         Override this method in subclasses to perform custom configuration.
         """
-        pass
 
     def create_group(self, default: str | None = None) -> ToolGroup:
         """Create a tool group for subcommands."""

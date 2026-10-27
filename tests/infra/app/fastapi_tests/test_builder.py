@@ -221,10 +221,10 @@ class TestRouteConfigurer:
         builder = ServerBuilder(mock_lg, "test-api")
         builder.routes.with_route("/health", handler).done()
 
-        assert len(builder._routes) == 1
-        assert builder._routes[0].path == "/health"
-        assert builder._routes[0].handler is handler
-        assert builder._routes[0].methods == ["GET"]
+        assert len(builder._defs.routes) == 1
+        assert builder._defs.routes[0].path == "/health"
+        assert builder._defs.routes[0].handler is handler
+        assert builder._defs.routes[0].methods == ["GET"]
 
     def test_add_route_with_methods(self, mock_fastapi, mock_lg):
         """Test adding a route with custom methods."""
@@ -236,7 +236,7 @@ class TestRouteConfigurer:
         builder = ServerBuilder(mock_lg, "test-api")
         builder.routes.with_route("/data", handler, methods=["POST", "PUT"]).done()
 
-        assert builder._routes[0].methods == ["POST", "PUT"]
+        assert builder._defs.routes[0].methods == ["POST", "PUT"]
 
     def test_add_multiple_routes(self, mock_fastapi, mock_lg):
         """Test adding multiple routes."""
@@ -247,7 +247,7 @@ class TestRouteConfigurer:
             "/b", lambda: None
         ).done()
 
-        assert len(builder._routes) == 2
+        assert len(builder._defs.routes) == 2
 
     def test_cors_configuration(self, mock_fastapi, mock_lg):
         """Test CORS configuration."""
@@ -260,10 +260,10 @@ class TestRouteConfigurer:
             allow_methods=["GET", "POST"],
         ).done()
 
-        assert builder._cors is not None
-        assert builder._cors.origins == ["http://localhost:3000"]
-        assert builder._cors.allow_credentials is True
-        assert builder._cors.allow_methods == ["GET", "POST"]
+        assert builder._defs.cors is not None
+        assert builder._defs.cors.origins == ["http://localhost:3000"]
+        assert builder._defs.cors.allow_credentials is True
+        assert builder._defs.cors.allow_methods == ["GET", "POST"]
 
     def test_done_returns_builder(self, mock_fastapi, mock_lg):
         """Test that done() returns parent builder."""
@@ -281,10 +281,10 @@ class TestRouteConfigurer:
         builder = ServerBuilder(mock_lg, "test-api")
         builder.routes.with_router(mock_router, prefix="/api/v1", tags=["v1"]).done()
 
-        assert len(builder._routers) == 1
-        assert builder._routers[0].router is mock_router
-        assert builder._routers[0].prefix == "/api/v1"
-        assert builder._routers[0].tags == ["v1"]
+        assert len(builder._defs.routers) == 1
+        assert builder._defs.routers[0].router is mock_router
+        assert builder._defs.routers[0].prefix == "/api/v1"
+        assert builder._defs.routers[0].tags == ["v1"]
 
     def test_add_exception_handler(self, mock_fastapi, mock_lg):
         """Test adding an exception handler."""
@@ -296,9 +296,9 @@ class TestRouteConfigurer:
         builder = ServerBuilder(mock_lg, "test-api")
         builder.routes.with_exception_handler(ValueError, handler).done()
 
-        assert len(builder._exception_handlers) == 1
-        assert builder._exception_handlers[0].exc_class is ValueError
-        assert builder._exception_handlers[0].handler is handler
+        assert len(builder._defs.exception_handlers) == 1
+        assert builder._defs.exception_handlers[0].exc_class is ValueError
+        assert builder._defs.exception_handlers[0].handler is handler
 
     def test_add_middleware(self, mock_fastapi, mock_lg):
         """Test adding middleware."""
@@ -310,9 +310,9 @@ class TestRouteConfigurer:
         builder = ServerBuilder(mock_lg, "test-api")
         builder.routes.with_middleware(CustomMiddleware, timeout=30).done()
 
-        assert len(builder._middleware) == 1
-        assert builder._middleware[0].middleware_class is CustomMiddleware
-        assert builder._middleware[0].options == {"timeout": 30}
+        assert len(builder._defs.middleware) == 1
+        assert builder._defs.middleware[0].middleware_class is CustomMiddleware
+        assert builder._defs.middleware[0].options == {"timeout": 30}
 
 
 @pytest.mark.unit
@@ -664,9 +664,9 @@ class TestServerBuilderLifecycleCallbacks:
             startup, name="init"
         )
 
-        assert len(builder._startup_callbacks) == 1
-        assert builder._startup_callbacks[0].callback is startup
-        assert builder._startup_callbacks[0].name == "init"
+        assert len(builder._defs.startup_callbacks) == 1
+        assert builder._defs.startup_callbacks[0].callback is startup
+        assert builder._defs.startup_callbacks[0].name == "init"
 
     def test_with_on_shutdown(self, mock_fastapi, mock_lg):
         """Test with_on_shutdown adds callback."""
@@ -677,8 +677,8 @@ class TestServerBuilderLifecycleCallbacks:
 
         builder = ServerBuilder(mock_lg, "test-api").with_on_shutdown(shutdown)
 
-        assert len(builder._shutdown_callbacks) == 1
-        assert builder._shutdown_callbacks[0].callback is shutdown
+        assert len(builder._defs.shutdown_callbacks) == 1
+        assert builder._defs.shutdown_callbacks[0].callback is shutdown
 
     def test_with_lifespan(self, mock_fastapi, mock_lg):
         """Test with_lifespan sets lifespan."""
@@ -692,8 +692,8 @@ class TestServerBuilderLifecycleCallbacks:
 
         builder = ServerBuilder(mock_lg, "test-api").with_lifespan(lifespan)
 
-        assert builder._lifespan is not None
-        assert builder._lifespan.lifespan is lifespan
+        assert builder._defs.lifespan is not None
+        assert builder._defs.lifespan.lifespan is lifespan
 
     def test_with_on_request(self, mock_fastapi, mock_lg):
         """Test with_on_request adds callback."""
@@ -704,8 +704,8 @@ class TestServerBuilderLifecycleCallbacks:
 
         builder = ServerBuilder(mock_lg, "test-api").with_on_request(on_request)
 
-        assert len(builder._request_callbacks) == 1
-        assert builder._request_callbacks[0].callback is on_request
+        assert len(builder._defs.request_callbacks) == 1
+        assert builder._defs.request_callbacks[0].callback is on_request
 
     def test_with_on_response(self, mock_fastapi, mock_lg):
         """Test with_on_response adds callback."""
@@ -716,8 +716,8 @@ class TestServerBuilderLifecycleCallbacks:
 
         builder = ServerBuilder(mock_lg, "test-api").with_on_response(on_response)
 
-        assert len(builder._response_callbacks) == 1
-        assert builder._response_callbacks[0].callback is on_response
+        assert len(builder._defs.response_callbacks) == 1
+        assert builder._defs.response_callbacks[0].callback is on_response
 
     def test_with_on_exception(self, mock_fastapi, mock_lg):
         """Test with_on_exception adds callback."""
@@ -728,8 +728,8 @@ class TestServerBuilderLifecycleCallbacks:
 
         builder = ServerBuilder(mock_lg, "test-api").with_on_exception(on_exception)
 
-        assert len(builder._exception_callbacks) == 1
-        assert builder._exception_callbacks[0].callback is on_exception
+        assert len(builder._defs.exception_callbacks) == 1
+        assert builder._defs.exception_callbacks[0].callback is on_exception
 
     def test_lifecycle_callbacks_chaining(self, mock_fastapi, mock_lg):
         """Test lifecycle callbacks can be chained."""
@@ -752,9 +752,9 @@ class TestServerBuilderLifecycleCallbacks:
             .with_port(8080)
         )
 
-        assert len(builder._startup_callbacks) == 1
-        assert len(builder._shutdown_callbacks) == 1
-        assert len(builder._request_callbacks) == 1
+        assert len(builder._defs.startup_callbacks) == 1
+        assert len(builder._defs.shutdown_callbacks) == 1
+        assert len(builder._defs.request_callbacks) == 1
         assert builder._api.port == 8080
 
     def test_configure_adapter_passes_lifecycle_callbacks(self, mock_fastapi, mock_lg):

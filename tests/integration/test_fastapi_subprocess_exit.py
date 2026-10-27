@@ -13,6 +13,7 @@ timeout.
 
 from __future__ import annotations
 
+import contextlib
 import multiprocessing as mp
 import os
 import signal
@@ -283,7 +284,5 @@ class TestSubprocessExit:
             assert _port_bindable(port)
         finally:
             if not _pid_gone(child_pid):
-                try:
+                with contextlib.suppress(ProcessLookupError):
                     os.kill(child_pid, signal.SIGKILL)
-                except ProcessLookupError:
-                    pass

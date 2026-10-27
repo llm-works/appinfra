@@ -34,21 +34,25 @@ Repository = "https://github.com/llm-works/appinfra"
 Issues = "https://github.com/llm-works/appinfra/issues"
 
 [project.optional-dependencies]
-dev = [
-    "setuptools>=68.0",
+# The tools the Makefile framework's checks run; `make setup` installs them in every project
+check = [
     "coverage>=7.4.0,<8.0.0",
-    "ruff>=0.1.0,<1.0.0",
+    "ruff>=0.2.0,<1.0.0",  # --output-format=concise since 0.2
     "mypy>=1.9.0,<2.0.0",
-    "types-PyYAML>=6.0.0,<7.0.0",
-    "types-setuptools>=80.0.0,<85.0.0",
     "pytest>=8.0.0,<10.0.0",
-    "pytest-asyncio>=0.21.0,<2.0.0",
     "pytest-cov>=4.0.0,<8.0.0",
     "pytest-xdist>=3.2.0,<4.0.0",
-    "hypothesis>=6.0.0,<7.0.0",
-    "pip-audit>=2.0.0,<3.0.0",
     "interrogate>=1.5.0,<2.0.0",
     "pylint>=3.0.0,<5.0.0",  # --output-format=json2 since 3.0
+]
+dev = [
+    "appinfra[check]",
+    "setuptools>=68.0",
+    "types-PyYAML>=6.0.0,<7.0.0",
+    "types-setuptools>=80.0.0,<85.0.0",
+    "pytest-asyncio>=0.21.0,<2.0.0",
+    "hypothesis>=6.0.0,<7.0.0",
+    "pip-audit>=2.0.0,<3.0.0",
     "httpx>=0.24.0,<1.0.0",
 ]
 validation = [
@@ -111,12 +115,18 @@ select = [
     "N",     # pep8-naming
     "UP",    # pyupgrade
     "UP037", # Remove quotes from annotations (explicit for policy enforcement)
+    "C90",   # mccabe complexity
+    "SIM",   # flake8-simplify
+    "RET",   # flake8-return
+    "PIE",   # flake8-pie
+    "PERF",  # perflint
+    "FURB",  # refurb
+    "C4",    # flake8-comprehensions
 ]
 ignore = [
     "E501",  # line too long (handled by formatter)
 ]
 
-# For C901 when selected (INFRA_DEV_CQ_LINT_SELECT in the Makefile reports it as a warning)
 [tool.ruff.lint.mccabe]
 max-complexity = 10
 

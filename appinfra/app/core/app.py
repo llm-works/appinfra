@@ -168,7 +168,6 @@ class App(Traceable):
 
         Override this method in subclasses to register application-specific tools.
         """
-        pass
 
     def create_args(self) -> None:
         """
@@ -345,7 +344,6 @@ class App(Traceable):
         Override this method in subclasses to perform custom configuration
         after command-line arguments have been parsed.
         """
-        pass
 
     def _log_setup_complete(self, start_time: float) -> None:
         """Log application setup completion."""

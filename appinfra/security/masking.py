@@ -201,11 +201,7 @@ class SecretMasker:
             return True
 
         # Check patterns
-        for pattern in self._patterns:
-            if pattern.search(text):
-                return True
-
-        return False
+        return any(pattern.search(text) for pattern in self._patterns)
 
 
 # Global masker instance

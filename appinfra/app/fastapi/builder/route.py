@@ -82,7 +82,7 @@ class RouteConfigurer(Generic[P]):
         Returns:
             Self for method chaining
         """
-        self._parent._routes.append(
+        self._parent._defs.routes.append(
             RouteDefinition(
                 path=path,
                 handler=handler,
@@ -111,7 +111,7 @@ class RouteConfigurer(Generic[P]):
         Returns:
             Self for method chaining
         """
-        self._parent._routers.append(
+        self._parent._defs.routers.append(
             RouterDefinition(
                 router=router,
                 prefix=prefix,
@@ -135,7 +135,7 @@ class RouteConfigurer(Generic[P]):
         Returns:
             Self for method chaining
         """
-        self._parent._exception_handlers.append(
+        self._parent._defs.exception_handlers.append(
             ExceptionHandlerDefinition(
                 exc_class=exc_class,
                 handler=handler,
@@ -158,7 +158,7 @@ class RouteConfigurer(Generic[P]):
         Returns:
             Self for method chaining
         """
-        self._parent._middleware.append(
+        self._parent._defs.middleware.append(
             MiddlewareDefinition(
                 middleware_class=middleware_class,
                 options=options,
@@ -185,7 +185,7 @@ class RouteConfigurer(Generic[P]):
         Returns:
             Self for method chaining
         """
-        self._parent._cors = CORSDefinition(
+        self._parent._defs.cors = CORSDefinition(
             origins=origins,
             allow_credentials=allow_credentials,
             allow_methods=allow_methods or ["*"],

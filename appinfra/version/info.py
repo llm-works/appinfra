@@ -8,10 +8,13 @@ This module defines the data structure for storing version and commit
 information about installed packages.
 """
 
+import contextlib
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Self
+
+from .git import find_git_root, head_commit, is_modified
 
 
 @dataclass
@@ -53,38 +56,11 @@ class BuildInfo:
         if not self._source_path:
             return None
 
-        git_root = self._find_git_root(self._source_path.parent)
+        git_root = find_git_root(self._source_path.parent)
         if not git_root:
             return None
 
-        return self._check_git_modified(git_root)
-
-    def _find_git_root(self, path: Path) -> Path | None:
-        """Find the git root directory containing the given path."""
-        current = path.resolve()
-        while current != current.parent:
-            if (current / ".git").exists():
-                return current
-            current = current.parent
-        return None
-
-    def _check_git_modified(self, git_root: Path) -> bool | None:
-        """Check if the git repo has uncommitted changes."""
-        import subprocess
-
-        try:
-            result = subprocess.run(
-                ["git", "status", "--porcelain"],
-                cwd=git_root,
-                capture_output=True,
-                text=True,
-                timeout=5,
-            )
-            if result.returncode == 0:
-                return bool(result.stdout.strip())
-        except (subprocess.SubprocessError, FileNotFoundError, OSError):
-            pass
-        return None
+        return is_modified(git_root)
 
     @classmethod
     def from_path(cls, path: Path) -> Self | None:
@@ -150,12 +126,8 @@ class BuildInfo:
 
         build_time = None
         if build_time_str:
-            try:
-                build_time = datetime.fromisoformat(
-                    build_time_str.replace("Z", "+00:00")
-                )
-            except ValueError:
-                pass
+            with contextlib.suppress(ValueError):
+                build_time = datetime.fromisoformat(build_time_str)
 
         return cls(
             commit=commit_short or commit_full[:7],
@@ -172,17 +144,15 @@ class BuildInfo:
 
         Used as fallback when _build_info.py is empty or missing.
         """
-        git_root = cls._find_git_root_static(directory)
+        git_root = find_git_root(directory)
         if not git_root:
             return None
 
-        commit_full = cls._run_git(git_root, ["rev-parse", "HEAD"])
-        if not commit_full:
+        commit = head_commit(git_root)
+        if not commit:
             return None
 
-        message = cls._run_git(git_root, ["log", "-1", "--format=%s"]) or ""
-        commit_time = cls._get_commit_time(git_root)
-
+        commit_full, message, commit_time = commit
         return cls(
             commit=commit_full[:7],
             commit_full=commit_full,
@@ -190,46 +160,6 @@ class BuildInfo:
             build_time=commit_time,
             _source_path=directory,
         )
-
-    @staticmethod
-    def _find_git_root_static(directory: Path) -> Path | None:
-        """Find the git root directory containing the given path."""
-        current = directory.resolve()
-        while current != current.parent:
-            if (current / ".git").exists():
-                return current
-            current = current.parent
-        return None
-
-    @staticmethod
-    def _run_git(git_root: Path, args: list[str]) -> str | None:
-        """Run a git command and return stdout, or None on failure."""
-        import subprocess
-
-        try:
-            result = subprocess.run(
-                ["git", *args],
-                cwd=git_root,
-                capture_output=True,
-                text=True,
-                timeout=5,
-            )
-            if result.returncode == 0:
-                return result.stdout.strip()
-        except (subprocess.SubprocessError, FileNotFoundError, OSError):
-            pass
-        return None
-
-    @classmethod
-    def _get_commit_time(cls, git_root: Path) -> datetime | None:
-        """Get the commit timestamp from a git repository."""
-        time_str = cls._run_git(git_root, ["log", "-1", "--format=%cI"])
-        if time_str:
-            try:
-                return datetime.fromisoformat(time_str)
-            except ValueError:
-                pass
-        return None
 
 
 @dataclass
@@ -269,12 +199,10 @@ class PackageVersionInfo:
 
     def __post_init__(self) -> None:
         """Validate and normalize the data after initialization."""
-        # Ensure commit_full is set if commit is provided
-        if self.commit and not self.commit_full:
-            # If only short hash provided, use it as full (unusual but allowed)
-            if len(self.commit) == 40:
-                self.commit_full = self.commit
-                self.commit = self.commit[:7]
+        # A full hash given as commit becomes commit_full, and commit its short form
+        if self.commit and not self.commit_full and len(self.commit) == 40:
+            self.commit_full = self.commit
+            self.commit = self.commit[:7]
 
         # Derive short commit from full if not set
         if self.commit_full and not self.commit:
@@ -307,38 +235,11 @@ class PackageVersionInfo:
         if not self._package_path:
             return None
 
-        git_root = self._find_git_root(self._package_path)
+        git_root = find_git_root(self._package_path)
         if not git_root:
             return None
 
-        return self._check_git_modified(git_root)
-
-    def _find_git_root(self, path: Path) -> Path | None:
-        """Find the git root directory containing the given path."""
-        current = path.resolve()
-        while current != current.parent:
-            if (current / ".git").exists():
-                return current
-            current = current.parent
-        return None
-
-    def _check_git_modified(self, git_root: Path) -> bool | None:
-        """Check if the git repo has uncommitted changes."""
-        import subprocess
-
-        try:
-            result = subprocess.run(
-                ["git", "status", "--porcelain"],
-                cwd=git_root,
-                capture_output=True,
-                text=True,
-                timeout=5,
-            )
-            if result.returncode == 0:
-                return bool(result.stdout.strip())
-        except (subprocess.SubprocessError, FileNotFoundError, OSError):
-            pass
-        return None
+        return is_modified(git_root)
 
     @property
     def message_short(self) -> str:

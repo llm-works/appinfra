@@ -62,12 +62,12 @@ class TestWithFlags:
     def test_invalid_flag_name_raises(self):
         """Unknown names are rejected with the valid set listed."""
         with pytest.raises(TypeError, match="Unknown CLI flag: 'invalid_arg'"):
-            AppBuilder("test").cli.with_flags(**{"invalid_arg": False})
+            AppBuilder("test").cli.with_flags(invalid_arg=False)
 
     def test_non_boolean_value_raises(self):
         """Values must be booleans."""
         with pytest.raises(TypeError, match="Value for 'etc_dir' must be a boolean"):
-            AppBuilder("test").cli.with_flags(**{"etc_dir": "not_a_bool"})
+            AppBuilder("test").cli.with_flags(etc_dir="not_a_bool")
 
     def test_returns_block_for_chaining(self):
         """with_flags returns the block, not the AppBuilder."""
@@ -107,7 +107,7 @@ class TestWithFlags:
     def test_log_alias_rejects_non_boolean(self):
         """The alias value is validated like any other."""
         with pytest.raises(TypeError, match="Value for 'log' must be a boolean"):
-            AppBuilder("test").cli.with_flags(**{"log": 1})
+            AppBuilder("test").cli.with_flags(log=1)
 
     def test_version_is_a_flag(self):
         """version is a standard flag key like the others."""

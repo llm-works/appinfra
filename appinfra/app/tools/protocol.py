@@ -33,7 +33,6 @@ class ToolProtocol(ABC):
         Returns:
             str: Tool name
         """
-        pass
 
     @property
     @abstractmethod
@@ -44,7 +43,6 @@ class ToolProtocol(ABC):
         Returns:
             tuple: (command_args, command_kwargs) for argparse
         """
-        pass
 
     @abstractmethod
     def add_args(self, parser: argparse.ArgumentParser) -> None:
@@ -54,7 +52,6 @@ class ToolProtocol(ABC):
         Args:
             parser: Argument parser instance
         """
-        pass
 
     @abstractmethod
     def setup(self, **kwargs: Any) -> None:
@@ -64,7 +61,6 @@ class ToolProtocol(ABC):
         Args:
             **kwargs: Setup keyword arguments
         """
-        pass
 
     @abstractmethod
     def run(self, **kwargs: Any) -> Any:
@@ -77,7 +73,6 @@ class ToolProtocol(ABC):
         Returns:
             Any: Tool execution result
         """
-        pass
 
     @property
     def lg(self) -> Any:
@@ -87,7 +82,6 @@ class ToolProtocol(ABC):
         Returns:
             Logger instance
         """
-        pass
 
     @property
     def args(self) -> Any:
@@ -97,7 +91,6 @@ class ToolProtocol(ABC):
         Returns:
             Parsed arguments
         """
-        pass
 
     @property
     def kwargs(self) -> Any:
@@ -107,7 +100,6 @@ class ToolProtocol(ABC):
         Returns:
             Setup keyword arguments
         """
-        pass
 
     @property
     @abstractmethod
@@ -118,7 +110,6 @@ class ToolProtocol(ABC):
         Returns:
             bool: True if initialized, False otherwise
         """
-        pass
 
     @property
     def arg_prs(self) -> Any:
@@ -128,4 +119,3 @@ class ToolProtocol(ABC):
         Returns:
             Argument parser instance
         """
-        pass

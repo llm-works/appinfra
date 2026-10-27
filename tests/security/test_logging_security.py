@@ -3,6 +3,7 @@
 
 """Security tests for logging module (infra/log/builder/file.py)."""
 
+import contextlib
 from pathlib import Path
 
 import pytest
@@ -78,10 +79,8 @@ def test_log_file_path_traversal(traversal_path: str):
             # Cleanup: close handler and remove created file if it exists
             handler.close()
             if actual_path.exists():
-                try:
+                with contextlib.suppress(OSError):
                     actual_path.unlink()
-                except (PermissionError, OSError):
-                    pass
 
     except (ValueError, OSError, PermissionError) as e:
         # Expected: Path validation or permission errors
@@ -140,56 +139,12 @@ def test_log_injection_attack(payload: str, secure_temp_project: Path):
     # Read the log file
     log_content = log_file.read_text()
 
-    # Verify the payload appears in the log (it should be logged)
-    # but check that it's sanitized/escaped properly
+    # Null byte injection must not truncate the entry: the content after the null byte
+    # is still logged, the null byte itself escaped or removed
+    if "\x00" in payload and "hidden_content" in payload:
+        assert "hidden" in log_content or payload.replace("\x00", "") in log_content
 
-    # 1. Newline injection - fake log entries should not work
-    if "\n" in payload and "[" in payload:
-        # Count the number of log entries
-        # There should be exactly ONE log entry (the one we wrote)
-        # not multiple entries from newline injection
-        lines = log_content.strip().split("\n")
-        # Filter out empty lines
-        non_empty_lines = [line for line in lines if line.strip()]
-
-        # The payload might span multiple lines in output if escaped,
-        # but there should be a clear delimiter showing it's ONE entry
-        # Check that fake log level markers are escaped
-        if "[CRITICAL]" in payload or "[ERROR]" in payload:
-            # These should appear as literal text, not as real log markers
-            # Real log markers would be at the start of a line with timestamp
-            fake_markers = []
-            for line in non_empty_lines:
-                # Skip the legitimate first line
-                if line == non_empty_lines[0]:
-                    continue
-                # Check if subsequent lines look like real log entries
-                # Real entries should have timestamp format
-                if "[CRITICAL]" in line or "[ERROR]" in line:
-                    # This could be the injected content
-                    # Verify it doesn't look like a real log entry
-                    # (it should be escaped or clearly part of message)
-                    fake_markers.append(line)
-
-    # 2. ANSI escape code injection - codes should be escaped or stripped
-    if "\x1b[" in payload:
-        # ANSI codes could be present but should be escaped
-        # Check that the log file doesn't contain raw ANSI codes that could
-        # exploit terminals
-        # Note: Some formatters might preserve them, which is okay if documented
-        # The critical thing is that they don't hide log content
-        pass
-
-    # 3. Null byte injection - should not truncate log entries
-    if "\x00" in payload:
-        # The payload should be in the log file, not truncated at null byte
-        # The null byte itself might be escaped or removed
-        # but content after it should still be logged
-        if "hidden_content" in payload:
-            # Verify "hidden_content" after the null byte is still logged
-            assert "hidden" in log_content or payload.replace("\x00", "") in log_content
-
-    # 4. General verification: The log file should have valid structure
+    # General verification: The log file should have valid structure
     # and not be corrupted by the injection
     assert len(log_content) > 0, "Log file is empty - logging may have failed"
 

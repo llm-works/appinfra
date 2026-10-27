@@ -88,8 +88,7 @@ class DoctorTool(Tool):
         # Output results
         if getattr(self.args, "json", False):
             return self._output_json(results)
-        else:
-            return self._output_pretty(results)
+        return self._output_pretty(results)
 
     def _check_python_version(self) -> CheckResult:
         """Check Python version >= 3.11."""
@@ -102,13 +101,12 @@ class DoctorTool(Tool):
                 passed=True,
                 message=f"{version_str} (>= 3.11 required)",
             )
-        else:
-            return CheckResult(
-                name="Python version",
-                passed=False,
-                message=f"{version_str} (>= 3.11 required)",
-                suggestion="Upgrade to Python 3.11 or later",
-            )
+        return CheckResult(
+            name="Python version",
+            passed=False,
+            message=f"{version_str} (>= 3.11 required)",
+            suggestion="Upgrade to Python 3.11 or later",
+        )
 
     def _check_required_tools(self) -> list[CheckResult]:
         """Check for ruff, pytest, mypy."""
@@ -338,9 +336,8 @@ class DoctorTool(Tool):
         if all_passed:
             print("All checks passed!")
             return 0
-        else:
-            print("Some checks failed. See suggestions above.")
-            return 1
+        print("Some checks failed. See suggestions above.")
+        return 1
 
     def _output_json(self, results: list[CheckResult]) -> int:
         """Output as JSON."""

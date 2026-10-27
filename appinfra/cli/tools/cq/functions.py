@@ -158,12 +158,6 @@ class FunctionAnalyzer:
             # Would have been a violation without custom limit - track as exempt
             self._exempt_functions.append(info)
 
-    def _is_method(self, node: ast.FunctionDef) -> bool:
-        """Check if a function node is a method inside a class."""
-        # This is a simple heuristic; ast.walk doesn't maintain parent info
-        # In practice, we handle this by processing class bodies explicitly
-        return False
-
     def _analyze_function(
         self, node: ast.FunctionDef, file_path: Path, is_method: bool
     ) -> FunctionInfo | None:
@@ -408,10 +402,10 @@ class FunctionReporter:
     def _format_moderate_section(self, moderate: list[FunctionInfo]) -> list[str]:
         """Format moderate functions section."""
         lines = [f"MODERATE ({self.limit}-50 lines):"]
-        for func in moderate[:5]:  # Show top 5
-            lines.append(
-                f"  ├─ {func.file_path}:{func.line_number} - {func.name}() - {func.code_lines} lines"
-            )
+        lines.extend(
+            f"  ├─ {func.file_path}:{func.line_number} - {func.name}() - {func.code_lines} lines"
+            for func in moderate[:5]  # Show top 5
+        )
         if len(moderate) > 5:
             lines.append(f"  └─ ... and {len(moderate) - 5} more")
         lines.append("")

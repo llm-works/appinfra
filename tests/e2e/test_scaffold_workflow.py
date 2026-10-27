@@ -87,13 +87,12 @@ class TestScaffoldWorkflow:
         ]
         cmd.extend(args)
 
-        result = subprocess.run(
+        return subprocess.run(
             cmd,
             capture_output=True,
             text=True,
             cwd=str(self.infra_root),
         )
-        return result
 
     def _verify_directories(self, project_path: Path):
         """Verify project directories exist."""

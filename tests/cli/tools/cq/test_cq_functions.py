@@ -891,7 +891,7 @@ class TestCheckFunctionsToolAddArgs:
 
         tool.add_args(parser)
 
-        calls = [c for c in parser.add_argument.call_args_list]
+        calls = list(parser.add_argument.call_args_list)
         dir_calls = [c for c in calls if c[0][0] == "dir"]
         assert len(dir_calls) == 1
         assert dir_calls[0][1].get("default") == "."
@@ -913,7 +913,7 @@ class TestCheckFunctionsToolAddArgs:
 
         tool.add_args(parser)
 
-        calls = [c for c in parser.add_argument.call_args_list]
+        calls = list(parser.add_argument.call_args_list)
         format_calls = [c for c in calls if c[0][0] == "--format"]
         assert len(format_calls) == 1
 

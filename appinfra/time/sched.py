@@ -83,25 +83,17 @@ class Period(Enum):
 class SchedulerError(Exception):
     """Base exception for scheduler errors."""
 
-    pass
-
 
 class UnsupportedPeriodError(SchedulerError):
     """Raised when an unsupported period is specified."""
-
-    pass
 
 
 class InvalidTimeFormatError(SchedulerError):
     """Raised when an invalid time format is provided."""
 
-    pass
-
 
 class InvalidConfigError(SchedulerError):
     """Raised when invalid configuration is provided."""
-
-    pass
 
 
 # Constants
@@ -388,15 +380,14 @@ class Sched:
                 second=0,
                 microsecond=0,
             )
-        else:
-            return now.replace(
-                month=now.month + 1,
-                day=1,
-                hour=self._hour,
-                minute=self._minute,
-                second=0,
-                microsecond=0,
-            )
+        return now.replace(
+            month=now.month + 1,
+            day=1,
+            hour=self._hour,
+            minute=self._minute,
+            second=0,
+            microsecond=0,
+        )
 
     def _setup_monthly(self, now: datetime.datetime) -> None:
         """Set up monthly scheduling."""

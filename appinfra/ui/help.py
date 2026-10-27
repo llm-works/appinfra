@@ -48,7 +48,6 @@ class RichHelpFormatter(argparse.HelpFormatter):
     ):
         """Initialize the formatter."""
         super().__init__(prog, indent_increment, max_help_position, width)
-        self._rich_output: list[Any] = []
 
     def _build_rich_help(self, console: Any) -> None:
         """Build rich help output to console."""
@@ -179,8 +178,7 @@ class RichHelpFormatter(argparse.HelpFormatter):
                 opts += f" {getattr(action.type, '__name__', 'VALUE').upper()}"
             help_text = action.help or ""
             if action.default and action.default != argparse.SUPPRESS:
-                if action.default is not None:
-                    help_text += f" [dim](default: {action.default})[/dim]"
+                help_text += f" [dim](default: {action.default})[/dim]"
             table.add_row(opts, help_text)
         console.print(table)
 

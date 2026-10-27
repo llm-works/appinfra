@@ -25,8 +25,7 @@ def _create_debug_table_for_test(test_helper, table_name_prefix, custom_schema):
         return test_helper.create_debug_table_with_schema(
             table_name_prefix, custom_schema
         )
-    else:
-        return test_helper.create_debug_table(table_name_prefix)
+    return test_helper.create_debug_table(table_name_prefix)
 
 
 def _log_test_failure(self, table_name):
@@ -150,8 +149,7 @@ class PGTestCaseHelper(unittest.TestCase):
         current_path = Path(__file__)
         for parent in current_path.parents:
             if (parent / "etc" / "infra.yaml").exists():
-                config_path = parent / "etc" / "infra.yaml"
-                return config_path
+                return parent / "etc" / "infra.yaml"
 
         cls._db_available = False
         cls._skip_reason = "Could not find project root with etc/infra.yaml"

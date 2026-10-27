@@ -57,6 +57,7 @@ Usage::
 from __future__ import annotations
 
 import argparse
+import contextlib
 import os
 import re
 import shlex
@@ -374,10 +375,8 @@ def _wait_case(spec: Spec, proc: subprocess.Popen[str]) -> tuple[str, str]:
 
 def _kill_group(proc: subprocess.Popen[str]) -> None:
     """SIGKILL the case's process group, if anything in it is still alive."""
-    try:
+    with contextlib.suppress(ProcessLookupError):
         os.killpg(proc.pid, signal.SIGKILL)
-    except ProcessLookupError:
-        pass
 
 
 def run_spec(

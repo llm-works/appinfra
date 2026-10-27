@@ -58,14 +58,13 @@ class TestPGConnection:
 
     def test_pg_multiple_sessions(self, pg_connection):
         """Test that multiple sessions can be created from same PG instance."""
-        with pg_connection.session() as session1:
-            with pg_connection.session() as session2:
-                # Both should work independently
-                result1 = session1.execute(text("SELECT 1"))
-                result2 = session2.execute(text("SELECT 2"))
+        with pg_connection.session() as session1, pg_connection.session() as session2:
+            # Both should work independently
+            result1 = session1.execute(text("SELECT 1"))
+            result2 = session2.execute(text("SELECT 2"))
 
-                assert result1.fetchone()[0] == 1
-                assert result2.fetchone()[0] == 2
+            assert result1.fetchone()[0] == 1
+            assert result2.fetchone()[0] == 2
 
     def test_pg_autocommit_session(self, pg_connection):
         """Test session(autocommit=True) with AUTOCOMMIT isolation."""

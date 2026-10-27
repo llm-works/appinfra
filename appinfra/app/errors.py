@@ -14,8 +14,6 @@ from typing import Any
 class InfraAppError(Exception):
     """Base exception for appinfra.app package."""
 
-    pass
-
 
 class UndefNameError(InfraAppError):
     """Raised when a tool name is not defined."""

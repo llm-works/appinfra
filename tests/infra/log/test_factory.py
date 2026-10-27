@@ -51,7 +51,7 @@ def cleanup_loggers():
     to_remove = [
         name
         for name in logging.root.manager.loggerDict
-        if name.startswith("test_") or name.startswith("/")
+        if name.startswith(("test_", "/"))
     ]
     for name in to_remove:
         if name in logging.root.manager.loggerDict:

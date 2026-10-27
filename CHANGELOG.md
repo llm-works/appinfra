@@ -10,13 +10,19 @@ For API stability guarantees and deprecation policy, see
 
 ## [Unreleased]
 
+<!-- RELEASE TODO (remove when done): before tagging 0.14.0, change FRAMEWORK_TOOLS in
+appinfra/scripts/install_deps.py to "appinfra[check]>=0.14.0". Without the floor, a project
+pinning an older appinfra resolves a release with no `check` extra and pip only warns. Not set
+earlier: pre-release builds (0.13.1.devN) would not satisfy it. -->
+
 ### Added
 - `appinfra cq dup` reports duplicated code blocks (pylint's duplicate-code; pylint joins the
-  `dev` extra). `appinfra cq dead` reports private definitions nothing refers to; `# cq: keep
-  <reason>` exempts one. `make check` runs them when `INFRA_DEV_CQ_DUP` / `INFRA_DEV_CQ_DEAD`
-  is `warn` or `strict` (default `false`).
+  `check` extra). `appinfra cq dead` reports private definitions nothing refers to. `# cq: keep
+  <reason>` exempts a finding, on the definition line or within every copy of a block. `make
+  check` runs them per `INFRA_DEV_CQ_DUP` / `INFRA_DEV_CQ_DEAD`:
+  `false`, `warn` (default) or `strict`.
 - `INFRA_DEV_CQ_LINT_SELECT`: extra ruff rule codes that `make check` reports under Linting as
-  warnings, without failing.
+  warnings, without failing (default `C90,SIM,RET,PIE,PERF,FURB,C4`).
 - `make check` names, in a row below its checklist, a test that left a non-daemon thread running
   at exit; the thread's stack goes to the kept log. Such a thread holds a pytest-xdist worker
   until it ends, for up to 10s.
@@ -24,10 +30,18 @@ For API stability guarantees and deprecation policy, see
 ### Changed
 - `make check`: the "Function size check" row is now "Code quality check" and also runs
   `cq dup` and `cq dead` when enabled; the "Running code quality checks..." banner is gone.
+- A bare `make` shows the help screen instead of `make config`'s output.
+- `make setup` installs the tools `make check` runs (the new `check` extra: ruff, mypy, pytest,
+  coverage, interrogate, pylint) in every project, not only those its own dependencies list.
 - **Breaking:** `appinfra.cli.tools.code_quality`, `check_functions` and `check_spdx` moved to
   `appinfra.cli.tools.cq` (`tool`, `functions`, `spdx`).
+- **Breaking:** `GitRuntimeSource()` no longer takes `check_dirty`; the parameter had no effect.
 
 ### Fixed
+- `password(confirm=True)` accepts a matching confirmation; with questionary installed it always
+  reported a mismatch and prompted again.
+- `JSONLoggingBuilder` and `DatabaseLoggingBuilder` apply the location color; a database handler
+  that fails to build raises `LogConfigError`, as with the other builders.
 - `StoreConformance`'s racing-prune test no longer stalls for seconds under load, and it races
   writers against prune in every run.
 

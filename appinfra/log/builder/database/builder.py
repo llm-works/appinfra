@@ -11,9 +11,6 @@ database loggers from configuration.
 from collections.abc import Callable
 from typing import Any, Self
 
-from ...config import LogConfig
-from ...factory import LoggerFactory
-from ...logger import Logger
 from ..builder import LoggingBuilder
 from .config import DatabaseHandlerConfig
 
@@ -229,36 +226,6 @@ class DatabaseLoggingBuilder(LoggingBuilder):
                 handler_config.fallback_to_console = fallback_to_console
         return self
 
-    def build(self) -> Logger:
-        """
-        Build and return the configured logger.
-
-        Returns:
-            Configured logger instance
-        """
-        # Create base configuration
-        config = LogConfig.from_params(
-            level=self._level,
-            location=self._location,
-            micros=self._micros,
-            colors=self._colors,
-        )
-
-        # Create logger; raises LoggerExistsError if the name is taken
-        logger = LoggerFactory.create(
-            self._name, config, self._logger_class, self._extra
-        )
-
-        # Clear default handlers since we're configuring our own
-        logger.handlers.clear()
-
-        # Add configured handlers
-        for handler_config in self._handlers:
-            handler = handler_config.create_handler(config, logger=logger)
-            logger.addHandler(handler)
-
-        return logger
-
 
 # Convenience function for database logging builder
 def create_database_logger(name: str) -> DatabaseLoggingBuilder:
@@ -335,8 +302,7 @@ def load_database_logging_config(
     """
     if handler_config:
         return _load_config_from_handler(handler_config)
-    else:
-        return _load_config_from_top_level(config_dict)
+    return _load_config_from_top_level(config_dict)
 
 
 def create_database_logger_from_config(

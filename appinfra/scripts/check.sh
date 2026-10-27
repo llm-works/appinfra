@@ -193,8 +193,19 @@ fi
 DOCSTRING_THRESHOLD="${INFRA_DEV_DOCSTRING_THRESHOLD:-80}"
 MAX_INLINE_LINES=30
 
-# Check definitions: "Name|Make Target|Command|Fix Target"
-declare -a CHECKS=(
+# Check definitions: "Name|Make Target|Command|Fix Target", listed from a file's outside in
+# (license header, layout, lint, types, docstrings), then the slow ones: code quality, tests
+declare -a CHECKS=()
+
+# SPDX header check only if opted in (INFRA_DEV_CQ_SPDX=true).
+# Off by default so closed-source repos that reuse this framework don't
+# fail on files without SPDX-License-Identifier headers.
+CQ_SPDX="${INFRA_DEV_CQ_SPDX:-false}"
+if [ "$CQ_SPDX" = "true" ]; then
+    CHECKS+=("SPDX header check|cq.spdx|${PYTHON} -m appinfra.cli.cli -l error cq spdx|")
+fi
+
+CHECKS+=(
     "Formatting check|fmt.check|${PYTHON} -m ruff format --check .|fmt"
     "Linting|lint|lint_check|lint.fix"
     "Type checking|type|${PYTHON} -m mypy ${PKG_NAME}/ --exclude 'examples/' --cache-dir .mypy_cache/pkg ${MYPY_FLAGS}|"
@@ -225,13 +236,14 @@ if [ -n "${INFRA_DEV_CQ_EXCLUDE:-}" ]; then
 fi
 
 # Extra ruff rules reported over the package as warnings, never failing: a comma-separated list
-# of rule codes (empty = off). Rules that should fail the build belong in the project's ruff config.
-CQ_LINT_SELECT="${INFRA_DEV_CQ_LINT_SELECT:-}"
+# of rule codes (empty or false = off; "-" not ":-" keeps an empty value). Rules that should fail
+# the build belong in the project's ruff config.
+CQ_LINT_SELECT="${INFRA_DEV_CQ_LINT_SELECT-C90,SIM,RET,PIE,PERF,FURB,C4}"
 
-# Duplicated code (pylint) and dead private code checks over the package, opt-in per project.
-# Each takes false (default), warn (report the count, never fail) or strict (fail on findings).
-CQ_DUP="${INFRA_DEV_CQ_DUP:-false}"
-CQ_DEAD="${INFRA_DEV_CQ_DEAD:-false}"
+# Duplicated code (pylint) and dead private code checks over the package. Each takes false (off),
+# warn (default: report the count, never fail) or strict (fail on findings).
+CQ_DUP="${INFRA_DEV_CQ_DUP:-warn}"
+CQ_DEAD="${INFRA_DEV_CQ_DEAD:-warn}"
 for _cq_var in INFRA_DEV_CQ_DUP:"$CQ_DUP" INFRA_DEV_CQ_DEAD:"$CQ_DEAD"; do
     case "${_cq_var#*:}" in
         false|warn|strict) ;;
@@ -244,7 +256,7 @@ done
 # Linting: the project's ruff rules fail the check; the CQ_LINT_SELECT rules only warn.
 lint_check() {
     eval "${PYTHON} -m ruff check ." || return 1
-    [ -n "$CQ_LINT_SELECT" ] || return 0
+    [ -n "$CQ_LINT_SELECT" ] && [ "$CQ_LINT_SELECT" != false ] || return 0
     local out count
     out=$(eval "${PYTHON} -m ruff check ${PKG_NAME}/ --select ${CQ_LINT_SELECT} --no-fix --exit-zero --output-format concise") || return 1
     count=$(printf '%s\n' "$out" | grep -cE '^[^ ].*:[0-9]+:[0-9]+: ' || true)
@@ -294,23 +306,15 @@ CQ_TARGET="cq"
 # Docstring coverage check command (only if threshold > 0)
 DOCSTRING_CMD="${PYTHON} -m interrogate -v ${PKG_NAME}/ --ignore-init-module --ignore-init-method --fail-under=${DOCSTRING_THRESHOLD}"
 
-# Add remaining checks
-CHECKS+=(
-    "Code quality check|${CQ_TARGET}|cq_check|"
-)
-
-# Add SPDX header check only if opted in (INFRA_DEV_CQ_SPDX=true).
-# Off by default so closed-source repos that reuse this framework don't
-# fail on files without SPDX-License-Identifier headers.
-CQ_SPDX="${INFRA_DEV_CQ_SPDX:-false}"
-if [ "$CQ_SPDX" = "true" ]; then
-    CHECKS+=("SPDX header check|cq.spdx|${PYTHON} -m appinfra.cli.cli -l error cq spdx|")
-fi
-
 # Add docstring check only if threshold > 0
 if awk "BEGIN {exit !($DOCSTRING_THRESHOLD > 0)}" 2>/dev/null; then
     CHECKS+=("Docstring coverage|cq.docstring.strict|${DOCSTRING_CMD}|docstring:${DOCSTRING_THRESHOLD}")
 fi
+
+# The slowest checks last: the rows above finish first, top down
+CHECKS+=(
+    "Code quality check|${CQ_TARGET}|cq_check|"
+)
 
 # Add test suite check only if not skipped
 if [ "$SKIP_TESTS" = false ]; then

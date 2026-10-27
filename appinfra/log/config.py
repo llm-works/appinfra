@@ -52,13 +52,12 @@ class LogConfig:
 
         if isinstance(level, bool):
             return False if not level else logging.INFO
-        elif isinstance(level, str):
+        if isinstance(level, str):
             if level.isnumeric():
                 return int(level)
-            elif level in LogConstants.LEVEL_NAMES:
+            if level in LogConstants.LEVEL_NAMES:
                 return LogConstants.LEVEL_NAMES[level]
-            else:
-                raise InvalidLogLevelError(level)
+            raise InvalidLogLevelError(level)
         return level
 
     @classmethod

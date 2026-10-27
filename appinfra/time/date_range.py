@@ -160,4 +160,4 @@ def dates_from_lists(
     # Convert to strings if requested
     if not strings:
         return dates
-    return set([date_to_str(d) for d in dates])
+    return {date_to_str(d) for d in dates}

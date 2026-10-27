@@ -320,7 +320,6 @@ class TestToolFunctionInit:
 
         def test():
             """Docstring here."""
-            pass
 
         tool_func = ToolFunction(
             test,
@@ -343,7 +342,6 @@ class TestToolFunctionInit:
 
             More detailed description here.
             """
-            pass
 
         tool_func = ToolFunction(my_tool)
 

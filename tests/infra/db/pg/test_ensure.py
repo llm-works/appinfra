@@ -84,9 +84,11 @@ class TestWithObjectLock:
         conn = session.connection.return_value
         conn.get_execution_options.return_value = {"isolation_level": "AUTOCOMMIT"}
 
-        with pytest.raises(ValueError, match="AUTOCOMMIT"):
-            with with_object_lock(session, "k"):
-                pass
+        with (
+            pytest.raises(ValueError, match="AUTOCOMMIT"),
+            with_object_lock(session, "k"),
+        ):
+            pass
 
 
 @pytest.mark.unit

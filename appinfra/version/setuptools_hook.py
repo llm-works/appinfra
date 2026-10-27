@@ -111,4 +111,3 @@ def finalize_hook(dist: Distribution) -> None:
             return
 
     # If we can't find it, that's OK - might be installed differently
-    pass

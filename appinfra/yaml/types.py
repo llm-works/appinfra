@@ -172,8 +172,6 @@ class DeepMergeDict(dict):
     (not just merge keys).
     """
 
-    pass
-
 
 class ResetValue:
     """

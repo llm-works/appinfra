@@ -61,9 +61,11 @@ class TestDetach:
 
     def test_loads_all_column_attributes(self, mock_obj, mock_session, mock_mapper):
         """Test forces loading of all column attributes."""
-        with patch("appinfra.db.utils.inspect", return_value=mock_mapper):
-            with patch("appinfra.db.utils.make_transient"):
-                detach(mock_obj, mock_session)
+        with (
+            patch("appinfra.db.utils.inspect", return_value=mock_mapper),
+            patch("appinfra.db.utils.make_transient"),
+        ):
+            detach(mock_obj, mock_session)
 
         # Verify all columns were accessed
         assert mock_obj.id == 1
@@ -72,25 +74,31 @@ class TestDetach:
 
     def test_expunges_object_from_session(self, mock_obj, mock_session, mock_mapper):
         """Test expunges object from session."""
-        with patch("appinfra.db.utils.inspect", return_value=mock_mapper):
-            with patch("appinfra.db.utils.make_transient"):
-                detach(mock_obj, mock_session)
+        with (
+            patch("appinfra.db.utils.inspect", return_value=mock_mapper),
+            patch("appinfra.db.utils.make_transient"),
+        ):
+            detach(mock_obj, mock_session)
 
         mock_session.expunge.assert_called_once_with(mock_obj)
 
     def test_makes_object_transient(self, mock_obj, mock_session, mock_mapper):
         """Test marks object as transient."""
-        with patch("appinfra.db.utils.inspect", return_value=mock_mapper):
-            with patch("appinfra.db.utils.make_transient") as mock_make_transient:
-                detach(mock_obj, mock_session)
+        with (
+            patch("appinfra.db.utils.inspect", return_value=mock_mapper),
+            patch("appinfra.db.utils.make_transient") as mock_make_transient,
+        ):
+            detach(mock_obj, mock_session)
 
         mock_make_transient.assert_called_once_with(mock_obj)
 
     def test_returns_detached_object(self, mock_obj, mock_session, mock_mapper):
         """Test returns the detached object."""
-        with patch("appinfra.db.utils.inspect", return_value=mock_mapper):
-            with patch("appinfra.db.utils.make_transient"):
-                result = detach(mock_obj, mock_session)
+        with (
+            patch("appinfra.db.utils.inspect", return_value=mock_mapper),
+            patch("appinfra.db.utils.make_transient"),
+        ):
+            result = detach(mock_obj, mock_session)
 
         assert result is mock_obj
 
@@ -111,9 +119,11 @@ class TestDetachAll:
         obj2 = Mock(id=2, name="two")
         obj3 = Mock(id=3, name="three")
 
-        with patch("appinfra.db.utils.inspect", return_value=mock_mapper):
-            with patch("appinfra.db.utils.make_transient"):
-                result = detach_all([obj1, obj2, obj3], mock_session)
+        with (
+            patch("appinfra.db.utils.inspect", return_value=mock_mapper),
+            patch("appinfra.db.utils.make_transient"),
+        ):
+            result = detach_all([obj1, obj2, obj3], mock_session)
 
         assert len(result) == 3
         assert mock_session.expunge.call_count == 3
@@ -123,9 +133,11 @@ class TestDetachAll:
         obj1 = Mock(id=1)
         obj2 = Mock(id=2)
 
-        with patch("appinfra.db.utils.inspect", return_value=mock_mapper):
-            with patch("appinfra.db.utils.make_transient"):
-                result = detach_all([obj1, obj2], mock_session)
+        with (
+            patch("appinfra.db.utils.inspect", return_value=mock_mapper),
+            patch("appinfra.db.utils.make_transient"),
+        ):
+            result = detach_all([obj1, obj2], mock_session)
 
         assert result[0] is obj1
         assert result[1] is obj2

@@ -72,9 +72,9 @@ class TestGetGitCommit:
         def side_effect(*args):
             if "rev-parse" in args:
                 return "abc123def456789012345678901234567890abcd"
-            elif "--format=%s" in args:
+            if "--format=%s" in args:
                 return "Test commit message"
-            elif "--porcelain" in args:
+            if "--porcelain" in args:
                 return " M file.py"
             return None
 
@@ -104,9 +104,9 @@ class TestGetGitCommit:
         def side_effect(*args):
             if "rev-parse" in args:
                 return "abc123"
-            elif "--format=%s" in args:
+            if "--format=%s" in args:
                 return None  # message command fails
-            elif "--porcelain" in args:
+            if "--porcelain" in args:
                 return ""
             return None
 
@@ -125,9 +125,9 @@ class TestGetGitCommit:
         def side_effect(*args):
             if "rev-parse" in args:
                 return "abc123"
-            elif "--format=%s" in args:
+            if "--format=%s" in args:
                 return "Clean commit"
-            elif "--porcelain" in args:
+            if "--porcelain" in args:
                 return ""
             return None
 

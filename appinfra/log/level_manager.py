@@ -250,8 +250,7 @@ class LogLevelManager:
         with self._lock:
             if source is None:
                 return list(self._rules)
-            else:
-                return [r for r in self._rules if r.source == source]
+            return [r for r in self._rules if r.source == source]
 
     def _matches_pattern(self, logger_name: str, pattern: str) -> bool:
         """
@@ -333,12 +332,11 @@ class LogLevelManager:
             if pattern.endswith("/**"):
                 prefix = pattern[:-3]
                 return logger_name.startswith(prefix)
-            elif pattern.startswith("**/"):
+            if pattern.startswith("**/"):
                 suffix = pattern[3:]
                 return logger_name.endswith(suffix)
-            else:
-                # No /** in pattern, shouldn't happen
-                return fnmatch.fnmatch(logger_name, pattern)
+            # No /** in pattern, shouldn't happen
+            return fnmatch.fnmatch(logger_name, pattern)
 
         # Pattern has prefix/**/.../suffix structure
         prefix = parts[0]

@@ -288,7 +288,7 @@ def test_config_path_resolution_traversal(
     """
     # Create config with !path tag for path resolution
     # Note: Only paths with !path tag are resolved
-    if not (traversal_path.startswith("./") or traversal_path.startswith("../")):
+    if not traversal_path.startswith(("./", "../")):
         pytest.skip(f"Path {traversal_path} not a relative path (not ./ or ../)")
 
     config_content = f"""
@@ -401,7 +401,7 @@ normal_key: "normal_value"
         config_dict = config.dict()
 
         # Check that null byte didn't truncate the key
-        for key in config_dict.keys():
+        for key in config_dict:
             if "\x00" in key:
                 # Null byte preserved - verify full key is there
                 assert key == null_byte_key

@@ -7,8 +7,11 @@ Duplicated code check.
 Runs pylint's duplicate-code checker (``R0801``) over the selected files and
 reports each group of similar blocks as ``path:first-last`` locations. Comments,
 docstrings, imports and function signatures are ignored when comparing, so
-blocks that differ only in those still count as duplicates. pylint must be
-installed; it is part of the ``dev`` extra.
+blocks that differ only in those still count as duplicates. A group is kept,
+not reported, when one of its reported copies has ``# cq: keep`` on a line
+within the reported range, followed by the reason. pylint may report only two
+copies of a block found in three or more places, so the directive goes on every
+copy. pylint must be installed; it is part of the ``check`` extra.
 
 Exit Codes:
     0: No duplicates
@@ -28,9 +31,18 @@ from pathlib import Path
 from typing import Any
 
 from ....app.tools import Tool, ToolConfig
-from .common import EXIT_CODE_WARNING, collect_python_files
+from .common import (
+    EXIT_CODE_WARNING,
+    collect_python_files,
+    has_keep,
+    keep_lines,
+    read_source,
+)
 
 DEFAULT_MIN_LINES = 8
+# pylint processes: about half the single-process time; more buys little and takes the CPU
+# make check gives its other checks
+DEFAULT_JOBS = 4
 
 # One location line in an R0801 message: ==<module>:[<start>:<end>], 0-based, end exclusive
 _LOCATION = re.compile(r"^==(?P<module>[^:\s]+):\[(?P<start>\d+):(?P<end>\d+)\]$")
@@ -53,12 +65,13 @@ class Block:
         return self.last_line - self.first_line + 1
 
 
-def pylint_command(files: list[Path], min_lines: int) -> list[str]:
+def pylint_command(files: list[Path], min_lines: int, jobs: int) -> list[str]:
     """Build the pylint invocation that reports only duplicate-code."""
     return [
         sys.executable,
         "-m",
         "pylint",
+        f"--jobs={jobs}",
         "--disable=all",
         "--enable=duplicate-code",
         "--output-format=json2",
@@ -83,7 +96,10 @@ def module_paths(files: list[Path]) -> dict[str, Path]:
 
 
 def parse_message(message: str, paths: dict[str, Path]) -> list[Block]:
-    """Parse the location lines of one R0801 message into blocks."""
+    """Parse the location lines of one R0801 message into blocks, sorted by location.
+
+    With several pylint jobs the order of the locations in a message varies between runs.
+    """
     blocks = []
     for line in message.splitlines():
         match = _LOCATION.match(line)
@@ -92,7 +108,7 @@ def parse_message(message: str, paths: dict[str, Path]) -> list[Block]:
         path = paths.get(match["module"])
         location = str(path) if path else match["module"]
         blocks.append(Block(location, int(match["start"]) + 1, int(match["end"])))
-    return blocks
+    return sorted(blocks, key=lambda b: (b.location, b.first_line))
 
 
 def parse_groups(output: str, paths: dict[str, Path]) -> list[list[Block]]:
@@ -104,6 +120,29 @@ def parse_groups(output: str, paths: dict[str, Path]) -> list[list[Block]]:
         if m.get("symbol") == "duplicate-code"
     ]
     return [g for g in groups if g]
+
+
+def _kept_lines(location: str, cache: dict[str, set[int]]) -> set[int]:
+    """Return a block's file's keep-directive lines, read once; an unreadable file has none."""
+    if location not in cache:
+        try:
+            cache[location] = keep_lines(read_source(Path(location)))
+        except (OSError, UnicodeDecodeError, SyntaxError):
+            cache[location] = set()
+    return cache[location]
+
+
+def drop_kept(groups: list[list[Block]]) -> list[list[Block]]:
+    """Drop the groups that have a keep directive within one of their blocks."""
+    cache: dict[str, set[int]] = {}
+    return [
+        group
+        for group in groups
+        if not any(
+            has_keep(_kept_lines(b.location, cache), b.first_line, b.last_line)
+            for b in group
+        )
+    ]
 
 
 def format_report(groups: list[list[Block]], files_checked: int) -> str:
@@ -138,7 +177,8 @@ class CheckDupTool(Tool):
             description=(
                 "Report blocks of similar lines found in more than one place, "
                 "using pylint's duplicate-code checker. Comments, docstrings, "
-                "imports and signatures are ignored when comparing."
+                "imports and signatures are ignored when comparing. Mark intended "
+                "ones with '# cq: keep <reason>' within every copy."
             ),
         )
         super().__init__(parent, config)
@@ -156,6 +196,12 @@ class CheckDupTool(Tool):
             type=int,
             default=DEFAULT_MIN_LINES,
             help=f"Minimum similar lines to report (default: {DEFAULT_MIN_LINES})",
+        )
+        parser.add_argument(
+            "--jobs",
+            type=int,
+            default=DEFAULT_JOBS,
+            help=f"pylint processes; 0 uses every CPU (default: {DEFAULT_JOBS})",
         )
         parser.add_argument(
             "--strict",
@@ -179,7 +225,7 @@ class CheckDupTool(Tool):
         result = self._run_pylint(files)
         if result is None:
             return 1
-        groups = parse_groups(result.stdout, module_paths(files))
+        groups = drop_kept(parse_groups(result.stdout, module_paths(files)))
         sys.stdout.write(format_report(groups, len(files)) + "\n")
         if not groups:
             return 0
@@ -187,7 +233,7 @@ class CheckDupTool(Tool):
 
     def _run_pylint(self, files: list[Path]) -> subprocess.CompletedProcess[str] | None:
         """Run pylint; log and return None if it is missing or did not complete."""
-        cmd = pylint_command(files, self.args.min_lines)
+        cmd = pylint_command(files, self.args.min_lines, self.args.jobs)
         result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode & _PYLINT_FAILED or not result.stdout:
             self.lg.warning(

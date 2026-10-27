@@ -156,7 +156,7 @@ class TestGenerateToolsList:
         def get_tool(name):
             if name == "tool1":
                 return Mock(cmd=(["tool1"], {"help": "First tool", "aliases": []}))
-            elif name == "tool2":
+            if name == "tool2":
                 return Mock(cmd=(["tool2"], {"help": "Second tool", "aliases": []}))
             return None
 
@@ -282,7 +282,7 @@ class TestHelpGeneratorIntegration:
         def get_tool(name):
             if name == "analyze":
                 return tool1
-            elif name == "report":
+            if name == "report":
                 return tool2
             return None
 

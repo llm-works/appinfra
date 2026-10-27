@@ -66,17 +66,12 @@ from .ratelimit import RateLimiter, RateLimitMiddleware, TokenBucketLimiter
 
 _INSTALL_MSG = "FastAPI is not installed. Install with: pip install appinfra[fastapi]"
 
-# Flag to track if real implementations are available
-_HAS_FASTAPI = False
-
 # Guard runtime imports for optional dependency
 try:
     from .builder.server import ServerBuilder
     from .handlers import ExceptionHandler, LoggerInjectable
     from .runtime.ipc import IPCChannel
     from .runtime.server import Server
-
-    _HAS_FASTAPI = True
 
 except ImportError:
     # FastAPI not installed - provide stub classes with clear error messages

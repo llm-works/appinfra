@@ -86,9 +86,8 @@ def _find_file_in_path(examples_dir: Path, name: str) -> Path | None:
 def _find_direct_match(examples_dir: Path, name: str) -> Path | None:
     """Find direct directory or file match."""
     direct = examples_dir / name
-    if direct.exists():
-        if direct.is_dir() or direct.is_file():
-            return direct
+    if direct.is_dir() or direct.is_file():
+        return direct
     if not name.endswith(".py"):
         direct_py = examples_dir / f"{name}.py"
         if direct_py.exists() and direct_py.is_file():
@@ -148,7 +147,7 @@ def find_example(examples_dir: Path, name: str) -> Path | None:
     if not examples_dir.exists():
         return None
 
-    name_base = name[:-3] if name.endswith(".py") else name
+    name_base = name.removesuffix(".py")
     name_normalized = name_base.lower().replace("-", "").replace("_", "")
 
     # Path with directory component
@@ -285,8 +284,7 @@ class DocsShowTool(Tool):
             return 1
 
         # Strip .md suffix if present (allow "README.md" as well as "README")
-        if topic.endswith(".md"):
-            topic = topic[:-3]
+        topic = topic.removesuffix(".md")
 
         docs_dir = get_docs_dir()
         examples_dir = get_examples_dir()
@@ -593,9 +591,8 @@ class DocsFindTool(Tool):
             return
 
         printed_lines: set[int] = set()
-        matches_shown = 0
 
-        for line_num, _ in file_matches:
+        for matches_shown, (line_num, _) in enumerate(file_matches):
             if matches_shown >= max_matches:
                 remaining = len(file_matches) - matches_shown
                 if remaining > 0:
@@ -611,7 +608,6 @@ class DocsFindTool(Tool):
                 word_boundary,
                 no_color,
             )
-            matches_shown += 1
 
     def _print_context_block(
         self,
@@ -729,11 +725,12 @@ class DocsFindTool(Tool):
         try:
             content = file_path.read_text(encoding="utf-8", errors="ignore")
             # Check frontmatter keywords for .md files
-            if file_path.suffix == ".md":
-                if kw_match := self._search_frontmatter_keywords(
+            if file_path.suffix == ".md" and (
+                kw_match := self._search_frontmatter_keywords(
                     content, pattern_lower, fuzzy, threshold
-                ):
-                    matches.append(kw_match)
+                )
+            ):
+                matches.append(kw_match)
             # Search content lines
             for i, line in enumerate(content.splitlines(keepends=True), 1):
                 if self._line_matches(
