@@ -71,6 +71,22 @@ class TestCollectPythonFiles:
 
         assert len(files) == 2
 
+    def test_root_under_a_tests_directory_is_collected(self, tmp_path: Path):
+        root = tmp_path / "tests" / "proj" / "pkg"
+        root.mkdir(parents=True)
+        (root / "mod.py").touch()
+
+        files = collect_python_files(Mock(), [str(root)], [], False)
+
+        assert files == [root / "mod.py"]
+
+    def test_root_named_tests_is_excluded(self, tmp_path: Path):
+        root = tmp_path / "tests"
+        root.mkdir()
+        (root / "helpers.py").touch()
+
+        assert collect_python_files(Mock(), [str(root)], [], False) == []
+
     def test_handles_nonexistent_path(self):
         lg = Mock()
 

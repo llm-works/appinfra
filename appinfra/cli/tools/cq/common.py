@@ -77,10 +77,16 @@ def collect_python_files(
             ):
                 python_files.append(path)
         elif path.is_dir():
+            # Judge each file below the scan root, keeping the root's own name: the directories
+            # above the root (a checkout under tests/ or a hidden directory) must not exclude it
             python_files.extend(
                 py_file
                 for py_file in sorted(path.rglob("*.py"))
-                if not should_exclude(py_file, exclude_patterns, include_tests)
+                if not should_exclude(
+                    Path(path.name) / py_file.relative_to(path),
+                    exclude_patterns,
+                    include_tests,
+                )
             )
 
     return python_files

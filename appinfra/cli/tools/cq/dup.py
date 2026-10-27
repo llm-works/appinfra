@@ -33,7 +33,7 @@ from .common import EXIT_CODE_WARNING, collect_python_files
 DEFAULT_MIN_LINES = 8
 
 # One location line in an R0801 message: ==<module>:[<start>:<end>], 0-based, end exclusive
-_LOCATION = re.compile(r"^==(?P<module>[\w.]+):\[(?P<start>\d+):(?P<end>\d+)\]$")
+_LOCATION = re.compile(r"^==(?P<module>[^:\s]+):\[(?P<start>\d+):(?P<end>\d+)\]$")
 
 # pylint exit status bits that mean it did not complete (fatal, usage error)
 _PYLINT_FAILED = 1 | 32

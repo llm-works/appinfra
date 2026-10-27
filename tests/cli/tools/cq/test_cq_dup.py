@@ -48,6 +48,16 @@ class TestParsing:
 
         assert groups == [[Block("pkg/a.py", 10, 20), Block("pkg/b.py", 1, 11)]]
 
+    def test_parse_groups_accepts_non_identifier_module_names(self):
+        files = [Path("pkg/my-script.py"), Path("pkg/b.py")]
+        output = json.dumps(
+            {"messages": [_r0801("==my-script:[0:9]", "==pkg.b:[0:9]")]}
+        )
+
+        groups = parse_groups(output, module_paths(files))
+
+        assert groups == [[Block("pkg/my-script.py", 1, 9), Block("pkg/b.py", 1, 9)]]
+
     def test_parse_groups_keeps_unknown_module_name(self):
         output = json.dumps({"messages": [_r0801("==other.mod:[0:9]")]})
         assert parse_groups(output, {}) == [[Block("other.mod", 1, 9)]]
