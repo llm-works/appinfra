@@ -31,6 +31,8 @@ For API stability guarantees and deprecation policy, see
 - **Breaking:** `GitRuntimeSource()` no longer takes `check_dirty`; the parameter had no effect.
 
 ### Fixed
+- `JSONLoggingBuilder` and `DatabaseLoggingBuilder` apply the location color; a database handler
+  that fails to build raises `LogConfigError`, as with the other builders.
 - `StoreConformance`'s racing-prune test no longer stalls for seconds under load, and it races
   writers against prune in every run.
 

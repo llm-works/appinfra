@@ -15,7 +15,6 @@ from pathlib import Path
 from typing import Any, Self
 
 from ..config import LogConfig
-from ..factory import LoggerFactory
 from ..logger import Logger
 from .builder import LoggingBuilder
 
@@ -425,34 +424,6 @@ class JSONLoggingBuilder(LoggingBuilder):
         self._json_console = True
         return self
 
-    def build(self) -> Logger:
-        """
-        Build and return the configured logger.
-
-        Returns:
-            Configured logger instance
-        """
-        # Create base configuration
-        config = LogConfig.from_params(
-            level=self._level,
-            location=self._location,
-            micros=self._micros,
-            colors=self._colors,
-        )
-
-        # Create logger; raises LoggerExistsError if the name is taken
-        logger = LoggerFactory.create(
-            self._name, config, self._logger_class, self._extra
-        )
-
-        # Clear default handlers since we're configuring our own
-        logger.handlers.clear()
-
-        # Add configured handlers
-        self._add_json_handlers(logger, config)
-
-        return logger
-
     def _add_regular_console_handler(self, logger: Logger, config: LogConfig) -> None:
         """Add regular (non-JSON) console handler."""
         console_handler = logging.StreamHandler(sys.stdout)
@@ -489,9 +460,9 @@ class JSONLoggingBuilder(LoggingBuilder):
         json_file_handler.setFormatter(json_formatter)
         logger.addHandler(json_file_handler)
 
-    def _add_json_handlers(self, logger: Logger, config: LogConfig) -> None:
+    def _add_handlers(self, logger: Logger, config: LogConfig) -> None:
         """
-        Add configured JSON handlers to the logger.
+        Add configured JSON handlers to the logger; build() calls this.
 
         Args:
             logger: Logger instance

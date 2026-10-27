@@ -307,7 +307,7 @@ class TestServerBuilderValidation:
 
         mock_lg = MagicMock()
         builder = ServerBuilder(mock_lg, "test")
-        builder._exception_handlers.append(
+        builder._defs.exception_handlers.append(
             ExceptionHandlerDefinition(ValueError, handler)
         )
         builder._request_q = mp.Queue()
@@ -326,7 +326,7 @@ class TestServerBuilderValidation:
         handler = ConcreteHandler(mock_lg)
 
         builder = ServerBuilder(mock_lg, "test")
-        builder._exception_handlers.append(
+        builder._defs.exception_handlers.append(
             ExceptionHandlerDefinition(ValueError, handler)
         )
         builder._request_q = mp.Queue()
@@ -349,7 +349,7 @@ class TestServerBuilderValidation:
 
         mock_lg = MagicMock()
         builder = ServerBuilder(mock_lg, "test")
-        builder._exception_handlers.append(
+        builder._defs.exception_handlers.append(
             ExceptionHandlerDefinition(ValueError, handler)
         )
         # No subprocess queues set

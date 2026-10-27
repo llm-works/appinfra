@@ -229,11 +229,11 @@ class TestFastAPIAdapter:
         adapter = FastAPIAdapter(config)
 
         assert adapter._config is config
-        assert adapter._routes == []
-        assert adapter._routers == []
-        assert adapter._middleware == []
-        assert adapter._exception_handlers == []
-        assert adapter._cors is None
+        assert adapter._defs.routes == []
+        assert adapter._defs.routers == []
+        assert adapter._defs.middleware == []
+        assert adapter._defs.exception_handlers == []
+        assert adapter._defs.cors is None
 
     def test_add_route(self, mock_fastapi):
         """Test adding a route."""
@@ -242,8 +242,8 @@ class TestFastAPIAdapter:
 
         adapter.add_route(route)
 
-        assert len(adapter._routes) == 1
-        assert adapter._routes[0] is route
+        assert len(adapter._defs.routes) == 1
+        assert adapter._defs.routes[0] is route
 
     def test_add_router(self, mock_fastapi):
         """Test adding a router."""
@@ -252,8 +252,8 @@ class TestFastAPIAdapter:
 
         adapter.add_router(router_def)
 
-        assert len(adapter._routers) == 1
-        assert adapter._routers[0] is router_def
+        assert len(adapter._defs.routers) == 1
+        assert adapter._defs.routers[0] is router_def
 
     def test_add_middleware(self, mock_fastapi):
         """Test adding middleware."""
@@ -262,8 +262,8 @@ class TestFastAPIAdapter:
 
         adapter.add_middleware(mw_def)
 
-        assert len(adapter._middleware) == 1
-        assert adapter._middleware[0] is mw_def
+        assert len(adapter._defs.middleware) == 1
+        assert adapter._defs.middleware[0] is mw_def
 
     def test_add_exception_handler(self, mock_fastapi):
         """Test adding exception handler."""
@@ -274,8 +274,8 @@ class TestFastAPIAdapter:
 
         adapter.add_exception_handler(handler_def)
 
-        assert len(adapter._exception_handlers) == 1
-        assert adapter._exception_handlers[0] is handler_def
+        assert len(adapter._defs.exception_handlers) == 1
+        assert adapter._defs.exception_handlers[0] is handler_def
 
     def test_set_cors(self, mock_fastapi):
         """Test setting CORS."""
@@ -284,7 +284,7 @@ class TestFastAPIAdapter:
 
         adapter.set_cors(cors)
 
-        assert adapter._cors is cors
+        assert adapter._defs.cors is cors
 
     def test_build_creates_app(self, mock_fastapi):
         """Test build creates FastAPI app."""
@@ -528,8 +528,8 @@ class TestFastAPIAdapterLifecycleCallbacks:
         cb_def = LifecycleCallbackDefinition(callback=startup, name="startup")
         adapter.add_startup_callback(cb_def)
 
-        assert len(adapter._startup_callbacks) == 1
-        assert adapter._startup_callbacks[0] is cb_def
+        assert len(adapter._defs.startup_callbacks) == 1
+        assert adapter._defs.startup_callbacks[0] is cb_def
 
     def test_add_shutdown_callback(self, mock_fastapi):
         """Test add_shutdown_callback stores callback."""
@@ -541,8 +541,8 @@ class TestFastAPIAdapterLifecycleCallbacks:
         cb_def = LifecycleCallbackDefinition(callback=shutdown, name="shutdown")
         adapter.add_shutdown_callback(cb_def)
 
-        assert len(adapter._shutdown_callbacks) == 1
-        assert adapter._shutdown_callbacks[0] is cb_def
+        assert len(adapter._defs.shutdown_callbacks) == 1
+        assert adapter._defs.shutdown_callbacks[0] is cb_def
 
     def test_set_lifespan(self, mock_fastapi):
         """Test set_lifespan stores lifespan."""
@@ -557,7 +557,7 @@ class TestFastAPIAdapterLifecycleCallbacks:
         lifespan_def = LifespanDefinition(lifespan=lifespan)
         adapter.set_lifespan(lifespan_def)
 
-        assert adapter._lifespan is lifespan_def
+        assert adapter._defs.lifespan is lifespan_def
 
     def test_add_request_callback(self, mock_fastapi):
         """Test add_request_callback stores callback."""
@@ -569,8 +569,8 @@ class TestFastAPIAdapterLifecycleCallbacks:
         cb_def = RequestCallbackDefinition(callback=on_request)
         adapter.add_request_callback(cb_def)
 
-        assert len(adapter._request_callbacks) == 1
-        assert adapter._request_callbacks[0] is cb_def
+        assert len(adapter._defs.request_callbacks) == 1
+        assert adapter._defs.request_callbacks[0] is cb_def
 
     def test_add_response_callback(self, mock_fastapi):
         """Test add_response_callback stores callback."""
@@ -582,8 +582,8 @@ class TestFastAPIAdapterLifecycleCallbacks:
         cb_def = ResponseCallbackDefinition(callback=on_response)
         adapter.add_response_callback(cb_def)
 
-        assert len(adapter._response_callbacks) == 1
-        assert adapter._response_callbacks[0] is cb_def
+        assert len(adapter._defs.response_callbacks) == 1
+        assert adapter._defs.response_callbacks[0] is cb_def
 
     def test_add_exception_callback(self, mock_fastapi):
         """Test add_exception_callback stores callback."""
@@ -595,8 +595,8 @@ class TestFastAPIAdapterLifecycleCallbacks:
         cb_def = ExceptionCallbackDefinition(callback=on_exception)
         adapter.add_exception_callback(cb_def)
 
-        assert len(adapter._exception_callbacks) == 1
-        assert adapter._exception_callbacks[0] is cb_def
+        assert len(adapter._defs.exception_callbacks) == 1
+        assert adapter._defs.exception_callbacks[0] is cb_def
 
     def test_build_with_startup_shutdown_creates_lifespan(self, mock_fastapi):
         """Test build creates lifespan from startup/shutdown callbacks."""
@@ -1534,7 +1534,7 @@ class TestResolveLazy:
             RouteDefinition(path="/", handler=Lazy(f"{__name__}:_factory_no_config"))
         )
         adapter._resolve_lazy()
-        assert adapter._routes[0].handler == "resolved-no-config"
+        assert adapter._defs.routes[0].handler == "resolved-no-config"
 
     def test_resolves_router(self, adapter):
         adapter.add_router(
@@ -1542,7 +1542,7 @@ class TestResolveLazy:
         )
         adapter._resolve_lazy()
         # `.name` is a MagicMock built-in; check the tag we set instead
-        assert isinstance(adapter._routers[0].router, MagicMock)
+        assert isinstance(adapter._defs.routers[0].router, MagicMock)
 
     def test_resolves_middleware_class(self, adapter):
         adapter.add_middleware(
@@ -1553,7 +1553,7 @@ class TestResolveLazy:
             )
         )
         adapter._resolve_lazy()
-        assert adapter._middleware[0].middleware_class.__name__ == "LazyMiddleware"
+        assert adapter._defs.middleware[0].middleware_class.__name__ == "LazyMiddleware"
 
     def test_resolves_exception_handler(self, adapter):
         adapter.add_exception_handler(
@@ -1563,7 +1563,7 @@ class TestResolveLazy:
             )
         )
         adapter._resolve_lazy()
-        assert adapter._exception_handlers[0].handler == "resolved-no-config"
+        assert adapter._defs.exception_handlers[0].handler == "resolved-no-config"
 
     def test_resolves_startup_callback(self, adapter):
         adapter.add_startup_callback(
@@ -1572,7 +1572,7 @@ class TestResolveLazy:
             )
         )
         adapter._resolve_lazy()
-        assert callable(adapter._startup_callbacks[0].callback)
+        assert callable(adapter._defs.startup_callbacks[0].callback)
 
     def test_resolves_startup_callback_preserves_after_lifespan_false(self, adapter):
         """Lazy-wrapped callback with after_lifespan=False partitions correctly."""
@@ -1583,8 +1583,8 @@ class TestResolveLazy:
             )
         )
         adapter._resolve_lazy()
-        assert callable(adapter._startup_callbacks[0].callback)
-        assert adapter._startup_callbacks[0].after_lifespan is False
+        assert callable(adapter._defs.startup_callbacks[0].callback)
+        assert adapter._defs.startup_callbacks[0].after_lifespan is False
 
     def test_resolves_shutdown_callback(self, adapter):
         adapter.add_shutdown_callback(
@@ -1593,7 +1593,7 @@ class TestResolveLazy:
             )
         )
         adapter._resolve_lazy()
-        assert callable(adapter._shutdown_callbacks[0].callback)
+        assert callable(adapter._defs.shutdown_callbacks[0].callback)
 
     def test_resolves_lifespan(self, adapter):
         adapter.set_lifespan(
@@ -1602,7 +1602,7 @@ class TestResolveLazy:
             )
         )
         adapter._resolve_lazy()
-        assert callable(adapter._lifespan.lifespan)
+        assert callable(adapter._defs.lifespan.lifespan)
 
     def test_resolves_request_callback(self, adapter):
         adapter.add_request_callback(
@@ -1611,7 +1611,7 @@ class TestResolveLazy:
             )
         )
         adapter._resolve_lazy()
-        assert callable(adapter._request_callbacks[0].callback)
+        assert callable(adapter._defs.request_callbacks[0].callback)
 
     def test_resolves_response_callback(self, adapter):
         adapter.add_response_callback(
@@ -1620,7 +1620,7 @@ class TestResolveLazy:
             )
         )
         adapter._resolve_lazy()
-        assert callable(adapter._response_callbacks[0].callback)
+        assert callable(adapter._defs.response_callbacks[0].callback)
 
     def test_resolves_exception_callback(self, adapter):
         adapter.add_exception_callback(
@@ -1629,7 +1629,7 @@ class TestResolveLazy:
             )
         )
         adapter._resolve_lazy()
-        assert callable(adapter._exception_callbacks[0].callback)
+        assert callable(adapter._defs.exception_callbacks[0].callback)
 
     def test_resolves_rate_limiter(self, adapter):
         adapter.add_rate_limiter(
@@ -1638,7 +1638,7 @@ class TestResolveLazy:
             )
         )
         adapter._resolve_lazy()
-        assert adapter._rate_limiters[0].limiter.tag == "lazy-limiter"
+        assert adapter._defs.rate_limiters[0].limiter.tag == "lazy-limiter"
 
     def test_preserves_real_callables(self, adapter):
         """Non-Lazy fields must be left untouched."""
@@ -1648,7 +1648,7 @@ class TestResolveLazy:
 
         adapter.add_route(RouteDefinition(path="/", handler=real_handler))
         adapter._resolve_lazy()
-        assert adapter._routes[0].handler is real_handler
+        assert adapter._defs.routes[0].handler is real_handler
 
     def test_idempotent(self, adapter):
         """Second _resolve_lazy pass is a no-op — fields already hold real values."""
@@ -1656,9 +1656,9 @@ class TestResolveLazy:
             RouteDefinition(path="/", handler=Lazy(f"{__name__}:_factory_no_config"))
         )
         adapter._resolve_lazy()
-        first = adapter._routes[0].handler
+        first = adapter._defs.routes[0].handler
         adapter._resolve_lazy()
-        assert adapter._routes[0].handler is first
+        assert adapter._defs.routes[0].handler is first
 
     def test_build_resolves_lazy(self, adapter):
         """FastAPIAdapter.build must invoke _resolve_lazy before configuring the app."""
@@ -1666,4 +1666,4 @@ class TestResolveLazy:
             RouteDefinition(path="/", handler=Lazy(f"{__name__}:_factory_no_config"))
         )
         adapter.build()
-        assert adapter._routes[0].handler == "resolved-no-config"
+        assert adapter._defs.routes[0].handler == "resolved-no-config"

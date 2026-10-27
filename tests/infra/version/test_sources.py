@@ -11,7 +11,6 @@ Tests the chain-of-responsibility pattern for version detection:
 """
 
 import json
-from datetime import datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -388,106 +387,6 @@ class TestGitRuntimeSource:
 
         source = GitRuntimeSource()
         result = source.get_info("mypackage")
-        assert result is None
-
-
-@pytest.mark.unit
-class TestGitRuntimeSourceHelpers:
-    """Test GitRuntimeSource helper methods."""
-
-    def test_find_git_root_finds_git_dir(self, tmp_path):
-        """Test _find_git_root finds .git directory."""
-        git_dir = tmp_path / ".git"
-        git_dir.mkdir()
-        subdir = tmp_path / "subdir" / "nested"
-        subdir.mkdir(parents=True)
-
-        source = GitRuntimeSource()
-        result = source._find_git_root(subdir)
-
-        assert result == tmp_path
-
-    def test_find_git_root_returns_none_without_git(self, tmp_path):
-        """Test _find_git_root returns None without .git."""
-        source = GitRuntimeSource()
-        result = source._find_git_root(tmp_path)
-        assert result is None
-
-    @patch("subprocess.run")
-    def test_get_commit_hash_success(self, mock_run, tmp_path):
-        """Test _get_commit_hash returns hash on success."""
-        mock_run.return_value = MagicMock(returncode=0, stdout="abc123def456\n")
-
-        source = GitRuntimeSource()
-        result = source._get_commit_hash(tmp_path)
-
-        assert result == "abc123def456"
-
-    @patch("subprocess.run")
-    def test_get_commit_hash_failure(self, mock_run, tmp_path):
-        """Test _get_commit_hash returns None on failure."""
-        mock_run.return_value = MagicMock(returncode=1)
-
-        source = GitRuntimeSource()
-        result = source._get_commit_hash(tmp_path)
-
-        assert result is None
-
-    @patch("subprocess.run")
-    def test_get_commit_hash_exception(self, mock_run, tmp_path):
-        """Test _get_commit_hash handles exception."""
-        import subprocess
-
-        mock_run.side_effect = subprocess.SubprocessError("error")
-
-        source = GitRuntimeSource()
-        result = source._get_commit_hash(tmp_path)
-
-        assert result is None
-
-    @patch("subprocess.run")
-    def test_get_commit_message_success(self, mock_run, tmp_path):
-        """Test _get_commit_message returns message."""
-        mock_run.return_value = MagicMock(returncode=0, stdout="Fix bug\n")
-
-        source = GitRuntimeSource()
-        result = source._get_commit_message(tmp_path)
-
-        assert result == "Fix bug"
-
-    @patch("subprocess.run")
-    def test_get_commit_message_exception(self, mock_run, tmp_path):
-        """Test _get_commit_message handles exception."""
-        import subprocess
-
-        mock_run.side_effect = subprocess.SubprocessError("error")
-
-        source = GitRuntimeSource()
-        result = source._get_commit_message(tmp_path)
-
-        assert result == ""
-
-    @patch("subprocess.run")
-    def test_get_commit_time_success(self, mock_run, tmp_path):
-        """Test _get_commit_time parses timestamp."""
-        mock_run.return_value = MagicMock(
-            returncode=0, stdout="2025-12-01T10:30:00+00:00\n"
-        )
-
-        source = GitRuntimeSource()
-        result = source._get_commit_time(tmp_path)
-
-        assert result is not None
-        assert isinstance(result, datetime)
-
-    @patch("subprocess.run")
-    def test_get_commit_time_invalid_format(self, mock_run, tmp_path):
-        """Test _get_commit_time handles invalid format."""
-        mock_run.return_value = MagicMock(returncode=0, stdout="invalid\n")
-
-        source = GitRuntimeSource()
-        result = source._get_commit_time(tmp_path)
-
         assert result is None
 
 

@@ -25,18 +25,14 @@ from dataclasses import replace
 from ....subprocess import Lazy
 from ..config.api import ApiConfig
 from ..runtime.adapter import (
-    CORSDefinition,
     ExceptionCallbackDefinition,
-    ExceptionHandlerDefinition,
     FastAPIAdapter,
     LifecycleCallbackDefinition,
     LifespanDefinition,
-    MiddlewareDefinition,
     RateLimitDefinition,
     RequestCallbackDefinition,
     ResponseCallbackDefinition,
-    RouteDefinition,
-    RouterDefinition,
+    ServerDefinitions,
 )
 from ..runtime.server import Server
 from .route import RouteConfigurer
@@ -119,22 +115,7 @@ class ServerBuilder:
         self._api = ApiConfig()
         self._request_q: mp.Queue[Any] | None = None
         self._response_q: mp.Queue[Any] | None = None
-        self._init_routes_and_callbacks()
-
-    def _init_routes_and_callbacks(self) -> None:
-        """Initialize routes, middleware, and callback storage."""
-        self._routes: list[RouteDefinition] = []
-        self._routers: list[RouterDefinition] = []
-        self._middleware: list[MiddlewareDefinition] = []
-        self._exception_handlers: list[ExceptionHandlerDefinition] = []
-        self._cors: CORSDefinition | None = None
-        self._startup_callbacks: list[LifecycleCallbackDefinition] = []
-        self._shutdown_callbacks: list[LifecycleCallbackDefinition] = []
-        self._lifespan: LifespanDefinition | None = None
-        self._request_callbacks: list[RequestCallbackDefinition] = []
-        self._response_callbacks: list[ResponseCallbackDefinition] = []
-        self._exception_callbacks: list[ExceptionCallbackDefinition] = []
-        self._rate_limiters: list[RateLimitDefinition] = []
+        self._defs = ServerDefinitions()
 
     # Direct configuration methods
 
@@ -218,7 +199,7 @@ class ServerBuilder:
 
             builder.with_on_startup(log_ready)  # runs after lifespan
         """
-        self._startup_callbacks.append(
+        self._defs.startup_callbacks.append(
             LifecycleCallbackDefinition(
                 callback=callback, name=name, after_lifespan=after_lifespan
             )
@@ -246,7 +227,7 @@ class ServerBuilder:
 
             builder.with_on_shutdown(close_db)
         """
-        self._shutdown_callbacks.append(
+        self._defs.shutdown_callbacks.append(
             LifecycleCallbackDefinition(callback=callback, name=name)
         )
         return self
@@ -275,7 +256,7 @@ class ServerBuilder:
 
             builder.with_lifespan(lifespan)
         """
-        self._lifespan = LifespanDefinition(lifespan=lifespan)
+        self._defs.lifespan = LifespanDefinition(lifespan=lifespan)
         return self
 
     def with_on_request(
@@ -304,7 +285,7 @@ class ServerBuilder:
 
             builder.with_on_request(log_request)
         """
-        self._request_callbacks.append(
+        self._defs.request_callbacks.append(
             RequestCallbackDefinition(callback=callback, name=name)
         )
         return self
@@ -332,7 +313,7 @@ class ServerBuilder:
 
             builder.with_on_response(add_headers)
         """
-        self._response_callbacks.append(
+        self._defs.response_callbacks.append(
             ResponseCallbackDefinition(callback=callback, name=name)
         )
         return self
@@ -360,7 +341,7 @@ class ServerBuilder:
 
             builder.with_on_exception(log_error)
         """
-        self._exception_callbacks.append(
+        self._defs.exception_callbacks.append(
             ExceptionCallbackDefinition(callback=callback, name=name)
         )
         return self
@@ -404,7 +385,7 @@ class ServerBuilder:
             raise ValueError(
                 f"cleanup_interval must be positive, got: {cleanup_interval}"
             )
-        self._rate_limiters.append(
+        self._defs.rate_limiters.append(
             RateLimitDefinition(
                 limiter=limiter,
                 exempt_paths=list(exempt_paths) if exempt_paths else [],
@@ -440,24 +421,24 @@ class ServerBuilder:
     def _configure_adapter(self, adapter: FastAPIAdapter) -> None:
         """Configure adapter with routes, middleware, handlers, and lifecycle callbacks."""
         additions: list[tuple[list[Any], Callable[[Any], None]]] = [
-            (self._routes, adapter.add_route),
-            (self._routers, adapter.add_router),
-            (self._middleware, adapter.add_middleware),
-            (self._exception_handlers, adapter.add_exception_handler),
-            (self._startup_callbacks, adapter.add_startup_callback),
-            (self._shutdown_callbacks, adapter.add_shutdown_callback),
-            (self._request_callbacks, adapter.add_request_callback),
-            (self._response_callbacks, adapter.add_response_callback),
-            (self._exception_callbacks, adapter.add_exception_callback),
-            (self._rate_limiters, adapter.add_rate_limiter),
+            (self._defs.routes, adapter.add_route),
+            (self._defs.routers, adapter.add_router),
+            (self._defs.middleware, adapter.add_middleware),
+            (self._defs.exception_handlers, adapter.add_exception_handler),
+            (self._defs.startup_callbacks, adapter.add_startup_callback),
+            (self._defs.shutdown_callbacks, adapter.add_shutdown_callback),
+            (self._defs.request_callbacks, adapter.add_request_callback),
+            (self._defs.response_callbacks, adapter.add_response_callback),
+            (self._defs.exception_callbacks, adapter.add_exception_callback),
+            (self._defs.rate_limiters, adapter.add_rate_limiter),
         ]
         for items, add in additions:
             for item in items:
                 add(item)
-        if self._cors:
-            adapter.set_cors(self._cors)
-        if self._lifespan:
-            adapter.set_lifespan(self._lifespan)
+        if self._defs.cors:
+            adapter.set_cors(self._defs.cors)
+        if self._defs.lifespan:
+            adapter.set_lifespan(self._defs.lifespan)
 
     def _is_subprocess_mode(self) -> bool:
         """Check if subprocess mode is configured."""
@@ -520,7 +501,7 @@ class ServerBuilder:
 
     def _validate_subprocess_handlers(self) -> None:
         """Validate exception handlers are subprocess-compatible."""
-        for handler_def in self._exception_handlers:
+        for handler_def in self._defs.exception_handlers:
             handler = handler_def.handler
             exc_class_name = handler_def.exc_class.__name__
             self._validate_handler_pickling(handler, exc_class_name)

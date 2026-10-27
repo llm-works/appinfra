@@ -23,9 +23,9 @@ class TestServerBuilderIntegration:
             limiter, exempt_paths=["/health"]
         )
 
-        assert len(builder._rate_limiters) == 1
-        assert builder._rate_limiters[0].limiter is limiter
-        assert builder._rate_limiters[0].exempt_paths == ["/health"]
+        assert len(builder._defs.rate_limiters) == 1
+        assert builder._defs.rate_limiters[0].limiter is limiter
+        assert builder._defs.rate_limiters[0].exempt_paths == ["/health"]
 
     def test_with_rate_limiter_chaining(self):
         """Test that with_rate_limiter returns self for chaining."""
@@ -41,8 +41,8 @@ class TestServerBuilderIntegration:
         limiter = TokenBucketLimiter(rate="60/min")
         builder = ServerBuilder(lg, "test").with_rate_limiter(limiter)
 
-        assert len(builder._rate_limiters) == 1
-        assert builder._rate_limiters[0].exempt_paths == []
+        assert len(builder._defs.rate_limiters) == 1
+        assert builder._defs.rate_limiters[0].exempt_paths == []
 
     def test_with_rate_limiter_custom_cleanup_interval(self):
         """Test custom cleanup interval."""
@@ -52,8 +52,8 @@ class TestServerBuilderIntegration:
             limiter, cleanup_interval=120.0
         )
 
-        assert len(builder._rate_limiters) == 1
-        assert builder._rate_limiters[0].cleanup_interval == 120.0
+        assert len(builder._defs.rate_limiters) == 1
+        assert builder._defs.rate_limiters[0].cleanup_interval == 120.0
 
     def test_multiple_rate_limiters(self):
         """Test chaining multiple rate limiters."""
@@ -69,9 +69,9 @@ class TestServerBuilderIntegration:
             .with_rate_limiter(per_ip_limiter, exempt_paths=["/health"])
         )
 
-        assert len(builder._rate_limiters) == 2
-        assert builder._rate_limiters[0].limiter is global_limiter
-        assert builder._rate_limiters[1].limiter is per_ip_limiter
+        assert len(builder._defs.rate_limiters) == 2
+        assert builder._defs.rate_limiters[0].limiter is global_limiter
+        assert builder._defs.rate_limiters[1].limiter is per_ip_limiter
 
 
 @pytest.mark.integration

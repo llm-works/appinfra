@@ -86,7 +86,7 @@ __all__ = [
     "create_multi_output_logger",
     "create_database_logger",
     # Quick setup functions
-    "quick_console_logger",
+    "quick_console_logger",  # cq: keep re-export list, repeated by appinfra.log
     "quick_file_logger",
     "quick_both_logger",
     "quick_console_with_colors",
