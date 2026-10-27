@@ -24,6 +24,10 @@ For API stability guarantees and deprecation policy, see
 - **Breaking:** `appinfra.cli.tools.code_quality`, `check_functions` and `check_spdx` moved to
   `appinfra.cli.tools.cq` (`tool`, `functions`, `spdx`).
 
+### Fixed
+- `StoreConformance`'s racing-prune test no longer stalls for seconds under load, and it races
+  writers against prune in every run.
+
 ## [0.13.0] - 2026-10-25
 
 ### Added
