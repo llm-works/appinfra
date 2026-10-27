@@ -5,12 +5,14 @@
 
 import argparse
 import json
+import os
 import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+import appinfra
 from appinfra.cli.tools.cq.common import EXIT_CODE_WARNING
 from appinfra.cli.tools.cq.dup import (
     Block,
@@ -20,6 +22,7 @@ from appinfra.cli.tools.cq.dup import (
     module_paths,
     parse_groups,
     pylint_command,
+    pylint_env,
 )
 
 # A body long enough to pass the default 8-line threshold
@@ -200,6 +203,13 @@ class TestCheckDupTool:
             assert tool.run() == 1
         errors = tool._logger.error.call_args.kwargs["extra"]["errors"]
         assert errors == ["Plugin 'p' is impossible"]
+
+    def test_env_puts_this_appinfra_first_on_pythonpath(self, monkeypatch):
+        root = str(Path(appinfra.__file__).resolve().parent.parent)
+        monkeypatch.setenv("PYTHONPATH", "/elsewhere")
+        assert pylint_env()["PYTHONPATH"] == f"{root}{os.pathsep}/elsewhere"
+        monkeypatch.delenv("PYTHONPATH")
+        assert pylint_env()["PYTHONPATH"] == root
 
     def test_command_passes_threshold_jobs_and_files(self):
         cmd = pylint_command([Path("a.py")], 6, 4)

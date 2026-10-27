@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
@@ -53,6 +54,11 @@ _PYLINT_FAILED = 1 | 32
 
 # Skips astroid's attribute inference, which can import large dependencies whole
 _PLUGIN = f"{__package__}.pylint_plugin"
+
+# Directory holding the appinfra package this module belongs to: a checkout's root or
+# site-packages. pylint drops the working directory from sys.path, so a checkout's
+# appinfra is not importable there unless this is on PYTHONPATH.
+_PACKAGE_ROOT = Path(__file__).resolve().parents[len(__name__.split(".")) - 1]
 
 
 @dataclass(frozen=True)
@@ -88,6 +94,17 @@ def pylint_command(files: list[Path], min_lines: int, jobs: int) -> list[str]:
         "--ignore-signatures=y",
         *(str(f) for f in files),
     ]
+
+
+def pylint_env() -> dict[str, str]:
+    """Return the environment for pylint, with this appinfra first on PYTHONPATH.
+
+    pylint then loads the plugin from the same appinfra that runs cq dup.
+    """
+    env = dict(os.environ)
+    paths = [str(_PACKAGE_ROOT), env.get("PYTHONPATH", "")]
+    env["PYTHONPATH"] = os.pathsep.join(p for p in paths if p)
+    return env
 
 
 def module_paths(files: list[Path]) -> dict[str, Path]:
@@ -249,7 +266,7 @@ class CheckDupTool(Tool):
     def _run_pylint(self, files: list[Path]) -> subprocess.CompletedProcess[str] | None:
         """Run pylint; log and return None if it did not complete or ran without its plugin."""
         cmd = pylint_command(files, self.args.min_lines, self.args.jobs)
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        result = subprocess.run(cmd, capture_output=True, text=True, env=pylint_env())
         if result.returncode & _PYLINT_FAILED or not result.stdout:
             self.lg.error(
                 "pylint did not complete (is it installed?)",
