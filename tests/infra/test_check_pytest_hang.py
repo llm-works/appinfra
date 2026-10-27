@@ -71,6 +71,72 @@ def test_report_starts_on_its_own_line(run_with_plugin) -> None:
     assert any(line.startswith("=== test running >0.3s: ") for line in lines)
 
 
+_THREAD_TESTS = """
+import threading
+
+stop = threading.Event()
+
+def test_leaves_a_thread():
+    threading.Thread(target=stop.wait, args=(30.0,), name="lingerer").start()
+
+def test_leaves_a_daemon():
+    threading.Thread(target=stop.wait, args=(30.0,), name="daemonic", daemon=True).start()
+
+def test_joins_its_thread():
+    thread = threading.Thread(target=lambda: None, name="joined")
+    thread.start()
+    thread.join()
+
+def test_stops_its_thread_in_a_cleanup(request):
+    done = threading.Event()
+    thread = threading.Thread(target=done.wait, args=(30.0,), name="cleaned-up")
+    thread.start()
+
+    def stop():
+        done.set()
+        thread.join()
+
+    request.config.add_cleanup(stop)
+"""
+
+# Releases the inner threads only after pytest_hang has reported them. Cleanups run last-
+# registered first; registered from a tryfirst pytest_configure, before the plugin's, this one
+# runs after the report, so the threads are alive when it looks, however slow the machine, and
+# the inner run does not wait out their timeout
+_RELEASE_THREADS = """
+import sys
+
+import pytest
+
+def _release():
+    module = sys.modules.get("test_inner")
+    if module is not None:
+        module.stop.set()
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_configure(config):
+    config.add_cleanup(_release)
+"""
+
+
+@pytest.mark.unit
+def test_thread_left_running_is_reported_with_its_test(
+    run_with_plugin, pytester: pytest.Pytester
+) -> None:
+    pytester.makepyfile(test_inner=_THREAD_TESTS)
+    pytester.makeconftest(_RELEASE_THREADS)
+    result = run_with_plugin("60")
+
+    result.assert_outcomes(passed=4)
+    err = result.stderr.str()
+    assert "=== thread left running by test_inner.py::test_leaves_a_thread ===" in err
+    assert "(lingerer):\n" in err  # the thread follows, then its own stack
+    assert ", in wait\n" in err
+    assert "daemonic" not in err  # a daemon thread does not hold up the exit
+    assert "joined" not in err  # nor does one that ended
+    assert "cleaned-up" not in err  # nor one a config cleanup stops before the report
+
+
 @pytest.mark.unit
 def test_nothing_without_the_variable(run_with_plugin) -> None:
     for seconds in (None, "0"):

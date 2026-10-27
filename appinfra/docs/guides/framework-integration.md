@@ -202,6 +202,15 @@ test is neither stopped nor failed, so a slow machine only gets more rows. In a 
 node id is shortened from the start to fit the width; without one (CI) it is printed whole, and
 the CI log keeps the rows even when the job is killed by its timeout.
 
+A non-daemon thread a test starts and leaves running holds up its process's exit; a
+pytest-xdist worker in that state waits for it up to a 10s timeout, which the check's time
+includes. The test that started such a thread gets a row below the checklist, and the thread's
+name and stack go to the kept log:
+
+```text
+[⚠] Unit & E2E & Coverage tests: tests/test_proc.py::test_stream thread left running
+```
+
 Interrupting `make check` (Ctrl-C, `TERM`, a closed terminal), or a fail-fast stop, kills every
 process it started at once: pytest and its workers, the tools and the examples runner.
 
