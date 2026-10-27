@@ -57,7 +57,15 @@ class TestParsing:
 
         groups = parse_groups(output, module_paths(files))
 
-        assert groups == [[Block("pkg/my-script.py", 1, 9), Block("pkg/b.py", 1, 9)]]
+        assert groups == [[Block("pkg/b.py", 1, 9), Block("pkg/my-script.py", 1, 9)]]
+
+    def test_parse_groups_sorts_blocks_by_location(self):
+        files = [Path("pkg/a.py"), Path("pkg/b.py")]
+        output = json.dumps({"messages": [_r0801("==pkg.b:[0:9]", "==pkg.a:[4:13]")]})
+
+        groups = parse_groups(output, module_paths(files))
+
+        assert groups == [[Block("pkg/a.py", 5, 13), Block("pkg/b.py", 1, 9)]]
 
     def test_parse_groups_keeps_unknown_module_name(self):
         output = json.dumps({"messages": [_r0801("==other.mod:[0:9]")]})
@@ -109,7 +117,7 @@ class TestFormatReport:
 def _make_tool(tmp_path: Path, strict: bool = False) -> CheckDupTool:
     tool = CheckDupTool(parent=None)
     tool._parsed_args = argparse.Namespace(
-        dir=str(tmp_path), min_lines=8, strict=strict, exclude=None
+        dir=str(tmp_path), min_lines=8, jobs=1, strict=strict, exclude=None
     )
     tool._logger = MagicMock()
     return tool
@@ -164,13 +172,15 @@ class TestCheckDupTool:
             assert tool.run() == 1
         tool._logger.warning.assert_called()
 
-    def test_command_passes_threshold_and_files(self):
-        cmd = pylint_command([Path("a.py")], 6)
+    def test_command_passes_threshold_jobs_and_files(self):
+        cmd = pylint_command([Path("a.py")], 6, 4)
         assert "--min-similarity-lines=6" in cmd
+        assert "--jobs=4" in cmd
         assert cmd[-1] == "a.py"
 
     def test_args(self):
         parser = argparse.ArgumentParser()
         CheckDupTool(parent=None).add_args(parser)
-        args = parser.parse_args(["pkg", "--min-lines", "5", "--strict"])
-        assert (args.dir, args.min_lines, args.strict) == ("pkg", 5, True)
+        args = parser.parse_args(["pkg", "--min-lines", "5", "--jobs", "2", "--strict"])
+        assert (args.dir, args.min_lines, args.jobs, args.strict) == ("pkg", 5, 2, True)
+        assert parser.parse_args([]).jobs == 4

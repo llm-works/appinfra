@@ -33,6 +33,9 @@ from ....app.tools import Tool, ToolConfig
 from .common import EXIT_CODE_WARNING, collect_python_files, has_keep
 
 DEFAULT_MIN_LINES = 8
+# pylint processes: about half the single-process time; more buys little and takes the CPU
+# make check gives its other checks
+DEFAULT_JOBS = 4
 
 # One location line in an R0801 message: ==<module>:[<start>:<end>], 0-based, end exclusive
 _LOCATION = re.compile(r"^==(?P<module>[^:\s]+):\[(?P<start>\d+):(?P<end>\d+)\]$")
@@ -55,12 +58,13 @@ class Block:
         return self.last_line - self.first_line + 1
 
 
-def pylint_command(files: list[Path], min_lines: int) -> list[str]:
+def pylint_command(files: list[Path], min_lines: int, jobs: int) -> list[str]:
     """Build the pylint invocation that reports only duplicate-code."""
     return [
         sys.executable,
         "-m",
         "pylint",
+        f"--jobs={jobs}",
         "--disable=all",
         "--enable=duplicate-code",
         "--output-format=json2",
@@ -85,7 +89,10 @@ def module_paths(files: list[Path]) -> dict[str, Path]:
 
 
 def parse_message(message: str, paths: dict[str, Path]) -> list[Block]:
-    """Parse the location lines of one R0801 message into blocks."""
+    """Parse the location lines of one R0801 message into blocks, sorted by location.
+
+    With several pylint jobs the order of the locations in a message varies between runs.
+    """
     blocks = []
     for line in message.splitlines():
         match = _LOCATION.match(line)
@@ -94,7 +101,7 @@ def parse_message(message: str, paths: dict[str, Path]) -> list[Block]:
         path = paths.get(match["module"])
         location = str(path) if path else match["module"]
         blocks.append(Block(location, int(match["start"]) + 1, int(match["end"])))
-    return blocks
+    return sorted(blocks, key=lambda b: (b.location, b.first_line))
 
 
 def parse_groups(output: str, paths: dict[str, Path]) -> list[list[Block]]:
@@ -184,6 +191,12 @@ class CheckDupTool(Tool):
             help=f"Minimum similar lines to report (default: {DEFAULT_MIN_LINES})",
         )
         parser.add_argument(
+            "--jobs",
+            type=int,
+            default=DEFAULT_JOBS,
+            help=f"pylint processes; 0 uses every CPU (default: {DEFAULT_JOBS})",
+        )
+        parser.add_argument(
             "--strict",
             action="store_true",
             help="Exit with code 1 if duplicates exist (for CI)",
@@ -213,7 +226,7 @@ class CheckDupTool(Tool):
 
     def _run_pylint(self, files: list[Path]) -> subprocess.CompletedProcess[str] | None:
         """Run pylint; log and return None if it is missing or did not complete."""
-        cmd = pylint_command(files, self.args.min_lines)
+        cmd = pylint_command(files, self.args.min_lines, self.args.jobs)
         result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode & _PYLINT_FAILED or not result.stdout:
             self.lg.warning(
