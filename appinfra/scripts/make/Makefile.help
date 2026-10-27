@@ -28,6 +28,9 @@ _help_makefile_list = $(wordlist 2,$(words $(MAKEFILE_LIST)),$(MAKEFILE_LIST)) $
 _help_disabled_targets = $(INFRA_DISABLE_TARGETS)
 _help_disabled_groups = $(INFRA_DISABLE_GROUPS)
 
+# A bare `make` shows this help, whatever target an earlier include defines first
+.DEFAULT_GOAL := help
+
 .PHONY: help
 help: ## Display this help message
 	@awk -v disabled_targets="$(_help_disabled_targets)" \

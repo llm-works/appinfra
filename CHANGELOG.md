@@ -24,6 +24,7 @@ For API stability guarantees and deprecation policy, see
 ### Changed
 - `make check`: the "Function size check" row is now "Code quality check" and also runs
   `cq dup` and `cq dead` when enabled; the "Running code quality checks..." banner is gone.
+- A bare `make` shows the help screen instead of `make config`'s output.
 - **Breaking:** `appinfra.cli.tools.code_quality`, `check_functions` and `check_spdx` moved to
   `appinfra.cli.tools.cq` (`tool`, `functions`, `spdx`).
 
