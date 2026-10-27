@@ -29,18 +29,16 @@ def should_exclude(file_path: Path, patterns: list[str], include_tests: bool) ->
     Returns:
         True if file should be excluded
     """
-    file_str = str(file_path)
-
     # Exclude hidden directories and default exclude dirs
     # Note: skip "." (current dir) to allow "./file.py" paths
     for part in file_path.parts:
         if (part != "." and part.startswith(".")) or part in DEFAULT_EXCLUDE_DIRS:
             return True
 
-    # Exclude test files by default
+    # Exclude test files by default; matching components also covers relative tests/x.py
     if not include_tests and (
-        "/test/" in file_str
-        or "/tests/" in file_str
+        "test" in file_path.parts
+        or "tests" in file_path.parts
         or file_path.name.startswith("test_")
         or file_path.name.endswith("_test.py")
     ):

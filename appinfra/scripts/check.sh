@@ -265,7 +265,7 @@ cq_tool() {
     out=$(eval "${PYTHON} -m appinfra.cli.cli -l error cq ${args}" 2>&1) || rc=$?
     printf '%s\n' "$out"
     if [ "$rc" -eq "$EXIT_CODE_WARNING" ]; then
-        count=$(printf '%s\n' "$out" | grep -oP '(?<=Violations found: )\d+|(?<=Violations: )\d+' | head -1 || true)
+        count=$(printf '%s\n' "$out" | sed -nE 's/.*Violations( found)?: ([0-9]+).*/\2/p' | head -1)
         CQ_SUMMARY+=("${count:-?} ${label}")
     elif [ "$rc" -ne 0 ]; then
         CQ_FAILED=true
@@ -910,7 +910,7 @@ run_check() {
             ;;
         42)  # Warning: findings that do not fail the build (EXIT_CODE_WARNING)
             # The check's "Warnings: <summary>" line, e.g. "9 dup, 22 dead"
-            local warning_summary=$(grep -oP '(?<=^Warnings: ).*' "$tmpfile" 2>/dev/null | tail -1)
+            local warning_summary=$(sed -n 's/^Warnings: //p' "$tmpfile" 2>/dev/null | tail -1)
             if [ -n "$warning_summary" ]; then
                 update_line "$line_num" "${UI_MARK_WARN}" "${prefix}${name}" " ${UI_GRAY}(${warning_summary}, run make ${make_target})${UI_RESET}${timing_suffix}"
                 record_warning "$name" "$warning_summary"

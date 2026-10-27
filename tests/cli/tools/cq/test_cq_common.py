@@ -18,6 +18,10 @@ class TestShouldExclude:
     def test_excludes_test_directory(self):
         assert should_exclude(Path("/project/tests/test_foo.py"), [], False) is True
 
+    def test_excludes_relative_test_directory(self):
+        assert should_exclude(Path("tests/conftest.py"), [], False) is True
+        assert should_exclude(Path("test/helpers.py"), [], False) is True
+
     def test_excludes_test_prefix(self):
         assert should_exclude(Path("/project/test_foo.py"), [], False) is True
 
