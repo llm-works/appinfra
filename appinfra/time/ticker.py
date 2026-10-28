@@ -238,9 +238,10 @@ class Ticker:
 
     Thread safety: The ticker is NOT thread-safe. Internal state (_first flag,
     _last_tick_time, _api_mode) is not protected by locks. Do not call ticker
-    methods concurrently from multiple threads. Do not mix API modes (run/try_tick/
-    iterator) even from the same thread - each Ticker instance must use exactly
-    one API pattern throughout its lifetime.
+    methods concurrently from multiple threads; stop() is the exception and may
+    be called from any thread. Do not mix API modes (run/try_tick/iterator) even
+    from the same thread - each Ticker instance must use exactly one API pattern
+    throughout its lifetime.
 
     Example:
         import threading
@@ -325,25 +326,26 @@ class Ticker:
         self._first = True
         self._running = False
         self._stop_event = threading.Event()
+        self._lifecycle = threading.Lock()  # guards run() startup against stop()
         self._sched = (
-            sched.scheduler(time.monotonic, time.sleep) if secs is not None else None
+            sched.scheduler(time.monotonic, self._sched_delay)
+            if secs is not None
+            else None
         )
         # For context manager signal handling (stores previous handlers)
         self._prev_sigterm: Any = None
         self._prev_sigint: Any = None
-        # For non-blocking API (try_tick/time_until_next_tick)
-        self._last_tick_time: float | None = None
-        # API mode tracking (prevents mixing run() with try_tick())
-        self._api_mode: str | None = (
-            None  # "blocking" for run(), "nonblocking" for try_tick()
-        )
+        self._last_tick_time: float | None = None  # try_tick/time_until_next_tick
+        # API mode, "blocking" (run()) or "nonblocking" (try_tick()); no mixing
+        self._api_mode: str | None = None
 
     def run(self, *args: Any, **kwargs: Any) -> None:
         """
         Start the ticker execution (callback-based mode).
 
         Requires a handler to be set. For iterator-based usage, use the
-        for-loop pattern instead.
+        for-loop pattern instead. Returns at once, without calling the handler,
+        if a stop() was requested while the ticker was not running.
 
         Args:
             *args: Positional arguments to pass to handler
@@ -375,8 +377,6 @@ class Ticker:
             raise TickerConfigError(
                 "Handler required for run() mode. Use iterator pattern instead."
             )
-        if self._running:
-            raise TickerStateError("Ticker is already running")
         if self._api_mode == "nonblocking":
             raise TickerAPIError(
                 "Cannot call run() after using try_tick(). "
@@ -388,16 +388,42 @@ class Ticker:
                 "Choose one API mode per Ticker instance."
             )
 
-        self._api_mode = "blocking"
-        self._running = True
-        self._stop_event.clear()
+        if not self._claim_run():
+            return
 
         try:
             self._handler.ticker_start(*args, **kwargs)
             self.run_started(*args, **kwargs)
         except Exception as e:
-            self._running = False
             raise TickerStateError(f"Ticker execution failed: {e}") from e
+        finally:
+            # A stop() requested during this run is spent with it; one that
+            # comes later is pending for the next run()
+            with self._lifecycle:
+                self._running = False
+                self._stop_event.clear()
+
+    def _claim_run(self) -> bool:
+        """
+        Mark the ticker running, unless a stop() is pending.
+
+        Atomic with stop(): a stop() requested while the ticker is not running
+        stays pending, and the next run() consumes it here and returns without
+        starting. This covers a stop() that reaches a run() thread before run()
+        does.
+
+        Returns:
+            True if the run should start, False if a pending stop() ended it.
+        """
+        with self._lifecycle:
+            if self._running:
+                raise TickerStateError("Ticker is already running")
+            self._api_mode = "blocking"
+            if self._stop_event.is_set():
+                self._stop_event.clear()
+                return False
+            self._running = True
+            return True
 
     def run_started(self, *args: Any, **kwargs: Any) -> None:
         """
@@ -414,26 +440,19 @@ class Ticker:
         # Handler is guaranteed to be set - run() validates this
         assert self._handler is not None
 
-        try:
-            if self._sched is not None:
-                # Scheduled execution mode
-                self._tick_sched(*args, **kwargs)
-                self._sched.run()
-            else:
-                # Continuous execution mode
-                self._handler.ticker_before_first_tick(*args, **kwargs)
-                while not self._stop_event.is_set():
-                    try:
-                        self._handler.ticker_tick()
-                    except Exception as e:
-                        # Log error but continue running unless it's a critical error
-                        self._lg.exception(
-                            "Error in ticker_tick", extra={"exception": e}
-                        )
-        finally:
-            self._running = False
-            # Note: ticker_stop() is now called immediately in stop() method
-            # to ensure cleanup logging happens during shutdown phase, not here
+        if self._sched is not None:
+            # Scheduled execution mode
+            self._tick_sched(*args, **kwargs)
+            self._sched.run()
+        else:
+            # Continuous execution mode
+            self._handler.ticker_before_first_tick(*args, **kwargs)
+            while not self._stop_event.is_set():
+                try:
+                    self._handler.ticker_tick()
+                except Exception as e:
+                    # Log error but continue running unless it's a critical error
+                    self._lg.error("error in ticker_tick", extra={"exception": e})
 
     def _tick_sched(self, *args: Any, **kwargs: Any) -> None:
         """
@@ -462,12 +481,27 @@ class Ticker:
             try:
                 self._handler.ticker_tick()
             except Exception as e:
-                self._lg.exception("Error in ticker_tick", extra={"exception": e})
+                self._lg.error("error in ticker_tick", extra={"exception": e})
 
             # Calculate and schedule next tick
             tick_end_time = time.monotonic()
             delay = self._calculate_next_tick_delay(tick_start_time, tick_end_time)
             self._sched.enter(delay, 1, self._tick_sched, args, kwargs)
+
+    def _sched_delay(self, secs: float) -> None:
+        """
+        Wait for the scheduler's next event, waking as soon as stop() is called.
+
+        Once stopped, the pending ticks are cancelled here, on the run() thread,
+        so stop() never races the scheduler over the queue. This also drops a
+        successor that a tick running during stop() queued afterwards: every
+        wait now returns at once, and the scheduler would otherwise spin until
+        that tick's deadline.
+        """
+        assert self._sched is not None
+        if self._stop_event.wait(secs):
+            for event in self._sched.queue:
+                self._sched.cancel(event)
 
     def _handle_first_tick_sched(
         self, tick_start_time: float, args: tuple[Any, ...], kwargs: dict[str, Any]
@@ -482,9 +516,7 @@ class Ticker:
         try:
             self._handler.ticker_before_first_tick(*args, **kwargs)  # type: ignore
         except Exception as e:
-            self._lg.exception(
-                "Error in ticker_before_first_tick", extra={"exception": e}
-            )
+            self._lg.error("error in ticker_before_first_tick", extra={"exception": e})
 
         if not self._initial:
             # Initialize timing for delayed first tick
@@ -612,27 +644,29 @@ class Ticker:
         """
         Stop the ticker gracefully.
 
-        This method signals the ticker to stop. If a handler is set, calls the
-        handler's ticker_stop method immediately. The ticker will stop after
-        the current tick completes.
+        This method signals the ticker to stop. On the first stop() of a run,
+        calls the handler's ticker_stop method immediately; repeated calls do
+        not. The ticker will stop after the current tick completes. A stop()
+        while the ticker is not running stays pending: the next run() returns
+        without starting.
         """
-        self._stop_event.set()
+        # Read the state and set the event as one step against run()'s startup
+        # and end. In scheduled mode the run() thread wakes on this event and
+        # cancels the pending ticks itself (_sched_delay), so only one thread
+        # touches the queue
+        with self._lifecycle:
+            first = not self._stop_event.is_set()
+            handler = self._handler if self._running and first else None
+            self._stop_event.set()
 
-        if self._running:
-            # For scheduled mode, we need to cancel pending events
-            if self._sched is not None:
-                # Cancel all pending events
-                for event in self._sched.queue:
-                    self._sched.cancel(event)
-
-            # Call ticker_stop handler immediately so cleanup logging
-            # happens during the shutdown phase, not in finally block
-            if self._handler is not None:
-                try:
-                    self._handler.ticker_stop()
-                except Exception:
-                    # Log error but continue with stop
-                    self._lg.exception("Error in ticker_stop callback")
+        # Call ticker_stop handler immediately so cleanup logging happens during
+        # the shutdown phase; outside the lock, so a slow handler blocks no one
+        if handler is not None:
+            try:
+                handler.ticker_stop()
+            except Exception as e:
+                # Log error but continue with stop
+                self._lg.error("error in ticker_stop callback", extra={"exception": e})
 
     def is_running(self) -> bool:
         """
@@ -664,13 +698,13 @@ class Ticker:
         """Validate user-provided 'now' parameter to catch common timing mistakes."""
         if now < 0:
             self._lg.warning(
-                "Invalid 'now' parameter: negative value",
+                "invalid 'now' parameter: negative value",
                 extra={"now": now, "caller": caller},
             )
         elif self._last_tick_time is not None and now < self._last_tick_time - 10.0:
             # Allow small backwards jumps (clock adjustments), but warn on large ones
             self._lg.warning(
-                "Suspicious 'now' parameter: far in past relative to last tick",
+                "suspicious 'now' parameter: far in past relative to last tick",
                 extra={
                     "now": now,
                     "last_tick_time": self._last_tick_time,
@@ -861,8 +895,8 @@ class Ticker:
                 try:
                     self._handler.ticker_before_first_tick()
                 except Exception as e:
-                    self._lg.exception(
-                        "Error in ticker_before_first_tick", extra={"exception": e}
+                    self._lg.error(
+                        "error in ticker_before_first_tick", extra={"exception": e}
                     )
 
         # Execute tick via handler if present
@@ -870,7 +904,7 @@ class Ticker:
             try:
                 self._handler.ticker_tick()
             except Exception as e:
-                self._lg.exception("Error in ticker_tick", extra={"exception": e})
+                self._lg.error("error in ticker_tick", extra={"exception": e})
 
     def _update_tick_timing(self, now: float) -> None:
         """Update timing state based on mode after tick execution."""

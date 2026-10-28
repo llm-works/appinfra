@@ -611,10 +611,14 @@ class PG(Interface):
             for hook in hooks:
                 try:
                     hook(conn)
-                except Exception:
-                    self._lg.exception(
+                except Exception as e:
+                    self._lg.error(
                         "hook failed",
-                        extra={**self._lg_extra, "hook_type": hook_type},
+                        extra={
+                            **self._lg_extra,
+                            "hook_type": hook_type,
+                            "exception": e,
+                        },
                     )
                     raise
             conn.commit()

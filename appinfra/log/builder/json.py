@@ -16,6 +16,7 @@ from typing import Any, Self
 
 from ..config import LogConfig
 from ..logger import Logger
+from ..serialize import record_traceback, sanitize_extra
 from .builder import LoggingBuilder
 
 # Helper functions for JSONFormatter._record_to_dict()
@@ -69,7 +70,7 @@ def _add_extra_fields(
     """Add extra fields if present."""
     extra = getattr(record, "__infra__extra", None)
     if formatter.include_extra and formatter.should_include_field("extra") and extra:
-        data["extra"] = formatter._sanitize_extra_fields(extra)
+        data["extra"] = sanitize_extra(extra)
 
 
 def _add_location_fields(
@@ -85,13 +86,14 @@ def _add_location_fields(
 def _add_exception_fields(
     data: dict[str, Any], formatter: Any, record: logging.LogRecord
 ) -> None:
-    """Add exception information if present."""
-    if (
-        formatter.include_exception
-        and formatter.should_include_field("exception")
-        and record.exc_info
+    """Add the exception traceback if the record carries one."""
+    if not (
+        formatter.include_exception and formatter.should_include_field("exception")
     ):
-        data["exception"] = formatter._format_exception(record.exc_info)
+        return
+    text = record_traceback(record)
+    if text is not None:
+        data["exception"] = text
 
 
 def _add_custom_fields(data: dict[str, Any], formatter: Any) -> None:
@@ -211,26 +213,6 @@ class JSONFormatter(logging.Formatter):
         # Default to ISO format
         return datetime.fromtimestamp(record.created).isoformat()
 
-    def _sanitize_extra_fields(self, extra: dict[str, Any]) -> dict[str, Any]:
-        """Sanitize extra fields to ensure JSON serializability.
-
-        Walks the value with ``coerce_tree`` first so opaque types with a
-        preferred ``__str__`` form reach the encoder as their string form
-        rather than being destructured.
-        """
-        from ..serialize import coerce_leaf, coerce_tree
-
-        sanitized = {}
-        for key, value in extra.items():
-            key = coerce_leaf(key)
-            try:
-                value = coerce_tree(value)
-                json.dumps(value)
-                sanitized[key] = value
-            except Exception:
-                sanitized[key] = str(value)
-        return sanitized
-
     def _extract_location(self, record: logging.LogRecord) -> list[str] | None:
         """Extract location information from the record."""
         locations = []
@@ -248,18 +230,6 @@ class JSONFormatter(logging.Formatter):
             locations.append(f"{record.pathname}:{record.lineno}")
 
         return locations or None
-
-    def _format_exception(self, exc_info: Any) -> str | None:
-        """Format exception traceback as string."""
-        if not exc_info:
-            return None
-
-        try:
-            import traceback
-
-            return "".join(traceback.format_exception(*exc_info))
-        except Exception:
-            return f"Exception formatting failed: {exc_info[1]}"
 
     def _dict_to_json(self, data: dict[str, Any]) -> str:
         """Convert dictionary to JSON string."""

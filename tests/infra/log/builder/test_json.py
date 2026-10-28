@@ -36,6 +36,7 @@ from appinfra.log.builder.json import (
     create_json_logger,
 )
 from appinfra.log.logger import Logger
+from appinfra.log.serialize import sanitize_extra
 
 # =============================================================================
 # Helper function for creating mock log records
@@ -227,7 +228,6 @@ class TestSanitizeExtraFields:
 
     def test_sanitize_serializable_fields(self):
         """Test that serializable fields pass through unchanged."""
-        formatter = JSONFormatter()
         extra = {
             "string": "value",
             "number": 42,
@@ -237,7 +237,7 @@ class TestSanitizeExtraFields:
             "dict": {"nested": "value"},
         }
 
-        sanitized = formatter._sanitize_extra_fields(extra)
+        sanitized = sanitize_extra(extra)
 
         assert sanitized["string"] == "value"
         assert sanitized["number"] == 42
@@ -248,7 +248,6 @@ class TestSanitizeExtraFields:
 
     def test_sanitize_non_serializable_fields(self):
         """Test that non-serializable fields are converted to strings."""
-        formatter = JSONFormatter()
 
         class CustomObject:
             def __str__(self):
@@ -259,7 +258,7 @@ class TestSanitizeExtraFields:
             "set": {1, 2, 3},
         }
 
-        sanitized = formatter._sanitize_extra_fields(extra)
+        sanitized = sanitize_extra(extra)
 
         assert sanitized["custom"] == "CustomObject()"
         # Sets are converted to string representation
@@ -319,51 +318,6 @@ class TestExtractLocation:
         locations = formatter._extract_location(record)
 
         assert locations is None
-
-
-# =============================================================================
-# Test exception formatting
-# =============================================================================
-
-
-@pytest.mark.unit
-class TestFormatException:
-    """Test exception traceback formatting."""
-
-    def test_format_exception_none(self):
-        """Test formatting None exception info."""
-        formatter = JSONFormatter()
-        result = formatter._format_exception(None)
-        assert result is None
-
-    def test_format_exception_with_traceback(self):
-        """Test formatting actual exception info."""
-        formatter = JSONFormatter()
-
-        try:
-            raise ValueError("Test error")
-        except ValueError:
-            import sys
-
-            exc_info = sys.exc_info()
-
-        result = formatter._format_exception(exc_info)
-
-        assert "ValueError" in result
-        assert "Test error" in result
-        assert "Traceback" in result
-
-    def test_format_exception_error_handling(self):
-        """Test fallback when traceback formatting fails."""
-        formatter = JSONFormatter()
-
-        # Create invalid exc_info that will cause format_exception to fail
-        exc_info = (ValueError, ValueError("Test"), None)
-
-        # Even with minimal exc_info, should not raise
-        result = formatter._format_exception(exc_info)
-        # Should contain some error info
-        assert result is not None
 
 
 # =============================================================================
@@ -603,6 +557,20 @@ class TestHelperFunctions:
 
         assert "exception" in data
         assert "ValueError" in data["exception"]
+
+    def test_add_exception_fields_from_extra(self):
+        """Test _add_exception_fields renders an exception passed in extra."""
+        formatter = JSONFormatter(include_exception=True)
+        try:
+            raise ValueError("Test error")
+        except ValueError as e:
+            record = create_mock_record(extra={"exception": e})
+
+        data = {}
+        _add_exception_fields(data, formatter, record)
+
+        assert "Traceback (most recent call last)" in data["exception"]
+        assert "ValueError: Test error" in data["exception"]
 
     def test_add_exception_fields_no_exception(self):
         """Test _add_exception_fields when no exception."""

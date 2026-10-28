@@ -9,7 +9,7 @@ Covers:
 
 - ``coerce_leaf`` coerces ``sqlalchemy.engine.url.URL`` via ``str()``.
 - ``coerce_tree`` recurses through dict/list/tuple containers.
-- ``JSONFormatter._sanitize_extra_fields`` emits the coerced form.
+- ``sanitize_extra`` emits the coerced form.
 - ``MPQueueHandler`` preserves coerced values across its pickle sanitizer.
 """
 
@@ -17,7 +17,12 @@ import pytest
 
 from appinfra.log.builder.json import JSONFormatter
 from appinfra.log.mp.queue_handler import MPQueueHandler
-from appinfra.log.serialize import coerce_leaf, coerce_tree
+from appinfra.log.serialize import (
+    coerce_leaf,
+    coerce_tree,
+    record_traceback,
+    sanitize_extra,
+)
 
 try:
     from sqlalchemy.engine.url import URL as SAURL
@@ -141,29 +146,25 @@ class TestCoerceTree:
 class TestJSONFormatterSanitize:
     @pytest.mark.skipif(not _HAVE_SA, reason="sqlalchemy not installed")
     def test_url_rendered_as_string(self):
-        formatter = JSONFormatter()
-        out = formatter._sanitize_extra_fields({"url": _make_url()})
+        out = sanitize_extra({"url": _make_url()})
         assert isinstance(out["url"], str)
         assert "secret" not in out["url"]
 
     @pytest.mark.skipif(not _HAVE_SA, reason="sqlalchemy not installed")
     def test_url_nested_in_dict(self):
-        formatter = JSONFormatter()
-        out = formatter._sanitize_extra_fields({"cfg": {"url": _make_url()}})
+        out = sanitize_extra({"cfg": {"url": _make_url()}})
         assert isinstance(out["cfg"]["url"], str)
         assert "secret" not in out["cfg"]["url"]
 
     def test_plain_values_unchanged(self):
-        formatter = JSONFormatter()
         extra = {"s": "x", "n": 1, "lst": [1, 2], "d": {"a": 1}}
-        out = formatter._sanitize_extra_fields(extra)
+        out = sanitize_extra(extra)
         assert out == extra
 
     def test_secret_str_masked_in_extra(self):
         from appinfra.yaml import SecretStr
 
-        formatter = JSONFormatter()
-        out = formatter._sanitize_extra_fields({"pwd": SecretStr("hunter2")})
+        out = sanitize_extra({"pwd": SecretStr("hunter2")})
         assert "hunter2" not in str(out)
 
     @pytest.mark.skipif(not _HAVE_SA, reason="sqlalchemy not installed")
@@ -209,3 +210,65 @@ class TestQueueHandlerSanitize:
         out = handler._sanitize_for_pickle({"url": _make_url()}, set())
         assert isinstance(out["url"], str)
         assert "secret" not in out["url"]
+
+
+# =============================================================================
+# record_traceback
+# =============================================================================
+
+
+def _raised(msg: str) -> ValueError:
+    try:
+        raise ValueError(msg)
+    except ValueError as e:
+        return e
+
+
+def _raised_elsewhere(msg: str) -> ValueError:
+    try:
+        raise ValueError(msg)
+    except ValueError as e:
+        return e
+
+
+def _record(exc_info=None, extra=None):
+    import logging
+
+    record = logging.LogRecord("t", logging.ERROR, "t.py", 1, "m", (), exc_info)
+    if extra is not None:
+        setattr(record, "__infra__extra", extra)
+    return record
+
+
+@pytest.mark.unit
+class TestRecordTraceback:
+    def test_none_without_exception(self):
+        assert record_traceback(_record(extra={"k": 1})) is None
+
+    def test_exc_info_formats_the_supplied_traceback(self):
+        # The tuple's traceback wins over the exception's own __traceback__
+        exc, other = _raised("first"), _raised_elsewhere("second")
+        text = record_traceback(
+            _record(exc_info=(ValueError, exc, other.__traceback__))
+        )
+        assert "ValueError: first" in text
+        assert "in _raised_elsewhere" in text
+        assert "in _raised\n" not in text
+
+    def test_exc_text_from_queue_preparation(self):
+        record = _record()
+        record.exc_text = "Traceback ...\nValueError: prepared"
+        assert record_traceback(record) == "Traceback ...\nValueError: prepared"
+
+    def test_extra_exception(self):
+        text = record_traceback(_record(extra={"exception": _raised("boom")}))
+        assert "Traceback (most recent call last)" in text
+        assert "ValueError: boom" in text
+
+    def test_extra_exception_formatted_from_queue_preparation(self):
+        extra = {"exception_formatted": "Traceback ...\nValueError: boom"}
+        assert record_traceback(_record(extra=extra)) == extra["exception_formatted"]
+
+    def test_formatting_failure_falls_back_to_message(self):
+        text = record_traceback(_record(exc_info=(ValueError, ValueError("x"), 42)))
+        assert text == "Exception formatting failed: x"

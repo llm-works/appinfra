@@ -212,6 +212,37 @@ class TestDefaultDataMapper:
         assert extra["user_id"] == 123
         assert extra["action"] == "login"
 
+    def test_maps_exception_in_extra(self, mock_db_interface):
+        """Test an exception passed in extra maps to text and to the traceback column."""
+        import json
+
+        config = DatabaseHandlerConfig(
+            table_name="test_logs",
+            db_interface=mock_db_interface,
+        )
+        try:
+            raise ValueError("hook broke")
+        except ValueError as e:
+            error = e
+
+        record = logging.LogRecord(
+            name="test",
+            level=logging.ERROR,
+            pathname="test.py",
+            lineno=10,
+            msg="hook failed",
+            args=(),
+            exc_info=None,
+        )
+        setattr(record, "__infra__extra", {"hook_type": "connect", "exception": error})
+
+        data = config._default_data_mapper(record)
+
+        extra = json.loads(data["extra_data"])
+        assert extra == {"hook_type": "connect", "exception": "hook broke"}
+        assert "Traceback (most recent call last)" in data["exception_info"]
+        assert "ValueError: hook broke" in data["exception_info"]
+
     def test_maps_standard_line_number(self, mock_db_interface):
         """Test maps standard line number (int)."""
         config = DatabaseHandlerConfig(

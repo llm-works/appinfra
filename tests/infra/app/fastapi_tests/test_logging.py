@@ -31,7 +31,10 @@ class TestSetupSubprocessLogging:
             assert logger is not None
             assert logger.name == "fastapi.subprocess"
         finally:
-            # Restore
+            # Restore, closing the file handler the call added
+            for handler in logging.root.handlers:
+                if handler not in original_handlers:
+                    handler.close()
             logging.root.handlers = original_handlers
             logging.root.level = original_level
 
@@ -56,5 +59,8 @@ class TestSetupSubprocessLogging:
 
             assert log_file.parent.exists()
         finally:
+            for handler in logging.root.handlers:
+                if handler not in original_handlers:
+                    handler.close()
             logging.root.handlers = original_handlers
             logging.root.level = original_level
