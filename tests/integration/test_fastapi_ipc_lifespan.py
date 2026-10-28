@@ -222,11 +222,11 @@ class TestFastAPIIPCWithLifecycleCallbacks:
             args=(request_q, response_q, stop_event),
             daemon=True,
         )
-        handler_thread.start()
-
         try:
-            # Start the subprocess
+            # Start the subprocess, then the handler thread: forking while
+            # this process runs a thread can deadlock the child
             server.start_subprocess()
+            handler_thread.start()
 
             # Wait for server to be ready (poll the /ping endpoint)
             ready = False
@@ -298,11 +298,11 @@ class TestFastAPIIPCWithLifecycleCallbacks:
             args=(request_q, response_q, stop_event),
             daemon=True,
         )
-        handler_thread.start()
-
         try:
-            # Start the subprocess
+            # Start the subprocess, then the handler thread: forking while
+            # this process runs a thread can deadlock the child
             server.start_subprocess()
+            handler_thread.start()
 
             # Wait for server to be ready
             ready = False

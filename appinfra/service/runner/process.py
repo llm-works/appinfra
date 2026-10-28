@@ -96,6 +96,10 @@ class ProcessRunner(Runner):
             log_config = self._create_log_infrastructure()
             self._create_ipc_primitives()
             self._spawn_process(log_config)
+            # After the fork, so its thread is not running while the child is
+            # forked; the queue holds any records the child sends before then
+            assert self._log_listener is not None
+            self._log_listener.start()
         except Exception:
             self._cleanup_ipc()
             self._transition(State.FAILED)
@@ -116,7 +120,6 @@ class ProcessRunner(Runner):
         self._log_queue = mp.Queue()
         log_config = self.service.lg.queue_config(self._log_queue)
         self._log_listener = LogQueueListener(self._log_queue, self.service.lg)
-        self._log_listener.start()
         return log_config
 
     def _create_ipc_primitives(self) -> None:

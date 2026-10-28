@@ -32,6 +32,9 @@ from tests.helpers.pg.probe import (
 # Register integration test fixtures and appinfra testing utilities
 pytest_plugins = [
     "appinfra.testing",
+    # Registered here, before any test module imports it, so pytest can
+    # rewrite its asserts
+    "appinfra.db.pg.testing",
     "pytester",
     "tests.fixtures.clock",
     "tests.fixtures.pg_integration",
