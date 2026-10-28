@@ -186,7 +186,7 @@ python my_app.py
 
 ## Integration with Logging System
 
-The environment variable overrides work seamlessly with the logging system:
+The `test.logging` section configures test loggers, and its fields take overrides like any other:
 
 ```bash
 # Disable logging completely
@@ -200,11 +200,13 @@ export INFRA_TEST_LOGGING_COLORS=false
 ```
 
 ```python
-from appinfra.test_helpers import create_test_logger
+from appinfra.config import Config
+from appinfra.log import LogConfig, LoggerFactory
 
-# Logger will use environment variable overrides
-logger = create_test_logger("my_test")
-logger.info("This will respect INFRA_TEST_LOGGING_LEVEL")
+config = Config.from_path("etc/infra.yaml")  # applies the INFRA_* overrides
+lg = LoggerFactory.create(
+    "my_test", LogConfig.from_config(config.dict(), "test.logging")
+)
 ```
 
 ## Configuration File Structure

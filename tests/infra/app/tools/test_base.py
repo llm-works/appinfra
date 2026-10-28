@@ -714,6 +714,7 @@ class TestToolSetupLg:
 
             tool.setup_lg()
 
+            MockLogConfig.from_params.assert_called_once_with("info")
             # Its own name, not the root logger an app owns
             MockFactory.create.assert_called_once_with(f"/{tool.name}", mock_config)
 

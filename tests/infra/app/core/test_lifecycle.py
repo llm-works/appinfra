@@ -11,7 +11,6 @@ Tests key functionality including:
 """
 
 import logging
-import os
 import signal
 import time as std_time
 from unittest.mock import Mock, patch
@@ -115,18 +114,6 @@ class TestInitialize:
 
         manager.initialize(config)
 
-        assert manager._logger is not None
-
-    def test_initialize_uses_test_logging_level(self):
-        """Test initialize uses INFRA_TEST_LOGGING_LEVEL env var (line 31)."""
-        app = Mock()
-        manager = LifecycleManager(app)
-        config = DotDict(logging=DotDict(level="debug", location=0, micros=False))
-
-        with patch.dict(os.environ, {"INFRA_TEST_LOGGING_LEVEL": "warning"}):
-            manager.initialize(config)
-
-        # Logger should be created (actual level is checked internally)
         assert manager._logger is not None
 
     def test_initialize_without_logging_section(self):
