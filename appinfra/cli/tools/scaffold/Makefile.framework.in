@@ -4,40 +4,42 @@
 # Generated with infra scaffold tool using --makefile-style=framework
 
 # Configuration
-INFRA_DEV_PKG_NAME := {{PROJECT_NAME}}
+APPINFRA_DEV_PKG_NAME := {{PROJECT_NAME}}
 
-# Auto-detect infra framework location (override by setting INFRA_ROOT env var or in Makefile)
-INFRA_ROOT ?=
+# Auto-detect infra framework location (override by setting APPINFRA_ROOT env var or in Makefile)
+APPINFRA_ROOT ?=
 
 # Check common submodule location
-ifeq ($(INFRA_ROOT),)
+ifeq ($(APPINFRA_ROOT),)
   ifneq (,$(wildcard ./submodules/infra/scripts/make/Makefile.env))
-    INFRA_ROOT := ./submodules/infra
+    APPINFRA_ROOT := ./submodules/infra
   endif
 endif
 
 # Auto-detect via Python import
 _BOOTSTRAP_PYTHON := $(or $(PYTHON),$(wildcard $(HOME)/.venv/bin/python),python3)
 
-ifeq ($(INFRA_ROOT),)
-  INFRA_ROOT := $(shell $(_BOOTSTRAP_PYTHON) -c "import appinfra; from pathlib import Path; print(Path(appinfra.__file__).parent.parent)" 2>/dev/null || echo "")
+ifeq ($(APPINFRA_ROOT),)
+  APPINFRA_ROOT := $(shell $(_BOOTSTRAP_PYTHON) -c "import appinfra; from pathlib import Path; print(Path(appinfra.__file__).parent.parent)" 2>/dev/null || echo "")
 endif
 
-ifeq ($(INFRA_ROOT),)
-  $(error Cannot locate infra. Set INFRA_ROOT=/path/to/infra at top of Makefile or install appinfra package)
+ifeq ($(APPINFRA_ROOT),)
+  $(error Cannot locate infra. Set APPINFRA_ROOT=/path/to/infra at top of Makefile or install appinfra package)
 endif
 
-# Include framework Makefiles (Makefile.env handles Python detection)
-include $(INFRA_ROOT)/scripts/make/Makefile.env
-include $(INFRA_ROOT)/scripts/make/Makefile.help
-include $(INFRA_ROOT)/scripts/make/Makefile.utils
-include $(INFRA_ROOT)/scripts/make/Makefile.clean
-include $(INFRA_ROOT)/scripts/make/Makefile.dev
-include $(INFRA_ROOT)/scripts/make/Makefile.pytest
+# Include framework Makefiles (Makefile.config loads Makefile.local and the
+# defaults; Makefile.env handles Python detection)
+include $(APPINFRA_ROOT)/scripts/make/Makefile.config
+include $(APPINFRA_ROOT)/scripts/make/Makefile.env
+include $(APPINFRA_ROOT)/scripts/make/Makefile.help
+include $(APPINFRA_ROOT)/scripts/make/Makefile.utils
+include $(APPINFRA_ROOT)/scripts/make/Makefile.clean
+include $(APPINFRA_ROOT)/scripts/make/Makefile.dev
+include $(APPINFRA_ROOT)/scripts/make/Makefile.pytest
 # Uncomment if using PostgreSQL; the pg targets read the pgserver section of
-# $(ETC_DIR)/$(INFRA_DEFAULT_CONFIG_FILE), which the scaffold keeps inside the package:
-# ETC_DIR := $(CURDIR)/$(INFRA_DEV_PKG_NAME)/etc
-# include $(INFRA_ROOT)/scripts/make/Makefile.pg
+# $(ETC_DIR)/$(APPINFRA_DEFAULT_CONFIG_FILE), which the scaffold keeps inside the package:
+# ETC_DIR := $(CURDIR)/$(APPINFRA_DEV_PKG_NAME)/etc
+# include $(APPINFRA_ROOT)/scripts/make/Makefile.pg
 
 ##@ Application
 

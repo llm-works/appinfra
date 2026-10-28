@@ -728,7 +728,7 @@ export INFRA_PGSERVER_PORT=5432
 
 # Override nested configuration
 export INFRA_TEST_LOGGING_LEVEL=info
-export INFRA_TEST_LOGGING_COLORS_ENABLED=true
+export INFRA_TEST_LOGGING_COLORS=true
 
 # Override multiple values
 export INFRA_LOGGING_MICROSECONDS=true

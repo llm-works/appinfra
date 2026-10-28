@@ -17,7 +17,7 @@ pip install appinfra
 infra := $(shell appinfra scripts-path)
 
 # Configure your project
-INFRA_DEV_PKG_NAME := myproject
+APPINFRA_DEV_PKG_NAME := myproject
 
 # Include framework
 include $(infra)/make/Makefile.all
@@ -41,7 +41,7 @@ git submodule add <repo-url> submodules/infra
 # Makefile - using submodule
 infra := submodules/infra
 
-INFRA_DEV_PKG_NAME := myproject
+APPINFRA_DEV_PKG_NAME := myproject
 include $(infra)/scripts/make/Makefile.all
 ```
 
@@ -54,7 +54,7 @@ Note: With submodules, the path is `$(infra)/scripts/make/` vs `$(infra)/make/` 
 infra := $(shell appinfra scripts-path)
 
 # Configure your project
-INFRA_DEV_PKG_NAME := myproject
+APPINFRA_DEV_PKG_NAME := myproject
 
 # Include framework (config must be first)
 include $(infra)/make/Makefile.config
@@ -99,8 +99,8 @@ include $(infra)/make/Makefile.all
 
 Variables are resolved in this order (highest to lowest priority):
 
-1. **Environment variables** - `INFRA_DEV_PKG_NAME=foo make test`
-2. **Makefile variables before include** - `INFRA_DEV_PKG_NAME := foo`
+1. **Environment variables** - `APPINFRA_DEV_PKG_NAME=foo make test`
+2. **Makefile variables before include** - `APPINFRA_DEV_PKG_NAME := foo`
 3. **Makefile.local** - Optional overrides file (not committed)
 4. **Framework defaults** - Defined in `Makefile.config`
 
@@ -108,11 +108,11 @@ Variables are resolved in this order (highest to lowest priority):
 
 ```makefile
 # In Makefile (before include)
-INFRA_DEV_PKG_NAME := myproject
+APPINFRA_DEV_PKG_NAME := myproject
 include $(infra)/make/Makefile.all
 
 # Or via environment variable (for CI/testing)
-# INFRA_DEV_PKG_NAME=myproject make test.coverage
+# APPINFRA_DEV_PKG_NAME=myproject make test.coverage
 ```
 
 ## Common Configuration
@@ -122,7 +122,7 @@ include $(infra)/make/Makefile.all
 ```makefile
 # Makefile
 infra := $(shell appinfra scripts-path)
-INFRA_DEV_PKG_NAME := myproject
+APPINFRA_DEV_PKG_NAME := myproject
 
 include $(infra)/make/Makefile.all
 ```
@@ -132,13 +132,13 @@ include $(infra)/make/Makefile.all
 ```makefile
 # Makefile
 infra := $(shell appinfra scripts-path)
-INFRA_DEV_PKG_NAME := myproject
-INFRA_DEV_CQ_STRICT := true
-INFRA_PYTEST_TESTS_DIR := tests
-INFRA_DOCS_CONFIG_FILE := mkdocs.yaml
+APPINFRA_DEV_PKG_NAME := myproject
+APPINFRA_DEV_CQ_STRICT := true
+APPINFRA_PYTEST_TESTS_DIR := tests
+APPINFRA_DOCS_CONFIG_FILE := mkdocs.yaml
 
 # Hide unused features
-INFRA_DISABLE_GROUPS := pg.
+APPINFRA_DISABLE_GROUPS := pg.
 
 include $(infra)/make/Makefile.all
 ```
@@ -175,7 +175,7 @@ make check
 make check.raw      # For CI logs
 make check.summary  # Summaries only
 
-# Incorrect - will use fallback defaults (INFRA_DEV_PKG_NAME=appinfra)
+# Incorrect - will use fallback defaults (APPINFRA_DEV_PKG_NAME=appinfra)
 ./scripts/check.sh
 ```
 
@@ -188,7 +188,7 @@ included, empties the directory first, so copy a log elsewhere before running it
 directory carries its own `.gitignore`. A failed example's whole stdout and stderr are in the
 Examples log: `make check` runs the examples with `run_examples.py --full-output`.
 
-A test still running after `INFRA_PYTEST_HANG_DUMP_SECONDS` (default 120) gets a row below the
+A test still running after `APPINFRA_PYTEST_HANG_DUMP_SECONDS` (default 120) gets a row below the
 checklist, after a blank line:
 
 ```text
@@ -231,10 +231,10 @@ test categories implemented yet.
 ```makefile
 # Wrong - too late
 include $(infra)/make/Makefile.all
-INFRA_DEV_PKG_NAME := myproject
+APPINFRA_DEV_PKG_NAME := myproject
 
 # Correct - before include
-INFRA_DEV_PKG_NAME := myproject
+APPINFRA_DEV_PKG_NAME := myproject
 include $(infra)/make/Makefile.all
 ```
 
@@ -272,8 +272,8 @@ myproject/
 ```makefile
 # Makefile
 infra := $(shell appinfra scripts-path)
-INFRA_DEV_PKG_NAME := myproject
-INFRA_DISABLE_GROUPS := pg.
+APPINFRA_DEV_PKG_NAME := myproject
+APPINFRA_DISABLE_GROUPS := pg.
 
 include $(infra)/make/Makefile.all
 

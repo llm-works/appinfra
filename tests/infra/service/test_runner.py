@@ -460,6 +460,52 @@ class TestProcessRunner:
             assert runner.state == State.STOPPED
             mock_process.return_value.join.assert_called()
 
+    def test_start_failure_after_fork_ends_the_child(self, lg):
+        """A failure after the fork terminates the forked child before start() raises."""
+        with (
+            patch("appinfra.service.runner.process.mp.Process") as mock_process,
+            patch("appinfra.service.runner.process.mp.Event"),
+            patch("appinfra.service.runner.process.mp.Queue"),
+            patch("appinfra.service.runner.process.LogQueueListener") as mock_listener,
+        ):
+            child = mock_process.return_value
+            child.is_alive.return_value = True  # alive until terminated
+            child.terminate.side_effect = lambda: setattr(
+                child.is_alive, "return_value", False
+            )
+            mock_listener.return_value.start.side_effect = RuntimeError("no thread")
+
+            runner = ProcessRunner(MPSimpleService(lg))
+            with pytest.raises(RuntimeError, match="no thread"):
+                runner.start()
+
+            child.terminate.assert_called_once()
+            child.join.assert_called_once_with(timeout=2.0)
+            child.kill.assert_not_called()
+            assert runner.state == State.FAILED
+            assert runner.process is None  # ended, so the handles are released
+
+    def test_start_failure_kills_a_child_that_ignores_terminate(self, lg):
+        """A child still alive after terminate() is killed."""
+        with (
+            patch("appinfra.service.runner.process.mp.Process") as mock_process,
+            patch("appinfra.service.runner.process.mp.Event"),
+            patch("appinfra.service.runner.process.mp.Queue"),
+            patch("appinfra.service.runner.process.LogQueueListener") as mock_listener,
+        ):
+            child = mock_process.return_value
+            child.is_alive.return_value = True
+            mock_listener.return_value.start.side_effect = RuntimeError("no thread")
+
+            runner = ProcessRunner(MPSimpleService(lg))
+            with pytest.raises(RuntimeError):
+                runner.start()
+
+            child.kill.assert_called_once()
+            assert runner.state == State.FAILED
+            # Still alive: the handle stays so a later stop() can retry
+            assert runner.process is child
+
     def test_is_alive_when_running(self, lg):
         """is_alive() returns True when process is alive."""
         with (

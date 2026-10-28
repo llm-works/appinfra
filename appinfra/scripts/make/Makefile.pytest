@@ -7,34 +7,34 @@
 # Requires: PYTHON (from Makefile.env)
 #
 # Configuration variables (set in Makefile before include):
-#   INFRA_PYTEST_COVERAGE_PKG       - Package to measure coverage for (default: INFRA_DEV_PKG_NAME)
-#   INFRA_PYTEST_COVERAGE_MARKERS   - Pytest markers for coverage tests (default: unit)
+#   APPINFRA_PYTEST_COVERAGE_PKG       - Package to measure coverage for (default: APPINFRA_DEV_PKG_NAME)
+#   APPINFRA_PYTEST_COVERAGE_MARKERS   - Pytest markers for coverage tests (default: unit)
 #                                     Set empty to include all tests in coverage
-#   INFRA_PYTEST_COVERAGE_THRESHOLD - Coverage threshold for make check (default: 95.0)
+#   APPINFRA_PYTEST_COVERAGE_THRESHOLD - Coverage threshold for make check (default: 95.0)
 #                                     Set to 0 to disable coverage checking entirely
-#   INFRA_PYTEST_TESTS_DIR          - Tests directory (default: tests)
-#   INFRA_PYTEST_PERF_DIR           - Directory test.perf and make check's Performance group
+#   APPINFRA_PYTEST_TESTS_DIR          - Tests directory (default: tests)
+#   APPINFRA_PYTEST_PERF_DIR           - Directory test.perf and make check's Performance group
 #                                     collect from (default: tests); narrowing it skips
 #                                     importing the rest of the test tree
-#   INFRA_PYTEST_WORKERS            - pytest-xdist worker count, auto or N (default: empty = no -n flag)
+#   APPINFRA_PYTEST_WORKERS            - pytest-xdist worker count, auto or N (default: empty = no -n flag)
 #                                     Never applied to test.perf targets. Not read by check.sh
 #                                     (make check), which runs suites concurrently with its own
 #                                     per-suite worker heuristic
-#   INFRA_PYTEST_ARGS               - Additional pytest arguments (default: empty)
-#   INFRA_DEV_SKIP_TARGETS          - Space-separated list of targets to skip (project provides own)
+#   APPINFRA_PYTEST_ARGS               - Additional pytest arguments (default: empty)
+#   APPINFRA_DEV_SKIP_TARGETS          - Space-separated list of targets to skip (project provides own)
 #                                     Supported: test.unit test.integration test.e2e test.perf test.security
 
 # Configuration (defaults set in Makefile.config)
-INFRA_PYTEST_TESTS_DIR ?= tests
-INFRA_PYTEST_PERF_DIR ?= tests
-INFRA_PYTEST_WORKERS ?=
-INFRA_PYTEST_ARGS ?=
+APPINFRA_PYTEST_TESTS_DIR ?= tests
+APPINFRA_PYTEST_PERF_DIR ?= tests
+APPINFRA_PYTEST_WORKERS ?=
+APPINFRA_PYTEST_ARGS ?=
 
 # Coverage output directory (under project root)
-_COVERAGE_DIR := $(INFRA_DEV_PROJECT_ROOT)/.cover
+_COVERAGE_DIR := $(APPINFRA_DEV_PROJECT_ROOT)/.cover
 
 # Build marker argument for coverage tests (empty if no markers specified)
-_COVERAGE_MARKER_ARG := $(if $(INFRA_PYTEST_COVERAGE_MARKERS),-m "$(INFRA_PYTEST_COVERAGE_MARKERS)",)
+_COVERAGE_MARKER_ARG := $(if $(APPINFRA_PYTEST_COVERAGE_MARKERS),-m "$(APPINFRA_PYTEST_COVERAGE_MARKERS)",)
 
 # Helper to check pytest availability with helpful error
 define _check_pytest
@@ -50,12 +50,12 @@ define _check_pytest
 }
 endef
 
-# pytest-xdist worker argument (empty when INFRA_PYTEST_WORKERS is unset).
+# pytest-xdist worker argument (empty when APPINFRA_PYTEST_WORKERS is unset).
 # --dist=worksteal (xdist >= 3.2) tacks on whenever -n is enabled: idle
 # workers steal tests from busy peers, smoothing the tail on skewed cost
 # distributions. No-op with -n 1; incompatible with -n 0, hence the guard
-# on INFRA_PYTEST_WORKERS being set at all.
-_PYTEST_WORKERS_ARG := $(if $(INFRA_PYTEST_WORKERS),-n $(INFRA_PYTEST_WORKERS) --dist=worksteal,)
+# on APPINFRA_PYTEST_WORKERS being set at all.
+_PYTEST_WORKERS_ARG := $(if $(APPINFRA_PYTEST_WORKERS),-n $(APPINFRA_PYTEST_WORKERS) --dist=worksteal,)
 
 # Helper to run pytest, treating "no tests collected" (exit 5) as success
 # Usage: $(call run_pytest,args)
@@ -63,7 +63,7 @@ define run_pytest
 $(PYTHON) -m pytest $(_PYTEST_WORKERS_ARG) $(1) || { ec=$$?; [ $$ec -eq 5 ] && exit 0 || exit $$ec; }
 endef
 
-# Same, ignoring INFRA_PYTEST_WORKERS. Performance targets always run
+# Same, ignoring APPINFRA_PYTEST_WORKERS. Performance targets always run
 # in-process: test.perf.v passes -s, and xdist workers do not relay
 # uncaptured output.
 # Usage: $(call run_pytest_serial,args)
@@ -73,7 +73,7 @@ endef
 
 ##@ Testing
 
-ifeq ($(filter test.unit,$(INFRA_DEV_SKIP_TARGETS)),)
+ifeq ($(filter test.unit,$(APPINFRA_DEV_SKIP_TARGETS)),)
 test.unit:: ## runs unit tests (fast, isolated, mocked dependencies)
 	@echo "* running unit tests..."
 	@$(call run_pytest,tests/ -m unit -qq --tb=short)
@@ -86,7 +86,7 @@ test.unit.v:: ## runs unit tests (verbose)
 endif # skip test.unit
 .PHONY: test.unit test.unit.v
 
-ifeq ($(filter test.integration,$(INFRA_DEV_SKIP_TARGETS)),)
+ifeq ($(filter test.integration,$(APPINFRA_DEV_SKIP_TARGETS)),)
 test.integration:: ## runs integration tests (real dependencies)
 	@echo "* running integration tests..."
 	@$(call run_pytest,tests/ -m integration -qq --tb=short)
@@ -99,20 +99,20 @@ test.integration.v:: ## runs integration tests (verbose)
 endif # skip test.integration
 .PHONY: test.integration test.integration.v
 
-ifeq ($(filter test.perf,$(INFRA_DEV_SKIP_TARGETS)),)
+ifeq ($(filter test.perf,$(APPINFRA_DEV_SKIP_TARGETS)),)
 test.perf:: ## runs performance tests (benchmarks, load tests)
 	@echo "* running performance tests..."
-	@$(call run_pytest_serial,$(INFRA_PYTEST_PERF_DIR)/ -m performance -qq --tb=short)
+	@$(call run_pytest_serial,$(APPINFRA_PYTEST_PERF_DIR)/ -m performance -qq --tb=short)
 	@echo "* performance tests done"
 
 test.perf.v:: ## runs performance tests (verbose)
 	@echo "* running performance tests... (verbose)"
-	@$(call run_pytest_serial,$(INFRA_PYTEST_PERF_DIR)/ -m performance -v -s)
+	@$(call run_pytest_serial,$(APPINFRA_PYTEST_PERF_DIR)/ -m performance -v -s)
 	@echo "* performance tests done"
 endif # skip test.perf
 .PHONY: test.perf test.perf.v
 
-ifeq ($(filter test.security,$(INFRA_DEV_SKIP_TARGETS)),)
+ifeq ($(filter test.security,$(APPINFRA_DEV_SKIP_TARGETS)),)
 test.security:: ## runs security tests (injection, validation, XSS)
 	@echo "* running security tests..."
 	@$(call run_pytest,tests/ -m security -qq --tb=short)
@@ -125,7 +125,7 @@ test.security.v:: ## runs security tests (verbose)
 endif # skip test.security
 .PHONY: test.security test.security.v
 
-ifeq ($(filter test.e2e,$(INFRA_DEV_SKIP_TARGETS)),)
+ifeq ($(filter test.e2e,$(APPINFRA_DEV_SKIP_TARGETS)),)
 test.e2e:: ## runs end-to-end tests (full system workflows)
 	@echo "* running end-to-end tests..."
 	@$(call run_pytest,tests/ -m e2e -qq --tb=short)
@@ -165,32 +165,32 @@ test.v:: ## runs all tests (verbose)
 	@echo "* all tests completed"
 .PHONY: test.v
 
-test.coverage:: ## runs tests with coverage analysis (configurable via INFRA_PYTEST_COVERAGE_MARKERS)
+test.coverage:: ## runs tests with coverage analysis (configurable via APPINFRA_PYTEST_COVERAGE_MARKERS)
 	@echo "* running tests with coverage analysis..."
 	@rm -rf $(_COVERAGE_DIR) 2>/dev/null || true
 	@mkdir -p $(_COVERAGE_DIR)
-	@COVERAGE_FILE=$(_COVERAGE_DIR)/data $(call run_pytest,tests/ $(_COVERAGE_MARKER_ARG) -qq --no-header --cov=$(INFRA_PYTEST_COVERAGE_PKG) --cov-report=term --cov-report=xml:$(_COVERAGE_DIR)/coverage.xml)
+	@COVERAGE_FILE=$(_COVERAGE_DIR)/data $(call run_pytest,tests/ $(_COVERAGE_MARKER_ARG) -qq --no-header --cov=$(APPINFRA_PYTEST_COVERAGE_PKG) --cov-report=term --cov-report=xml:$(_COVERAGE_DIR)/coverage.xml)
 	@echo "* coverage analysis completed (XML report: $(_COVERAGE_DIR)/coverage.xml)"
 .PHONY: test.coverage
 
 test.coverage.v:: ## runs tests with coverage analysis (verbose, shows missing lines)
 	@echo "* running tests with coverage analysis... (verbose)"
-	@$(call run_pytest,tests/ $(_COVERAGE_MARKER_ARG) -v --cov=$(INFRA_PYTEST_COVERAGE_PKG) --cov-report=term-missing)
+	@$(call run_pytest,tests/ $(_COVERAGE_MARKER_ARG) -v --cov=$(APPINFRA_PYTEST_COVERAGE_PKG) --cov-report=term-missing)
 	@echo "* coverage analysis completed"
 .PHONY: test.coverage.v
 
 test.coverage.html:: ## generates HTML coverage report
 	@echo "* running tests with coverage analysis..."
-	@$(call run_pytest,tests/ $(_COVERAGE_MARKER_ARG) --cov=$(INFRA_PYTEST_COVERAGE_PKG) --cov-report=html)
+	@$(call run_pytest,tests/ $(_COVERAGE_MARKER_ARG) --cov=$(APPINFRA_PYTEST_COVERAGE_PKG) --cov-report=html)
 	@echo "* HTML coverage report generated in .htmlcov/ directory"
 .PHONY: test.coverage.html
 
 test.coverage.json:: ## generates JSON coverage report
 	@echo "* running tests with coverage analysis..."
-	@$(call run_pytest,tests/ $(_COVERAGE_MARKER_ARG) --cov=$(INFRA_PYTEST_COVERAGE_PKG) --cov-report=json)
+	@$(call run_pytest,tests/ $(_COVERAGE_MARKER_ARG) --cov=$(APPINFRA_PYTEST_COVERAGE_PKG) --cov-report=json)
 	@echo "* JSON coverage report generated as .coverage.json"
 .PHONY: test.coverage.json
 
 test.coverage.rank:: ## shows files ranked by missed lines (descending)
-	@$(MAKE) test.coverage 2>&1 | grep -E "$(INFRA_PYTEST_COVERAGE_PKG).*[0-9]+\s+[1-9]" | awk '{print $$3, $$1}' | sort -rn | head -20
+	@$(MAKE) test.coverage 2>&1 | grep -E "$(APPINFRA_PYTEST_COVERAGE_PKG).*[0-9]+\s+[1-9]" | awk '{print $$3, $$1}' | sort -rn | head -20
 .PHONY: test.coverage.rank

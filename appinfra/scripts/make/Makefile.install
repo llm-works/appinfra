@@ -8,7 +8,7 @@
 #
 # `install` builds a wheel per $(PYTHON_ENVS) entry (so C-extension or
 # version-specific wheels stay valid for their target), installs it, and drops a
-# copy into <sys.prefix>/share/$(INFRA_DEV_PKG_NAME)/wheels/ for each env.
+# copy into <sys.prefix>/share/$(APPINFRA_DEV_PKG_NAME)/wheels/ for each env.
 # Consumers (e.g. container builds) can pull from that per-prefix location
 # instead of hardcoding the dev checkout path. For pure-Python packages the
 # wheels overwrite in dist/; for C-extension packages dist/ accumulates one
@@ -25,26 +25,26 @@
 # interpreter).
 #
 # Required variables:
-#   INFRA_DEV_PKG_NAME  - Package name to install/uninstall
-#   PYTHON_ENVS         - Python environments to install to
+#   APPINFRA_DEV_PKG_NAME - Package name to install/uninstall
+#   PYTHON_ENVS           - Python environments to install to
 #
 # Optional variables:
-#   INFRA_DEV_INSTALL_EXTRAS - Comma-separated extras (e.g., "dev,ui")
+#   APPINFRA_DEV_INSTALL_EXTRAS - Comma-separated extras (e.g., "dev,ui")
 
-# Reject INFRA_DEV_PKG_NAME values that would escape sys.prefix/share/ when used
+# Reject APPINFRA_DEV_PKG_NAME values that would escape sys.prefix/share/ when used
 # as a path component (empty, `.`, `..`, leading/trailing `.` or `-`).
 # PEP 503 normalized distribution names: starts and ends with alphanumeric;
 # inner chars may be alphanumeric, `.`, `-`, or `_`.
-ifeq ($(shell echo "$(INFRA_DEV_PKG_NAME)" | grep -qE '^([A-Za-z0-9]|[A-Za-z0-9][A-Za-z0-9._-]*[A-Za-z0-9])$$' && echo ok),)
-$(error INFRA_DEV_PKG_NAME='$(INFRA_DEV_PKG_NAME)' must be a PEP 503 distribution name (alphanumeric, `.`, `-`, `_`; must start and end with alphanumeric))
+ifeq ($(shell echo "$(APPINFRA_DEV_PKG_NAME)" | grep -qE '^([A-Za-z0-9]|[A-Za-z0-9][A-Za-z0-9._-]*[A-Za-z0-9])$$' && echo ok),)
+$(error APPINFRA_DEV_PKG_NAME='$(APPINFRA_DEV_PKG_NAME)' must be a PEP 503 distribution name (alphanumeric, `.`, `-`, `_`; must start and end with alphanumeric))
 endif
 
 ##@ Package Installation
 
-install:: areyousure ## installs $(INFRA_DEV_PKG_NAME) to all environments; emits wheel to dist/ and $$VENV/share/$(INFRA_DEV_PKG_NAME)/wheels/
+install:: areyousure ## installs $(APPINFRA_DEV_PKG_NAME) to all environments; emits wheel to dist/ and $$VENV/share/$(APPINFRA_DEV_PKG_NAME)/wheels/
 	@echo "* cleaning build artifacts..."
 	@rm -rf *.egg-info .dist .build dist build
-	@echo "* installing $(INFRA_DEV_PKG_NAME) to all environments..."
+	@echo "* installing $(APPINFRA_DEV_PKG_NAME) to all environments..."
 	@for pyenv in $(PYTHON_ENVS); do \
 		if [ -x "$$pyenv" ]; then \
 			echo "  → $$pyenv"; \
@@ -66,13 +66,13 @@ install:: areyousure ## installs $(INFRA_DEV_PKG_NAME) to all environments; emit
 			wheel="$$(ls -t dist/*.whl 2>/dev/null | head -1)"; \
 			if [ -z "$$wheel" ]; then echo "    ERROR: pip wheel produced no .whl"; exit 1; fi; \
 			echo "    built $$wheel"; \
-			if [ -n "$(INFRA_DEV_INSTALL_EXTRAS)" ]; then \
-				$$pyenv -m pip install -q "$${wheel}[$(INFRA_DEV_INSTALL_EXTRAS)]" || exit 1; \
+			if [ -n "$(APPINFRA_DEV_INSTALL_EXTRAS)" ]; then \
+				$$pyenv -m pip install -q "$${wheel}[$(APPINFRA_DEV_INSTALL_EXTRAS)]" || exit 1; \
 			else \
 				$$pyenv -m pip install -q "$$wheel" || exit 1; \
 			fi; \
-			venv_share="$$prefix/share/$(INFRA_DEV_PKG_NAME)/wheels"; \
-			install -d -m "$$dir_mode" "$$prefix/share/$(INFRA_DEV_PKG_NAME)" || exit 1; \
+			venv_share="$$prefix/share/$(APPINFRA_DEV_PKG_NAME)/wheels"; \
+			install -d -m "$$dir_mode" "$$prefix/share/$(APPINFRA_DEV_PKG_NAME)" || exit 1; \
 			install -d -m "$$dir_mode" "$$venv_share" || exit 1; \
 			wheel_name="$$(basename "$$wheel")"; \
 			install -m "$$file_mode" "$$wheel" "$$venv_share/$$wheel_name" || exit 1; \
@@ -85,21 +85,21 @@ install:: areyousure ## installs $(INFRA_DEV_PKG_NAME) to all environments; emit
 	@echo "* install done"
 .PHONY: install
 
-install.e:: areyousure ## installs $(INFRA_DEV_PKG_NAME) (editable) to all environments in PYTHON_ENVS
+install.e:: areyousure ## installs $(APPINFRA_DEV_PKG_NAME) (editable) to all environments in PYTHON_ENVS
 	@echo "* cleaning build artifacts..."
 	@rm -rf *.egg-info .dist .build dist build
-	@echo "* installing $(INFRA_DEV_PKG_NAME) (editable) to all environments..."
+	@echo "* installing $(APPINFRA_DEV_PKG_NAME) (editable) to all environments..."
 	@for pyenv in $(PYTHON_ENVS); do \
 		if [ -x "$$pyenv" ]; then \
 			echo "  → $$pyenv"; \
-			if [ -n "$(INFRA_DEV_INSTALL_EXTRAS)" ]; then \
-				$$pyenv -m pip install -q -e ".[$(INFRA_DEV_INSTALL_EXTRAS)]" || exit 1; \
+			if [ -n "$(APPINFRA_DEV_INSTALL_EXTRAS)" ]; then \
+				$$pyenv -m pip install -q -e ".[$(APPINFRA_DEV_INSTALL_EXTRAS)]" || exit 1; \
 			else \
 				$$pyenv -m pip install -q -e . || exit 1; \
 			fi; \
 			prefix="$$($$pyenv -c 'import sys; print(sys.prefix)')" || exit 1; \
 			[ -n "$$prefix" ] || { echo "    ERROR: $$pyenv reported empty sys.prefix"; exit 1; }; \
-			rm -rf "$$prefix/share/$(INFRA_DEV_PKG_NAME)/wheels" || exit 1; \
+			rm -rf "$$prefix/share/$(APPINFRA_DEV_PKG_NAME)/wheels" || exit 1; \
 		else \
 			echo "  → $$pyenv (skipped, not found)"; \
 		fi; \
@@ -107,15 +107,15 @@ install.e:: areyousure ## installs $(INFRA_DEV_PKG_NAME) (editable) to all envir
 	@echo "* install.e done"
 .PHONY: install.e
 
-uninstall:: areyousure ## uninstalls $(INFRA_DEV_PKG_NAME) from all environments in PYTHON_ENVS
-	@echo "* uninstalling $(INFRA_DEV_PKG_NAME) from all environments..."
+uninstall:: areyousure ## uninstalls $(APPINFRA_DEV_PKG_NAME) from all environments in PYTHON_ENVS
+	@echo "* uninstalling $(APPINFRA_DEV_PKG_NAME) from all environments..."
 	@for pyenv in $(PYTHON_ENVS); do \
 		if [ -x "$$pyenv" ]; then \
 			echo "  → $$pyenv"; \
-			$$pyenv -m pip uninstall -q -y $(INFRA_DEV_PKG_NAME) 2>/dev/null || true; \
+			$$pyenv -m pip uninstall -q -y $(APPINFRA_DEV_PKG_NAME) 2>/dev/null || true; \
 			prefix="$$($$pyenv -c 'import sys; print(sys.prefix)')" || exit 1; \
 			[ -n "$$prefix" ] || { echo "    ERROR: $$pyenv reported empty sys.prefix"; exit 1; }; \
-			rm -rf "$$prefix/share/$(INFRA_DEV_PKG_NAME)/wheels" || exit 1; \
+			rm -rf "$$prefix/share/$(APPINFRA_DEV_PKG_NAME)/wheels" || exit 1; \
 		else \
 			echo "  → $$pyenv (skipped, not found)"; \
 		fi; \

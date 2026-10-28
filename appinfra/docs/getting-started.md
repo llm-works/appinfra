@@ -40,13 +40,13 @@ make setup
 make install
 
 # Install with optional extras
-make install INFRA_DEV_INSTALL_EXTRAS=ui           # Rich terminal UI
-make install INFRA_DEV_INSTALL_EXTRAS=ui,fastapi   # Multiple extras
-make install INFRA_DEV_INSTALL_EXTRAS=dev          # All dev dependencies
+make install APPINFRA_DEV_INSTALL_EXTRAS=ui           # Rich terminal UI
+make install APPINFRA_DEV_INSTALL_EXTRAS=ui,fastapi   # Multiple extras
+make install APPINFRA_DEV_INSTALL_EXTRAS=dev          # All dev dependencies
 
 # For development (editable mode - changes reflect without reinstall)
 make install.e
-make install.e INFRA_DEV_INSTALL_EXTRAS=ui,dev     # Editable with extras
+make install.e APPINFRA_DEV_INSTALL_EXTRAS=ui,dev     # Editable with extras
 
 # Uninstall
 make uninstall
@@ -367,8 +367,8 @@ make fmt
 # Run all checks (format, lint, type, tests)
 make check
 
-# Preview what checks would run without executing
-INFRA_DRY_RUN=1 make check
+# Preview the commands fmt / lint / type would run, without running them
+APPINFRA_DRY_RUN=1 make lint
 ```
 
 ### Database

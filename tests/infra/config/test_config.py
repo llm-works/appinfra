@@ -453,19 +453,44 @@ class TestEnvironmentOverrides:
         assert exc_info.value.env_name == "INFRA_NEW_SECTION_NEW_KEY"
         assert exc_info.value.path == ["new", "section", "new", "key"]
 
-    def test_appinfra_tooling_env_vars_skipped(self, temp_yaml_file, clean_env):
-        """Vars in APPINFRA_TOOLING_ENV_VARS bypass Config override matching.
-
-        Without this skip, shell-script vars like INFRA_DEV_PKG_NAME would
-        raise UndeclaredConfigPathError because they have no yaml field.
-        """
-        os.environ["INFRA_DEV_PKG_NAME"] = "appinfra"
-        os.environ["INFRA_CHECK_PYTEST_SUITE"] = "unit"
-        # Config load must not raise even though these paths are undeclared.
+    def test_appinfra_control_vars_ignored(self, temp_yaml_file, clean_env):
+        """APPINFRA_* control variables never reach override matching."""
+        os.environ["APPINFRA_DEV_PKG_NAME"] = "appinfra"
+        os.environ["APPINFRA_CHECK_PYTEST_SUITE"] = "unit"
         config = Config(temp_yaml_file)
-        # And they must not have been quietly written into the config tree.
         assert not config.has("dev.pkg.name")
         assert not config.has("check.pytest.suite")
+
+    def test_former_control_name_raises_with_hint(self, temp_yaml_file, clean_env):
+        """A control variable still named INFRA_* is an undeclared override."""
+        os.environ["INFRA_DEV_PKG_NAME"] = "appinfra"
+        with pytest.raises(UndeclaredConfigPathError, match="use APPINFRA_"):
+            Config(temp_yaml_file)
+
+    def test_custom_prefix_error_has_no_hint(self, temp_yaml_file, clean_env):
+        """The APPINFRA_ hint is only for the default INFRA_ prefix."""
+        os.environ["MYAPP_NEW_KEY"] = "x"
+        with pytest.raises(UndeclaredConfigPathError) as exc_info:
+            Config(temp_yaml_file, env_prefix="MYAPP_")
+        assert "APPINFRA_" not in str(exc_info.value)
+
+    def test_underscore_top_level_key_overridable(self, tmp_path, clean_env):
+        """A top-level key starting with _ is an ordinary override target."""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("_defaults:\n  level: info\n")
+        os.environ["INFRA__DEFAULTS_LEVEL"] = "debug"
+        config = Config(str(config_file))
+        assert config.get("_defaults.level") == "debug"
+
+    @pytest.mark.parametrize(
+        "prefix", ["APPINFRA_", "APPINFRA", "APP", "", "APPINFRA_X_"]
+    )
+    def test_env_prefix_overlapping_control_prefix_rejected(
+        self, temp_yaml_file, prefix
+    ):
+        """An env_prefix that would also match APPINFRA_* names is rejected."""
+        with pytest.raises(ValueError, match="overlaps APPINFRA_"):
+            Config(temp_yaml_file, env_prefix=prefix)
 
     def test_env_override_preserves_existing_structure(self, temp_yaml_file, clean_env):
         """Test that env overrides don't destroy existing structure."""

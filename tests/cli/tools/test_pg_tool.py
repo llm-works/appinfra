@@ -193,35 +193,35 @@ class TestExec:
         assert p.exists()
 
     def test_detect_runtime_honors_explicit_env(self, monkeypatch):
-        monkeypatch.setenv("INFRA_CONTAINER_CMD", "docker")
+        monkeypatch.setenv("APPINFRA_CONTAINER_CMD", "docker")
         assert _detect_runtime_env() == {}
 
     def test_detect_runtime_prefers_podman(self, monkeypatch):
-        monkeypatch.delenv("INFRA_CONTAINER_CMD", raising=False)
-        monkeypatch.delenv("INFRA_COMPOSE_CMD", raising=False)
+        monkeypatch.delenv("APPINFRA_CONTAINER_CMD", raising=False)
+        monkeypatch.delenv("APPINFRA_COMPOSE_CMD", raising=False)
         with patch(
             "appinfra.cli.tools.pg_tool.shutil.which",
             side_effect=lambda name: f"/usr/bin/{name}" if name == "podman" else None,
         ):
             env = _detect_runtime_env()
         assert env == {
-            "INFRA_CONTAINER_CMD": "podman",
-            "INFRA_COMPOSE_CMD": "podman compose",
+            "APPINFRA_CONTAINER_CMD": "podman",
+            "APPINFRA_COMPOSE_CMD": "podman compose",
         }
 
     def test_detect_runtime_falls_back_to_docker(self, monkeypatch):
-        monkeypatch.delenv("INFRA_CONTAINER_CMD", raising=False)
-        monkeypatch.delenv("INFRA_COMPOSE_CMD", raising=False)
+        monkeypatch.delenv("APPINFRA_CONTAINER_CMD", raising=False)
+        monkeypatch.delenv("APPINFRA_COMPOSE_CMD", raising=False)
         with patch(
             "appinfra.cli.tools.pg_tool.shutil.which",
             side_effect=lambda name: f"/usr/bin/{name}" if name == "docker" else None,
         ):
             env = _detect_runtime_env()
-        assert env["INFRA_CONTAINER_CMD"] == "docker"
-        assert env["INFRA_COMPOSE_CMD"] == "docker compose"
+        assert env["APPINFRA_CONTAINER_CMD"] == "docker"
+        assert env["APPINFRA_COMPOSE_CMD"] == "docker compose"
 
     def test_detect_runtime_empty_when_neither_present(self, monkeypatch):
-        monkeypatch.delenv("INFRA_CONTAINER_CMD", raising=False)
+        monkeypatch.delenv("APPINFRA_CONTAINER_CMD", raising=False)
         with patch("appinfra.cli.tools.pg_tool.shutil.which", return_value=None):
             assert _detect_runtime_env() == {}
 
@@ -255,8 +255,8 @@ class TestExec:
     def test_detect_runtime_prefers_podman_compose_binary(self, monkeypatch):
         """When podman-compose is on PATH, use it directly so the
         ``podman compose`` shim's banner stays out of user output."""
-        monkeypatch.delenv("INFRA_CONTAINER_CMD", raising=False)
-        monkeypatch.delenv("INFRA_COMPOSE_CMD", raising=False)
+        monkeypatch.delenv("APPINFRA_CONTAINER_CMD", raising=False)
+        monkeypatch.delenv("APPINFRA_COMPOSE_CMD", raising=False)
         with patch(
             "appinfra.cli.tools.pg_tool.shutil.which",
             side_effect=lambda name: (
@@ -265,20 +265,20 @@ class TestExec:
         ):
             env = _detect_runtime_env()
         assert env == {
-            "INFRA_CONTAINER_CMD": "podman",
-            "INFRA_COMPOSE_CMD": "podman-compose",
+            "APPINFRA_CONTAINER_CMD": "podman",
+            "APPINFRA_COMPOSE_CMD": "podman-compose",
         }
 
     def test_detect_runtime_falls_back_to_podman_compose_shim(self, monkeypatch):
         """Without ``podman-compose`` on PATH, fall back to the shim."""
-        monkeypatch.delenv("INFRA_CONTAINER_CMD", raising=False)
-        monkeypatch.delenv("INFRA_COMPOSE_CMD", raising=False)
+        monkeypatch.delenv("APPINFRA_CONTAINER_CMD", raising=False)
+        monkeypatch.delenv("APPINFRA_COMPOSE_CMD", raising=False)
         with patch(
             "appinfra.cli.tools.pg_tool.shutil.which",
             side_effect=lambda name: f"/usr/bin/{name}" if name == "podman" else None,
         ):
             env = _detect_runtime_env()
-        assert env["INFRA_COMPOSE_CMD"] == "podman compose"
+        assert env["APPINFRA_COMPOSE_CMD"] == "podman compose"
 
 
 # =============================================================================

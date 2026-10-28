@@ -350,18 +350,10 @@ class Tool(Traceable, ToolProtocol):
                 self._logger = LoggerFactory.derive(self.parent.lg, self.name)
             else:
                 # Fallback to creating a standalone logger
-                import os
-
                 from ...log import LogConfig
 
-                # Respect INFRA_TEST_LOGGING_LEVEL environment variable
-                log_level_str = os.getenv("INFRA_TEST_LOGGING_LEVEL", "info")
-                log_level: str | bool = log_level_str
-                if log_level_str.lower() == "false":
-                    log_level = False
-
                 # Its own name, not the root: the root logger belongs to an app
-                config = LogConfig.from_params(log_level)
+                config = LogConfig.from_params("info")
                 self._logger = LoggerFactory.create(f"/{self.name}", config)
         except Exception as e:
             # If logger creation fails, raise a descriptive error

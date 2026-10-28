@@ -79,6 +79,11 @@ class UndeclaredConfigPathError(ConfigError):
             f"Declare it in yaml first (e.g. `{path[-1]}: ''` for a scalar or "
             f"`{path[-1]}: []` for a list)."
         )
+        if env_prefix == "INFRA_":
+            message += (
+                " INFRA_ variables are config overrides; appinfra's control "
+                "variables use APPINFRA_."
+            )
         super().__init__(message, env_name=env_name, path=path)
         self.env_name = env_name
         self.path = path

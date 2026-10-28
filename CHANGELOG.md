@@ -19,15 +19,15 @@ earlier: pre-release builds (0.13.1.devN) would not satisfy it. -->
 - `appinfra cq dup` reports duplicated code blocks (pylint's duplicate-code; pylint joins the
   `check` extra). `appinfra cq dead` reports private definitions nothing refers to. `# cq: keep
   <reason>` exempts a finding, on the definition line or within every copy of a block. `make
-  check` runs them per `INFRA_DEV_CQ_DUP` / `INFRA_DEV_CQ_DEAD`:
+  check` runs them per `APPINFRA_DEV_CQ_DUP` / `APPINFRA_DEV_CQ_DEAD`:
   `false`, `warn` (default) or `strict`.
-- `INFRA_DEV_CQ_LINT_SELECT`: extra ruff rule codes that `make check` reports under Linting as
+- `APPINFRA_DEV_CQ_LINT_SELECT`: extra ruff rule codes that `make check` reports under Linting as
   warnings, without failing (default `C90,SIM,RET,PIE,PERF,FURB,C4`).
 - `make check` names, in a row below its checklist, a test that left a non-daemon thread running
   at exit; the thread's stack goes to the kept log. Such a thread holds a pytest-xdist worker
   until it ends, for up to 10s.
-- `INFRA_PYTEST_PERF_DIR`: the directory `make check` and `make test.perf` collect performance
-  tests from (default `tests`).
+- `APPINFRA_PYTEST_PERF_DIR`: the directory `make check` and `make test.perf` collect
+  performance tests from (default `tests`).
 
 ### Changed
 - `make check` runs the Performance group on one pytest-xdist worker instead of several.
@@ -44,6 +44,11 @@ earlier: pre-release builds (0.13.1.devN) would not satisfy it. -->
 - **Breaking:** `appinfra.cli.tools.code_quality`, `check_functions` and `check_spdx` moved to
   `appinfra.cli.tools.cq` (`tool`, `functions`, `spdx`).
 - **Breaking:** `GitRuntimeSource()` no longer takes `check_dirty`; the parameter had no effect.
+- **Breaking:** the framework's Make and tooling variables are renamed from `INFRA_*` to
+  `APPINFRA_*` (`APPINFRA_DEV_PKG_NAME`, `APPINFRA_ROOT`, ...); every `INFRA_*` variable is now a
+  config override. Make stops on the old name of any variable a project sets; exported, an old
+  name is read as a config override and fails on its undeclared yaml path. `Config` rejects an
+  `env_prefix` that overlaps `APPINFRA_`.
 - A `Ticker.stop()` while the ticker is not running is kept: the next `run()` returns at once,
   without calling the handler. A `stop()` right after starting the `run()` thread used to be lost.
 
@@ -61,6 +66,7 @@ earlier: pre-release builds (0.13.1.devN) would not satisfy it. -->
 - JSON and database log output include the traceback of an exception logged as
   `extra={"exception": e}` or sent through the multiprocess queue; the database handler used to
   drop a record with an exception in `extra`.
+- `INFRA_TEST_LOGGING_LEVEL` overrides `test.logging.level`; `Config` used to skip it.
 
 ## [0.13.0] - 2026-10-25
 

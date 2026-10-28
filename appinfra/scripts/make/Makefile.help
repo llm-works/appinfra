@@ -8,8 +8,8 @@
 # Features:
 # - Parses ## comments for target descriptions
 # - Groups targets by ##@ section headers
-# - Filters out targets listed in INFRA_DISABLE_TARGETS
-# - Filters out targets matching INFRA_DISABLE_GROUPS prefixes
+# - Filters out targets listed in APPINFRA_DISABLE_TARGETS
+# - Filters out targets matching APPINFRA_DISABLE_GROUPS prefixes
 #
 # Derived from multiple sources:
 # - Base AWK pattern: kubernetes-sigs/kubebuilder (Apache 2.0)
@@ -23,10 +23,10 @@
 _help_makefile_list = $(wordlist 2,$(words $(MAKEFILE_LIST)),$(MAKEFILE_LIST)) $(firstword $(MAKEFILE_LIST))
 
 # Build filter pattern for disabled targets (awk regex)
-# Combines INFRA_DISABLE_TARGETS (exact match) and INFRA_DISABLE_GROUPS (prefix match)
+# Combines APPINFRA_DISABLE_TARGETS (exact match) and APPINFRA_DISABLE_GROUPS (prefix match)
 # Use deferred assignment (=) so values set by later includes are picked up
-_help_disabled_targets = $(INFRA_DISABLE_TARGETS)
-_help_disabled_groups = $(INFRA_DISABLE_GROUPS)
+_help_disabled_targets = $(APPINFRA_DISABLE_TARGETS)
+_help_disabled_groups = $(APPINFRA_DISABLE_GROUPS)
 
 # A bare `make` shows this help, whatever target an earlier include defines first
 .DEFAULT_GOAL := help

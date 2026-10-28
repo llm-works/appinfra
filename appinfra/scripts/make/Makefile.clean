@@ -7,10 +7,10 @@
 # Requires: areyousure (from Makefile.utils)
 #
 # Configuration variables (set in Makefile before include):
-#   INFRA_CLEAN_PRESERVE - Space-separated list of files/dirs to preserve (default: .data .logs .GRADING.md)
+#   APPINFRA_CLEAN_PRESERVE - Space-separated list of files/dirs to preserve (default: .data .logs .GRADING.md)
 
 # Configuration
-INFRA_CLEAN_PRESERVE ?= .data .logs .GRADING.md
+APPINFRA_CLEAN_PRESERVE ?= .data .logs .GRADING.md
 
 ##@ Cleanup
 

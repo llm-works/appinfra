@@ -37,7 +37,7 @@ class DoctorTool(Tool):
     Performs checks for:
     - Python version compatibility
     - Required tools (ruff, pytest, mypy)
-    - Package configuration (INFRA_DEV_PKG_NAME validity)
+    - Package configuration (APPINFRA_DEV_PKG_NAME validity)
     - Project structure (tests/ directory)
     - Config file syntax (Makefile.local)
     """
@@ -61,7 +61,7 @@ class DoctorTool(Tool):
         parser.add_argument(
             "--pkg-name",
             default=None,
-            help="Package name to validate (default: from INFRA_DEV_PKG_NAME env var)",
+            help="Package name to validate (default: from APPINFRA_DEV_PKG_NAME env var)",
         )
         parser.add_argument(
             "--project-root",
@@ -171,16 +171,16 @@ class DoctorTool(Tool):
         return "installed"
 
     def _check_package_name(self) -> CheckResult:
-        """Validate INFRA_DEV_PKG_NAME."""
+        """Validate APPINFRA_DEV_PKG_NAME."""
         pkg_name = getattr(self.args, "pkg_name", None) or os.environ.get(
-            "INFRA_DEV_PKG_NAME"
+            "APPINFRA_DEV_PKG_NAME"
         )
         if not pkg_name:
             return CheckResult(
                 name="Package name",
                 passed=False,
-                message="INFRA_DEV_PKG_NAME not set",
-                suggestion="Set INFRA_DEV_PKG_NAME in your Makefile or environment",
+                message="APPINFRA_DEV_PKG_NAME not set",
+                suggestion="Set APPINFRA_DEV_PKG_NAME in your Makefile or environment",
             )
 
         project_root = Path(getattr(self.args, "project_root", "."))
@@ -197,7 +197,7 @@ class DoctorTool(Tool):
                 name="Package name",
                 passed=False,
                 message=f"Directory '{pkg_name}/' does not exist",
-                suggestion=f"Create {pkg_name}/ directory or fix INFRA_DEV_PKG_NAME",
+                suggestion=f"Create {pkg_name}/ directory or fix APPINFRA_DEV_PKG_NAME",
             )
 
         if not (pkg_dir / "__init__.py").exists():

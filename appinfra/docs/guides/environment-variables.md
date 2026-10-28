@@ -36,6 +36,11 @@ Environment variable overrides are particularly useful for:
 
 Environment variables follow the pattern: `INFRA_<SECTION>_<SUBSECTION>_<KEY>`
 
+Every `INFRA_*` variable is read as a config override, and one naming a path the yaml does not
+declare fails the config load. appinfra's own Make and tooling variables use the separate
+`APPINFRA_*` prefix (`APPINFRA_DEV_PKG_NAME`, `APPINFRA_CONTAINER_CMD`); see
+[Customizing Framework Makefiles](makefile-customization.md).
+
 ### Examples
 
 ```bash
@@ -47,7 +52,7 @@ INFRA_PGSERVER_PORT=5432
 
 # Override nested configuration
 INFRA_TEST_LOGGING_LEVEL=info
-INFRA_TEST_LOGGING_COLORS_ENABLED=true
+INFRA_TEST_LOGGING_COLORS=true
 
 # Override multiple values
 INFRA_LOGGING_MICROS=true
@@ -161,7 +166,7 @@ python my_app.py
 ```bash
 # Enable logging for tests
 export INFRA_TEST_LOGGING_LEVEL=info
-export INFRA_TEST_LOGGING_COLORS_ENABLED=false
+export INFRA_TEST_LOGGING_COLORS=false
 
 # Run tests
 make test
@@ -181,7 +186,7 @@ python my_app.py
 
 ## Integration with Logging System
 
-The environment variable overrides work seamlessly with the logging system:
+The `test.logging` section configures test loggers, and its fields take overrides like any other:
 
 ```bash
 # Disable logging completely
@@ -191,15 +196,17 @@ export INFRA_TEST_LOGGING_LEVEL=false
 export INFRA_TEST_LOGGING_LEVEL=debug
 
 # Disable colors
-export INFRA_TEST_LOGGING_COLORS_ENABLED=false
+export INFRA_TEST_LOGGING_COLORS=false
 ```
 
 ```python
-from appinfra.test_helpers import create_test_logger
+from appinfra.config import Config
+from appinfra.log import LogConfig, LoggerFactory
 
-# Logger will use environment variable overrides
-logger = create_test_logger("my_test")
-logger.info("This will respect INFRA_TEST_LOGGING_LEVEL")
+config = Config.from_path("etc/infra.yaml")  # applies the INFRA_* overrides
+lg = LoggerFactory.create(
+    "my_test", LogConfig.from_config(config.dict(), "test.logging")
+)
 ```
 
 ## Configuration File Structure
@@ -228,14 +235,14 @@ Corresponding environment variables:
 ```bash
 INFRA_LOGGING_LEVEL=debug
 INFRA_LOGGING_MICROS=true
-INFRA_LOGGING_COLORS_ENABLED=false
+INFRA_LOGGING_COLORS=false
 
 INFRA_PGSERVER_PORT=25432
 INFRA_PGSERVER_USER=myuser
 
 INFRA_TEST_TIMEOUT=60
 INFRA_TEST_LOGGING_LEVEL=info
-INFRA_TEST_LOGGING_COLORS_ENABLED=true
+INFRA_TEST_LOGGING_COLORS=true
 ```
 
 ## Important Notes
@@ -385,13 +392,14 @@ These environment variables control framework behavior (not config value overrid
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `INFRA_DEFAULT_CONFIG_FILE` | `infra.yaml` | Config filename the `pg.*` and `docs.*` Make targets fall back to when `INFRA_PG_CONFIG_FILE` / `INFRA_DOCS_CONFIG_FILE` are empty |
-| `INFRA_NO_CONFIRM` | unset | When set to `1`, bypasses the `areyousure` confirmation prompt used by destructive Make targets (e.g., `pg.server.down`, `pg.server.clean`, `uninstall`). Intended for CI and other non-interactive contexts. |
-| `INFRA_CONTAINER_CMD` | `docker` | Container runtime used by `pg.*` Make targets (`ps`, `exec`, `volume`, ...). Set to `podman` to run the local-dev container layer under Podman. Exported to the `pg.sh` helper script. |
-| `INFRA_COMPOSE_CMD` | `docker compose` | Compose orchestrator paired with `INFRA_CONTAINER_CMD`. Set to `podman compose` alongside the container-cmd override. |
+| `APPINFRA_DEFAULT_CONFIG_FILE` | `infra.yaml` | Config filename the `pg.*` and `docs.*` Make targets fall back to when `APPINFRA_PG_CONFIG_FILE` / `APPINFRA_DOCS_CONFIG_FILE` are empty |
+| `APPINFRA_NO_CONFIRM` | unset | When set to `1`, bypasses the `areyousure` confirmation prompt used by destructive Make targets (e.g., `pg.server.down`, `pg.server.clean`, `uninstall`). Intended for CI and other non-interactive contexts. |
+| `APPINFRA_CONTAINER_CMD` | `docker` | Container runtime used by `pg.*` Make targets (`ps`, `exec`, `volume`, ...). Set to `podman` to run the local-dev container layer under Podman. Exported to the `pg.sh` helper script. |
+| `APPINFRA_COMPOSE_CMD` | `docker compose` | Compose orchestrator paired with `APPINFRA_CONTAINER_CMD`. Set to `podman compose` alongside the container-cmd override. |
 
-These names are excluded from config overrides, so a config key such as `default` or
-`container` is never shadowed by them.
+Their `APPINFRA_` prefix is separate from the `INFRA_` override prefix, so they never reach config
+overrides and no config key such as `default` or `container` can be shadowed by them. While make
+runs, their old `INFRA_` names stop it with an error naming the replacement.
 
 ## Best Practices
 

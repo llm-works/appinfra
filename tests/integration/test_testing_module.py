@@ -25,8 +25,7 @@ def pg_test_logger(pg_logger):
     return pg_logger
 
 
-# Now import the testing fixtures
-pytest_plugins = ["appinfra.db.pg.testing"]
+# The appinfra.db.pg.testing fixtures come from tests/conftest.py
 
 # All classes here exercise PG-backed fixtures from appinfra.db.pg.testing;
 # skip the whole module with the sentinel reason if PG is unreachable.

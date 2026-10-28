@@ -120,9 +120,9 @@ def _detect_runtime_env() -> dict[str, str]:
     """
     Auto-detect a container runtime for pg.sh when the caller didn't set one.
 
-    Precedence: honor an explicit ``INFRA_CONTAINER_CMD`` (Makefile.config
+    Precedence: honor an explicit ``APPINFRA_CONTAINER_CMD`` (Makefile.config
     does this); else prefer ``podman`` if on PATH; else ``docker``. Sets
-    ``INFRA_COMPOSE_CMD`` to a matching ``<runtime> compose`` when
+    ``APPINFRA_COMPOSE_CMD`` to a matching ``<runtime> compose`` when
     unset. Falls through empty if neither is present — pg.sh will then
     report its own missing-runtime error.
 
@@ -131,16 +131,16 @@ def _detect_runtime_env() -> dict[str, str]:
     provider <<<<`` banner stays out of the user's output. The shim was
     only going to invoke ``podman-compose`` anyway.
     """
-    if os.environ.get("INFRA_CONTAINER_CMD"):
+    if os.environ.get("APPINFRA_CONTAINER_CMD"):
         return {}
     for runtime in ("podman", "docker"):
         if shutil.which(runtime):
-            env = {"INFRA_CONTAINER_CMD": runtime}
-            if not os.environ.get("INFRA_COMPOSE_CMD"):
+            env = {"APPINFRA_CONTAINER_CMD": runtime}
+            if not os.environ.get("APPINFRA_COMPOSE_CMD"):
                 if runtime == "podman" and shutil.which("podman-compose"):
-                    env["INFRA_COMPOSE_CMD"] = "podman-compose"
+                    env["APPINFRA_COMPOSE_CMD"] = "podman-compose"
                 else:
-                    env["INFRA_COMPOSE_CMD"] = f"{runtime} compose"
+                    env["APPINFRA_COMPOSE_CMD"] = f"{runtime} compose"
             return env
     return {}
 
@@ -387,7 +387,7 @@ _ERASE_NETWORK_SUFFIXES = ("_default",)
 def _resolve_preview_runtime() -> str | None:
     """Runtime binary to use for the pre-erase inventory query. None means
     the check is skipped and pg.sh's own runtime pre-flight will fire."""
-    explicit = os.environ.get("INFRA_CONTAINER_CMD", "").strip()
+    explicit = os.environ.get("APPINFRA_CONTAINER_CMD", "").strip()
     if explicit:
         return explicit if shutil.which(explicit) else None
     for r in ("podman", "docker"):

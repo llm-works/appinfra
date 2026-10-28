@@ -7,65 +7,65 @@
 # Requires: PYTHON (from Makefile.env), areyousure (from Makefile.utils)
 #
 # Configuration variables (set in Makefile before include, or in Makefile.local):
-#   INFRA_DEV_PKG_NAME      - Package name (default: appinfra)
-#   INFRA_DEV_CQ_STRICT     - Code quality strictness (default: false)
-#   INFRA_DEV_CQ_SPDX       - Enforce SPDX license headers on tracked source files
+#   APPINFRA_DEV_PKG_NAME      - Package name (default: appinfra)
+#   APPINFRA_DEV_CQ_STRICT     - Code quality strictness (default: false)
+#   APPINFRA_DEV_CQ_SPDX       - Enforce SPDX license headers on tracked source files
 #                             (Python, shell, Makefile, Dockerfile) in `make check`
 #                             (default: false; opt-in for open-source Apache-2.0 repos)
-#   INFRA_DEV_CQ_LINT_SELECT - Extra ruff rule codes (comma-separated) that the Linting check
+#   APPINFRA_DEV_CQ_LINT_SELECT - Extra ruff rule codes (comma-separated) that the Linting check
 #                             reports over the package as warnings, never failing
 #                             (default: C90,SIM,RET,PIE,PERF,FURB,C4; empty or false turns it off)
-#   INFRA_DEV_CQ_DUP        - Duplicated code in the Code quality check (pylint duplicate-code):
+#   APPINFRA_DEV_CQ_DUP        - Duplicated code in the Code quality check (pylint duplicate-code):
 #                             false, warn (show the count) or strict (fail on findings)
 #                             (default: warn; needs pylint, part of the check extra)
-#   INFRA_DEV_CQ_DEAD       - Dead private code in the Code quality check: false, warn or strict
+#   APPINFRA_DEV_CQ_DEAD       - Dead private code in the Code quality check: false, warn or strict
 #                             (default: warn)
-#   INFRA_DEV_CHECK_EXAMPLES - Run every example script as a `make check` test
+#   APPINFRA_DEV_CHECK_EXAMPLES - Run every example script as a `make check` test
 #                             subcheck, the same run as `make examples.check`
 #                             (default: false; opt-in because it executes the
 #                             scripts, and each needs its `# ci-*` header first)
-#   INFRA_DEV_CQ_EXCLUDE    - Patterns to exclude from cq checks (e.g., "examples/*")
+#   APPINFRA_DEV_CQ_EXCLUDE    - Patterns to exclude from cq checks (e.g., "examples/*")
 #                             Note: patterns cannot contain spaces (Make limitation)
-#   INFRA_DEV_PROJECT_ROOT  - Project root path (default: $(CURDIR))
-#   INFRA_DEV_CHECK_SCRIPT  - Path to check.sh (default: auto-derived)
-#   INFRA_DEV_INSTALL_EXTRAS - Optional extras for install (e.g., "ui,fastapi")
-#   INFRA_DEV_MYPY_FLAGS    - Extra flags for mypy (e.g., "--follow-imports=skip" for large deps)
-#   INFRA_DEV_SKIP_TARGETS  - Space-separated list of targets to skip (project provides own)
+#   APPINFRA_DEV_PROJECT_ROOT  - Project root path (default: $(CURDIR))
+#   APPINFRA_DEV_CHECK_SCRIPT  - Path to check.sh (default: auto-derived)
+#   APPINFRA_DEV_INSTALL_EXTRAS - Optional extras for install (e.g., "ui,fastapi")
+#   APPINFRA_DEV_MYPY_FLAGS    - Extra flags for mypy (e.g., "--follow-imports=skip" for large deps)
+#   APPINFRA_DEV_SKIP_TARGETS  - Space-separated list of targets to skip (project provides own)
 #                             Supported: fmt lint type cq
 
 # Path to this Makefile's directory (for deriving paths)
 _MAKEFILE_DEV_DIR := $(dir $(lastword $(MAKEFILE_LIST)))
 
 # Derive check script path
-INFRA_DEV_CHECK_SCRIPT ?= $(_MAKEFILE_DEV_DIR)../check.sh
+APPINFRA_DEV_CHECK_SCRIPT ?= $(_MAKEFILE_DEV_DIR)../check.sh
 
 # Default for optional install extras (empty = base package only)
-INFRA_DEV_INSTALL_EXTRAS ?=
+APPINFRA_DEV_INSTALL_EXTRAS ?=
 
 # Default PYTHON_ENVS to PYTHON if not set (backward compatibility)
 PYTHON_ENVS ?= $(PYTHON)
 
 # Export for subprocesses
-export INFRA_DEV_PKG_NAME
-export INFRA_DEV_CQ_STRICT
-export INFRA_DEV_CQ_SPDX
-export INFRA_DEV_CQ_LINT_SELECT
-export INFRA_DEV_CQ_DUP
-export INFRA_DEV_CQ_DEAD
-export INFRA_DEV_CHECK_EXAMPLES
-export INFRA_DEV_CQ_EXCLUDE
-export INFRA_DEV_DOCSTRING_THRESHOLD
-export INFRA_DEV_PROJECT_ROOT
-export INFRA_DEV_INSTALL_EXTRAS
-export INFRA_DEV_MYPY_FLAGS
-export INFRA_DEFAULT_CONFIG_FILE
-export INFRA_PYTEST_COVERAGE_MARKERS
-export INFRA_PYTEST_COVERAGE_THRESHOLD
-export INFRA_PYTEST_HANG_DUMP_SECONDS
-export INFRA_PYTEST_PERF_DIR
+export APPINFRA_DEV_PKG_NAME
+export APPINFRA_DEV_CQ_STRICT
+export APPINFRA_DEV_CQ_SPDX
+export APPINFRA_DEV_CQ_LINT_SELECT
+export APPINFRA_DEV_CQ_DUP
+export APPINFRA_DEV_CQ_DEAD
+export APPINFRA_DEV_CHECK_EXAMPLES
+export APPINFRA_DEV_CQ_EXCLUDE
+export APPINFRA_DEV_DOCSTRING_THRESHOLD
+export APPINFRA_DEV_PROJECT_ROOT
+export APPINFRA_DEV_INSTALL_EXTRAS
+export APPINFRA_DEV_MYPY_FLAGS
+export APPINFRA_DEFAULT_CONFIG_FILE
+export APPINFRA_PYTEST_COVERAGE_MARKERS
+export APPINFRA_PYTEST_COVERAGE_THRESHOLD
+export APPINFRA_PYTEST_HANG_DUMP_SECONDS
+export APPINFRA_PYTEST_PERF_DIR
 
 # Expand CQ_EXCLUDE patterns to --exclude flags (empty if no exclusions)
-_CQ_EXCLUDE_FLAGS := $(if $(INFRA_DEV_CQ_EXCLUDE),$(foreach pat,$(INFRA_DEV_CQ_EXCLUDE),--exclude "$(pat)"))
+_CQ_EXCLUDE_FLAGS := $(if $(APPINFRA_DEV_CQ_EXCLUDE),$(foreach pat,$(APPINFRA_DEV_CQ_EXCLUDE),--exclude "$(pat)"))
 
 # Endpoint run_examples.py probes for `# ci-requires: pg` files, as HOST:PORT.
 # Recursive (=) on purpose: PG_HOST / PG_PORT are defined by Makefile.pg,
@@ -82,7 +82,7 @@ PYTHON_TEST = PYTHONWARNINGS="ignore::ResourceWarning,ignore::RuntimeWarning" ${
 ##@ Health Check
 
 doctor:: ## Run project health checks
-	@$(PYTHON) -m appinfra.cli.cli doctor --pkg-name=$(INFRA_DEV_PKG_NAME)
+	@$(PYTHON) -m appinfra.cli.cli doctor --pkg-name=$(APPINFRA_DEV_PKG_NAME)
 .PHONY: doctor
 
 ##@ Development
@@ -107,9 +107,9 @@ setup:: ## sets up dev environment with all dependencies for all PYTHON_ENVS
 
 ##@ Code Quality
 
-ifeq ($(filter fmt,$(INFRA_DEV_SKIP_TARGETS)),)
+ifeq ($(filter fmt,$(APPINFRA_DEV_SKIP_TARGETS)),)
 fmt:: ## Format code with ruff
-ifeq ($(INFRA_DRY_RUN),1)
+ifeq ($(APPINFRA_DRY_RUN),1)
 	@echo "[DRY RUN] Would run: ruff format ."
 else
 	@echo "* running formatter..."
@@ -119,7 +119,7 @@ endif
 endif # skip fmt
 .PHONY: fmt
 
-ifeq ($(filter fmt,$(INFRA_DEV_SKIP_TARGETS)),)
+ifeq ($(filter fmt,$(APPINFRA_DEV_SKIP_TARGETS)),)
 fmt.check:: ## Check if code is formatted (CI)
 	@echo "* checking formatting..."
 	@${PYTHON} -m ruff format --check . || (echo "ERROR: Code needs formatting. Run 'make fmt' first." && exit 1)
@@ -127,23 +127,23 @@ fmt.check:: ## Check if code is formatted (CI)
 endif # skip fmt.check
 .PHONY: fmt.check
 
-ifeq ($(filter lint,$(INFRA_DEV_SKIP_TARGETS)),)
+ifeq ($(filter lint,$(APPINFRA_DEV_SKIP_TARGETS)),)
 lint:: ## Lint code with ruff
-ifeq ($(INFRA_DRY_RUN),1)
+ifeq ($(APPINFRA_DRY_RUN),1)
 	@echo "[DRY RUN] Would run: ruff check ."
 else
 	@echo "* running linter..."
 	@${PYTHON} -m ruff check .
-ifneq ($(filter-out false,$(INFRA_DEV_CQ_LINT_SELECT)),)
-	@echo "* warning rules (INFRA_DEV_CQ_LINT_SELECT, do not fail):"
-	@${PYTHON} -m ruff check $(INFRA_DEV_PKG_NAME)/ --select $(INFRA_DEV_CQ_LINT_SELECT) --no-fix --exit-zero --statistics
+ifneq ($(filter-out false,$(APPINFRA_DEV_CQ_LINT_SELECT)),)
+	@echo "* warning rules (APPINFRA_DEV_CQ_LINT_SELECT, do not fail):"
+	@${PYTHON} -m ruff check $(APPINFRA_DEV_PKG_NAME)/ --select $(APPINFRA_DEV_CQ_LINT_SELECT) --no-fix --exit-zero --statistics
 endif
 	@echo "* linter done"
 endif
 endif # skip lint
 .PHONY: lint
 
-ifeq ($(filter lint,$(INFRA_DEV_SKIP_TARGETS)),)
+ifeq ($(filter lint,$(APPINFRA_DEV_SKIP_TARGETS)),)
 lint.fix:: ## Auto-fix linting issues
 	@echo "* running linter with auto-fix..."
 	@${PYTHON} -m ruff check . --fix
@@ -157,24 +157,24 @@ endif # skip lint.fix, lint.unsafe
 .PHONY: lint.fix
 .PHONY: lint.unsafe
 
-ifeq ($(filter type,$(INFRA_DEV_SKIP_TARGETS)),)
+ifeq ($(filter type,$(APPINFRA_DEV_SKIP_TARGETS)),)
 type:: ## Run type checking with mypy
-	@if [ ! -d "$(INFRA_DEV_PKG_NAME)" ]; then \
+	@if [ ! -d "$(APPINFRA_DEV_PKG_NAME)" ]; then \
 		echo ""; \
-		echo "ERROR: Package directory '$(INFRA_DEV_PKG_NAME)/' not found"; \
+		echo "ERROR: Package directory '$(APPINFRA_DEV_PKG_NAME)/' not found"; \
 		echo ""; \
-		echo "Check INFRA_DEV_PKG_NAME in your Makefile"; \
+		echo "Check APPINFRA_DEV_PKG_NAME in your Makefile"; \
 		echo "Run 'make doctor' for diagnostics"; \
 		echo ""; \
 		exit 1; \
 	fi
-ifeq ($(INFRA_DRY_RUN),1)
-	@echo "[DRY RUN] Would run: mypy $(INFRA_DEV_PKG_NAME)/"
+ifeq ($(APPINFRA_DRY_RUN),1)
+	@echo "[DRY RUN] Would run: mypy $(APPINFRA_DEV_PKG_NAME)/"
 else
 	@echo "* running type checker..."
-	@${PYTHON} -m mypy $(INFRA_DEV_PKG_NAME)/ --exclude 'examples/' --cache-dir .mypy_cache/pkg $(INFRA_DEV_MYPY_FLAGS)
-	@if [ -d "examples" ]; then ${PYTHON} -m mypy examples/ --disable-error-code=no-untyped-def --disable-error-code=import-untyped --ignore-missing-imports --cache-dir .mypy_cache/examples $(INFRA_DEV_MYPY_FLAGS); \
-	elif [ -d "$(INFRA_DEV_PKG_NAME)/examples" ]; then ${PYTHON} -m mypy $(INFRA_DEV_PKG_NAME)/examples/ --disable-error-code=no-untyped-def --disable-error-code=import-untyped --ignore-missing-imports --cache-dir .mypy_cache/examples $(INFRA_DEV_MYPY_FLAGS); fi
+	@${PYTHON} -m mypy $(APPINFRA_DEV_PKG_NAME)/ --exclude 'examples/' --cache-dir .mypy_cache/pkg $(APPINFRA_DEV_MYPY_FLAGS)
+	@if [ -d "examples" ]; then ${PYTHON} -m mypy examples/ --disable-error-code=no-untyped-def --disable-error-code=import-untyped --ignore-missing-imports --cache-dir .mypy_cache/examples $(APPINFRA_DEV_MYPY_FLAGS); \
+	elif [ -d "$(APPINFRA_DEV_PKG_NAME)/examples" ]; then ${PYTHON} -m mypy $(APPINFRA_DEV_PKG_NAME)/examples/ --disable-error-code=no-untyped-def --disable-error-code=import-untyped --ignore-missing-imports --cache-dir .mypy_cache/examples $(APPINFRA_DEV_MYPY_FLAGS); fi
 	@echo "* type checking done"
 endif
 endif # skip type
@@ -182,39 +182,39 @@ endif # skip type
 
 examples.check:: ## Run every example script; fail on errors or timeouts
 	@if [ -d "examples" ]; then ${PYTHON} $(_MAKEFILE_DEV_DIR)../run_examples.py examples $(_INFRA_DEV_EXAMPLES_PG_FLAG); \
-	elif [ -d "$(INFRA_DEV_PKG_NAME)/examples" ]; then ${PYTHON} $(_MAKEFILE_DEV_DIR)../run_examples.py $(INFRA_DEV_PKG_NAME)/examples $(_INFRA_DEV_EXAMPLES_PG_FLAG); \
+	elif [ -d "$(APPINFRA_DEV_PKG_NAME)/examples" ]; then ${PYTHON} $(_MAKEFILE_DEV_DIR)../run_examples.py $(APPINFRA_DEV_PKG_NAME)/examples $(_INFRA_DEV_EXAMPLES_PG_FLAG); \
 	else echo "No examples directory found"; fi
 .PHONY: examples.check
 
 # cq tools over the package. Exit status 42 means findings in report mode.
-_CQ_DUP_CMD = $(PYTHON) -m appinfra.cli.cli -l error cq dup $(INFRA_DEV_PKG_NAME)/ $(_CQ_EXCLUDE_FLAGS)
-_CQ_DEAD_CMD = $(PYTHON) -m appinfra.cli.cli -l error cq dead $(INFRA_DEV_PKG_NAME)/ $(_CQ_EXCLUDE_FLAGS)
+_CQ_DUP_CMD = $(PYTHON) -m appinfra.cli.cli -l error cq dup $(APPINFRA_DEV_PKG_NAME)/ $(_CQ_EXCLUDE_FLAGS)
+_CQ_DEAD_CMD = $(PYTHON) -m appinfra.cli.cli -l error cq dead $(APPINFRA_DEV_PKG_NAME)/ $(_CQ_EXCLUDE_FLAGS)
 # Run command $(1) in mode $(2): strict fails on findings, warn reports them, false skips
 _cq_run = $(if $(filter strict,$(2)),$(1) --strict,$(if $(filter warn,$(2)),$(1) || [ $$? -eq 42 ],:))
 # Report-only mode for a tool that is enabled at all
 _cq_report = $(if $(filter warn strict,$(1)),warn,false)
 
-ifeq ($(filter cq,$(INFRA_DEV_SKIP_TARGETS)),)
+ifeq ($(filter cq,$(APPINFRA_DEV_SKIP_TARGETS)),)
 cq:: ## Code quality: function sizes, plus duplicated/dead code when enabled (reports only)
 	@echo "* checking code quality..."
 	@$(PYTHON) -m appinfra.cli.cli -l error cq cf $(_CQ_EXCLUDE_FLAGS) || [ $$? -eq 42 ]
-	@$(call _cq_run,$(_CQ_DUP_CMD),$(call _cq_report,$(INFRA_DEV_CQ_DUP)))
-	@$(call _cq_run,$(_CQ_DEAD_CMD),$(call _cq_report,$(INFRA_DEV_CQ_DEAD)))
+	@$(call _cq_run,$(_CQ_DUP_CMD),$(call _cq_report,$(APPINFRA_DEV_CQ_DUP)))
+	@$(call _cq_run,$(_CQ_DEAD_CMD),$(call _cq_report,$(APPINFRA_DEV_CQ_DEAD)))
 	@echo "* code quality check done"
 endif # skip cq
 .PHONY: cq
 
-ifeq ($(filter cq,$(INFRA_DEV_SKIP_TARGETS)),)
+ifeq ($(filter cq,$(APPINFRA_DEV_SKIP_TARGETS)),)
 cq.strict:: ## Code quality: fails on function sizes, and on duplicated/dead code set to strict
 	@echo "* checking code quality (strict mode)..."
 	@$(PYTHON) -m appinfra.cli.cli -l error cq cf --strict $(_CQ_EXCLUDE_FLAGS)
-	@$(call _cq_run,$(_CQ_DUP_CMD),$(INFRA_DEV_CQ_DUP))
-	@$(call _cq_run,$(_CQ_DEAD_CMD),$(INFRA_DEV_CQ_DEAD))
+	@$(call _cq_run,$(_CQ_DUP_CMD),$(APPINFRA_DEV_CQ_DUP))
+	@$(call _cq_run,$(_CQ_DEAD_CMD),$(APPINFRA_DEV_CQ_DEAD))
 	@echo "* code quality check passed"
 endif # skip cq.strict
 .PHONY: cq.strict
 
-ifeq ($(filter cq,$(INFRA_DEV_SKIP_TARGETS)),)
+ifeq ($(filter cq,$(APPINFRA_DEV_SKIP_TARGETS)),)
 cq.spdx:: ## Check SPDX license headers on tracked source files
 	@echo "* checking SPDX headers..."
 	@$(PYTHON) -m appinfra.cli.cli -l error cq spdx
@@ -222,7 +222,7 @@ cq.spdx:: ## Check SPDX license headers on tracked source files
 endif # skip cq.spdx
 .PHONY: cq.spdx
 
-ifeq ($(filter cq,$(INFRA_DEV_SKIP_TARGETS)),)
+ifeq ($(filter cq,$(APPINFRA_DEV_SKIP_TARGETS)),)
 cq.dup:: ## Report duplicated code blocks (pylint duplicate-code)
 	@$(call _cq_run,$(_CQ_DUP_CMD),warn)
 
@@ -231,18 +231,18 @@ cq.dead:: ## Report private definitions nothing refers to
 endif # skip cq.dup cq.dead
 .PHONY: cq.dup cq.dead
 
-ifeq ($(filter cq,$(INFRA_DEV_SKIP_TARGETS)),)
+ifeq ($(filter cq,$(APPINFRA_DEV_SKIP_TARGETS)),)
 cq.docstring:: ## Check docstring coverage (reports only)
 	@echo "* checking docstring coverage..."
-	@$(PYTHON) -m interrogate -v $(INFRA_DEV_PKG_NAME)/ --ignore-init-module --ignore-init-method || true
+	@$(PYTHON) -m interrogate -v $(APPINFRA_DEV_PKG_NAME)/ --ignore-init-module --ignore-init-method || true
 	@echo "* docstring coverage check done"
 
 cq.docstring.strict:: ## Check docstring coverage (fails if below threshold)
-ifeq ($(INFRA_DEV_DOCSTRING_THRESHOLD),0)
+ifeq ($(APPINFRA_DEV_DOCSTRING_THRESHOLD),0)
 	@echo "* docstring coverage check disabled (threshold=0)"
 else
-	@echo "* checking docstring coverage (threshold: $(INFRA_DEV_DOCSTRING_THRESHOLD)%)..."
-	@$(PYTHON) -m interrogate -v $(INFRA_DEV_PKG_NAME)/ --ignore-init-module --ignore-init-method --fail-under=$(INFRA_DEV_DOCSTRING_THRESHOLD)
+	@echo "* checking docstring coverage (threshold: $(APPINFRA_DEV_DOCSTRING_THRESHOLD)%)..."
+	@$(PYTHON) -m interrogate -v $(APPINFRA_DEV_PKG_NAME)/ --ignore-init-module --ignore-init-method --fail-under=$(APPINFRA_DEV_DOCSTRING_THRESHOLD)
 	@echo "* docstring coverage check passed"
 endif
 endif # skip cq.docstring
@@ -251,27 +251,27 @@ endif # skip cq.docstring
 export PYTHON
 
 check:: ## Full checks with progress indicators (fail-fast, parallel)
-	@bash $(INFRA_DEV_CHECK_SCRIPT) --fail-fast
+	@bash $(APPINFRA_DEV_CHECK_SCRIPT) --fail-fast
 .PHONY: check
 
 check.seq:: ## Full checks (sequential mode, fail-fast)
-	@bash $(INFRA_DEV_CHECK_SCRIPT) --sequential --fail-fast
+	@bash $(APPINFRA_DEV_CHECK_SCRIPT) --sequential --fail-fast
 .PHONY: check.seq
 
 check.all:: ## Full checks (run all checks even if some fail)
-	@bash $(INFRA_DEV_CHECK_SCRIPT)
+	@bash $(APPINFRA_DEV_CHECK_SCRIPT)
 .PHONY: check.all
 
 check.raw:: ## Full checks with raw output (no cursor positioning, fail-fast, for logs/CI)
-	@bash $(INFRA_DEV_CHECK_SCRIPT) --raw
+	@bash $(APPINFRA_DEV_CHECK_SCRIPT) --raw
 .PHONY: check.raw
 
 check.summary:: ## Full checks with summary output (no cursor, summaries + failures only)
-	@bash $(INFRA_DEV_CHECK_SCRIPT) --raw --summary
+	@bash $(APPINFRA_DEV_CHECK_SCRIPT) --raw --summary
 .PHONY: check.summary
 
 check.nt:: ## Code quality checks only (no tests)
-	@bash $(INFRA_DEV_CHECK_SCRIPT) --fail-fast --skip-tests
+	@bash $(APPINFRA_DEV_CHECK_SCRIPT) --fail-fast --skip-tests
 .PHONY: check.nt
 
 count:: ## counts number of lines
