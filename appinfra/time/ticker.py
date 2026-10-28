@@ -627,15 +627,18 @@ class Ticker:
         handler's ticker_stop method immediately. The ticker will stop after
         the current tick completes.
         """
+        # Read the state first: once the event is set, the run() thread can wake,
+        # finish and clear _running before the check below
+        handler = self._handler if self._running else None
         # In scheduled mode the run() thread wakes on this event and cancels the
         # pending ticks itself (_sched_delay), so only one thread touches the queue
         self._stop_event.set()
 
         # Call ticker_stop handler immediately so cleanup logging
         # happens during the shutdown phase, not in finally block
-        if self._running and self._handler is not None:
+        if handler is not None:
             try:
-                self._handler.ticker_stop()
+                handler.ticker_stop()
             except Exception as e:
                 # Log error but continue with stop
                 self._lg.error("error in ticker_stop callback", extra={"exception": e})

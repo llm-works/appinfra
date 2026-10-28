@@ -588,6 +588,26 @@ class TestTickerControl:
         assert not thread.is_alive()
         assert ticker._sched.queue == []
 
+    def test_stop_calls_ticker_stop_when_run_ends_first(self, mock_logger):
+        """Test ticker_stop() runs even if run() finishes as soon as stop() wakes it."""
+        handler = Mock(spec=TickerHandler)
+        ticker = Ticker(mock_logger, handler, secs=10)
+        ticker._running = True
+
+        # Stand in for a run() thread that wakes on the event and finishes,
+        # clearing _running, before stop() gets to its handler call
+        real_set = ticker._stop_event.set
+
+        def set_and_finish():
+            real_set()
+            ticker._running = False
+
+        ticker._stop_event.set = set_and_finish
+
+        ticker.stop()
+
+        handler.ticker_stop.assert_called_once()
+
     def test_stop_from_handler_ends_run(self, mock_logger):
         """Test stop() during a tick drops the tick queued after it."""
         # The tick queues its successor after stop() returns; run() must drop it
