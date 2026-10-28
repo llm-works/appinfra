@@ -284,8 +284,8 @@ jobs:
 
   # Podman compatibility: verify the local-dev container layer works under
   # rootless podman + podman-compose. Tests the same code paths a podman-only
-  # contributor would hit (Makefile.local override, INFRA_CONTAINER_CMD /
-  # INFRA_COMPOSE_CMD propagation, image pre-resolution, container lifecycle).
+  # contributor would hit (Makefile.local override, APPINFRA_CONTAINER_CMD /
+  # APPINFRA_COMPOSE_CMD propagation, image pre-resolution, container lifecycle).
   #
   # Smoke test, not full parity: single Python version (3.12), single-instance
   # pg only. Replication mode is not exercised here — the matrix `test` job
@@ -329,8 +329,8 @@ jobs:
         run: |
           cat > Makefile.local <<'EOF'
           PYTHON              := python
-          INFRA_CONTAINER_CMD := podman
-          INFRA_COMPOSE_CMD   := podman-compose
+          APPINFRA_CONTAINER_CMD := podman
+          APPINFRA_COMPOSE_CMD   := podman-compose
           EOF
           echo "Makefile.local contents:"
           cat Makefile.local
@@ -345,13 +345,13 @@ jobs:
 
       - name: Run integration tests
         env:
-          INFRA_PYTEST_WORKERS: auto
+          APPINFRA_PYTEST_WORKERS: auto
         run: make test.integration
 
       - name: Stop postgres
         if: always()
         env:
-          INFRA_NO_CONFIRM: '1'
+          APPINFRA_NO_CONFIRM: '1'
         run: make pg.server.down
 
   # Fresh-install check: verify `make check` passes on a clean ubuntu runner
@@ -380,11 +380,11 @@ jobs:
 
       - name: Configure Python for Makefile
         run: |
-          # Makefile.env requires PYTHON/INFRA_ENV_PYTHON to point to an
+          # Makefile.env requires PYTHON/APPINFRA_ENV_PYTHON to point to an
           # executable. The setup-python action puts python on PATH; resolve
           # it to an absolute path so `[ -x "$pyenv" ]` checks in Makefile.dev
           # pass under `make setup`.
-          echo "INFRA_ENV_PYTHON := $(which python)" > Makefile.local
+          echo "APPINFRA_ENV_PYTHON := $(which python)" > Makefile.local
           cat Makefile.local
 
       - name: Install dependencies via make setup
@@ -419,7 +419,7 @@ jobs:
           cache: 'pip'
 
       - name: Configure Python for Makefile
-        run: echo "INFRA_ENV_PYTHON := $(which python)" > Makefile.local
+        run: echo "APPINFRA_ENV_PYTHON := $(which python)" > Makefile.local
 
       - name: Install dependencies via make setup
         run: |
@@ -441,7 +441,7 @@ jobs:
           [ "$mode" = "2775" ] || { echo "ERROR: pre-create chmod 2775 did not stick (got $mode)"; exit 1; }
 
       - name: Run make install
-        run: INFRA_NO_CONFIRM=1 make install
+        run: APPINFRA_NO_CONFIRM=1 make install
 
       - name: Verify published wheel path and modes
         run: |
@@ -465,7 +465,7 @@ jobs:
         run: |
           python -m venv /tmp/fresh-venv
           test ! -d /tmp/fresh-venv/share || { echo "ERROR: fresh venv unexpectedly has share/"; exit 1; }
-          if INFRA_NO_CONFIRM=1 PYTHON_ENVS=/tmp/fresh-venv/bin/python make install > /tmp/install.log 2>&1; then
+          if APPINFRA_NO_CONFIRM=1 PYTHON_ENVS=/tmp/fresh-venv/bin/python make install > /tmp/install.log 2>&1; then
             echo "ERROR: make install should have failed but succeeded"
             cat /tmp/install.log
             exit 1
@@ -516,7 +516,7 @@ jobs:
 
       - name: Configure Python for Makefile
         run: |
-          echo "INFRA_ENV_PYTHON := $(which python)" > Makefile.local
+          echo "APPINFRA_ENV_PYTHON := $(which python)" > Makefile.local
 
       - name: Install dependencies via make setup
         run: |
@@ -524,7 +524,7 @@ jobs:
           make setup
 
       - name: Run make check (raw-parallel for readable logs)
-        run: PYTHON=$(which python) INFRA_DEV_PROJECT_ROOT=$(pwd) bash appinfra/scripts/check.sh --raw-parallel
+        run: PYTHON=$(which python) APPINFRA_DEV_PROJECT_ROOT=$(pwd) bash appinfra/scripts/check.sh --raw-parallel
 
       - name: Stop postgres
         if: always()

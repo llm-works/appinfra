@@ -34,6 +34,6 @@ test:
   create_test_tables: true     # Automatically create test tables if they don't exist (default: true)
   logging:
     level: false               # Test logging level (false = disabled to reduce noise, can be overridden with INFRA_TEST_LOGGING_LEVEL)
-    colors: true               # Enable colored output in test logs (default: true, can be overridden with INFRA_TEST_LOGGING_COLORS_ENABLED)
+    colors: true               # Enable colored output in test logs (default: true, can be overridden with INFRA_TEST_LOGGING_COLORS)
     location_color: null       # Color for code locations in test logs (null = default BLACK)
 

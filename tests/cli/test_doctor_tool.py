@@ -152,8 +152,8 @@ class TestDoctorTool:
         tool._parsed_args = mock_args
 
         with patch.dict(os.environ, {}, clear=True):
-            # Remove INFRA_DEV_PKG_NAME if present
-            os.environ.pop("INFRA_DEV_PKG_NAME", None)
+            # Remove APPINFRA_DEV_PKG_NAME if present
+            os.environ.pop("APPINFRA_DEV_PKG_NAME", None)
             result = tool._check_package_name()
             assert result.passed is False
             assert "not set" in result.message

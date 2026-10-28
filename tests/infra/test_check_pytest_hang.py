@@ -37,9 +37,9 @@ def run_with_plugin(pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch):
 
     def run(seconds: str | None) -> pytest.RunResult:
         if seconds is None:
-            monkeypatch.delenv("INFRA_PYTEST_HANG_DUMP_SECONDS", raising=False)
+            monkeypatch.delenv("APPINFRA_PYTEST_HANG_DUMP_SECONDS", raising=False)
         else:
-            monkeypatch.setenv("INFRA_PYTEST_HANG_DUMP_SECONDS", seconds)
+            monkeypatch.setenv("APPINFRA_PYTEST_HANG_DUMP_SECONDS", seconds)
         return pytester.runpytest_subprocess(
             "-p", "pytest_hang", "-q", "-p", "no:cacheprovider"
         )

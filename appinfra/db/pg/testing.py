@@ -130,7 +130,7 @@ def pg_test_schema(worker_id: str) -> str:
     Generate a unique schema name for the current test worker.
 
     When running with pytest-xdist, each worker gets a unique schema.
-    The schema name includes the test suite prefix (from INFRA_CHECK_PYTEST_SUITE env var)
+    The schema name includes the test suite prefix (from APPINFRA_CHECK_PYTEST_SUITE env var)
     to prevent collisions when multiple pytest processes run in parallel.
 
     Schema naming: {suite}_{worker_id}
@@ -148,10 +148,10 @@ def pg_test_schema(worker_id: str) -> str:
     import os
     import re
 
-    suite = os.environ.get("INFRA_CHECK_PYTEST_SUITE") or "test"
+    suite = os.environ.get("APPINFRA_CHECK_PYTEST_SUITE") or "test"
     if not re.match(r"^[a-z][a-z0-9_]{0,50}$", suite):
         raise ValueError(
-            f"Invalid INFRA_CHECK_PYTEST_SUITE value: {suite!r}. "
+            f"Invalid APPINFRA_CHECK_PYTEST_SUITE value: {suite!r}. "
             "Must start with lowercase letter, contain only lowercase letters, "
             "digits, and underscores, and be at most 51 characters."
         )

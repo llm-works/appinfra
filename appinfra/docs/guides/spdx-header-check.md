@@ -95,11 +95,11 @@ works across them.
 ## Makefile integration
 
 `cq spdx` integrates with `make check` via the framework variable
-`INFRA_DEV_CQ_SPDX` (default `false`). To enable, set it to `true` in the
+`APPINFRA_DEV_CQ_SPDX` (default `false`). To enable, set it to `true` in the
 project's top-level Makefile before including the framework:
 
 ```makefile
-INFRA_DEV_CQ_SPDX := true
+APPINFRA_DEV_CQ_SPDX := true
 
 include path/to/appinfra/Makefile
 ```
@@ -132,7 +132,7 @@ To adopt in a downstream Apache-2.0 repository:
 1. Run `python -m appinfra.cli.cli cq spdx --fix` from repo root.
 2. Commit the changes.
 3. Add the CI step above to the lint workflow.
-4. Optionally: set `INFRA_DEV_CQ_SPDX := true` in the top-level Makefile.
+4. Optionally: set `APPINFRA_DEV_CQ_SPDX := true` in the top-level Makefile.
 
 ## Limitations
 

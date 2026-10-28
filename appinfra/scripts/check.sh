@@ -7,7 +7,7 @@
 # Supports parallel execution, coverage checking, and fail-fast mode
 #
 # IMPORTANT: Run via 'make check', not directly. The Makefile exports required
-# variables (PYTHON, INFRA_DEV_PKG_NAME, INFRA_DEV_CQ_STRICT, INFRA_DEV_PROJECT_ROOT).
+# variables (PYTHON, APPINFRA_DEV_PKG_NAME, APPINFRA_DEV_CQ_STRICT, APPINFRA_DEV_PROJECT_ROOT).
 # Direct execution uses fallback defaults that may not match your project configuration.
 
 set -euo pipefail
@@ -72,16 +72,16 @@ done
 EXIT_CODE_WARNING=42
 
 PYTHON="${PYTHON:-~/.venv/bin/python}"
-PKG_NAME="${INFRA_DEV_PKG_NAME:-appinfra}"
-CQ_STRICT="${INFRA_DEV_CQ_STRICT:-false}"
-CHECK_EXAMPLES="${INFRA_DEV_CHECK_EXAMPLES:-false}"
+PKG_NAME="${APPINFRA_DEV_PKG_NAME:-appinfra}"
+CQ_STRICT="${APPINFRA_DEV_CQ_STRICT:-false}"
+CHECK_EXAMPLES="${APPINFRA_DEV_CHECK_EXAMPLES:-false}"
 # HOST:PORT for run_examples.py --pg; Makefile.dev derives it from Makefile.pg.
 EXAMPLES_PG="${_INFRA_DEV_EXAMPLES_PG:-}"
-COVERAGE_MARKERS="${INFRA_PYTEST_COVERAGE_MARKERS:-unit}"
+COVERAGE_MARKERS="${APPINFRA_PYTEST_COVERAGE_MARKERS:-unit}"
 
 # Coverage threshold precedence: CLI arg > env var > default (80)
 # Set to 0 to disable coverage checking entirely
-DEFAULT_COVERAGE_TARGET="${INFRA_PYTEST_COVERAGE_THRESHOLD:-80}"
+DEFAULT_COVERAGE_TARGET="${APPINFRA_PYTEST_COVERAGE_THRESHOLD:-80}"
 COVERAGE_TARGET="${COVERAGE_TARGET:-$DEFAULT_COVERAGE_TARGET}"
 if ! echo "$COVERAGE_TARGET" | grep -qE '^[0-9]+\.?[0-9]*$'; then
     echo "Error: Invalid coverage target: $COVERAGE_TARGET" >&2
@@ -137,9 +137,9 @@ for _m in unit integration e2e security; do
     esac
 done
 COVERAGE_LABEL="${_cov_prefix}Coverage tests"
-MYPY_FLAGS="${INFRA_DEV_MYPY_FLAGS:-}"
+MYPY_FLAGS="${APPINFRA_DEV_MYPY_FLAGS:-}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="${INFRA_DEV_PROJECT_ROOT:-$(dirname "$SCRIPT_DIR")}"
+PROJECT_ROOT="${APPINFRA_DEV_PROJECT_ROOT:-$(dirname "$SCRIPT_DIR")}"
 
 MAIN_PID=$$
 DISPLAY_LOCK="/tmp/infra-check-display-lock-${MAIN_PID}"
@@ -158,12 +158,12 @@ DISPLAY_ROWS="${STATUS_DIR}/display-rows"
 # node id and the stacks of its process go to the check's log, and the check gets a row below
 # the checklist. The test is neither stopped nor failed, so on a slow machine this only adds
 # rows. 0 disables it.
-HANG_DUMP_SECONDS="${INFRA_PYTEST_HANG_DUMP_SECONDS:-120}"
+HANG_DUMP_SECONDS="${APPINFRA_PYTEST_HANG_DUMP_SECONDS:-120}"
 if ! [[ "$HANG_DUMP_SECONDS" =~ ^[0-9]+$ ]]; then
-    echo "Error: Invalid INFRA_PYTEST_HANG_DUMP_SECONDS: $HANG_DUMP_SECONDS" >&2
+    echo "Error: Invalid APPINFRA_PYTEST_HANG_DUMP_SECONDS: $HANG_DUMP_SECONDS" >&2
     exit 1
 fi
-export INFRA_PYTEST_HANG_DUMP_SECONDS="$HANG_DUMP_SECONDS"
+export APPINFRA_PYTEST_HANG_DUMP_SECONDS="$HANG_DUMP_SECONDS"
 # Prefix for the pytest commands. The plugin is a file of its own next to this script, not part
 # of the appinfra package: -p imports a plugin before pytest-cov starts, and importing anything
 # under appinfra that early would leave the package's module-level lines unmeasured. Its
@@ -190,17 +190,17 @@ if ${PYTHON} -c "import sys; sys.exit(0 if sys.version_info >= (3, 12) else 1)" 
 fi
 
 # Docstring coverage threshold (0 to disable)
-DOCSTRING_THRESHOLD="${INFRA_DEV_DOCSTRING_THRESHOLD:-80}"
+DOCSTRING_THRESHOLD="${APPINFRA_DEV_DOCSTRING_THRESHOLD:-80}"
 MAX_INLINE_LINES=30
 
 # Check definitions: "Name|Make Target|Command|Fix Target", listed from a file's outside in
 # (license header, layout, lint, types, docstrings), then the slow ones: code quality, tests
 declare -a CHECKS=()
 
-# SPDX header check only if opted in (INFRA_DEV_CQ_SPDX=true).
+# SPDX header check only if opted in (APPINFRA_DEV_CQ_SPDX=true).
 # Off by default so closed-source repos that reuse this framework don't
 # fail on files without SPDX-License-Identifier headers.
-CQ_SPDX="${INFRA_DEV_CQ_SPDX:-false}"
+CQ_SPDX="${APPINFRA_DEV_CQ_SPDX:-false}"
 if [ "$CQ_SPDX" = "true" ]; then
     CHECKS+=("SPDX header check|cq.spdx|${PYTHON} -m appinfra.cli.cli -l error cq spdx|")
 fi
@@ -222,13 +222,13 @@ if [ -n "$EXAMPLES_DIR" ]; then
     CHECKS+=("Type checking (examples)|type|${PYTHON} -m mypy ${EXAMPLES_DIR}/ --disable-error-code=no-untyped-def --disable-error-code=import-untyped --ignore-missing-imports --cache-dir .mypy_cache/examples ${MYPY_FLAGS}|")
 fi
 
-# Build exclude flags from INFRA_DEV_CQ_EXCLUDE (subshell contains set -f scope)
+# Build exclude flags from APPINFRA_DEV_CQ_EXCLUDE (subshell contains set -f scope)
 CQ_EXCLUDE_FLAGS=""
-if [ -n "${INFRA_DEV_CQ_EXCLUDE:-}" ]; then
+if [ -n "${APPINFRA_DEV_CQ_EXCLUDE:-}" ]; then
     CQ_EXCLUDE_FLAGS=$(
         set -f  # Disable glob expansion to preserve patterns like "examples/*"
         sep=""
-        for pat in ${INFRA_DEV_CQ_EXCLUDE}; do
+        for pat in ${APPINFRA_DEV_CQ_EXCLUDE}; do
             printf '%s--exclude "%s"' "$sep" "$pat"
             sep=" "
         done
@@ -238,13 +238,13 @@ fi
 # Extra ruff rules reported over the package as warnings, never failing: a comma-separated list
 # of rule codes (empty or false = off; "-" not ":-" keeps an empty value). Rules that should fail
 # the build belong in the project's ruff config.
-CQ_LINT_SELECT="${INFRA_DEV_CQ_LINT_SELECT-C90,SIM,RET,PIE,PERF,FURB,C4}"
+CQ_LINT_SELECT="${APPINFRA_DEV_CQ_LINT_SELECT-C90,SIM,RET,PIE,PERF,FURB,C4}"
 
 # Duplicated code (pylint) and dead private code checks over the package. Each takes false (off),
 # warn (default: report the count, never fail) or strict (fail on findings).
-CQ_DUP="${INFRA_DEV_CQ_DUP:-warn}"
-CQ_DEAD="${INFRA_DEV_CQ_DEAD:-warn}"
-for _cq_var in INFRA_DEV_CQ_DUP:"$CQ_DUP" INFRA_DEV_CQ_DEAD:"$CQ_DEAD"; do
+CQ_DUP="${APPINFRA_DEV_CQ_DUP:-warn}"
+CQ_DEAD="${APPINFRA_DEV_CQ_DEAD:-warn}"
+for _cq_var in APPINFRA_DEV_CQ_DUP:"$CQ_DUP" APPINFRA_DEV_CQ_DEAD:"$CQ_DEAD"; do
     case "${_cq_var#*:}" in
         false|warn|strict) ;;
         *) echo "Error: ${_cq_var%%:*} must be false, warn or strict, got: ${_cq_var#*:}" >&2; exit 1 ;;
@@ -266,7 +266,7 @@ lint_check() {
     return "$EXIT_CODE_WARNING"
 }
 
-# --strict for a cq tool whose mode is strict (true for INFRA_DEV_CQ_STRICT)
+# --strict for a cq tool whose mode is strict (true for APPINFRA_DEV_CQ_STRICT)
 cq_strict_flag() {
     case "$1" in strict|true) echo "--strict" ;; esac
 }
@@ -344,7 +344,7 @@ fi
 # (including lists). Dynamic markers applied by
 # ``pytest_collection_modifyitems`` hooks are missed; standard patterns
 # are not.
-PERF_DIR="${INFRA_PYTEST_PERF_DIR:-tests}"
+PERF_DIR="${APPINFRA_PYTEST_PERF_DIR:-tests}"
 _MARKERS_FOUND=$(
     grep -rhoE 'pytest\.mark\.[a-z_][a-z0-9_]*' tests/ "$PERF_DIR" --include='*.py' 2>/dev/null \
         | cut -d. -f3 | sort -u | tr '\n' ' ' || true
@@ -361,7 +361,7 @@ _pytest_cmd_for() {
     local suite="$1" marker="$2" flags="$3" path="${4:-tests/}"
     case " $_MARKERS_FOUND " in
         *" $marker "*)
-            echo "${PYTEST_HANG}INFRA_CHECK_PYTEST_SUITE=$suite ${PYTHON} -m pytest $path -m $marker ${PYTEST_HANG_FLAG} $flags"
+            echo "${PYTEST_HANG}APPINFRA_CHECK_PYTEST_SUITE=$suite ${PYTHON} -m pytest $path -m $marker ${PYTEST_HANG_FLAG} $flags"
             ;;
         *)
             echo "(exit 5)"
@@ -369,7 +369,7 @@ _pytest_cmd_for() {
     esac
 }
 
-# INFRA_CHECK_PYTEST_SUITE prevents schema collisions when test suites run in parallel.
+# APPINFRA_CHECK_PYTEST_SUITE prevents schema collisions when test suites run in parallel.
 # Each suite gets unique schema names: unit_gw0, integ_gw0, e2e_gw0, etc.
 #
 # Standalone suites are skipped when coverage subsumes their marker (see
@@ -390,8 +390,8 @@ declare -a TEST_SUBCHECKS_RAW=()
 # parallel group; leading the list keeps its running/completed state
 # obvious. Uses NPROC/2 workers (see PYTEST_PARALLEL_COVERAGE above).
 if awk "BEGIN {exit !($COVERAGE_TARGET > 0)}" 2>/dev/null; then
-    TEST_SUBCHECKS+=("${COVERAGE_LABEL}|test.coverage|${PYTEST_HANG}${COVERAGE_CORE_ENV}INFRA_CHECK_PYTEST_SUITE=cov ${PYTHON} -m pytest tests/ ${COVERAGE_MARKER_ARG} ${PYTEST_HANG_FLAG} --cov=${PKG_NAME} --cov-report=term -q -rEfs ${PYTEST_PARALLEL_COVERAGE}|${COVERAGE_TARGET}")
-    TEST_SUBCHECKS_RAW+=("${COVERAGE_LABEL}|test.coverage|${PYTEST_HANG}${COVERAGE_CORE_ENV}INFRA_CHECK_PYTEST_SUITE=cov ${PYTHON} -m pytest tests/ ${COVERAGE_MARKER_ARG} ${PYTEST_HANG_FLAG} --cov=${PKG_NAME} --cov-report=term-missing -rEfs ${PYTEST_PARALLEL_COVERAGE}|${COVERAGE_TARGET}")
+    TEST_SUBCHECKS+=("${COVERAGE_LABEL}|test.coverage|${PYTEST_HANG}${COVERAGE_CORE_ENV}APPINFRA_CHECK_PYTEST_SUITE=cov ${PYTHON} -m pytest tests/ ${COVERAGE_MARKER_ARG} ${PYTEST_HANG_FLAG} --cov=${PKG_NAME} --cov-report=term -q -rEfs ${PYTEST_PARALLEL_COVERAGE}|${COVERAGE_TARGET}")
+    TEST_SUBCHECKS_RAW+=("${COVERAGE_LABEL}|test.coverage|${PYTEST_HANG}${COVERAGE_CORE_ENV}APPINFRA_CHECK_PYTEST_SUITE=cov ${PYTHON} -m pytest tests/ ${COVERAGE_MARKER_ARG} ${PYTEST_HANG_FLAG} --cov=${PKG_NAME} --cov-report=term-missing -rEfs ${PYTEST_PARALLEL_COVERAGE}|${COVERAGE_TARGET}")
 fi
 
 _standalone_suite unit        "Unit tests"        test.unit        unit
@@ -402,12 +402,12 @@ _standalone_suite security    "Security tests"    test.security    sec
 # process rather than sibling workers, and only one process re-imports the test
 # tree. A worker rather than in-process: a test that leaves a non-daemon thread
 # running costs the controller's 10s exit timeout instead of hanging the run.
-# INFRA_PYTEST_PERF_DIR narrows collection to where the performance tests live.
+# APPINFRA_PYTEST_PERF_DIR narrows collection to where the performance tests live.
 TEST_SUBCHECKS+=("Performance tests|test.perf|$(_pytest_cmd_for perf performance "--tb=short --no-header -q -rEfs -n 1" "${PERF_DIR}/")|")
 TEST_SUBCHECKS_RAW+=("Performance tests|test.perf.v|$(_pytest_cmd_for perf performance "-v --tb=short -rEfs -n 1" "${PERF_DIR}/")|")
 
 # Run the example scripts as the last test subcheck when opted in
-# (INFRA_DEV_CHECK_EXAMPLES=true) and an examples directory exists. Same
+# (APPINFRA_DEV_CHECK_EXAMPLES=true) and an examples directory exists. Same
 # runner and flags as `make examples.check`; raw mode adds -v.
 if [ "$CHECK_EXAMPLES" = "true" ] && [ -n "$EXAMPLES_DIR" ]; then
     # --full-output: the runner prints a failed example's whole output, so the kept log has it

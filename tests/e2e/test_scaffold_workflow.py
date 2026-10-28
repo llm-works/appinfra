@@ -187,8 +187,8 @@ class TestScaffoldWorkflow:
         assert "install:" in makefile_content
         assert "clean:" in makefile_content
         assert "test:" in makefile_content
-        assert "INFRA_ROOT" not in makefile_content, (
-            "Standalone should not reference INFRA_ROOT"
+        assert "APPINFRA_ROOT" not in makefile_content, (
+            "Standalone should not reference APPINFRA_ROOT"
         )
         assert "COVERAGE_PKG" not in makefile_content, (
             "Standalone should not have COVERAGE_PKG"
@@ -199,8 +199,8 @@ class TestScaffoldWorkflow:
     ):
         """Verify framework Makefile has expected content."""
         assert "Makefile.env" in makefile_content
-        assert f"INFRA_DEV_PKG_NAME := {project_name}" in makefile_content
-        assert "INFRA_ROOT" in makefile_content
+        assert f"APPINFRA_DEV_PKG_NAME := {project_name}" in makefile_content
+        assert "APPINFRA_ROOT" in makefile_content
         for makefile in [
             "Makefile.help",
             "Makefile.utils",
@@ -209,7 +209,7 @@ class TestScaffoldWorkflow:
             "Makefile.pytest",
         ]:
             assert (
-                f"include $(INFRA_ROOT)/scripts/make/{makefile}" in makefile_content
+                f"include $(APPINFRA_ROOT)/scripts/make/{makefile}" in makefile_content
             ), f"Should include {makefile}"
         assert "run::" in makefile_content, "Should use double-colon rules"
 
@@ -280,7 +280,7 @@ class TestScaffoldWorkflow:
         # Verify Makefile has project name
         makefile_content = (project_path / "Makefile").read_text()
         assert f"# {project_name} - Framework-based Makefile" in makefile_content
-        assert f"INFRA_DEV_PKG_NAME := {project_name}" in makefile_content
+        assert f"APPINFRA_DEV_PKG_NAME := {project_name}" in makefile_content
         assert f"$(PYTHON) -m {project_name}" in makefile_content
         assert "{{PROJECT_NAME}}" not in makefile_content, (
             "Template variable should be replaced"

@@ -6,7 +6,7 @@ keywords:
   - extend
   - override
   - customize
-  - INFRA_DEV_
+  - APPINFRA_DEV_
   - double-colon
   - downstream
 aliases:
@@ -22,7 +22,8 @@ to customize and extend framework targets without modifying framework files.
 ## Configuration Protocol
 
 The framework uses a consistent naming convention for configuration variables:
-`INFRA_<MODULE>_<VAR>`.
+`APPINFRA_<MODULE>_<VAR>`. The `INFRA_*` prefix belongs to config overrides; see
+[Config Protocol](config-protocol.md).
 
 ### Quick Start
 
@@ -30,8 +31,8 @@ The framework uses a consistent naming convention for configuration variables:
 infra := $(shell appinfra scripts-path)
 
 # Set your configuration
-INFRA_DEV_PKG_NAME := myproject
-INFRA_DEV_CQ_STRICT := true
+APPINFRA_DEV_PKG_NAME := myproject
+APPINFRA_DEV_CQ_STRICT := true
 
 # Include what you need (selective inclusion)
 include $(infra)/make/Makefile.config
@@ -48,7 +49,7 @@ Or include everything:
 
 ```makefile
 infra := $(shell appinfra scripts-path)
-INFRA_DEV_PKG_NAME := myproject
+APPINFRA_DEV_PKG_NAME := myproject
 include $(infra)/make/Makefile.all
 ```
 
@@ -58,8 +59,8 @@ For local development overrides (not committed to git), use `Makefile.local`:
 
 ```makefile
 # Makefile.local - Local overrides (gitignored)
-INFRA_DEV_CQ_STRICT := false
-INFRA_PYTEST_ARGS := -x --pdb
+APPINFRA_DEV_CQ_STRICT := false
+APPINFRA_PYTEST_ARGS := -x --pdb
 ```
 
 ### Configuration Precedence
@@ -76,15 +77,15 @@ framework uses `?=` for all configuration variables, so precedence works as expe
 
 ```makefile
 # Example 1: Environment variable (highest priority)
-# $ INFRA_DEV_PKG_NAME=myapp make test.coverage
+# $ APPINFRA_DEV_PKG_NAME=myapp make test.coverage
 # Uses myapp regardless of Makefile settings
 
 # Example 2: Makefile variable before include
-INFRA_DEV_PKG_NAME := myproject
+APPINFRA_DEV_PKG_NAME := myproject
 include $(infra)/make/Makefile.all
 
 # Example 3: Fallback to default
-# If nothing sets INFRA_DEV_PKG_NAME, uses "appinfra"
+# If nothing sets APPINFRA_DEV_PKG_NAME, uses "appinfra"
 ```
 
 **Note on include order:** Always include `Makefile.config` first. It sets up framework defaults
@@ -96,21 +97,21 @@ Hide specific targets from `make help` and block their execution:
 
 ```makefile
 # Hide specific targets
-INFRA_DISABLE_TARGETS := pg.clean pg.clean.internal pg.server.clean pg.server.clean.internal
+APPINFRA_DISABLE_TARGETS := pg.clean pg.clean.internal pg.server.clean pg.server.clean.internal
 
 # Hide all targets with a prefix
-INFRA_DISABLE_GROUPS := pg. docs.
+APPINFRA_DISABLE_GROUPS := pg. docs.
 ```
 
-`INFRA_DISABLE_TARGETS` matches names exactly. Confirm-prompt wrappers like `pg.clean` and their
+`APPINFRA_DISABLE_TARGETS` matches names exactly. Confirm-prompt wrappers like `pg.clean` and their
 no-prompt `.internal` siblings are independent targets — list both to block a destructive op
-entirely. Alternatively, use `INFRA_DISABLE_GROUPS` to cover an entire prefix.
+entirely. Alternatively, use `APPINFRA_DISABLE_GROUPS` to cover an entire prefix.
 
 Usage:
 
 ```bash
 # Hide all postgres targets for this run
-INFRA_DISABLE_GROUPS="pg." make help
+APPINFRA_DISABLE_GROUPS="pg." make help
 ```
 
 ## Health Check
@@ -137,7 +138,7 @@ All checks passed!
 The doctor checks:
 - Python version (>= 3.11 required)
 - Required tools installed (ruff, pytest, mypy)
-- `INFRA_DEV_PKG_NAME` points to a valid Python package
+- `APPINFRA_DEV_PKG_NAME` points to a valid Python package
 - `tests/` directory exists with test files
 
 Use `--json` for machine-readable output:
@@ -151,13 +152,13 @@ make doctor ARGS="--json"
 Preview what commands would run without executing them:
 
 ```bash
-$ INFRA_DRY_RUN=1 make fmt
+$ APPINFRA_DRY_RUN=1 make fmt
 [DRY RUN] Would run: ruff format .
 
-$ INFRA_DRY_RUN=1 make lint
+$ APPINFRA_DRY_RUN=1 make lint
 [DRY RUN] Would run: ruff check .
 
-$ INFRA_DRY_RUN=1 make type
+$ APPINFRA_DRY_RUN=1 make type
 [DRY RUN] Would run: mypy myproject/
 ```
 
@@ -190,12 +191,12 @@ Infra Framework Configuration
 Config file: (none found)
 
 Target Filtering:
-  INFRA_DISABLE_TARGETS: (none)
-  INFRA_DISABLE_GROUPS:  (none)
+  APPINFRA_DISABLE_TARGETS: (none)
+  APPINFRA_DISABLE_GROUPS:  (none)
 
 Development (DEV):
-  INFRA_DEV_PKG_NAME:     myproject
-  INFRA_DEV_CQ_STRICT:    true
+  APPINFRA_DEV_PKG_NAME:     myproject
+  APPINFRA_DEV_CQ_STRICT:    true
 ...
 ```
 
@@ -248,7 +249,7 @@ lint::
 
 ## Overriding Targets Completely
 
-Some targets can be completely replaced by your project using `INFRA_DEV_SKIP_TARGETS`. This is
+Some targets can be completely replaced by your project using `APPINFRA_DEV_SKIP_TARGETS`. This is
 useful when a project needs fundamentally different behavior (e.g., different mypy flags for
 different directories).
 
@@ -269,14 +270,14 @@ need different mypy configurations per directory:
 
 ```makefile
 # Skip the built-in type target
-INFRA_DEV_SKIP_TARGETS := type
+APPINFRA_DEV_SKIP_TARGETS := type
 
 include $(infra)/make/Makefile.dev
 
 # Define your own type target
 type::
 	@echo "* running type checker..."
-	@$(PYTHON) -m mypy $(INFRA_DEV_PKG_NAME)/ --exclude 'examples/' --strict
+	@$(PYTHON) -m mypy $(APPINFRA_DEV_PKG_NAME)/ --exclude 'examples/' --strict
 	@$(PYTHON) -m mypy examples/ --follow-imports=skip --ignore-missing-imports
 	@echo "* type checking done"
 ```
@@ -285,7 +286,7 @@ type::
 
 ```makefile
 # Skip multiple targets
-INFRA_DEV_SKIP_TARGETS := type lint
+APPINFRA_DEV_SKIP_TARGETS := type lint
 
 include $(infra)/make/Makefile.dev
 
@@ -302,12 +303,12 @@ lint::
 
 Projects with special test requirements (e.g., GPU tests that OOM when run in parallel) can skip
 framework test targets and provide their own. Two helper macros are available: `run_pytest`
-honors `INFRA_PYTEST_WORKERS`, while `run_pytest_serial` never passes `-n` and always runs
+honors `APPINFRA_PYTEST_WORKERS`, while `run_pytest_serial` never passes `-n` and always runs
 pytest in-process. Both treat "no tests collected" (exit 5) as success.
 
 ```makefile
 # Skip the built-in test.e2e target
-INFRA_DEV_SKIP_TARGETS := test.e2e
+APPINFRA_DEV_SKIP_TARGETS := test.e2e
 
 include $(infra)/make/Makefile.pytest
 
@@ -323,7 +324,7 @@ test.e2e.v:: ## runs e2e tests (verbose, sequential)
 	@echo "* e2e tests done"
 ```
 
-> **Note:** `INFRA_DEV_SKIP_TARGETS` must be set **before** the include statement.
+> **Note:** `APPINFRA_DEV_SKIP_TARGETS` must be set **before** the include statement.
 
 ## Overriding Variables
 
@@ -401,7 +402,7 @@ These targets can be extended by defining them again in your Makefile:
   database cleanup into a downstream higher-level target so the user is prompted
   once (at the top level), not once per layer. Mirrors `pg.server.clean.internal::`.
 
-> **Non-interactive use:** Set `INFRA_NO_CONFIRM=1` to bypass all `areyousure` prompts
+> **Non-interactive use:** Set `APPINFRA_NO_CONFIRM=1` to bypass all `areyousure` prompts
 > (intended for CI and scripts). See
 > [Framework Environment Variables](environment-variables.md#framework-environment-variables).
 
@@ -417,97 +418,97 @@ These targets should be used as-is, not extended:
 
 ### Overridable Variables
 
-All configuration variables follow the `INFRA_<MODULE>_<VAR>` naming convention.
+All configuration variables follow the `APPINFRA_<MODULE>_<VAR>` naming convention.
 
 **Environment (ENV):**
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `INFRA_ENV_PYTHON` | `~/.venv/bin/python` | Python interpreter path |
+| `APPINFRA_ENV_PYTHON` | `~/.venv/bin/python` | Python interpreter path |
 
 **Config:**
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `ETC_DIR` | `$(CURDIR)/etc` | Config directory path |
-| `INFRA_DEFAULT_CONFIG_FILE` | `infra.yaml` | Default config filename (contains all sections if specific files not set) |
+| `APPINFRA_DEFAULT_CONFIG_FILE` | `infra.yaml` | Default config filename (contains all sections if specific files not set) |
 
 **Development (DEV):**
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `INFRA_DEV_PKG_NAME` | `appinfra` | Package name for install, type, coverage |
-| `INFRA_DEV_CQ_STRICT` | `false` | Code quality: `true`=30-line, `false`=50-line |
-| `INFRA_DEV_CQ_LINT_SELECT` | `C90,SIM,RET,PIE,PERF,FURB,C4` | Extra ruff rule codes the Linting check reports as warnings, never failing (empty or `false` to turn off) |
-| `INFRA_DEV_CQ_DUP` | `warn` | Duplicated code in the Code quality check (pylint): `false`, `warn` or `strict` |
-| `INFRA_DEV_CQ_DEAD` | `warn` | Dead private code in the Code quality check: `false`, `warn` or `strict` |
-| `INFRA_DEV_DOCSTRING_THRESHOLD` | `80` | Docstring coverage threshold for `make check` (0 to disable) |
-| `INFRA_DEV_CHECK_EXAMPLES` | `false` | Run `examples.check` as a test subcheck of `make check` |
-| `INFRA_DEV_PROJECT_ROOT` | `$(CURDIR)` | Project root for check.sh |
-| `INFRA_DEV_INSTALL_EXTRAS` | (empty) | Optional extras for install (e.g., `ui,fastapi`) |
-| `INFRA_DEV_MYPY_FLAGS` | (empty) | Extra mypy flags (e.g., `--follow-imports=skip` for large deps) |
-| `INFRA_DEV_SKIP_TARGETS` | (empty) | Targets to skip so project can override (e.g., `type`, `test.e2e`) |
-| `INFRA_DRY_RUN` | `0` | Set to `1` to preview commands without executing |
+| `APPINFRA_DEV_PKG_NAME` | `appinfra` | Package name for install, type, coverage |
+| `APPINFRA_DEV_CQ_STRICT` | `false` | Code quality: `true`=30-line, `false`=50-line |
+| `APPINFRA_DEV_CQ_LINT_SELECT` | `C90,SIM,RET,PIE,PERF,FURB,C4` | Extra ruff rule codes the Linting check reports as warnings, never failing (empty or `false` to turn off) |
+| `APPINFRA_DEV_CQ_DUP` | `warn` | Duplicated code in the Code quality check (pylint): `false`, `warn` or `strict` |
+| `APPINFRA_DEV_CQ_DEAD` | `warn` | Dead private code in the Code quality check: `false`, `warn` or `strict` |
+| `APPINFRA_DEV_DOCSTRING_THRESHOLD` | `80` | Docstring coverage threshold for `make check` (0 to disable) |
+| `APPINFRA_DEV_CHECK_EXAMPLES` | `false` | Run `examples.check` as a test subcheck of `make check` |
+| `APPINFRA_DEV_PROJECT_ROOT` | `$(CURDIR)` | Project root for check.sh |
+| `APPINFRA_DEV_INSTALL_EXTRAS` | (empty) | Optional extras for install (e.g., `ui,fastapi`) |
+| `APPINFRA_DEV_MYPY_FLAGS` | (empty) | Extra mypy flags (e.g., `--follow-imports=skip` for large deps) |
+| `APPINFRA_DEV_SKIP_TARGETS` | (empty) | Targets to skip so project can override (e.g., `type`, `test.e2e`) |
+| `APPINFRA_DRY_RUN` | `0` | Set to `1` to preview commands without executing |
 
 **Testing (PYTEST):**
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `INFRA_PYTEST_COVERAGE_PKG` | `$(INFRA_DEV_PKG_NAME)` | Package to measure coverage |
-| `INFRA_PYTEST_COVERAGE_THRESHOLD` | `80` | Coverage threshold for `make check` (0 to disable) |
-| `INFRA_PYTEST_TESTS_DIR` | `tests` | Tests directory |
-| `INFRA_PYTEST_PERF_DIR` | `tests` | Directory `test.perf*` and `make check`'s Performance group collect from. Pointing it at the directory holding the performance tests skips importing the rest of the test tree |
-| `INFRA_PYTEST_WORKERS` | (empty) | pytest-xdist worker count (`auto` or N) for `test.*` targets; empty runs pytest in-process. Never applied to `test.perf*`. `make check` ignores it: `check.sh` runs suites concurrently with its own per-suite worker heuristic |
-| `INFRA_PYTEST_ARGS` | (empty) | Additional pytest arguments |
-| `INFRA_PYTEST_HANG_DUMP_SECONDS` | `120` | In `make check`, a test still running after this many seconds gets a row below the checklist and its process's stacks in the check's log; the test is neither stopped nor failed. `0` disables it |
+| `APPINFRA_PYTEST_COVERAGE_PKG` | `$(APPINFRA_DEV_PKG_NAME)` | Package to measure coverage |
+| `APPINFRA_PYTEST_COVERAGE_THRESHOLD` | `80` | Coverage threshold for `make check` (0 to disable) |
+| `APPINFRA_PYTEST_TESTS_DIR` | `tests` | Tests directory |
+| `APPINFRA_PYTEST_PERF_DIR` | `tests` | Directory `test.perf*` and `make check`'s Performance group collect from. Pointing it at the directory holding the performance tests skips importing the rest of the test tree |
+| `APPINFRA_PYTEST_WORKERS` | (empty) | pytest-xdist worker count (`auto` or N) for `test.*` targets; empty runs pytest in-process. Never applied to `test.perf*`. `make check` ignores it: `check.sh` runs suites concurrently with its own per-suite worker heuristic |
+| `APPINFRA_PYTEST_ARGS` | (empty) | Additional pytest arguments |
+| `APPINFRA_PYTEST_HANG_DUMP_SECONDS` | `120` | In `make check`, a test still running after this many seconds gets a row below the checklist and its process's stacks in the check's log; the test is neither stopped nor failed. `0` disables it |
 
 **Documentation (DOCS):**
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `INFRA_DOCS_CONFIG_FILE` | (empty) | MkDocs config filename (empty = use `INFRA_DEFAULT_CONFIG_FILE`) |
-| `INFRA_DOCS_OUTPUT_DIR` | `.site` | Documentation build output |
+| `APPINFRA_DOCS_CONFIG_FILE` | (empty) | MkDocs config filename (empty = use `APPINFRA_DEFAULT_CONFIG_FILE`) |
+| `APPINFRA_DOCS_OUTPUT_DIR` | `.site` | Documentation build output |
 
 **PostgreSQL (PG):**
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `INFRA_PG_CONFIG_FILE` | (empty) | PostgreSQL config filename (empty = use `INFRA_DEFAULT_CONFIG_FILE`) |
-| `INFRA_PG_CONFIG_KEY` | `pgserver` | Config section key |
-| `INFRA_PG_DATABASES` | (empty) | Space-separated database list |
-| `INFRA_PG_HOST` | `127.0.0.1` | PostgreSQL host |
-| `INFRA_PG_USER` | `postgres` | PostgreSQL user |
+| `APPINFRA_PG_CONFIG_FILE` | (empty) | PostgreSQL config filename (empty = use `APPINFRA_DEFAULT_CONFIG_FILE`) |
+| `APPINFRA_PG_CONFIG_KEY` | `pgserver` | Config section key |
+| `APPINFRA_PG_DATABASES` | (empty) | Space-separated database list |
+| `APPINFRA_PG_HOST` | `127.0.0.1` | PostgreSQL host |
+| `APPINFRA_PG_USER` | `postgres` | PostgreSQL user |
 
 **Container Runtime (PG):**
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `INFRA_CONTAINER_CMD` | `docker` | Runtime used by `pg.*` targets (`ps`, `exec`, `volume`, ...). Also exported to the `pg.sh` helper script. |
-| `INFRA_COMPOSE_CMD` | `docker compose` | Compose orchestrator paired with `INFRA_CONTAINER_CMD`. |
+| `APPINFRA_CONTAINER_CMD` | `docker` | Runtime used by `pg.*` targets (`ps`, `exec`, `volume`, ...). Also exported to the `pg.sh` helper script. |
+| `APPINFRA_COMPOSE_CMD` | `docker compose` | Compose orchestrator paired with `APPINFRA_CONTAINER_CMD`. |
 
 Set both together in `Makefile.local` to run the local-dev container layer under Podman:
 
 ```make
-INFRA_CONTAINER_CMD := podman
-INFRA_COMPOSE_CMD   := podman compose
+APPINFRA_CONTAINER_CMD := podman
+APPINFRA_COMPOSE_CMD   := podman compose
 ```
 
 **Cleanup (CLEAN):**
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `INFRA_CLEAN_PRESERVE` | `.data .logs .GRADING.md` | Files/dirs to preserve |
+| `APPINFRA_CLEAN_PRESERVE` | `.data .logs .GRADING.md` | Files/dirs to preserve |
 
 **Target Filtering:**
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `INFRA_DISABLE_TARGETS` | (empty) | Space-separated targets to hide |
-| `INFRA_DISABLE_GROUPS` | (empty) | Space-separated prefixes to hide (e.g., `pg.`) |
+| `APPINFRA_DISABLE_TARGETS` | (empty) | Space-separated targets to hide |
+| `APPINFRA_DISABLE_GROUPS` | (empty) | Space-separated prefixes to hide (e.g., `pg.`) |
 
-**Note:** When scaffolding a project with `--makefile-style=framework`, `INFRA_DEV_PKG_NAME` is
-automatically set to your project name. `INFRA_PYTEST_COVERAGE_PKG` inherits from it, so you
-typically only need to set `INFRA_DEV_PKG_NAME`.
+**Note:** When scaffolding a project with `--makefile-style=framework`, `APPINFRA_DEV_PKG_NAME` is
+automatically set to your project name. `APPINFRA_PYTEST_COVERAGE_PKG` inherits from it, so you
+typically only need to set `APPINFRA_DEV_PKG_NAME`.
 
 ## Complete Example
 
@@ -518,9 +519,9 @@ Here's a complete example of an app extending the framework:
 
 # Configuration (before includes)
 infra := $(shell appinfra scripts-path)
-INFRA_DEV_PKG_NAME := myapp
-INFRA_DEV_CQ_STRICT := true
-INFRA_DISABLE_TARGETS := pg.clean pg.clean.internal  # Hide destructive targets (wrapper + internal)
+APPINFRA_DEV_PKG_NAME := myapp
+APPINFRA_DEV_CQ_STRICT := true
+APPINFRA_DISABLE_TARGETS := pg.clean pg.clean.internal  # Hide destructive targets (wrapper + internal)
 
 # Include framework Makefiles (selectively)
 include $(infra)/make/Makefile.config
@@ -591,14 +592,14 @@ The tests run in your project's `tests/` directory, not infra's.
 
 ### Configuring Coverage
 
-By default, coverage targets measure coverage for the package specified by `INFRA_DEV_PKG_NAME`.
+By default, coverage targets measure coverage for the package specified by `APPINFRA_DEV_PKG_NAME`.
 Override this for your project:
 
 ```makefile
 # Your project's Makefile
 infra := $(shell appinfra scripts-path)
-INFRA_DEV_PKG_NAME := myproject
-# INFRA_PYTEST_COVERAGE_PKG inherits from INFRA_DEV_PKG_NAME automatically
+APPINFRA_DEV_PKG_NAME := myproject
+# APPINFRA_PYTEST_COVERAGE_PKG inherits from APPINFRA_DEV_PKG_NAME automatically
 
 include $(infra)/make/Makefile.config
 include $(infra)/make/Makefile.env
@@ -615,7 +616,7 @@ code and the submodule:
 ```makefile
 # Your project's Makefile (submodule approach)
 infra := submodules/infra
-INFRA_DEV_PKG_NAME := myproject
+APPINFRA_DEV_PKG_NAME := myproject
 
 include $(infra)/scripts/make/Makefile.config
 include $(infra)/scripts/make/Makefile.env
@@ -635,7 +636,7 @@ Note: With pip install, there's no submodule to test - appinfra is just a depend
 **Relative paths resolve to the including project:**
 - `tests/` → `YOUR_PROJECT/tests/` (not `infra/tests/`)
 - `$(PYTHON)` → Your Python interpreter
-- `$(INFRA_PYTEST_COVERAGE_PKG)` → Your package name (if overridden)
+- `$(APPINFRA_PYTEST_COVERAGE_PKG)` → Your package name (if overridden)
 
 **This ensures:**
 - ✅ Your tests test your code
@@ -658,7 +659,7 @@ MyFramework/
 ```makefile
 # MyFramework/Makefile
 infra := $(shell appinfra scripts-path)
-INFRA_DEV_PKG_NAME := myframework
+APPINFRA_DEV_PKG_NAME := myframework
 
 include $(infra)/make/Makefile.config
 include $(infra)/make/Makefile.env
@@ -793,10 +794,10 @@ clean::  # Your extension second
 ```makefile
 # Wrong
 include $(infra)/make/Makefile.config
-INFRA_DEV_PKG_NAME := myproject  # Too late
+APPINFRA_DEV_PKG_NAME := myproject  # Too late
 
 # Correct
-INFRA_DEV_PKG_NAME := myproject  # Before include
+APPINFRA_DEV_PKG_NAME := myproject  # Before include
 include $(infra)/make/Makefile.config
 ```
 
@@ -883,7 +884,7 @@ framework location in this order:
 1. **Manual override** (highest priority):
    ```makefile
    # Set at top of Makefile or via environment variable:
-   INFRA_ROOT = /custom/path/to/infra
+   APPINFRA_ROOT = /custom/path/to/infra
    ```
 
 2. **Submodule location** (if exists):
@@ -899,7 +900,7 @@ framework location in this order:
 
 4. **Error if not found**:
    ```
-   Cannot locate infra. Set INFRA_ROOT=/path/to/infra at top of Makefile
+   Cannot locate infra. Set APPINFRA_ROOT=/path/to/infra at top of Makefile
    or install appinfra package
    ```
 
@@ -1018,7 +1019,7 @@ If you start with a standalone Makefile and want to upgrade:
 ### Best Practices
 
 1. **Choose the right style upfront** - Standalone for simple projects, framework for advanced needs
-2. **Install appinfra package** - Enables auto-detection of INFRA_ROOT
+2. **Install appinfra package** - Enables auto-detection of APPINFRA_ROOT
 3. **Document custom targets** - Add `##` comments for `make help` integration
 4. **Keep framework Makefiles minimal** - Extend via `::` rather than modifying generated code
 

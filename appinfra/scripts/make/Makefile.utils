@@ -10,8 +10,8 @@
 #       @echo "doing something dangerous"
 
 define areyousure
-	@if [ "$$INFRA_NO_CONFIRM" = "1" ]; then \
-		echo "INFRA_NO_CONFIRM=1, skipping confirmation"; \
+	@if [ "$$APPINFRA_NO_CONFIRM" = "1" ]; then \
+		echo "APPINFRA_NO_CONFIRM=1, skipping confirmation"; \
 	else \
 		echo -n "Are you sure? [y/N] " && read ans && [ $${ans:-N} = y ]; \
 	fi

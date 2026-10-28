@@ -4,7 +4,7 @@
 """
 Report tests that run long, with the stack of every thread.
 
-When INFRA_PYTEST_HANG_DUMP_SECONDS is above 0, a test still running (setup, call or teardown)
+When APPINFRA_PYTEST_HANG_DUMP_SECONDS is above 0, a test still running (setup, call or teardown)
 after that many seconds gets one report written to stderr, past pytest's output capture:
 
     === test running >120s: tests/test_server.py::test_shutdown ===
@@ -51,7 +51,7 @@ from collections.abc import Generator
 
 import pytest
 
-ENV_VAR = "INFRA_PYTEST_HANG_DUMP_SECONDS"
+ENV_VAR = "APPINFRA_PYTEST_HANG_DUMP_SECONDS"
 
 _seconds_key = pytest.StashKey[float]()
 _fd_key = pytest.StashKey[int]()

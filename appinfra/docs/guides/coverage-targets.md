@@ -52,14 +52,14 @@ All targets:
 ### Coverage Threshold
 
 The `make check` command enforces a coverage threshold. Configure via
-`INFRA_PYTEST_COVERAGE_THRESHOLD`:
+`APPINFRA_PYTEST_COVERAGE_THRESHOLD`:
 
 ```makefile
 # In your Makefile (before includes)
-INFRA_PYTEST_COVERAGE_THRESHOLD := 95    # Require 95% coverage
+APPINFRA_PYTEST_COVERAGE_THRESHOLD := 95    # Require 95% coverage
 
 # Or disable coverage check entirely
-INFRA_PYTEST_COVERAGE_THRESHOLD := 0
+APPINFRA_PYTEST_COVERAGE_THRESHOLD := 0
 ```
 
 **Default:** 80%
@@ -71,7 +71,7 @@ INFRA_PYTEST_COVERAGE_THRESHOLD := 0
 
 You can also override at runtime:
 ```bash
-INFRA_PYTEST_COVERAGE_THRESHOLD=50 make check
+APPINFRA_PYTEST_COVERAGE_THRESHOLD=50 make check
 ```
 
 ## Best Practices

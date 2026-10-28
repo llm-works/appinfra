@@ -8,12 +8,12 @@
 #
 # Usage (in consuming project's Makefile):
 #   infra := path/to/infra
-#   INFRA_DEV_PKG_NAME := myproject
+#   APPINFRA_DEV_PKG_NAME := myproject
 #   include $(infra)/scripts/make/Makefile.all
 #
 # For selective inclusion (preferred for submodule use):
 #   infra := path/to/infra
-#   INFRA_DEV_PKG_NAME := myproject
+#   APPINFRA_DEV_PKG_NAME := myproject
 #   include $(infra)/scripts/make/Makefile.config
 #   include $(infra)/scripts/make/Makefile.env
 #   include $(infra)/scripts/make/Makefile.help

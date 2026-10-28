@@ -44,6 +44,10 @@ earlier: pre-release builds (0.13.1.devN) would not satisfy it. -->
 - **Breaking:** `appinfra.cli.tools.code_quality`, `check_functions` and `check_spdx` moved to
   `appinfra.cli.tools.cq` (`tool`, `functions`, `spdx`).
 - **Breaking:** `GitRuntimeSource()` no longer takes `check_dirty`; the parameter had no effect.
+- **Breaking:** the framework's Make and tooling variables are renamed from `INFRA_*` to
+  `APPINFRA_*` (`APPINFRA_DEV_PKG_NAME`, `APPINFRA_ROOT`, ...); every `INFRA_*` variable is now a
+  config override. A Makefile or `Makefile.local` still assigning an `INFRA_*` name stops with an
+  error. `Config` rejects an `env_prefix` that overlaps `APPINFRA_`.
 - A `Ticker.stop()` while the ticker is not running is kept: the next `run()` returns at once,
   without calling the handler. A `stop()` right after starting the `run()` thread used to be lost.
 
@@ -61,6 +65,7 @@ earlier: pre-release builds (0.13.1.devN) would not satisfy it. -->
 - JSON and database log output include the traceback of an exception logged as
   `extra={"exception": e}` or sent through the multiprocess queue; the database handler used to
   drop a record with an exception in `extra`.
+- `INFRA_TEST_LOGGING_LEVEL` overrides `test.logging.level`; `Config` used to skip it.
 
 ## [0.13.0] - 2026-10-25
 

@@ -30,14 +30,14 @@
 #   _INFRA_PG_MODE               "single" | "repl" — target mode for `up` / `reboot`
 #   _INFRA_PG_WAIT               "0" to skip readiness/teardown wait on up/down/reboot
 #   _INFRA_PG_WAIT_TIMEOUT       wait-up / wait-down loop timeout in seconds (default 30)
-#   INFRA_CONTAINER_CMD          container runtime (docker/podman); default docker
-#   INFRA_COMPOSE_CMD            compose runtime (docker compose / podman compose); default docker compose
+#   APPINFRA_CONTAINER_CMD       container runtime (docker/podman); default docker
+#   APPINFRA_COMPOSE_CMD         compose runtime (docker compose / podman compose); default docker compose
 #
 # The `_INFRA_PG_*` prefix marks these as an internal wire protocol between the
 # caller layer and pg.sh — subject to change, not part of the public
-# INFRA_PG_* / INFRA_PGSERVER_* user-facing configuration surface.
+# APPINFRA_PG_* / INFRA_PGSERVER_* user-facing configuration surface.
 
-# All _INFRA_PG_* / INFRA_* vars are supplied by the caller (Makefile shim or
+# All _INFRA_PG_* / APPINFRA_* vars are supplied by the caller (Makefile shim or
 # `appinfra pg` CLI), not assigned here — silence "may not be assigned" hints.
 # shellcheck disable=SC2153
 
@@ -70,7 +70,7 @@ _pg_compose_yaml() {
 }
 
 _pg_container_runtime() {
-    echo "${INFRA_CONTAINER_CMD:-docker}"
+    echo "${APPINFRA_CONTAINER_CMD:-docker}"
 }
 
 _pg_ensure_runtime() {
@@ -82,14 +82,14 @@ _pg_ensure_runtime() {
     if command -v "${runtime}" >/dev/null 2>&1; then
         return 0
     fi
-    explicit="${INFRA_CONTAINER_CMD:-}"
+    explicit="${APPINFRA_CONTAINER_CMD:-}"
     if [ -n "${explicit}" ]; then
-        printf '%b' "${UI_RED}pg.sh: INFRA_CONTAINER_CMD='${explicit}' but '${explicit}' is not on PATH.${UI_RESET}\n" >&2
+        printf '%b' "${UI_RED}pg.sh: APPINFRA_CONTAINER_CMD='${explicit}' but '${explicit}' is not on PATH.${UI_RESET}\n" >&2
         local other=""
         if [ "${explicit}" = "podman" ] && command -v docker >/dev/null 2>&1; then other="docker"; fi
         if [ "${explicit}" = "docker" ] && command -v podman >/dev/null 2>&1; then other="podman"; fi
         if [ -n "${other}" ]; then
-            echo "Hint: '${other}' is available — set INFRA_CONTAINER_CMD=${other} or unset it to auto-detect." >&2
+            echo "Hint: '${other}' is available — set APPINFRA_CONTAINER_CMD=${other} or unset it to auto-detect." >&2
         fi
         return 2
     fi
@@ -100,7 +100,7 @@ _pg_ensure_runtime() {
 pg.sh: 'docker' not found, but 'podman' is available.
 
 Set the runtime explicitly:
-  export INFRA_CONTAINER_CMD=podman
+  export APPINFRA_CONTAINER_CMD=podman
 
 Or install docker if you prefer it over podman.
 MSG
@@ -117,7 +117,7 @@ container. Install one:
   macOS:                  brew install podman
                           (then: podman machine init && podman machine start)
 
-Or set INFRA_CONTAINER_CMD to point at an installed binary if it lives
+Or set APPINFRA_CONTAINER_CMD to point at an installed binary if it lives
 under a non-standard name.
 MSG
     return 2
@@ -129,7 +129,7 @@ _pg_compose_run() {
     local mode="$1"; shift
     local compose_yaml compose_cmd
     compose_yaml="$(_pg_compose_yaml "${mode}")"
-    compose_cmd="${INFRA_COMPOSE_CMD:-docker compose}"
+    compose_cmd="${APPINFRA_COMPOSE_CMD:-docker compose}"
 
     local -a compose_env=(
         NAME="${_INFRA_PG_CONTAINER_NAME}"
@@ -576,7 +576,7 @@ _pg_info_short() {
 # ---------------------------------------------------------------------------
 
 _pg_info_containers() {
-    local runtime="${INFRA_CONTAINER_CMD:-docker}"
+    local runtime="${APPINFRA_CONTAINER_CMD:-docker}"
     local output exit_code=0
     output=$(${runtime} ps -a --filter "name=${_INFRA_PG_CONTAINER_NAME}" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" 2>&1) || exit_code=$?
     if [ $exit_code -ne 0 ]; then

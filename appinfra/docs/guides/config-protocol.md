@@ -98,7 +98,10 @@ Rationale: users move between packages without switching mental models. `INFRA_L
 applies to every process in the stack.
 
 Per-package `<PKG>_*` env vars MAY exist for non-config purposes — demo-application variables,
-non-config runtime state — but never for overriding config fields.
+non-config runtime state — but never for overriding config fields. appinfra's own Make and tooling
+variables follow this rule as `APPINFRA_*` (`APPINFRA_DEV_PKG_NAME`, `APPINFRA_CONTAINER_CMD`), so
+every `INFRA_*` variable is a config override and none is reserved: any declared yaml field,
+including one under a top-level `_` key, can be overridden.
 
 See [Environment Variable Overrides](environment-variables.md) for format and type-conversion
 rules, and [Configuration Precedence](configuration-precedence.md) for how env vars combine with
