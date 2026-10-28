@@ -571,7 +571,7 @@ class Sched:
         self._running = False
         self.lg.info("scheduler stopped")
 
-    def get_status(self) -> dict:
+    def get_status(self) -> dict[str, Any]:
         """
         Get current scheduler status.
 

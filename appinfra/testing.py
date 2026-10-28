@@ -71,7 +71,7 @@ def destroy_test_loggers() -> Generator[None, None, None]:
 
 @pytest.hookimpl(wrapper=True)
 def pytest_runtest_makereport(
-    item: Item, call: CallInfo
+    item: Item, call: CallInfo[None]
 ) -> Generator[None, TestReport, TestReport]:
     """
     Modify skip reason for tests marked with expected_skip.

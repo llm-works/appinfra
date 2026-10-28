@@ -137,7 +137,7 @@ class DeepMergeWrapper:
 
     __slots__ = ("data", "override")
 
-    def __init__(self, data: dict, override: bool = False) -> None:
+    def __init__(self, data: dict[Any, Any], override: bool = False) -> None:
         """
         Initialize wrapper with data to deep merge.
 
@@ -163,7 +163,7 @@ class DeepMergeWrapper:
         return f"DeepMergeWrapper({self.data!r})"
 
 
-class DeepMergeDict(dict):
+class DeepMergeDict(dict[Any, Any]):
     """
     Dict subclass that signals deep merge behavior in YAML merge keys.
 

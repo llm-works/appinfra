@@ -8,9 +8,16 @@ This module provides dedicated argument parsing with better organization.
 """
 
 import argparse
-from typing import IO, Any
+from typing import IO, TYPE_CHECKING, Any
 
 from ..args import DefaultsHelpFormatter
+
+# _SubParsersAction is generic only to type checkers; it takes no [...] at runtime, so the
+# runtime alias is the bare class and typing.get_type_hints() can still evaluate it.
+if TYPE_CHECKING:
+    _SubParsers = argparse._SubParsersAction[argparse.ArgumentParser]
+else:
+    _SubParsers = argparse._SubParsersAction
 
 
 class CLIParser:
@@ -42,7 +49,7 @@ class CLIParser:
             raise RuntimeError("Parser not created. Call create_parser() first.")
         return self.parser.add_argument(*args, **kwargs)
 
-    def add_subparsers(self, dest: str, **kwargs: Any) -> argparse._SubParsersAction:
+    def add_subparsers(self, dest: str, **kwargs: Any) -> _SubParsers:
         """Add subparsers to the main parser."""
         if not self.parser:
             raise RuntimeError("Parser not created. Call create_parser() first.")

@@ -23,7 +23,7 @@ from io import StringIO
 from pathlib import Path
 from typing import Any
 
-import yaml  # type: ignore[import-untyped]
+import yaml
 
 from ._include import _extract_section_data
 from ._utils import _file_exists, _normalize_allowed_paths
@@ -105,7 +105,7 @@ def _canonical_chain_suffix(source: str, policies: list[str]) -> str:
     return "+".join([source] + sorted(policies))
 
 
-def _sub_prefix(m: re.Match) -> str:
+def _sub_prefix(m: re.Match[str]) -> str:
     """Substitution callback for prefix-form chains."""
     tags = [t[1:] for t in _TAG_TOKEN_RE.findall(m.group(1))]
     arg = m.group(2)
@@ -113,7 +113,7 @@ def _sub_prefix(m: re.Match) -> str:
     return f"!chain:{_canonical_chain_suffix(source, policies)} {arg}"
 
 
-def _sub_postfix(m: re.Match) -> str:
+def _sub_postfix(m: re.Match[str]) -> str:
     """Substitution callback for postfix-form chains."""
     source = m.group(1)[1:]
     arg = m.group(2)
@@ -259,7 +259,8 @@ class Loader(yaml.SafeLoader):
         self.env_overrides = env_overrides
         self.allowed_paths = _normalize_allowed_paths(allowed_paths)
         self.source_map: dict[str, Path | None] = {}
-        self._path_stack: list = []  # Stack to track current config path during construction
+        # Stack to track current config path during construction
+        self._path_stack: list[Any] = []
         self._pending_include_maps: dict[
             int, dict[str, Path | None]
         ] = {}  # Temp storage for include source maps
@@ -318,7 +319,7 @@ class Loader(yaml.SafeLoader):
             return str(key)
         return key
 
-    def _convert_mapping_keys(self, mapping: dict) -> dict:
+    def _convert_mapping_keys(self, mapping: dict[Any, Any]) -> dict[Any, Any]:
         """
         Convert all date and numeric keys in a mapping to strings.
 

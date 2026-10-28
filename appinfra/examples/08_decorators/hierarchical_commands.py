@@ -20,7 +20,7 @@ from pathlib import Path
 # Allow running from a source checkout without installing the package.
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
-from appinfra.app import App
+from appinfra.app import App, Tool
 from appinfra.dot_dict import DotDict
 
 # Create app
@@ -34,7 +34,7 @@ app = App(
 
 # Database command group
 @app.tool(name="db", help="Database operations")
-def db_tool(self):
+def db_tool(self: Tool) -> None:
     """Database management commands."""
     pass
 
@@ -42,7 +42,7 @@ def db_tool(self):
 @db_tool.subtool(name="migrate", help="Run database migrations")
 @app.argument("--target", help="Target migration version")
 @app.argument("--dry-run", action="store_true", help="Show what would be done")
-def db_migrate(self):
+def db_migrate(self: Tool) -> int:
     """Run database migrations."""
     target = self.args.target or "latest"
 
@@ -57,7 +57,7 @@ def db_migrate(self):
 
 
 @db_tool.subtool(name="status", help="Check database status")
-def db_status(self):
+def db_status(self: Tool) -> int:
     """Check database connection and status."""
     self.lg.info("Checking database connection...")
     # Status check logic here
@@ -68,7 +68,7 @@ def db_status(self):
 @db_tool.subtool(name="backup", help="Backup database")
 @app.argument("--output", required=True, help="Backup file path")
 @app.argument("--compress", action="store_true", help="Compress backup")
-def db_backup(self):
+def db_backup(self: Tool) -> int:
     """Backup the database."""
     self.lg.info(f"Backing up database to {self.args.output}")
 
@@ -82,14 +82,14 @@ def db_backup(self):
 
 # Another command group - cache operations
 @app.tool(name="cache", help="Cache operations")
-def cache_tool(self):
+def cache_tool(self: Tool) -> None:
     """Cache management commands."""
     pass
 
 
 @cache_tool.subtool(name="clear", help="Clear cache")
 @app.argument("--pattern", help="Pattern to match keys")
-def cache_clear(self):
+def cache_clear(self: Tool) -> int:
     """Clear cache entries."""
     pattern = self.args.pattern or "*"
     self.lg.info(f"Clearing cache entries matching: {pattern}")
@@ -99,7 +99,7 @@ def cache_clear(self):
 
 
 @cache_tool.subtool(name="stats", help="Show cache statistics")
-def cache_stats(self):
+def cache_stats(self: Tool) -> int:
     """Show cache statistics."""
     self.lg.info("Cache statistics:")
     self.lg.info("  Entries: 1234")

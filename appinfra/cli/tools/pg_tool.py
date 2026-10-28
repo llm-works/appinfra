@@ -676,9 +676,7 @@ class PgUrlTool(Tool):
         if self.args.db:
             url = cfg.get(f"dbs.{self.args.db}.url")
             if not url:
-                self.lg.error(  # type: ignore[union-attr]
-                    "no dbs entry found", extra={"name": self.args.db}
-                )
+                self.lg.error("no dbs entry found", extra={"name": self.args.db})
                 return 1
             print(url)
             return 0
@@ -688,12 +686,12 @@ class PgUrlTool(Tool):
         if self.args.target == "standby":
             port = cfg.get("pgserver.replica.port")
             if not port:
-                self.lg.error("pgserver.replica.port not set")  # type: ignore[union-attr]
+                self.lg.error("pgserver.replica.port not set")
                 return 1
         else:
             port = cfg.get("pgserver.port")
             if not port:
-                self.lg.error("pgserver.port not set")  # type: ignore[union-attr]
+                self.lg.error("pgserver.port not set")
                 return 1
         url_host = f"[{host}]" if ":" in host and not host.startswith("[") else host
         print(f"postgresql://{quote(str(user), safe='')}@{url_host}:{port}")

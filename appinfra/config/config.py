@@ -14,7 +14,7 @@ import re
 from pathlib import Path
 from typing import Any, Self
 
-import yaml  # type: ignore[import-untyped]
+import yaml
 
 from ..dot_dict import DotDict
 from ..errors import UndeclaredConfigPathError
@@ -480,7 +480,7 @@ class Config(DotDict):
             return re.sub(r"\$\{([a-zA-Z0-9_.]+)\}", self._substitute_var, content)
         return content
 
-    def _substitute_var(self, match: re.Match) -> str:
+    def _substitute_var(self, match: re.Match[str]) -> str:
         """
         Substitute a variable reference with its value.
 
@@ -578,7 +578,9 @@ class Config(DotDict):
         # Remove prefix and split by underscore
         return env_key[len(self._env_prefix) :].lower().split("_")
 
-    def _set_nested_value(self, data: dict, path: list[str], value: Any) -> None:
+    def _set_nested_value(
+        self, data: dict[str, Any], path: list[str], value: Any
+    ) -> None:
         """
         Set a nested value in the configuration dictionary.
 
@@ -626,7 +628,7 @@ class Config(DotDict):
             current = current[matched_key]
             i += consumed
 
-    def _set_final_value(self, target: dict, key: str, value: Any) -> None:
+    def _set_final_value(self, target: dict[str, Any], key: str, value: Any) -> None:
         """Assign a converted env value to the matched yaml key.
 
         When the existing yaml value is a list, a non-None scalar override
@@ -645,7 +647,7 @@ class Config(DotDict):
         target[key] = value
 
     def _match_key_greedy(
-        self, data: dict, path: list[str], start_idx: int
+        self, data: dict[str, Any], path: list[str], start_idx: int
     ) -> tuple[str | None, int]:
         """
         Try to match a key in the dictionary by greedily combining path components.
@@ -687,7 +689,7 @@ class Config(DotDict):
         return (None, 0)
 
     def _try_multicomponent_match(
-        self, data: dict, components: list[str], num_components: int
+        self, data: dict[str, Any], components: list[str], num_components: int
     ) -> tuple[str, int] | None:
         """Try matching multi-component key with various strategies."""
         candidate_underscored = "_".join(components)

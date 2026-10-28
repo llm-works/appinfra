@@ -643,7 +643,7 @@ class Ticker:
         """
         return self._running
 
-    def get_status(self) -> dict:
+    def get_status(self) -> dict[str, Any]:
         """
         Get the current status of the ticker.
 

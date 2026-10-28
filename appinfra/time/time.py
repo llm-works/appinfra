@@ -248,7 +248,7 @@ def time_it(f: Callable[[float], Any]) -> Generator[None, None, None]:
 
 @contextlib.contextmanager
 def time_it_lg(
-    lg_func: Callable, msg: str, extra: dict = {}
+    lg_func: Callable[..., Any], msg: str, extra: dict[str, Any] = {}
 ) -> Generator[None, None, None]:
     """
     Context manager for timing code execution with logging.

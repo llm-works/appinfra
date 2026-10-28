@@ -9,39 +9,41 @@
 
 import sys
 from pathlib import Path
+from typing import Any
 
 # Allow running from a source checkout without installing the package.
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
+from appinfra.app import App, Tool
 from appinfra.app.builder.app import AppBuilder
 from appinfra.app.builder.tool import ToolBuilder
 
 
-def status_handler(tool, **kwargs):
+def status_handler(tool: Tool, **kwargs: Any) -> int:
     """Handle status command."""
     tool.lg.info("running status...")
     return 0
 
 
-def first_handler(tool, **kwargs):
+def first_handler(tool: Tool, **kwargs: Any) -> int:
     """Handle first command."""
     tool.lg.info("running 1...")
     return 0
 
 
-def info_handler(tool, **kwargs):
+def info_handler(tool: Tool, **kwargs: Any) -> int:
     """Handle info command."""
     tool.lg.info("running 1 info...")
     return 0
 
 
-def second_handler(tool, **kwargs):
+def second_handler(tool: Tool, **kwargs: Any) -> int:
     """Handle second command."""
     tool.lg.info("running 2...")
     return 0
 
 
-def _create_tool_builders():
+def _create_tool_builders() -> list[ToolBuilder]:
     """Create and return all tool builders for the application."""
     first_tool = (
         ToolBuilder("first")
@@ -74,7 +76,7 @@ def _create_tool_builders():
     return [first_tool, status_tool, info_tool, second_tool]
 
 
-def create_application():
+def create_application() -> App:
     """Create the application using AppBuilder."""
     tools = _create_tool_builders()
 
@@ -97,7 +99,7 @@ def create_application():
     return app
 
 
-def main():
+def main() -> int:
     """Main function."""
     app = create_application()
 

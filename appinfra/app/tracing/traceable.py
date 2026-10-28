@@ -63,7 +63,7 @@ class Traceable:
             )
         self._parent = parent
 
-    def _check_trace_limits(self, name: str, _visited: set, _depth: int) -> None:
+    def _check_trace_limits(self, name: str, _visited: set[int], _depth: int) -> None:
         """Check recursion depth and circular reference limits."""
         # Check recursion depth limit
         if _depth >= MAX_TRACE_DEPTH:
@@ -93,7 +93,7 @@ class Traceable:
         return False, None
 
     def trace_attr(
-        self, name: str, _visited: set | None = None, _depth: int = 0
+        self, name: str, _visited: set[int] | None = None, _depth: int = 0
     ) -> Any:
         """
         Trace an attribute through the parent hierarchy with cycle detection.

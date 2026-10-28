@@ -54,7 +54,7 @@ class HelloWorldWithConfigApp(App):
         logger.info("Hello, World!")
 
         # Test different log levels to demonstrate level filtering
-        logger.trace("This is a trace message (TRACE level)")  # type: ignore[attr-defined]
+        logger.trace("This is a trace message (TRACE level)")
         logger.debug("This is a debug message (DEBUG level)")
         logger.info("This is an info message (INFO level)")
         logger.warning("This is a warning message (WARNING level)")

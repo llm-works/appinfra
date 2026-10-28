@@ -11,7 +11,7 @@ standalone builder behind this block.
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Self
+from typing import TYPE_CHECKING, Any, Self
 
 from ..hook import STANDARD_EVENTS, HookBuilder
 from .block import check_fields, close_on_error
@@ -42,7 +42,9 @@ class LifecycleConfigurer:
         """Bind the block to its parent builder."""
         self._app_builder = app_builder
 
-    def with_hook(self, event: str, callback: Callable, priority: int = 0) -> Self:
+    def with_hook(
+        self, event: str, callback: Callable[..., Any], priority: int = 0
+    ) -> Self:
         """Register ``callback`` on ``event``; higher priority runs first."""
         self._app_builder._hooks.register_hook(event, callback, priority=priority)
         return self
@@ -58,7 +60,7 @@ class LifecycleConfigurer:
         self._app_builder._close(self)
         return self._app_builder
 
-    def __call__(self, **hooks: Callable) -> AppBuilder:
+    def __call__(self, **hooks: Callable[..., Any]) -> AppBuilder:
         """Keyword form of the block: one callback per standard event.
 
         Only the events the framework fires are accepted, so a misspelled

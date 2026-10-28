@@ -39,7 +39,7 @@ from appinfra.log.config import LogConfig
 from appinfra.log.factory import LoggerFactory
 
 
-def demo_default_location_color():
+def demo_default_location_color() -> None:
     """Demonstrate default location color (BLACK)."""
     print("=== Default Location Color (BLACK) ===\n")
 
@@ -56,7 +56,7 @@ def demo_default_location_color():
     print()
 
 
-def demo_cyan_location_color():
+def demo_cyan_location_color() -> None:
     """Demonstrate CYAN location color."""
     print("=== CYAN Location Color ===\n")
 
@@ -74,7 +74,7 @@ def demo_cyan_location_color():
     print()
 
 
-def demo_gray_location_color():
+def demo_gray_location_color() -> None:
     """Demonstrate custom gray level for location color."""
     print("=== Gray Level Location Color ===\n")
 
@@ -96,7 +96,7 @@ def demo_gray_location_color():
     print()
 
 
-def demo_multiple_colors():
+def demo_multiple_colors() -> None:
     """Demonstrate multiple loggers with different location colors."""
     print("=== Multiple Loggers with Different Location Colors ===\n")
 
@@ -124,7 +124,7 @@ def demo_multiple_colors():
     print()
 
 
-def demo_config_dict():
+def demo_config_dict() -> None:
     """Demonstrate configuration via LogConfig.from_params()."""
     print("=== Configuration via LogConfig ===\n")
 
@@ -144,7 +144,7 @@ def demo_config_dict():
     print()
 
 
-def _demo_production_logger():
+def _demo_production_logger() -> None:
     """Demo production logger with subtle gray."""
     print("1. Production Logger (subtle gray for locations):")
     prod_logger = (
@@ -158,7 +158,7 @@ def _demo_production_logger():
     prod_logger.info("Production log with subtle gray locations")
 
 
-def _demo_dev_logger():
+def _demo_dev_logger() -> None:
     """Demo development logger with bright cyan."""
     print("\n2. Development Logger (bright cyan for visibility):")
     dev_logger = (
@@ -172,7 +172,7 @@ def _demo_dev_logger():
     dev_logger.debug("Debug log with cyan locations for easy identification")
 
 
-def _demo_error_logger():
+def _demo_error_logger() -> None:
     """Demo error logger with default black."""
     print("\n3. Error Logger (default black, focus on error message):")
     error_logger = (
@@ -186,7 +186,7 @@ def _demo_error_logger():
     print()
 
 
-def demo_practical_usage():
+def demo_practical_usage() -> None:
     """Demonstrate practical usage scenarios."""
     print("=== Practical Usage Scenarios ===\n")
     _demo_production_logger()
@@ -194,7 +194,7 @@ def demo_practical_usage():
     _demo_error_logger()
 
 
-def _run_all_location_color_demos():
+def _run_all_location_color_demos() -> None:
     """Run all location color demos."""
     demo_default_location_color()
     demo_cyan_location_color()
@@ -204,7 +204,7 @@ def _run_all_location_color_demos():
     demo_practical_usage()
 
 
-def _print_location_color_summary():
+def _print_location_color_summary() -> None:
     """Print summary of location color features."""
     print("=" * 60)
     print("Demo Complete!")
@@ -219,7 +219,7 @@ def _print_location_color_summary():
     print("- YAML config supports color names: 'cyan', 'gray-12', etc.\n")
 
 
-def main():
+def main() -> int:
     """Main function to run location color demos."""
     print("=" * 60)
     print("Location Color Configuration Example")

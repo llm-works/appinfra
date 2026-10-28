@@ -136,7 +136,9 @@ class RichHelpFormatter(argparse.HelpFormatter):
         self._print_positionals(console, positionals)
         self._print_optionals(console, optionals)
 
-    def _split_actions(self) -> tuple[list, list]:
+    def _split_actions(
+        self,
+    ) -> tuple[list[argparse.Action], list[argparse.Action]]:
         """Separate positional and optional arguments."""
         positionals = []
         optionals = []
@@ -147,7 +149,9 @@ class RichHelpFormatter(argparse.HelpFormatter):
                 positionals.append(action)
         return positionals, optionals
 
-    def _print_positionals(self, console: Any, positionals: list) -> None:
+    def _print_positionals(
+        self, console: Any, positionals: list[argparse.Action]
+    ) -> None:
         """Print positional arguments table."""
         if not positionals:
             return
@@ -162,7 +166,7 @@ class RichHelpFormatter(argparse.HelpFormatter):
         console.print(table)
         console.print()
 
-    def _print_optionals(self, console: Any, optionals: list) -> None:
+    def _print_optionals(self, console: Any, optionals: list[argparse.Action]) -> None:
         """Print optional arguments table."""
         if not optionals:
             return

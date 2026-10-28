@@ -19,8 +19,11 @@ Pattern: Build app with AppBuilder (infrastructure + class-based tools),
 then define simple tools via @app.tool() decorators on the built app.
 """
 
+import argparse
 import sys
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 # Allow running from a source checkout without installing the package.
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
@@ -44,30 +47,30 @@ class ServerTool(Tool):
     - Inheritance
     """
 
-    def _create_config(self):
+    def _create_config(self) -> ToolConfig:
         return ToolConfig(
             name="server",
             help_text="Run HTTP server",
             description="Start the application HTTP server with full routing",
         )
 
-    def add_args(self, parser):
+    def add_args(self, parser: argparse.ArgumentParser) -> None:
         parser.add_argument("--port", type=int, help="Port to listen on")
         parser.add_argument("--workers", type=int, default=4, help="Number of workers")
         parser.add_argument(
             "--reload", action="store_true", help="Auto-reload on changes"
         )
 
-    def setup(self, **kwargs):
+    def setup(self, **kwargs: Any) -> None:
         """Initialize server components."""
         # State first: super().setup() creates the logger and calls configure().
-        self.routes = {}
-        self.middleware = []
+        self.routes: dict[str, Callable[[Any], dict[str, Any]]] = {}
+        self.middleware: list[Callable[[Any], None]] = []
         super().setup(**kwargs)
         self.lg.info("Initializing server components...")
         self.load_routes()
 
-    def configure(self):
+    def configure(self) -> None:
         """Configure server after initialization."""
         self.lg.info("Configuring server...")
 
@@ -81,31 +84,31 @@ class ServerTool(Tool):
         # More complex configuration
         self.setup_middleware()
 
-    def load_routes(self):
+    def load_routes(self) -> None:
         """Load application routes."""
         self.routes["/health"] = self.handle_health
         self.routes["/api/status"] = self.handle_status
         self.lg.info(f"Loaded {len(self.routes)} routes")
 
-    def setup_middleware(self):
+    def setup_middleware(self) -> None:
         """Setup middleware pipeline."""
         # Add middleware
         self.middleware.append(self.log_request)
         self.lg.info(f"Configured {len(self.middleware)} middleware")
 
-    def log_request(self, req):
+    def log_request(self, req: Any) -> None:
         """Middleware to log requests."""
         self.lg.info(f"Request: {req}")
 
-    def handle_health(self, req):
+    def handle_health(self, req: Any) -> dict[str, Any]:
         """Health check endpoint."""
         return {"status": "ok"}
 
-    def handle_status(self, req):
+    def handle_status(self, req: Any) -> dict[str, Any]:
         """Status endpoint."""
         return {"uptime": 123, "requests": 456}
 
-    def run(self, **kwargs):
+    def run(self, **kwargs: Any) -> int:
         """Run the HTTP server."""
         self.lg.info(f"Starting server on {self.host}:{self.port}")
         self.lg.info(f"Workers: {self.args.workers}")
@@ -123,39 +126,39 @@ class ServerTool(Tool):
 class ProcessorTool(Tool):
     """Data processor with complex pipeline."""
 
-    def _create_config(self):
+    def _create_config(self) -> ToolConfig:
         return ToolConfig(name="process", help_text="Process data through pipeline")
 
-    def add_args(self, parser):
+    def add_args(self, parser: argparse.ArgumentParser) -> None:
         parser.add_argument("--input", required=True)
         parser.add_argument("--output", required=True)
         parser.add_argument("--pipeline", nargs="+", required=True)
 
-    def setup(self, **kwargs):
+    def setup(self, **kwargs: Any) -> None:
         super().setup(**kwargs)  # creates the logger; must come first
         self.lg.info("Setting up processing pipeline...")
-        self.processors = {}
+        self.processors: dict[str, Callable[[Any], Any]] = {}
         self.load_processors()
 
-    def load_processors(self):
+    def load_processors(self) -> None:
         """Load available processors."""
         self.processors["filter"] = self.filter_processor
         self.processors["transform"] = self.transform_processor
         self.processors["aggregate"] = self.aggregate_processor
 
-    def filter_processor(self, data):
+    def filter_processor(self, data: Any) -> Any:
         """Filter processor."""
         return data  # Filter logic
 
-    def transform_processor(self, data):
+    def transform_processor(self, data: Any) -> Any:
         """Transform processor."""
         return data  # Transform logic
 
-    def aggregate_processor(self, data):
+    def aggregate_processor(self, data: Any) -> Any:
         """Aggregate processor."""
         return data  # Aggregate logic
 
-    def run(self, **kwargs):
+    def run(self, **kwargs: Any) -> int:
         """Run the processing pipeline."""
         self.lg.info(f"Processing {self.args.input} -> {self.args.output}")
         self.lg.info(f"Pipeline: {' -> '.join(self.args.pipeline)}")
@@ -173,11 +176,11 @@ class ProcessorTool(Tool):
         self.lg.info("Processing complete")
         return 0
 
-    def load_data(self, path):
+    def load_data(self, path: str) -> dict[str, Any]:
         """Load data from file."""
         return {}  # Load logic
 
-    def save_data(self, data, path):
+    def save_data(self, data: Any, path: str) -> None:
         """Save data to file."""
         pass  # Save logic
 
@@ -206,7 +209,7 @@ app = (
 @app.tool(name="analyze", help="Analyze data quickly")
 @app.argument("--file", required=True)
 @app.argument("--format", choices=["json", "csv"])
-def analyze(self):
+def analyze(self: Tool) -> int:
     """Quick data analysis tool."""
     self.lg.info(f"Analyzing {self.args.file} as {self.args.format}")
     # Simple analysis logic
@@ -216,7 +219,7 @@ def analyze(self):
 @app.tool(name="export", help="Export results")
 @app.argument("--output", required=True)
 @app.argument("--format", choices=["json", "csv", "xml"], default="json")
-def export(self):
+def export(self: Tool) -> int:
     """Export data to file."""
     self.lg.info(f"Exporting to {self.args.output} as {self.args.format}")
     # Simple export logic

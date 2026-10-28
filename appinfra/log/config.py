@@ -97,7 +97,9 @@ class LogConfig:
         )
 
     @staticmethod
-    def _navigate_to_section(config_dict: dict, section: str) -> dict:
+    def _navigate_to_section(
+        config_dict: dict[str, Any], section: str
+    ) -> dict[str, Any]:
         """Navigate to specified section in config dict."""
         section_parts = section.split(".")
         current = config_dict
@@ -126,7 +128,7 @@ class LogConfig:
         return location_color
 
     @classmethod
-    def from_config(cls, config_dict: dict, section: str = "logging") -> Self:
+    def from_config(cls, config_dict: dict[str, Any], section: str = "logging") -> Self:
         """
         Create LogConfig from a configuration dictionary.
 

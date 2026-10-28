@@ -952,11 +952,11 @@ class TestInquirerSelect:
         """Test returns selected value."""
         from appinfra.ui.prompts import _inquirer_select
 
-        mock_inq = MagicMock()
-        mock_inq.select.return_value.execute.return_value = "choice_b"
+        mock_list_prompt = MagicMock()
+        mock_list_prompt.return_value.execute.return_value = "choice_b"
 
         with (
-            patch.object(prompts, "inq", mock_inq),
+            patch.object(prompts, "ListPrompt", mock_list_prompt),
             patch.object(prompts, "InquirerPyStyle", MagicMock()),
         ):
             result = _inquirer_select(
@@ -968,11 +968,11 @@ class TestInquirerSelect:
         """Test returns None when cancelled."""
         from appinfra.ui.prompts import _inquirer_select
 
-        mock_inq = MagicMock()
-        mock_inq.select.return_value.execute.return_value = None
+        mock_list_prompt = MagicMock()
+        mock_list_prompt.return_value.execute.return_value = None
 
         with (
-            patch.object(prompts, "inq", mock_inq),
+            patch.object(prompts, "ListPrompt", mock_list_prompt),
             patch.object(prompts, "InquirerPyStyle", MagicMock()),
         ):
             result = _inquirer_select(

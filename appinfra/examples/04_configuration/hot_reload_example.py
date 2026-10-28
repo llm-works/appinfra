@@ -39,6 +39,7 @@ from typing import Any
 # Allow running from a source checkout without installing the package.
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
+from appinfra.app import App
 from appinfra.app.builder import AppBuilder
 from appinfra.app.tools import Tool, ToolConfig
 
@@ -156,7 +157,7 @@ class StatusCommand(Tool):
             return 0
 
 
-def create_app():
+def create_app() -> App:
     """Create app with hot-reload enabled."""
     return (
         AppBuilder("hot-reload-demo")

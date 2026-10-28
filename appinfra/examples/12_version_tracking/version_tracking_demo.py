@@ -27,6 +27,7 @@ Run with:
 
 import sys
 from pathlib import Path
+from typing import Any
 
 # Allow running from a source checkout without installing the package.
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
@@ -48,7 +49,7 @@ class InfoTool(Tool):
         super().__init__(config=config)
         self._tracker = tracker
 
-    def run(self, **kwargs) -> int:
+    def run(self, **kwargs: Any) -> int:
         """Display version info."""
         self.lg.info("Tracked Package Information")
         self.lg.info("-" * 40)
@@ -79,7 +80,7 @@ class ListTool(Tool):
         super().__init__(config=config)
         self._tracker = tracker
 
-    def run(self, **kwargs) -> int:
+    def run(self, **kwargs: Any) -> int:
         """List packages."""
         print("\nTracked Packages:")
         print("-" * 60)

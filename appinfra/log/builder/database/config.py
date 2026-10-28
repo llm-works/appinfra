@@ -37,7 +37,7 @@ class DatabaseHandlerConfig(HandlerConfig):
         db_interface: Any,
         level: str | int | None = None,
         columns: dict[str, str] | None = None,
-        data_mapper: Callable | None = None,
+        data_mapper: Callable[..., Any] | None = None,
         batch_size: int = 1,
         flush_interval: float = 0.0,
         # Critical flush parameters

@@ -260,6 +260,6 @@ except ImportError:
     class DatabaseConfig:  # type: ignore[no-redef]
         """Dummy database config class."""
 
-    def validate_config(config_dict: dict[str, Any]) -> dict[str, Any]:  # type: ignore[no-redef,misc]
+    def validate_config(config_dict: dict[str, Any]) -> dict[str, Any]:  # type: ignore[misc]
         """No-op validation when pydantic not installed."""
         return config_dict

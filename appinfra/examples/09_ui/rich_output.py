@@ -25,7 +25,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from appinfra.ui import RICH_AVAILABLE, Panel, Progress, Table, console
 
 
-def demo_styled_text():
+def demo_styled_text() -> None:
     """Demonstrate styled text output."""
     console.rule("Styled Text")
 
@@ -45,7 +45,7 @@ def demo_styled_text():
     console.print()
 
 
-def demo_tables():
+def demo_tables() -> None:
     """Demonstrate table output."""
     console.rule("Tables")
 
@@ -65,7 +65,7 @@ def demo_tables():
     console.print()
 
 
-def demo_panels():
+def demo_panels() -> None:
     """Demonstrate panel output."""
     console.rule("Panels")
 
@@ -88,7 +88,7 @@ def demo_panels():
     console.print()
 
 
-def demo_progress():
+def demo_progress() -> None:
     """Demonstrate progress bar."""
     console.rule("Progress Bars")
 
@@ -106,7 +106,7 @@ def demo_progress():
     console.print()
 
 
-def demo_status():
+def demo_status() -> None:
     """Demonstrate status spinner."""
     console.rule("Status Spinner")
 
@@ -122,7 +122,7 @@ def demo_status():
     console.print()
 
 
-def main():
+def main() -> None:
     """Run all demos."""
     console.print()
     console.print("[bold blue]Rich Terminal Output Demo[/bold blue]")

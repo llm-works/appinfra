@@ -9,16 +9,18 @@ Debug tables persist when tests fail (for debugging) but are cleaned up when tes
 """
 
 import uuid
-from typing import cast
+from typing import Any, cast
 
 import sqlalchemy
+import sqlalchemy.orm
 
 from appinfra.db.pg import PG
+from appinfra.log import Logger
 
 # Helper functions for PGTestHelperCore
 
 
-def _get_debug_tables_to_cleanup(session) -> list[str]:
+def _get_debug_tables_to_cleanup(session: sqlalchemy.orm.Session) -> list[str]:
     """Get list of debug tables that need cleanup."""
     result = session.execute(
         sqlalchemy.text(
@@ -34,7 +36,9 @@ def _get_debug_tables_to_cleanup(session) -> list[str]:
     return [row[0] for row in result.fetchall()]
 
 
-def _drop_debug_tables(session, tables_to_drop: list[str], lg) -> None:
+def _drop_debug_tables(
+    session: sqlalchemy.orm.Session, tables_to_drop: list[str], lg: Logger
+) -> None:
     """Drop a list of debug tables."""
     for table_name in tables_to_drop:
         try:
@@ -57,7 +61,7 @@ def _get_default_table_schema(table_name: str) -> str:
     """
 
 
-def _check_table_exists(session, table_name: str) -> bool:
+def _check_table_exists(session: sqlalchemy.orm.Session, table_name: str) -> bool:
     """Check if a table exists in the public schema."""
     result = session.execute(
         sqlalchemy.text(
@@ -68,10 +72,12 @@ def _check_table_exists(session, table_name: str) -> bool:
         ),
         {"table_name": table_name},
     )
-    return cast(bool, result.fetchone()[0] > 0)
+    return cast(int, result.scalar_one()) > 0
 
 
-def _get_table_columns(session, table_name: str) -> list[dict]:
+def _get_table_columns(
+    session: sqlalchemy.orm.Session, table_name: str
+) -> list[dict[str, Any]]:
     """Get table column information."""
     columns_result = session.execute(
         sqlalchemy.text(
@@ -87,7 +93,9 @@ def _get_table_columns(session, table_name: str) -> list[dict]:
     return [dict(row) for row in columns_result.fetchall()]
 
 
-def _get_table_contents(session, table_name: str, columns: list[dict]) -> list[dict]:
+def _get_table_contents(
+    session: sqlalchemy.orm.Session, table_name: str, columns: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
     """Get table contents as list of dictionaries."""
     contents_result = session.execute(sqlalchemy.text(f"SELECT * FROM {table_name}"))
     contents = []
@@ -109,7 +117,7 @@ class PGTestHelperCore:
     - Provides clear debug messages and table inspection guidance
     """
 
-    def __init__(self, pg_instance: PG):
+    def __init__(self, pg_instance: PG) -> None:
         """
         Initialize the test helper.
 
@@ -120,7 +128,7 @@ class PGTestHelperCore:
         self.lg = pg_instance._lg  # Use the logger from the PG instance
         self._cleanup_previous_tables()
 
-    def _cleanup_previous_tables(self):
+    def _cleanup_previous_tables(self) -> None:
         """Clean up any leftover debug tables from previous test runs."""
         try:
             with self.pg.session() as cleanup_session:
@@ -162,7 +170,7 @@ class PGTestHelperCore:
 
     def cleanup_debug_table(
         self, session: sqlalchemy.orm.Session, table_name: str, cleanup_needed: bool
-    ):
+    ) -> None:
         """
         Clean up debug table if test passed.
 
@@ -258,7 +266,7 @@ class PGTestHelperCore:
             self.lg.warning("could not list debug tables", extra={"error": str(e)})
             return []
 
-    def inspect_debug_table(self, table_name: str) -> dict | None:
+    def inspect_debug_table(self, table_name: str) -> dict[str, Any] | None:
         """
         Inspect a debug table and return its contents.
 
@@ -290,6 +298,6 @@ class PGTestHelperCore:
             )
             return None
 
-    def cleanup_all_debug_tables(self):
+    def cleanup_all_debug_tables(self) -> None:
         """Manually clean up all debug tables (useful for cleanup scripts)."""
         self._cleanup_previous_tables()

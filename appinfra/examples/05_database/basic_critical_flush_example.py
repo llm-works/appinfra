@@ -18,6 +18,7 @@ import logging
 import sys
 import time
 from pathlib import Path
+from typing import Any, Self
 from unittest.mock import Mock, patch
 
 # Allow running from a source checkout without installing the package.
@@ -30,11 +31,11 @@ from appinfra.log.config import LogConfig
 class SimpleDatabaseInterface:
     """Simple mock database interface for demonstration."""
 
-    def __init__(self):
-        self.operations = []
+    def __init__(self) -> None:
+        self.operations: list[str] = []
         self.should_fail = False
 
-    def session(self):
+    def session(self) -> "MockSession":
         """Return a mock session."""
         return MockSession(self)
 
@@ -42,16 +43,16 @@ class SimpleDatabaseInterface:
 class MockSession:
     """Mock database session."""
 
-    def __init__(self, db_interface):
+    def __init__(self, db_interface: SimpleDatabaseInterface) -> None:
         self.db_interface = db_interface
 
-    def __enter__(self):
+    def __enter__(self) -> Self:
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         pass
 
-    def execute(self, sql, params=None):
+    def execute(self, sql: Any, params: Any = None) -> Mock:
         """Mock execute method."""
         if self.db_interface.should_fail:
             raise Exception("Database connection lost")
@@ -60,7 +61,7 @@ class MockSession:
         print("    💾 Database: Executing SQL (immediate flush)")
         return Mock()
 
-    def commit(self):
+    def commit(self) -> None:
         """Mock commit method."""
         if self.db_interface.should_fail:
             raise Exception("Database commit failed")
@@ -69,7 +70,12 @@ class MockSession:
         print("    ✅ Database: Committed transaction")
 
 
-def create_log_record(level, message, exc_info=None, extra=None):
+def create_log_record(
+    level: int,
+    message: str,
+    exc_info: Any = None,
+    extra: dict[str, Any] | None = None,
+) -> logging.LogRecord:
     """Create a proper log record."""
     logger = logging.getLogger("demo_logger")
     logger.setLevel(logging.DEBUG)
@@ -84,15 +90,13 @@ def create_log_record(level, message, exc_info=None, extra=None):
         exc_info=exc_info,
     )
 
-    if extra:
-        record.extra = extra
-    else:
-        record.extra = {}
-
+    setattr(record, "extra", extra or {})
     return record
 
 
-def _demo_normal_logging(handler, db_interface):
+def _demo_normal_logging(
+    handler: DatabaseHandler, db_interface: SimpleDatabaseInterface
+) -> None:
     """Demonstrate normal batched logging."""
     print("📝 1. Normal Logging (Batched)")
     print("   Sending 5 normal log messages...")
@@ -107,7 +111,9 @@ def _demo_normal_logging(handler, db_interface):
     print()
 
 
-def _demo_critical_exception(handler, db_interface):
+def _demo_critical_exception(
+    handler: DatabaseHandler, db_interface: SimpleDatabaseInterface
+) -> None:
     """Demonstrate critical flush with exception."""
     print("🚨 2. Critical Error with Exception (Immediate Flush)")
     print("   Sending critical error with exception...")
@@ -133,7 +139,9 @@ def _demo_critical_exception(handler, db_interface):
     print()
 
 
-def _demo_critical_trigger_field(handler, db_interface):
+def _demo_critical_trigger_field(
+    handler: DatabaseHandler, db_interface: SimpleDatabaseInterface
+) -> None:
     """Demonstrate critical flush with trigger field."""
     print("🚨 3. Critical Error with Trigger Field (Immediate Flush)")
     print("   Sending critical warning with trigger field...")
@@ -158,7 +166,9 @@ def _demo_critical_trigger_field(handler, db_interface):
     print()
 
 
-def _demo_database_failure_fallback(handler, db_interface):
+def _demo_database_failure_fallback(
+    handler: DatabaseHandler, db_interface: SimpleDatabaseInterface
+) -> None:
     """Demonstrate fallback to console on database failure."""
     print("🔄 4. Database Failure Fallback")
     print("   Simulating database failure...")
@@ -182,7 +192,7 @@ def _demo_database_failure_fallback(handler, db_interface):
     print()
 
 
-def _print_summary(db_interface):
+def _print_summary(db_interface: SimpleDatabaseInterface) -> None:
     """Print demonstration summary."""
     print("📊 Summary")
     print("=" * 50)
@@ -198,7 +208,9 @@ def _print_summary(db_interface):
     print("✅ Critical flush ensures important errors survive crashes")
 
 
-def _setup_handler():
+def _setup_handler() -> tuple[
+    SimpleDatabaseInterface, DatabaseHandler, DatabaseHandlerConfig
+]:
     """Setup database handler and configuration."""
     db_interface = SimpleDatabaseInterface()
     handler_config = DatabaseHandlerConfig(
@@ -223,7 +235,7 @@ def _setup_handler():
     return db_interface, handler, handler_config
 
 
-def _print_config(handler_config):
+def _print_config(handler_config: DatabaseHandlerConfig) -> None:
     """Print handler configuration."""
     print("📋 Configuration:")
     print(f"   - Batch size: {handler_config.batch_size}")
@@ -234,7 +246,7 @@ def _print_config(handler_config):
     print()
 
 
-def demonstrate_critical_flush():
+def demonstrate_critical_flush() -> None:
     """Demonstrate critical flush functionality."""
     print("🚀 Critical Flush Demonstration")
     print("=" * 50)
@@ -249,7 +261,7 @@ def demonstrate_critical_flush():
     _print_summary(db_interface)
 
 
-def main():
+def main() -> int:
     """Main entry point."""
     try:
         demonstrate_critical_flush()

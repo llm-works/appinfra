@@ -159,7 +159,7 @@ class MPQueueHandler(logging.Handler):
             return {self._sanitize_for_pickle(item, seen) for item in obj}
         return obj
 
-    def _sanitize_dict(self, obj: dict, seen: set[int]) -> dict:
+    def _sanitize_dict(self, obj: dict[Any, Any], seen: set[int]) -> dict[Any, Any]:
         """Sanitize a dict, handling the special 'exception' key rename."""
         result = {}
         for key, value in obj.items():

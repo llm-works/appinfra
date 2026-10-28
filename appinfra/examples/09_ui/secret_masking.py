@@ -50,7 +50,7 @@ def _truncate(text: str, max_len: int = 40) -> str:
     return text[:max_len] + "..." if len(text) > max_len else text
 
 
-def demo_basic_masking():
+def demo_basic_masking() -> None:
     """Demonstrate basic secret masking."""
     console.rule("Basic Secret Masking")
     masker = SecretMasker()
@@ -68,7 +68,7 @@ def demo_basic_masking():
     console.print()
 
 
-def demo_known_secrets():
+def demo_known_secrets() -> None:
     """Demonstrate known secret registration."""
     console.rule("Known Secrets")
 
@@ -97,7 +97,7 @@ def demo_known_secrets():
         console.print()
 
 
-def demo_custom_patterns():
+def demo_custom_patterns() -> None:
     """Demonstrate custom pattern registration."""
     console.rule("Custom Patterns")
 
@@ -134,7 +134,7 @@ def _setup_secure_logger() -> logging.Logger:
     return logger
 
 
-def demo_logging_integration():
+def demo_logging_integration() -> None:
     """Demonstrate logging filter integration."""
     console.rule("Logging Integration")
     logger = _setup_secure_logger()
@@ -150,7 +150,7 @@ def demo_logging_integration():
     console.print()
 
 
-def demo_supported_patterns():
+def demo_supported_patterns() -> None:
     """Show all supported secret patterns."""
     console.rule("Supported Secret Patterns")
 
@@ -167,7 +167,7 @@ def demo_supported_patterns():
     console.print()
 
 
-def demo_is_secret():
+def demo_is_secret() -> None:
     """Demonstrate secret detection without masking."""
     console.rule("Secret Detection")
 
@@ -190,7 +190,7 @@ def demo_is_secret():
     console.print()
 
 
-def main():
+def main() -> None:
     """Run all demos."""
     console.print()
     console.print("[bold blue]Secret Masking Demo[/bold blue]")

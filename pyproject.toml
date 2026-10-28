@@ -171,9 +171,11 @@ line-ending = "auto"
 
 [tool.mypy]
 python_version = "3.11"
-warn_return_any = true
-warn_unused_configs = true
-disallow_untyped_defs = true
+strict = true
+# Calls into methods the library stubs leave unannotated: Loader inherits dispose, resolve and
+# add_multi_constructor from yaml.SafeLoader; sqlalchemy.dialects.postgresql.dialect (the
+# psycopg2 dialect) has an unannotated __init__.
+untyped_calls_exclude = ["appinfra.yaml.loader.Loader", "sqlalchemy.dialects.postgresql"]
 exclude = ["tests/", "scripts/", ".build/", ".dist/", ".cover/", ".htmlcov/", ".site/"]
 
 # No usable type information. sqlalchemy_utils has no py.typed, and its only stub package

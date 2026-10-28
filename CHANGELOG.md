@@ -36,6 +36,8 @@ earlier: pre-release builds (0.13.1.devN) would not satisfy it. -->
   coverage, interrogate, pylint) in every project, not only those its own dependencies list.
 - The `check` extra requires ruff 0.16 or later, the first release whose `ruff format --check`
   also checks the Python code blocks in Markdown files.
+- The package type-checks under `mypy --strict`, which `make check` enforces. `App.tool` and
+  `App.argument` return precisely typed decorators.
 - **Breaking:** `appinfra.cli.tools.code_quality`, `check_functions` and `check_spdx` moved to
   `appinfra.cli.tools.cq` (`tool`, `functions`, `spdx`).
 - **Breaking:** `GitRuntimeSource()` no longer takes `check_dirty`; the parameter had no effect.

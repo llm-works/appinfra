@@ -180,7 +180,7 @@ def _load_include_file(
         result = _load_with_context(inner, f)
 
     if ctx.track_sources:
-        return result  # type: ignore[return-value]
+        return result
     return result, {}
 
 

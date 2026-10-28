@@ -19,10 +19,10 @@ from .json import JSONLoggingBuilder
 # Helper for quick_custom_database_logger
 
 
-def _create_data_mapper_from_columns(columns: dict) -> Any:
+def _create_data_mapper_from_columns(columns: dict[str, str]) -> Any:
     """Create data mapper function from column definitions."""
 
-    def data_mapper(record: Any) -> dict:
+    def data_mapper(record: Any) -> dict[str, Any]:
         from datetime import datetime
 
         data = {}
@@ -326,7 +326,7 @@ def quick_custom_database_logger(
     db_interface: Any,
     table_name: str,
     config: dict[str, Any] | None = None,
-    columns: dict | None = None,
+    columns: dict[str, str] | None = None,
 ) -> Logger:
     """
     Create a quick custom database logger.

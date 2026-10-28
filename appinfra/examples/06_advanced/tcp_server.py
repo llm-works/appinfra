@@ -6,77 +6,44 @@
 # ci-stop: 4
 # ci-requires: port:25444
 
+import http.server
 import json
 import sys
+import threading
 import time
 from pathlib import Path
+from typing import Any
 
 # Allow running from a source checkout without installing the package.
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 import appinfra
-from appinfra.log import LogConfig, LoggerFactory
+from appinfra.log import LogConfig, Logger, LoggerFactory
 
 
-class Syn(appinfra.time.TickerHandler, appinfra.net.HTTPRequestHandler):
-    """Syncer that implements TickerHandler and HTTPRequestHandler."""
+class Syn(appinfra.time.TickerHandler):
+    """Ticker handler whose state TCPServer serves over HTTP (it delegates do_GET here)."""
 
-    def __init__(self, lg):
+    def __init__(self, lg: Logger) -> None:
         self._lg = lg
         self._last_t = time.monotonic()
-        self._lock = None
-        self._msg = None
-        self._ticker = None
+        # Shared between the ticker thread and the server's request handling
+        self._lock = threading.Lock()
+        self._msg = {"last_t": self._last_t}
 
-    def start(self):
-        """Start the ticker - required by TCPServer interface."""
-        self._lg.info("starting syn ticker...")
-        # Initialize local state for single-process mode
-        if self._lock is None:
-            import threading
-
-            self._lock = threading.Lock()
-            self._msg = {"last_t": time.monotonic()}
-
-        # Create and start the ticker with this handler
-        self._ticker = appinfra.time.Ticker(self._lg, self, secs=1)
-        self._ticker.start()
-        self._lg.info("syn ticker started")
-
-    def ticker_start(self, manager=None):
-        """Called when ticker starts in multiprocessing mode."""
+    def ticker_start(self, *args: Any, **kwargs: Any) -> None:
+        """Called when the ticker starts."""
         self._lg.info("start", extra={"after": appinfra.time.since(self._last_t)})
         self._last_t = time.monotonic()
 
-        if manager:
-            # Multiprocessing mode
-            self._lock = manager.Lock()
-            self._msg = manager.dict()
-        else:
-            # Single-process mode - use threading
-            import threading
-
-            if self._lock is None:
-                self._lock = threading.Lock()
-                self._msg = {"last_t": self._last_t}
-
-    def ticker_tick(self):
+    def ticker_tick(self) -> None:
         self._lg.info("tick", extra={"after": appinfra.time.since(self._last_t)})
         self._last_t = time.monotonic()
         with self._lock:
             self._msg.update({"last_t": self._last_t})
 
-    def do_GET(self, instance):
+    def do_GET(self, instance: http.server.BaseHTTPRequestHandler) -> None:
         """Handle GET requests - return current shared state."""
-        if self._lock is None or self._msg is None:
-            instance.send_response(500)
-            instance.send_header("Content-type", "application/json")
-            instance.end_headers()
-            instance.wfile.write(
-                json.dumps({"error": "Server not initialized"}).encode()
-            )
-            return
-
         with self._lock:
             try:
                 instance.send_response(200)
@@ -93,12 +60,15 @@ class Syn(appinfra.time.TickerHandler, appinfra.net.HTTPRequestHandler):
                 )
 
 
-def main():
+def main() -> int:
     config = LogConfig.from_params("info")
     lg = LoggerFactory.create_root(config)
 
-    # Create and run the server
-    server = appinfra.net.TCPServer(lg, 25444, Syn(lg))
+    # The ticker updates the state in a background thread; the server serves it
+    syn = Syn(lg)
+    ticker = appinfra.time.Ticker(lg, syn, secs=1)
+    threading.Thread(target=ticker.run, daemon=True).start()
+    server = appinfra.net.TCPServer(lg, 25444, syn)
     lg.info("starting tcp server...")
 
     try:

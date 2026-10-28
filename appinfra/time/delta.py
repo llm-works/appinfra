@@ -360,7 +360,7 @@ def delta_str(secs: float | None, precise: bool = False) -> str:
     return _format_duration_components(days, hours, minutes, isecs, fractional, precise)
 
 
-def _convert_unit_to_seconds(value_str: str, unit: str, seen_units: set) -> float:
+def _convert_unit_to_seconds(value_str: str, unit: str, seen_units: set[str]) -> float:
     """
     Convert a duration value with unit to seconds.
 

@@ -29,13 +29,13 @@ except ImportError:
 
 # Check for InquirerPy availability
 try:
-    from InquirerPy import inquirer as inq
+    from InquirerPy.prompts.list import ListPrompt
     from InquirerPy.utils import InquirerPyStyle
 
     INQUIRER_AVAILABLE = True
 except ImportError:
     INQUIRER_AVAILABLE = False
-    inq = None  # type: ignore[assignment]
+    ListPrompt = None  # type: ignore[assignment, misc]
     InquirerPyStyle = None  # type: ignore[assignment, misc]
 
 # Backward compatibility alias
@@ -227,7 +227,9 @@ def password(message: str, *, confirm: bool = False) -> str:
     return _password_getpass(message, confirm)
 
 
-def _normalize_choices(choices: Sequence[str] | Sequence[dict[str, Any]]) -> list[dict]:
+def _normalize_choices(
+    choices: Sequence[str] | Sequence[dict[str, Any]],
+) -> list[dict[str, Any]]:
     """Normalize choices to list of dicts with name and value."""
     choice_list = []
     for c in choices:
@@ -239,7 +241,7 @@ def _normalize_choices(choices: Sequence[str] | Sequence[dict[str, Any]]) -> lis
 
 
 def _select_questionary(
-    message: str, choice_list: list[dict], default: str | None
+    message: str, choice_list: list[dict[str, Any]], default: str | None
 ) -> str:
     """Use questionary for selection if available."""
     result = questionary.select(
@@ -258,7 +260,9 @@ def _select_questionary(
     return str(result)
 
 
-def _select_fallback(message: str, choice_list: list[dict], default: str | None) -> str:
+def _select_fallback(
+    message: str, choice_list: list[dict[str, Any]], default: str | None
+) -> str:
     """Fallback to numbered selection without questionary."""
     print(message)
     for i, c in enumerate(choice_list, 1):
@@ -319,7 +323,7 @@ def select(
 
 
 def _multiselect_questionary(
-    message: str, choice_list: list[dict], default: Sequence[str] | None
+    message: str, choice_list: list[dict[str, Any]], default: Sequence[str] | None
 ) -> list[str]:
     """Use questionary for multiselect if available."""
     q_choices = []
@@ -342,7 +346,7 @@ def _multiselect_questionary(
 
 
 def _multiselect_fallback(
-    message: str, choice_list: list[dict], default: Sequence[str] | None
+    message: str, choice_list: list[dict[str, Any]], default: Sequence[str] | None
 ) -> list[str]:
     """Fallback to comma-separated input without questionary."""
     print(message)
@@ -531,7 +535,7 @@ def _inquirer_select(
         choices[default_index] if 0 <= default_index < len(choices) else None
     )
 
-    prompt = inq.select(
+    prompt = ListPrompt(
         message=message,
         choices=choices,
         default=default_value,

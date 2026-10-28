@@ -28,4 +28,4 @@ def register(linter: PyLinter) -> None:
             "astroid.builder.AstroidBuilder.delayed_assattr is gone; "
             "cq dup's pylint plugin needs updating"
         )
-    AstroidBuilder.delayed_assattr = _skip_assattr  # type: ignore[method-assign]
+    AstroidBuilder.delayed_assattr = _skip_assattr

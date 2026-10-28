@@ -29,6 +29,7 @@ Run:
 import sys
 import time
 from pathlib import Path
+from typing import Any
 
 # Allow running from a source checkout without installing the package.
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
@@ -47,7 +48,7 @@ class SpinnerDemo(Tool):
             help_text="Spinner mode demo - unknown duration with periodic logs",
         )
 
-    def run(self, **kwargs) -> int:
+    def run(self, **kwargs: Any) -> int:
         self.lg.info("Starting spinner demo...")
 
         # Spinner mode - no total specified
@@ -71,7 +72,7 @@ class ProgressDemo(Tool):
             help_text="Progress bar mode demo - known total with periodic logs",
         )
 
-    def run(self, **kwargs) -> int:
+    def run(self, **kwargs: Any) -> int:
         self.lg.info("Starting progress bar demo...")
 
         total_items = 20
@@ -98,7 +99,7 @@ class SwitchDemo(Tool):
             help_text="Mode switching demo - spinner to progress bar",
         )
 
-    def run(self, **kwargs) -> int:
+    def run(self, **kwargs: Any) -> int:
         self.lg.info("Starting mode switch demo...")
 
         with ProgressLogger(self.lg, "Scanning directory...") as pl:
@@ -133,7 +134,7 @@ class JustifiedDemo(Tool):
             help_text="Right-justified progress bar demo - stable bar position",
         )
 
-    def run(self, **kwargs) -> int:
+    def run(self, **kwargs: Any) -> int:
         self.lg.info("Starting right-justified demo...")
         self.lg.info("Notice how the progress bar stays anchored to the right edge:\n")
 
@@ -167,7 +168,7 @@ class AllDemo(Tool):
             help_text="Run all demos sequentially",
         )
 
-    def run(self, **kwargs) -> int:
+    def run(self, **kwargs: Any) -> int:
         self.lg.info("Running all demos...\n")
 
         # Get other tools from registry

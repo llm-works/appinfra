@@ -19,6 +19,7 @@ import fnmatch
 import logging
 import threading
 from dataclasses import dataclass
+from typing import Any
 
 
 @dataclass
@@ -441,7 +442,7 @@ class LogLevelManager:
     # Serialization for multiprocessing
     # -------------------------------------------------------------------------
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         """
         Serialize the LogLevelManager state to a picklable dictionary.
 
@@ -471,7 +472,7 @@ class LogLevelManager:
                 "default_level": self._default_level,
             }
 
-    def from_dict(self, config: dict) -> None:
+    def from_dict(self, config: dict[str, Any]) -> None:
         """
         Restore LogLevelManager state from a serialized dictionary.
 

@@ -20,7 +20,7 @@ from appinfra.app import App, AppBuilder
 class TickerApp(App, appinfra.time.TickerHandler):
     """Ticker tool implementation that combines Tool and TickerHandler."""
 
-    def add_args(self):
+    def add_args(self) -> None:
         # Add default logging arguments
         super().add_args()
 
@@ -59,7 +59,7 @@ class TickerApp(App, appinfra.time.TickerHandler):
 
         return 0
 
-    def ticker_start(self):
+    def ticker_start(self) -> None:
         """Called when the ticker starts."""
         self.lg.info(
             "ticker started",
@@ -67,7 +67,7 @@ class TickerApp(App, appinfra.time.TickerHandler):
         )
         self._last_t = time.monotonic()
 
-    def ticker_tick(self):
+    def ticker_tick(self) -> None:
         """Called on each tick execution."""
         self.lg.info(
             "tick", extra={"after": appinfra.time.since_str(self._last_t, precise=True)}
@@ -75,7 +75,7 @@ class TickerApp(App, appinfra.time.TickerHandler):
         self._last_t = time.monotonic()
 
 
-def create_application():
+def create_application() -> App:
     """Create the application using AppBuilder with TickerTool."""
 
     # Create the application with ticker tool
@@ -89,7 +89,7 @@ def create_application():
     return app
 
 
-def main():
+def main() -> int:
     """Main function."""
     app = create_application()
     return app.main()

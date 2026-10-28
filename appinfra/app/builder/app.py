@@ -85,7 +85,9 @@ def _set_app_metadata(
         app.version = version  # type: ignore[attr-defined]
 
 
-def _register_tools_and_commands(app: App, tools: list, commands: list) -> None:
+def _register_tools_and_commands(
+    app: App, tools: list[Tool], commands: list[Command]
+) -> None:
     """
     Register tools and commands with application.
 
@@ -102,7 +104,9 @@ def _register_tools_and_commands(app: App, tools: list, commands: list) -> None:
         app.add_tool(command_tool)
 
 
-def _configure_arguments(app: App, custom_args: list[tuple]) -> None:
+def _configure_arguments(
+    app: App, custom_args: list[tuple[tuple[Any, ...], dict[str, Any]]]
+) -> None:
     """Add custom arguments declared on the cli block."""
     for args, kwargs in custom_args:
         app.add_argument(*args, **kwargs)
@@ -150,7 +154,7 @@ def _register_lifecycle_managers(app: App, hooks: Any, plugins: Any) -> None:
 def _initialize_foundation(app: App, builder: AppBuilder) -> None:
     """Initialize app foundation: flags and metadata."""
     # Config spec; resolved at App.setup() time.
-    app._config_spec = builder._config_spec  # type: ignore[attr-defined]
+    app._config_spec = builder._config_spec
     app._standard_args = builder._standard_args.copy()
     # _standard_arg_overrides is dict[str, dict[str, Any]] — copy one level deeper
     # than _standard_args (dict[str, bool]) so per-arg overrides don't alias the
@@ -180,7 +184,7 @@ class Command:
     """Represents a command with a run function."""
 
     name: str
-    run_func: Callable
+    run_func: Callable[..., Any]
     aliases: list[str] | None = None
     help_text: str = ""
 
@@ -237,7 +241,7 @@ class AppBuilder:
         # .cli
         self._standard_args: dict[str, bool] = DEFAULT_STANDARD_ARGS.copy()
         self._standard_arg_overrides: dict[str, dict[str, Any]] = {}
-        self._custom_args: list[tuple] = []
+        self._custom_args: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
         # .tools
         self._tools: list[Tool] = []
         self._commands: list[Command] = []

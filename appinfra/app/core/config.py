@@ -109,16 +109,16 @@ class ConfigLoader:
         ConfigLoader._ensure_nested_section(config, "logging")
 
         # Set defaults if not already present
-        if not hasattr(config.logging, "level"):  # type: ignore[attr-defined]
-            config.logging.level = "info"  # type: ignore[attr-defined]
-        if not hasattr(config.logging, "location"):  # type: ignore[attr-defined]
-            config.logging.location = 0  # type: ignore[attr-defined]
-        if not hasattr(config.logging, "micros"):  # type: ignore[attr-defined]
-            config.logging.micros = False  # type: ignore[attr-defined]
+        if not hasattr(config.logging, "level"):
+            config.logging.level = "info"
+        if not hasattr(config.logging, "location"):
+            config.logging.location = 0
+        if not hasattr(config.logging, "micros"):
+            config.logging.micros = False
 
         # Handle quiet mode (special case - disables logging)
         if ConfigLoader._get_arg(args, "quiet", False):
-            config.logging.level = LOG_LEVEL_QUIET  # type: ignore[attr-defined]
+            config.logging.level = LOG_LEVEL_QUIET
         else:
             # Apply standard logging arguments (override defaults)
             ConfigLoader._set_if_present(config, args, "log_level", "logging.level")
