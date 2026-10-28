@@ -34,7 +34,8 @@ class TestDeprecatedBasic:
             return "result"
 
         with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
+            warnings.simplefilter("ignore")
+            warnings.simplefilter("always", DeprecationWarning)
             result = old_function()
 
             assert result == "result"
@@ -49,7 +50,8 @@ class TestDeprecatedBasic:
             return "result"
 
         with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
+            warnings.simplefilter("ignore")
+            warnings.simplefilter("always", DeprecationWarning)
             old_function()
 
             assert "0.2.0" in str(w[0].message)
@@ -62,7 +64,8 @@ class TestDeprecatedBasic:
             return "result"
 
         with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
+            warnings.simplefilter("ignore")
+            warnings.simplefilter("always", DeprecationWarning)
             my_old_function()
 
             assert "my_old_function" in str(w[0].message)
@@ -75,7 +78,8 @@ class TestDeprecatedBasic:
             return "result"
 
         with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
+            warnings.simplefilter("ignore")
+            warnings.simplefilter("always", DeprecationWarning)
             old_function()
 
             assert "new_function" in str(w[0].message)
@@ -89,7 +93,8 @@ class TestDeprecatedBasic:
             return "result"
 
         with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
+            warnings.simplefilter("ignore")
+            warnings.simplefilter("always", DeprecationWarning)
             old_function()
 
             assert "instead" not in str(w[0].message)
@@ -206,7 +211,8 @@ class TestDeprecatedMethods:
 
         obj = MyClass()
         with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
+            warnings.simplefilter("ignore")
+            warnings.simplefilter("always", DeprecationWarning)
             result = obj.old_method()
 
             assert result == "instance method"
@@ -223,7 +229,8 @@ class TestDeprecatedMethods:
                 return "class method"
 
         with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
+            warnings.simplefilter("ignore")
+            warnings.simplefilter("always", DeprecationWarning)
             result = MyClass.old_classmethod()
 
             assert result == "class method"
@@ -239,7 +246,8 @@ class TestDeprecatedMethods:
                 return "static method"
 
         with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
+            warnings.simplefilter("ignore")
+            warnings.simplefilter("always", DeprecationWarning)
             result = MyClass.old_staticmethod()
 
             assert result == "static method"
@@ -264,7 +272,8 @@ class TestDeprecatedStackLevel:
             return "result"
 
         with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
+            warnings.simplefilter("ignore")
+            warnings.simplefilter("always", DeprecationWarning)
             old_function()  # This line should be in the warning
 
             # The warning's filename should be this test file
@@ -289,7 +298,8 @@ class TestDeprecatedMultipleCalls:
             return "result"
 
         with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
+            warnings.simplefilter("ignore")
+            warnings.simplefilter("always", DeprecationWarning)
             old_function()
             old_function()
             old_function()
