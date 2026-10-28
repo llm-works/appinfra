@@ -30,7 +30,7 @@ earlier: pre-release builds (0.13.1.devN) would not satisfy it. -->
   tests from (default `tests`).
 
 ### Changed
-- `make check` runs the Performance group in-process instead of on pytest-xdist workers.
+- `make check` runs the Performance group on one pytest-xdist worker instead of several.
 - `make check`: the "Function size check" row is now "Code quality check" and also runs
   `cq dup` and `cq dead` when enabled; the "Running code quality checks..." banner is gone. A
   cq tool that fails to run only warns, unless that tool is set to strict.

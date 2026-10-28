@@ -398,12 +398,13 @@ _standalone_suite unit        "Unit tests"        test.unit        unit
 _standalone_suite integration "Integration tests" test.integration integ
 _standalone_suite e2e         "E2E tests"         test.e2e         e2e
 _standalone_suite security    "Security tests"    test.security    sec
-# Performance tests run in-process, as `make test.perf` does: timing tests
-# measure against one quiet process rather than sibling workers, and the
-# group skips spawning workers that each re-import the test tree.
+# Performance tests run on one worker: timing tests measure against one quiet
+# process rather than sibling workers, and only one process re-imports the test
+# tree. A worker rather than in-process: a test that leaves a non-daemon thread
+# running costs the controller's 10s exit timeout instead of hanging the run.
 # INFRA_PYTEST_PERF_DIR narrows collection to where the performance tests live.
-TEST_SUBCHECKS+=("Performance tests|test.perf|$(_pytest_cmd_for perf performance "--tb=short --no-header -q -rEfs" "${PERF_DIR}/")|")
-TEST_SUBCHECKS_RAW+=("Performance tests|test.perf.v|$(_pytest_cmd_for perf performance "-v --tb=short -rEfs" "${PERF_DIR}/")|")
+TEST_SUBCHECKS+=("Performance tests|test.perf|$(_pytest_cmd_for perf performance "--tb=short --no-header -q -rEfs -n 1" "${PERF_DIR}/")|")
+TEST_SUBCHECKS_RAW+=("Performance tests|test.perf.v|$(_pytest_cmd_for perf performance "-v --tb=short -rEfs -n 1" "${PERF_DIR}/")|")
 
 # Run the example scripts as the last test subcheck when opted in
 # (INFRA_DEV_CHECK_EXAMPLES=true) and an examples directory exists. Same
@@ -838,10 +839,11 @@ run_check() {
     # For test subchecks, check if required directory exists first
     # This prevents hangs from pytest-xdist or unittest on non-existent directories
     if [ "$is_subcheck" = true ]; then
-        if [[ "$cmd" == *"tests/e2e"* ]] && [ ! -d "tests/e2e" ]; then
+        # The leading space matches tests/ as a whole argument, not the tail of perf_tests/
+        if [[ "$cmd" == *" tests/e2e"* ]] && [ ! -d "tests/e2e" ]; then
             update_line "$line_num" "${UI_MARK_PENDING}" "${prefix}${name}" " ${UI_GRAY}(no tests)${UI_RESET}"
             return 0
-        elif [[ "$cmd" == *"tests/"* ]] && [ ! -d "tests" ]; then
+        elif [[ "$cmd" == *" tests/"* ]] && [ ! -d "tests" ]; then
             update_line "$line_num" "${UI_MARK_PENDING}" "${prefix}${name}" " ${UI_GRAY}(no tests)${UI_RESET}"
             return 0
         fi
