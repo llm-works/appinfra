@@ -344,8 +344,9 @@ fi
 # (including lists). Dynamic markers applied by
 # ``pytest_collection_modifyitems`` hooks are missed; standard patterns
 # are not.
+PERF_DIR="${INFRA_PYTEST_PERF_DIR:-tests}"
 _MARKERS_FOUND=$(
-    grep -rhoE 'pytest\.mark\.[a-z_][a-z0-9_]*' tests/ --include='*.py' 2>/dev/null \
+    grep -rhoE 'pytest\.mark\.[a-z_][a-z0-9_]*' tests/ "$PERF_DIR" --include='*.py' 2>/dev/null \
         | cut -d. -f3 | sort -u | tr '\n' ' ' || true
 )
 
@@ -354,12 +355,13 @@ _MARKERS_FOUND=$(
 # without paying pytest's discovery cost. The subshell parens matter:
 # bare `exit 5` under ``eval`` would kill run_check's own subshell
 # before it could inspect the exit code, so ``wait -n`` in the parent
-# would count the check as a failure.
+# would count the check as a failure. The optional fourth argument is the
+# directory to collect from (default tests/).
 _pytest_cmd_for() {
-    local suite="$1" marker="$2" flags="$3"
+    local suite="$1" marker="$2" flags="$3" path="${4:-tests/}"
     case " $_MARKERS_FOUND " in
         *" $marker "*)
-            echo "${PYTEST_HANG}INFRA_CHECK_PYTEST_SUITE=$suite ${PYTHON} -m pytest tests/ -m $marker ${PYTEST_HANG_FLAG} $flags"
+            echo "${PYTEST_HANG}INFRA_CHECK_PYTEST_SUITE=$suite ${PYTHON} -m pytest $path -m $marker ${PYTEST_HANG_FLAG} $flags"
             ;;
         *)
             echo "(exit 5)"
@@ -396,11 +398,13 @@ _standalone_suite unit        "Unit tests"        test.unit        unit
 _standalone_suite integration "Integration tests" test.integration integ
 _standalone_suite e2e         "E2E tests"         test.e2e         e2e
 _standalone_suite security    "Security tests"    test.security    sec
-# Performance tests skip --dist=worksteal — the work-stealing overhead and
-# contention skews throughput measurements. Plain -n keeps parallelism for
-# multi-test discovery but distributes tests up front, not mid-run.
-TEST_SUBCHECKS+=("Performance tests|test.perf|$(_pytest_cmd_for perf performance "--tb=short --no-header -q -rEfs -n ${PYTEST_JOBS}")|")
-TEST_SUBCHECKS_RAW+=("Performance tests|test.perf.v|$(_pytest_cmd_for perf performance "-v --tb=short -rEfs -n ${PYTEST_JOBS}")|")
+# Performance tests run on one worker: timing tests measure against one quiet
+# process rather than sibling workers, and only one process re-imports the test
+# tree. A worker rather than in-process: a test that leaves a non-daemon thread
+# running costs the controller's 10s exit timeout instead of hanging the run.
+# INFRA_PYTEST_PERF_DIR narrows collection to where the performance tests live.
+TEST_SUBCHECKS+=("Performance tests|test.perf|$(_pytest_cmd_for perf performance "--tb=short --no-header -q -rEfs -n 1" "${PERF_DIR}/")|")
+TEST_SUBCHECKS_RAW+=("Performance tests|test.perf.v|$(_pytest_cmd_for perf performance "-v --tb=short -rEfs -n 1" "${PERF_DIR}/")|")
 
 # Run the example scripts as the last test subcheck when opted in
 # (INFRA_DEV_CHECK_EXAMPLES=true) and an examples directory exists. Same
@@ -528,7 +532,7 @@ update_line() {
             added=$(cat "$DISPLAY_ROWS" 2>/dev/null) || added=0
             local lines_up=$((TOTAL_LINES + added - line_num))
             [ $lines_up -gt 0 ] && printf "\033[${lines_up}A"
-            printf "\r%b%s %s%b\n" "$UI_CLEAR" "$status" "$name" "$extra"
+            printf "\r%b%s  %s%b\n" "$UI_CLEAR" "$status" "$name" "$extra"
             [ $lines_up -gt 1 ] && printf "\033[$((lines_up - 1))B"
             printf "\r"
         fi
@@ -550,7 +554,7 @@ add_display_row() {
                 printf "\r%b\n" "$UI_CLEAR"
                 added=1
             fi
-            printf "\r%b%s %s%b\n" "$UI_CLEAR" "$status" "$text" "$extra"
+            printf "\r%b%s  %s%b\n" "$UI_CLEAR" "$status" "$text" "$extra"
             ADDED_ROW=$((TOTAL_LINES + added))
             echo "$((added + 1))" > "$DISPLAY_ROWS"
         fi
@@ -835,10 +839,11 @@ run_check() {
     # For test subchecks, check if required directory exists first
     # This prevents hangs from pytest-xdist or unittest on non-existent directories
     if [ "$is_subcheck" = true ]; then
-        if [[ "$cmd" == *"tests/e2e"* ]] && [ ! -d "tests/e2e" ]; then
+        # The leading space matches tests/ as a whole argument, not the tail of perf_tests/
+        if [[ "$cmd" == *" tests/e2e"* ]] && [ ! -d "tests/e2e" ]; then
             update_line "$line_num" "${UI_MARK_PENDING}" "${prefix}${name}" " ${UI_GRAY}(no tests)${UI_RESET}"
             return 0
-        elif [[ "$cmd" == *"tests/"* ]] && [ ! -d "tests" ]; then
+        elif [[ "$cmd" == *" tests/"* ]] && [ ! -d "tests" ]; then
             update_line "$line_num" "${UI_MARK_PENDING}" "${prefix}${name}" " ${UI_GRAY}(no tests)${UI_RESET}"
             return 0
         fi
@@ -1200,12 +1205,12 @@ main() {
     # Print initial checkboxes
     for check_def in "${CHECKS[@]}"; do
         IFS='|' read -r name _ _ _ <<< "$check_def"
-        printf "%b %s\n" "$UI_MARK_PENDING" "$name"
+        printf "%b  %s\n" "$UI_MARK_PENDING" "$name"
 
         if [[ "$name" == "Test suite" ]]; then
             for subcheck_def in "${TEST_SUBCHECKS[@]}"; do
                 IFS='|' read -r subname _ _ _ <<< "$subcheck_def"
-                printf "%b   %s\n" "$UI_MARK_PENDING" "$subname"
+                printf "%b    %s\n" "$UI_MARK_PENDING" "$subname"
             done
         fi
     done

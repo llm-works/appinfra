@@ -13,6 +13,9 @@
 #   INFRA_PYTEST_COVERAGE_THRESHOLD - Coverage threshold for make check (default: 95.0)
 #                                     Set to 0 to disable coverage checking entirely
 #   INFRA_PYTEST_TESTS_DIR          - Tests directory (default: tests)
+#   INFRA_PYTEST_PERF_DIR           - Directory test.perf and make check's Performance group
+#                                     collect from (default: tests); narrowing it skips
+#                                     importing the rest of the test tree
 #   INFRA_PYTEST_WORKERS            - pytest-xdist worker count, auto or N (default: empty = no -n flag)
 #                                     Never applied to test.perf targets. Not read by check.sh
 #                                     (make check), which runs suites concurrently with its own
@@ -23,6 +26,7 @@
 
 # Configuration (defaults set in Makefile.config)
 INFRA_PYTEST_TESTS_DIR ?= tests
+INFRA_PYTEST_PERF_DIR ?= tests
 INFRA_PYTEST_WORKERS ?=
 INFRA_PYTEST_ARGS ?=
 
@@ -98,12 +102,12 @@ endif # skip test.integration
 ifeq ($(filter test.perf,$(INFRA_DEV_SKIP_TARGETS)),)
 test.perf:: ## runs performance tests (benchmarks, load tests)
 	@echo "* running performance tests..."
-	@$(call run_pytest_serial,tests/ -m performance -qq --tb=short)
+	@$(call run_pytest_serial,$(INFRA_PYTEST_PERF_DIR)/ -m performance -qq --tb=short)
 	@echo "* performance tests done"
 
 test.perf.v:: ## runs performance tests (verbose)
 	@echo "* running performance tests... (verbose)"
-	@$(call run_pytest_serial,tests/ -m performance -v -s)
+	@$(call run_pytest_serial,$(INFRA_PYTEST_PERF_DIR)/ -m performance -v -s)
 	@echo "* performance tests done"
 endif # skip test.perf
 .PHONY: test.perf test.perf.v

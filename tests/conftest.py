@@ -33,6 +33,7 @@ from tests.helpers.pg.probe import (
 pytest_plugins = [
     "appinfra.testing",
     "pytester",
+    "tests.fixtures.clock",
     "tests.fixtures.pg_integration",
     "tests.fixtures.sqlite_integration",
     "tests.fixtures.logging",
