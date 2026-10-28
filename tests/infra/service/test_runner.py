@@ -469,7 +469,10 @@ class TestProcessRunner:
             patch("appinfra.service.runner.process.LogQueueListener") as mock_listener,
         ):
             child = mock_process.return_value
-            child.is_alive.side_effect = [True, False]  # alive until terminated
+            child.is_alive.return_value = True  # alive until terminated
+            child.terminate.side_effect = lambda: setattr(
+                child.is_alive, "return_value", False
+            )
             mock_listener.return_value.start.side_effect = RuntimeError("no thread")
 
             runner = ProcessRunner(MPSimpleService(lg))
@@ -480,6 +483,7 @@ class TestProcessRunner:
             child.join.assert_called_once_with(timeout=2.0)
             child.kill.assert_not_called()
             assert runner.state == State.FAILED
+            assert runner.process is None  # ended, so the handles are released
 
     def test_start_failure_kills_a_child_that_ignores_terminate(self, lg):
         """A child still alive after terminate() is killed."""
@@ -499,6 +503,8 @@ class TestProcessRunner:
 
             child.kill.assert_called_once()
             assert runner.state == State.FAILED
+            # Still alive: the handle stays so a later stop() can retry
+            assert runner.process is child
 
     def test_is_alive_when_running(self, lg):
         """is_alive() returns True when process is alive."""

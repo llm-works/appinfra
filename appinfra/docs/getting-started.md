@@ -367,8 +367,8 @@ make fmt
 # Run all checks (format, lint, type, tests)
 make check
 
-# Preview what checks would run without executing
-APPINFRA_DRY_RUN=1 make check
+# Preview the commands fmt / lint / type would run, without running them
+APPINFRA_DRY_RUN=1 make lint
 ```
 
 ### Database

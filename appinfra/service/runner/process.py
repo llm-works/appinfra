@@ -101,7 +101,10 @@ class ProcessRunner(Runner):
             listener.start()
         except Exception:
             self._reap_spawned()
-            self._cleanup_ipc()
+            # As in stop(): keep the handles of a child that survived, so a
+            # later stop() can retry
+            if not self.is_alive():
+                self._cleanup_ipc()
             self._transition(State.FAILED)
             raise
 

@@ -128,3 +128,44 @@ class TestRenamedVariableCheck:
     def test_override_on_command_line_passes(self, tmp_path: Path) -> None:
         result = _make(tmp_path, "", "INFRA_PGSERVER_PORT=5433")
         assert result.returncode == 0, result.stderr
+
+
+def _python(tmp_path: Path, local: str, env: dict[str, str]) -> str:
+    """Return the PYTHON Makefile.env selects, given Makefile.local and the environment."""
+    (tmp_path / "Makefile.local").write_text(local)
+    (tmp_path / "Makefile").write_text(
+        f"include {MAKE_DIR / 'Makefile.env'}\nok:\n\t@echo $(PYTHON)\n"
+    )
+    base = {
+        k: v
+        for k, v in _clean_env().items()
+        if k not in ("PYTHON", "APPINFRA_ENV_PYTHON")
+    }
+    result = subprocess.run(
+        ["make", "--no-print-directory", "ok"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        env={**base, **env},
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    return result.stdout.strip()
+
+
+@pytest.mark.unit
+class TestInterpreterSelection:
+    """The environment outranks the project Makefile and Makefile.local."""
+
+    def test_environment_python_beats_makefile_local(self, tmp_path: Path) -> None:
+        local = "APPINFRA_ENV_PYTHON ?= /local/python\n"
+        assert _python(tmp_path, local, {"PYTHON": "/env/python"}) == "/env/python"
+
+    def test_environment_appinfra_env_python_beats_all(self, tmp_path: Path) -> None:
+        local = "APPINFRA_ENV_PYTHON ?= /local/python\n"
+        env = {"APPINFRA_ENV_PYTHON": "/env/appinfra", "PYTHON": "/env/python"}
+        assert _python(tmp_path, local, env) == "/env/appinfra"
+
+    def test_makefile_local_used_without_environment(self, tmp_path: Path) -> None:
+        local = "APPINFRA_ENV_PYTHON ?= /local/python\n"
+        assert _python(tmp_path, local, {}) == "/local/python"

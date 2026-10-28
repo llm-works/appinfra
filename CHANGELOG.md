@@ -46,8 +46,9 @@ earlier: pre-release builds (0.13.1.devN) would not satisfy it. -->
 - **Breaking:** `GitRuntimeSource()` no longer takes `check_dirty`; the parameter had no effect.
 - **Breaking:** the framework's Make and tooling variables are renamed from `INFRA_*` to
   `APPINFRA_*` (`APPINFRA_DEV_PKG_NAME`, `APPINFRA_ROOT`, ...); every `INFRA_*` variable is now a
-  config override. A renamed variable's old name stops make, wherever it is set, and fails config
-  loading when exported. `Config` rejects an `env_prefix` that overlaps `APPINFRA_`.
+  config override. Make stops on the old name of any variable a project sets; exported, an old
+  name is read as a config override and fails on its undeclared yaml path. `Config` rejects an
+  `env_prefix` that overlaps `APPINFRA_`.
 - A `Ticker.stop()` while the ticker is not running is kept: the next `run()` returns at once,
   without calling the handler. A `stop()` right after starting the `run()` thread used to be lost.
 
