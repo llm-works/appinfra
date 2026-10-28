@@ -325,6 +325,7 @@ class Ticker:
         self._first = True
         self._running = False
         self._stop_event = threading.Event()
+        self._lifecycle = threading.Lock()  # guards run() startup against stop()
         self._sched = (
             sched.scheduler(time.monotonic, self._sched_delay)
             if secs is not None
@@ -333,8 +334,7 @@ class Ticker:
         # For context manager signal handling (stores previous handlers)
         self._prev_sigterm: Any = None
         self._prev_sigint: Any = None
-        # For non-blocking API (try_tick/time_until_next_tick)
-        self._last_tick_time: float | None = None
+        self._last_tick_time: float | None = None  # try_tick/time_until_next_tick
         # API mode, "blocking" (run()) or "nonblocking" (try_tick()); no mixing
         self._api_mode: str | None = None
 
@@ -375,8 +375,6 @@ class Ticker:
             raise TickerConfigError(
                 "Handler required for run() mode. Use iterator pattern instead."
             )
-        if self._running:
-            raise TickerStateError("Ticker is already running")
         if self._api_mode == "nonblocking":
             raise TickerAPIError(
                 "Cannot call run() after using try_tick(). "
@@ -388,9 +386,14 @@ class Ticker:
                 "Choose one API mode per Ticker instance."
             )
 
-        self._api_mode = "blocking"
-        self._running = True
-        self._stop_event.clear()
+        # Atomic with stop()'s read-and-set: a stop() lands wholly before this
+        # (and is cleared) or wholly after (and stops this run)
+        with self._lifecycle:
+            if self._running:
+                raise TickerStateError("Ticker is already running")
+            self._api_mode = "blocking"
+            self._running = True
+            self._stop_event.clear()
 
         try:
             self._handler.ticker_start(*args, **kwargs)
@@ -627,15 +630,15 @@ class Ticker:
         handler's ticker_stop method immediately. The ticker will stop after
         the current tick completes.
         """
-        # Read the state first: once the event is set, the run() thread can wake,
-        # finish and clear _running before the check below
-        handler = self._handler if self._running else None
+        # Read the state and set the event as one step against run()'s startup.
         # In scheduled mode the run() thread wakes on this event and cancels the
         # pending ticks itself (_sched_delay), so only one thread touches the queue
-        self._stop_event.set()
+        with self._lifecycle:
+            handler = self._handler if self._running else None
+            self._stop_event.set()
 
-        # Call ticker_stop handler immediately so cleanup logging
-        # happens during the shutdown phase, not in finally block
+        # Call ticker_stop handler immediately so cleanup logging happens during
+        # the shutdown phase; outside the lock, so a slow handler blocks no one
         if handler is not None:
             try:
                 handler.ticker_stop()
