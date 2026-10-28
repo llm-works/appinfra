@@ -44,6 +44,8 @@ earlier: pre-release builds (0.13.1.devN) would not satisfy it. -->
 - **Breaking:** `appinfra.cli.tools.code_quality`, `check_functions` and `check_spdx` moved to
   `appinfra.cli.tools.cq` (`tool`, `functions`, `spdx`).
 - **Breaking:** `GitRuntimeSource()` no longer takes `check_dirty`; the parameter had no effect.
+- A `Ticker.stop()` while the ticker is not running is kept: the next `run()` returns at once,
+  without calling the handler. A `stop()` right after starting the `run()` thread used to be lost.
 
 ### Fixed
 - `password(confirm=True)` accepts a matching confirmation; with questionary installed it always
@@ -54,6 +56,8 @@ earlier: pre-release builds (0.13.1.devN) would not satisfy it. -->
   writers against prune in every run.
 - `Ticker.stop()` ends a scheduled `run()` right away; it used to return only when the current
   interval ran out.
+- `Ticker` calls the handler's `ticker_stop()` once per run; a repeated `stop()` during a run
+  called it again.
 - JSON and database log output include the traceback of an exception logged as
   `extra={"exception": e}` or sent through the multiprocess queue; the database handler used to
   drop a record with an exception in `extra`.

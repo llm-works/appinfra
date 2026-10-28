@@ -409,7 +409,8 @@ class TestContinuousMode:
         thread.join(timeout=1.0)
 
         # Should have stopped
-        assert ticker._stop_event.is_set()
+        assert not thread.is_alive()
+        assert ticker.is_running() is False
         assert simple_handler.stopped is True
 
     def test_continuous_mode_handles_ticker_tick_error(self, mock_logger, mock_handler):
@@ -572,8 +573,8 @@ class TestTickerControl:
         # Real time and a real thread: stop() comes from another thread while
         # run() waits out a 10s interval
         ticker = Ticker(mock_logger, mock_handler, secs=10, initial=True)
-        # run() clears the stop event on entry; waiting for the first tick
-        # (initial=True) guarantees stop() comes after that, not before
+        # A stop() before run() starts would end it before any interval; waiting
+        # for the first tick (initial=True) guarantees stop() comes mid-interval
         ticked = threading.Event()
         mock_handler.ticker_tick.side_effect = ticked.set
 
@@ -624,6 +625,107 @@ class TestTickerControl:
         assert not thread.is_alive()
         assert handler.ticker_tick.call_count == 1
         assert ticker._sched.queue == []
+
+    def test_stop_before_run_ends_that_run(self, mock_logger, mock_handler):
+        """Test a stop() while not running ends the next run() before it starts."""
+        ticker = Ticker(mock_logger, mock_handler, secs=10)
+        ticker.stop()
+
+        thread = threading.Thread(target=ticker.run, daemon=True)
+        thread.start()
+        thread.join(timeout=1.0)
+
+        assert not thread.is_alive()
+        mock_handler.ticker_start.assert_not_called()
+        mock_handler.ticker_stop.assert_not_called()
+        assert ticker.is_running() is False
+        # Consumed by that run(): the next one starts
+        assert not ticker._stop_event.is_set()
+
+    def test_stop_right_after_thread_start(self, mock_logger, mock_handler):
+        """Test stop() ends run() whether it lands before or after run() starts."""
+        for _ in range(50):
+            ticker = Ticker(mock_logger, mock_handler, secs=10)
+            starts = mock_handler.ticker_start.call_count
+            stops = mock_handler.ticker_stop.call_count
+
+            thread = threading.Thread(target=ticker.run, daemon=True)
+            thread.start()
+            ticker.stop()
+            thread.join(timeout=1.0)
+
+            assert not thread.is_alive()
+            # A run that started is stopped exactly once; one ended by the
+            # pending stop() calls neither hook
+            started = mock_handler.ticker_start.call_count - starts
+            assert mock_handler.ticker_stop.call_count - stops == started
+
+    def test_repeated_stop_calls_ticker_stop_once(self, mock_logger):
+        """Test only the first stop() of a run calls ticker_stop()."""
+        handler = Mock(spec=TickerHandler)
+        ticker = Ticker(mock_logger, handler, secs=10, initial=True)
+
+        def stop_twice():
+            ticker.stop()
+            ticker.stop()
+
+        handler.ticker_tick.side_effect = stop_twice
+
+        thread = threading.Thread(target=ticker.run, daemon=True)
+        thread.start()
+        thread.join(timeout=1.0)
+
+        assert not thread.is_alive()
+        handler.ticker_stop.assert_called_once()
+
+    def test_run_again_after_stop(self, mock_logger):
+        """Test a stop() during a run is spent with it: the next run() starts."""
+        handler = Mock(spec=TickerHandler)
+        ticker = Ticker(mock_logger, handler, secs=10, initial=True)
+        handler.ticker_tick.side_effect = ticker.stop
+
+        for _ in range(2):
+            thread = threading.Thread(target=ticker.run, daemon=True)
+            thread.start()
+            thread.join(timeout=1.0)
+            assert not thread.is_alive()
+
+        assert handler.ticker_start.call_count == 2
+        assert handler.ticker_tick.call_count == 2
+        assert handler.ticker_stop.call_count == 2
+
+    def test_stop_after_run_ends_is_pending(self, mock_logger):
+        """Test a stop() after a run ends is held for the next run()."""
+        handler = Mock(spec=TickerHandler)
+        ticker = Ticker(mock_logger, handler, secs=10, initial=True)
+        handler.ticker_tick.side_effect = ticker.stop
+
+        thread = threading.Thread(target=ticker.run, daemon=True)
+        thread.start()
+        thread.join(timeout=1.0)
+        assert not thread.is_alive()
+
+        ticker.stop()  # not running: pending, no ticker_stop() call
+        ticker.run()  # returns at once
+
+        handler.ticker_start.assert_called_once()
+        handler.ticker_stop.assert_called_once()
+
+    def test_failed_start_resets_state(self, mock_logger, mock_handler):
+        """Test a run() whose ticker_start() raises leaves the ticker reusable."""
+        mock_handler.ticker_start.side_effect = [RuntimeError("boom"), None]
+        mock_handler.ticker_tick.side_effect = lambda: ticker.stop()
+        ticker = Ticker(mock_logger, mock_handler, secs=10, initial=True)
+
+        with pytest.raises(TickerStateError, match="Ticker execution failed"):
+            ticker.run()
+        assert ticker.is_running() is False
+
+        thread = threading.Thread(target=ticker.run, daemon=True)
+        thread.start()
+        thread.join(timeout=1.0)
+        assert not thread.is_alive()
+        mock_handler.ticker_stop.assert_called_once()
 
 
 # =============================================================================
