@@ -34,12 +34,18 @@ def reset_logging_state() -> Generator[None, None, None]:
     # Reset logger class
     logging.setLoggerClass(original_class)
 
-    # Clear all custom loggers from loggerDict
+    # Clear all custom loggers from loggerDict, closing their handlers: a file
+    # handler left open keeps its file until garbage collection closes it
     for name in list(logging.root.manager.loggerDict.keys()):
         if name.startswith(("/", "test")):
-            del logging.root.manager.loggerDict[name]
+            lg = logging.root.manager.loggerDict.pop(name)
+            for handler in getattr(lg, "handlers", []):  # a PlaceHolder has none
+                handler.close()
 
-    # Restore root logger state
+    # Restore root logger state, closing handlers the test added
+    for handler in logging.root.handlers:
+        if handler not in original_handlers:
+            handler.close()
     logging.root.handlers = original_handlers
     logging.root.setLevel(original_level)
 

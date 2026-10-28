@@ -38,11 +38,13 @@ def memory_config():
 
 @pytest.fixture
 def sqlite_db(mock_logger, memory_config):
-    """Create SQLite instance with in-memory database."""
+    """Create SQLite instance with in-memory database, disposed after the test."""
     with patch(
         "appinfra.db.sqlite.sqlite.LoggerFactory.derive", return_value=mock_logger
     ):
-        return SQLite(mock_logger, memory_config)
+        db = SQLite(mock_logger, memory_config)
+    yield db
+    db.dispose()
 
 
 @pytest.mark.unit
@@ -184,6 +186,7 @@ class TestSQLiteReturnedObjects:
 
         with db.session() as session:
             item = session.get(Item, 1)
+        db.dispose()
 
         assert item.name == "first"
 
@@ -193,6 +196,7 @@ class TestSQLiteReturnedObjects:
 
         with db.session() as session:
             item = session.get(Item, 1)
+        db.dispose()
 
         with pytest.raises(DetachedInstanceError):
             _ = item.name
