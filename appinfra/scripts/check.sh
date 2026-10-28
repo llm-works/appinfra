@@ -344,8 +344,9 @@ fi
 # (including lists). Dynamic markers applied by
 # ``pytest_collection_modifyitems`` hooks are missed; standard patterns
 # are not.
+PERF_DIR="${INFRA_PYTEST_PERF_DIR:-tests}"
 _MARKERS_FOUND=$(
-    grep -rhoE 'pytest\.mark\.[a-z_][a-z0-9_]*' tests/ --include='*.py' 2>/dev/null \
+    grep -rhoE 'pytest\.mark\.[a-z_][a-z0-9_]*' tests/ "$PERF_DIR" --include='*.py' 2>/dev/null \
         | cut -d. -f3 | sort -u | tr '\n' ' ' || true
 )
 
@@ -354,12 +355,13 @@ _MARKERS_FOUND=$(
 # without paying pytest's discovery cost. The subshell parens matter:
 # bare `exit 5` under ``eval`` would kill run_check's own subshell
 # before it could inspect the exit code, so ``wait -n`` in the parent
-# would count the check as a failure.
+# would count the check as a failure. The optional fourth argument is the
+# directory to collect from (default tests/).
 _pytest_cmd_for() {
-    local suite="$1" marker="$2" flags="$3"
+    local suite="$1" marker="$2" flags="$3" path="${4:-tests/}"
     case " $_MARKERS_FOUND " in
         *" $marker "*)
-            echo "${PYTEST_HANG}INFRA_CHECK_PYTEST_SUITE=$suite ${PYTHON} -m pytest tests/ -m $marker ${PYTEST_HANG_FLAG} $flags"
+            echo "${PYTEST_HANG}INFRA_CHECK_PYTEST_SUITE=$suite ${PYTHON} -m pytest $path -m $marker ${PYTEST_HANG_FLAG} $flags"
             ;;
         *)
             echo "(exit 5)"
@@ -396,11 +398,12 @@ _standalone_suite unit        "Unit tests"        test.unit        unit
 _standalone_suite integration "Integration tests" test.integration integ
 _standalone_suite e2e         "E2E tests"         test.e2e         e2e
 _standalone_suite security    "Security tests"    test.security    sec
-# Performance tests skip --dist=worksteal — the work-stealing overhead and
-# contention skews throughput measurements. Plain -n keeps parallelism for
-# multi-test discovery but distributes tests up front, not mid-run.
-TEST_SUBCHECKS+=("Performance tests|test.perf|$(_pytest_cmd_for perf performance "--tb=short --no-header -q -rEfs -n ${PYTEST_JOBS}")|")
-TEST_SUBCHECKS_RAW+=("Performance tests|test.perf.v|$(_pytest_cmd_for perf performance "-v --tb=short -rEfs -n ${PYTEST_JOBS}")|")
+# Performance tests run in-process, as `make test.perf` does: timing tests
+# measure against one quiet process rather than sibling workers, and the
+# group skips spawning workers that each re-import the test tree.
+# INFRA_PYTEST_PERF_DIR narrows collection to where the performance tests live.
+TEST_SUBCHECKS+=("Performance tests|test.perf|$(_pytest_cmd_for perf performance "--tb=short --no-header -q -rEfs" "${PERF_DIR}/")|")
+TEST_SUBCHECKS_RAW+=("Performance tests|test.perf.v|$(_pytest_cmd_for perf performance "-v --tb=short -rEfs" "${PERF_DIR}/")|")
 
 # Run the example scripts as the last test subcheck when opted in
 # (INFRA_DEV_CHECK_EXAMPLES=true) and an examples directory exists. Same

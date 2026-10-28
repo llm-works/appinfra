@@ -26,8 +26,11 @@ earlier: pre-release builds (0.13.1.devN) would not satisfy it. -->
 - `make check` names, in a row below its checklist, a test that left a non-daemon thread running
   at exit; the thread's stack goes to the kept log. Such a thread holds a pytest-xdist worker
   until it ends, for up to 10s.
+- `INFRA_PYTEST_PERF_DIR`: the directory `make check` and `make test.perf` collect performance
+  tests from (default `tests`).
 
 ### Changed
+- `make check` runs the Performance group in-process instead of on pytest-xdist workers.
 - `make check`: the "Function size check" row is now "Code quality check" and also runs
   `cq dup` and `cq dead` when enabled; the "Running code quality checks..." banner is gone. A
   cq tool that fails to run only warns, unless that tool is set to strict.

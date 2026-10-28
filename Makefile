@@ -27,6 +27,9 @@ INFRA_DEV_CHECK_EXAMPLES := true
 # Include all tests in coverage (not just unit tests)
 INFRA_PYTEST_COVERAGE_MARKERS := unit or e2e
 
+# Performance tests all live here; collecting only this directory skips importing the rest
+INFRA_PYTEST_PERF_DIR := tests/performance
+
 # Coverage threshold (framework default is 80%)
 INFRA_PYTEST_COVERAGE_THRESHOLD := 95
 
