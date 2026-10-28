@@ -379,3 +379,77 @@ class TestBoolSh:
         result = _bool_sh(value)
         assert result.returncode == 2
         assert "X=" in result.stderr and "is not a boolean" in result.stderr
+
+
+@pytest.mark.unit
+class TestMakeConfig:
+    """`make config` names each setting's source and the interpreter's."""
+
+    def _config(
+        self, tmp_path: Path, head: str, local: str, *args: str
+    ) -> dict[str, str]:
+        (tmp_path / "Makefile.local").write_text(local)
+        (tmp_path / "Makefile").write_text(
+            f"{head}\ninclude {MAKEFILE_CONFIG}\ninclude {MAKE_DIR / 'Makefile.env'}\n"
+        )
+        result = subprocess.run(
+            ["make", "--no-print-directory", "config", *args],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+            env={**_clean_env(), "APPINFRA_PYTEST_WORKERS": "4"},
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr
+        sources = {}
+        for line in result.stdout.splitlines():
+            parts = line.split()
+            if parts and parts[0].startswith("APPINFRA_"):
+                sources[parts[0]] = parts[1]
+            elif line.startswith("Python:"):
+                sources["Python"] = line
+        return sources
+
+    def test_sources(self, tmp_path: Path) -> None:
+        sources = self._config(
+            tmp_path,
+            "APPINFRA_DEV_PKG_NAME := mypkg",
+            "APPINFRA_CONTAINER_CMD ?= podman\nAPPINFRA_DEV_CQ_STRICT := true\n",
+            "APPINFRA_DEV_CQ_DUP=warn",
+        )
+        assert sources["APPINFRA_DEV_PKG_NAME"] == "Makefile"
+        assert sources["APPINFRA_CONTAINER_CMD"] == "Makefile.local"
+        assert sources["APPINFRA_DEV_CQ_STRICT"] == "Makefile.local"
+        assert sources["APPINFRA_DEV_CQ_DUP"] == "command-line"
+        assert sources["APPINFRA_PYTEST_WORKERS"] == "environment"
+        assert sources["APPINFRA_CLEAN_PRESERVE"] == "default"
+        assert sources["APPINFRA_PYTHON"] == "resolved"
+        assert "(APPINFRA_PYTHON, environment)" in sources["Python"]
+
+    def test_makefile_local_question_assign_does_not_claim_makefile_value(
+        self, tmp_path: Path
+    ) -> None:
+        """A Makefile.local ?= that does not apply leaves the source at Makefile."""
+        sources = self._config(
+            tmp_path,
+            "APPINFRA_DEV_PKG_NAME := mypkg",
+            "APPINFRA_DEV_PKG_NAME ?= other\n",
+        )
+        assert sources["APPINFRA_DEV_PKG_NAME"] == "Makefile"
+
+    def test_macros_not_listed(self, tmp_path: Path) -> None:
+        (tmp_path / "Makefile.local").write_text("")
+        (tmp_path / "Makefile").write_text(
+            f"include {MAKEFILE_CONFIG}\ninclude {MAKE_DIR / 'Makefile.env'}\n"
+            f"include {MAKE_DIR / 'Makefile.pytest'}\n"
+        )
+        result = subprocess.run(
+            ["make", "--no-print-directory", "config"],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+            env=_clean_env(),
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr
+        assert "APPINFRA_RUN_PYTEST" not in result.stdout

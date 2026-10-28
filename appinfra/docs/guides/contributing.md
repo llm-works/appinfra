@@ -132,7 +132,7 @@ rules and variable overrides.
 
 ```makefile
 # Your app's Makefile
-include path/to/infra/scripts/make/Makefile.clean
+include $(APPINFRA_SCRIPTS)/make/Makefile.clean
 
 # Add app-specific cleanup
 clean::

@@ -7,22 +7,22 @@
 # Makefiles instead of this file.
 #
 # Usage (in consuming project's Makefile):
-#   infra := path/to/infra
+#   APPINFRA_SCRIPTS := path/to/appinfra/scripts
 #   APPINFRA_DEV_PKG_NAME := myproject
-#   include $(infra)/scripts/make/Makefile.all
+#   include $(APPINFRA_SCRIPTS)/make/Makefile.all
 #
 # For selective inclusion (preferred for submodule use):
-#   infra := path/to/infra
+#   APPINFRA_SCRIPTS := path/to/appinfra/scripts
 #   APPINFRA_DEV_PKG_NAME := myproject
-#   include $(infra)/scripts/make/Makefile.config
-#   include $(infra)/scripts/make/Makefile.env
-#   include $(infra)/scripts/make/Makefile.help
-#   include $(infra)/scripts/make/Makefile.utils
-#   include $(infra)/scripts/make/Makefile.dev
-#   include $(infra)/scripts/make/Makefile.install  # Optional: only if building a package
-#   include $(infra)/scripts/make/Makefile.pytest
+#   include $(APPINFRA_SCRIPTS)/make/Makefile.config
+#   include $(APPINFRA_SCRIPTS)/make/Makefile.env
+#   include $(APPINFRA_SCRIPTS)/make/Makefile.help
+#   include $(APPINFRA_SCRIPTS)/make/Makefile.utils
+#   include $(APPINFRA_SCRIPTS)/make/Makefile.dev
+#   include $(APPINFRA_SCRIPTS)/make/Makefile.install  # Optional: only if building a package
+#   include $(APPINFRA_SCRIPTS)/make/Makefile.pytest
 #   # Skip: Makefile.docs, Makefile.pg if not needed
-#   include $(infra)/scripts/make/Makefile.clean
+#   include $(APPINFRA_SCRIPTS)/make/Makefile.clean
 
 # Determine the directory containing this Makefile
 _APPINFRA_MAKE_DIR := $(dir $(lastword $(MAKEFILE_LIST)))

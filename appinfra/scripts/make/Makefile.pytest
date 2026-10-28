@@ -56,6 +56,9 @@ endef
 # on APPINFRA_PYTEST_WORKERS being set at all.
 _APPINFRA_PYTEST_WORKERS_ARG := $(if $(APPINFRA_PYTEST_WORKERS),-n $(APPINFRA_PYTEST_WORKERS) --dist=worksteal,)
 
+# Public macros, not settings: `make config` leaves them out
+_APPINFRA_MACROS += APPINFRA_RUN_PYTEST APPINFRA_RUN_PYTEST_SERIAL
+
 # Helper to run pytest, treating "no tests collected" (exit 5) as success
 # Usage: $(call APPINFRA_RUN_PYTEST,args)
 define APPINFRA_RUN_PYTEST

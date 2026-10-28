@@ -35,6 +35,8 @@ earlier: pre-release builds (0.13.1.devN) would not satisfy it. -->
   `cq dup` and `cq dead` when enabled; the "Running code quality checks..." banner is gone. A
   cq tool that fails to run only warns, unless that tool is set to strict.
 - A bare `make` shows the help screen instead of `make config`'s output.
+- **Breaking:** `make env` is removed. `make config` shows the interpreter and its source, and
+  every `APPINFRA_*` setting with its value and source, read from make's own variables.
 - `make setup` installs the tools `make check` runs (the new `check` extra: ruff, mypy, pytest,
   coverage, interrogate, pylint) in every project, not only those its own dependencies list.
 - The `check` extra requires ruff 0.16 or later, the first release whose `ruff format --check`

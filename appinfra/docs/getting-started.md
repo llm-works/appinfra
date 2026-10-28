@@ -440,10 +440,10 @@ Or use the `PYTHON=` prefix for one-off commands:
 PYTHON=/path/to/your/python make install
 ```
 
-To see your current environment configuration:
+To see the interpreter in use, its source and every framework setting:
 
 ```bash
-make env
+make config
 ```
 
 ## Running Scripts Directly

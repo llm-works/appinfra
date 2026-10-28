@@ -14,13 +14,13 @@ pip install appinfra
 
 ```makefile
 # Makefile - using pip-installed appinfra
-infra := $(shell appinfra scripts-path)
+APPINFRA_SCRIPTS := $(shell appinfra scripts-path)
 
 # Configure your project
 APPINFRA_DEV_PKG_NAME := myproject
 
 # Include framework
-include $(infra)/make/Makefile.all
+include $(APPINFRA_SCRIPTS)/make/Makefile.all
 ```
 
 This is the recommended approach because:
@@ -34,37 +34,37 @@ Submodules are supported but **should rarely be needed**. Use only if you need t
 framework itself or work offline without pip access.
 
 ```bash
-git submodule add <repo-url> submodules/infra
+git submodule add <repo-url> submodules/appinfra
 ```
 
 ```makefile
 # Makefile - using submodule
-infra := submodules/infra
+APPINFRA_SCRIPTS := submodules/appinfra/appinfra/scripts
 
 APPINFRA_DEV_PKG_NAME := myproject
-include $(infra)/scripts/make/Makefile.all
+include $(APPINFRA_SCRIPTS)/make/Makefile.all
 ```
 
-Note: With submodules, the path is `$(infra)/scripts/make/` vs `$(infra)/make/` with pip install.
+Either way, `APPINFRA_SCRIPTS` is appinfra's scripts directory, so the includes are the same.
 
 ## Quick Start
 
 ```makefile
 # Recommended setup (pip install)
-infra := $(shell appinfra scripts-path)
+APPINFRA_SCRIPTS := $(shell appinfra scripts-path)
 
 # Configure your project
 APPINFRA_DEV_PKG_NAME := myproject
 
 # Include framework (config must be first)
-include $(infra)/make/Makefile.config
-include $(infra)/make/Makefile.env
-include $(infra)/make/Makefile.help
-include $(infra)/make/Makefile.utils
-include $(infra)/make/Makefile.dev
-include $(infra)/make/Makefile.install  # Optional: only if building a package
-include $(infra)/make/Makefile.pytest
-include $(infra)/make/Makefile.clean
+include $(APPINFRA_SCRIPTS)/make/Makefile.config
+include $(APPINFRA_SCRIPTS)/make/Makefile.env
+include $(APPINFRA_SCRIPTS)/make/Makefile.help
+include $(APPINFRA_SCRIPTS)/make/Makefile.utils
+include $(APPINFRA_SCRIPTS)/make/Makefile.dev
+include $(APPINFRA_SCRIPTS)/make/Makefile.install  # Optional: only if building a package
+include $(APPINFRA_SCRIPTS)/make/Makefile.pytest
+include $(APPINFRA_SCRIPTS)/make/Makefile.clean
 ```
 
 ## Include Order
@@ -73,26 +73,26 @@ include $(infra)/make/Makefile.clean
 
 ```makefile
 # 1. REQUIRED FIRST - Handles config loading and deprecation
-include $(infra)/make/Makefile.config
+include $(APPINFRA_SCRIPTS)/make/Makefile.config
 
 # 2. Core modules (order matters)
-include $(infra)/make/Makefile.env      # Python detection
-include $(infra)/make/Makefile.help     # Help system
-include $(infra)/make/Makefile.utils    # Utilities (areyousure, etc.)
+include $(APPINFRA_SCRIPTS)/make/Makefile.env      # Python detection
+include $(APPINFRA_SCRIPTS)/make/Makefile.help     # Help system
+include $(APPINFRA_SCRIPTS)/make/Makefile.utils    # Utilities (areyousure, etc.)
 
 # 3. Feature modules (order flexible)
-include $(infra)/make/Makefile.dev      # Requires: env, utils
-include $(infra)/make/Makefile.install  # Optional: only if building a package
-include $(infra)/make/Makefile.pytest   # Requires: env
-include $(infra)/make/Makefile.docs     # Requires: env
-include $(infra)/make/Makefile.pg       # Requires: env, utils
-include $(infra)/make/Makefile.clean    # Requires: utils
+include $(APPINFRA_SCRIPTS)/make/Makefile.dev      # Requires: env, utils
+include $(APPINFRA_SCRIPTS)/make/Makefile.install  # Optional: only if building a package
+include $(APPINFRA_SCRIPTS)/make/Makefile.pytest   # Requires: env
+include $(APPINFRA_SCRIPTS)/make/Makefile.docs     # Requires: env
+include $(APPINFRA_SCRIPTS)/make/Makefile.pg       # Requires: env, utils
+include $(APPINFRA_SCRIPTS)/make/Makefile.clean    # Requires: utils
 ```
 
 Or use `Makefile.all` to include everything in the correct order:
 
 ```makefile
-include $(infra)/make/Makefile.all
+include $(APPINFRA_SCRIPTS)/make/Makefile.all
 ```
 
 ## Variable Precedence
@@ -109,7 +109,7 @@ Variables are resolved in this order (highest to lowest priority):
 ```makefile
 # In Makefile (before include)
 APPINFRA_DEV_PKG_NAME := myproject
-include $(infra)/make/Makefile.all
+include $(APPINFRA_SCRIPTS)/make/Makefile.all
 
 # Or via environment variable (for CI/testing)
 # APPINFRA_DEV_PKG_NAME=myproject make test.coverage
@@ -121,17 +121,17 @@ include $(infra)/make/Makefile.all
 
 ```makefile
 # Makefile
-infra := $(shell appinfra scripts-path)
+APPINFRA_SCRIPTS := $(shell appinfra scripts-path)
 APPINFRA_DEV_PKG_NAME := myproject
 
-include $(infra)/make/Makefile.all
+include $(APPINFRA_SCRIPTS)/make/Makefile.all
 ```
 
 ### Full Configuration
 
 ```makefile
 # Makefile
-infra := $(shell appinfra scripts-path)
+APPINFRA_SCRIPTS := $(shell appinfra scripts-path)
 APPINFRA_DEV_PKG_NAME := myproject
 APPINFRA_DEV_CQ_STRICT := true
 APPINFRA_PYTEST_TESTS_DIR := tests
@@ -140,7 +140,7 @@ APPINFRA_DOCS_CONFIG_FILE := mkdocs.yaml
 # Hide unused features
 APPINFRA_DISABLE_GROUPS := pg.
 
-include $(infra)/make/Makefile.all
+include $(APPINFRA_SCRIPTS)/make/Makefile.all
 ```
 
 ## Extending Targets
@@ -148,7 +148,7 @@ include $(infra)/make/Makefile.all
 Use double-colon rules (`::`) to extend framework targets:
 
 ```makefile
-include $(infra)/make/Makefile.all
+include $(APPINFRA_SCRIPTS)/make/Makefile.all
 
 # Extend cleanup
 clean::
@@ -230,12 +230,12 @@ test categories implemented yet.
 
 ```makefile
 # Wrong - too late
-include $(infra)/make/Makefile.all
+include $(APPINFRA_SCRIPTS)/make/Makefile.all
 APPINFRA_DEV_PKG_NAME := myproject
 
 # Correct - before include
 APPINFRA_DEV_PKG_NAME := myproject
-include $(infra)/make/Makefile.all
+include $(APPINFRA_SCRIPTS)/make/Makefile.all
 ```
 
 ### Include Order Errors
@@ -244,11 +244,11 @@ include $(infra)/make/Makefile.all
 
 ```makefile
 # Wrong - dev requires env and utils
-include $(infra)/make/Makefile.dev
-include $(infra)/make/Makefile.env
+include $(APPINFRA_SCRIPTS)/make/Makefile.dev
+include $(APPINFRA_SCRIPTS)/make/Makefile.env
 
 # Correct - use Makefile.all or follow documented order
-include $(infra)/make/Makefile.all
+include $(APPINFRA_SCRIPTS)/make/Makefile.all
 ```
 
 ### check.sh Uses Wrong Package Name
@@ -271,11 +271,11 @@ myproject/
 
 ```makefile
 # Makefile
-infra := $(shell appinfra scripts-path)
+APPINFRA_SCRIPTS := $(shell appinfra scripts-path)
 APPINFRA_DEV_PKG_NAME := myproject
 APPINFRA_DISABLE_GROUPS := pg.
 
-include $(infra)/make/Makefile.all
+include $(APPINFRA_SCRIPTS)/make/Makefile.all
 
 ##@ Application
 
