@@ -253,7 +253,8 @@ class TestFastAPIIPCWithLifecycleCallbacks:
         finally:
             stop_event.set()
             server.stop(timeout=2.0)
-            handler_thread.join(timeout=1.0)
+            if handler_thread.is_alive():  # not started if start_subprocess() raised
+                handler_thread.join(timeout=1.0)
 
     def test_ipc_polling_receives_responses_with_startup_callback(self):
         """
@@ -334,7 +335,8 @@ class TestFastAPIIPCWithLifecycleCallbacks:
         finally:
             stop_event.set()
             server.stop(timeout=2.0)
-            handler_thread.join(timeout=1.0)
+            if handler_thread.is_alive():  # not started if start_subprocess() raised
+                handler_thread.join(timeout=1.0)
 
     def test_exception_handler_with_logger_in_subprocess(self):
         """

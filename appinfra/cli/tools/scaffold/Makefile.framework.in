@@ -27,7 +27,9 @@ ifeq ($(APPINFRA_ROOT),)
   $(error Cannot locate infra. Set APPINFRA_ROOT=/path/to/infra at top of Makefile or install appinfra package)
 endif
 
-# Include framework Makefiles (Makefile.env handles Python detection)
+# Include framework Makefiles (Makefile.config loads Makefile.local and the
+# defaults; Makefile.env handles Python detection)
+include $(APPINFRA_ROOT)/scripts/make/Makefile.config
 include $(APPINFRA_ROOT)/scripts/make/Makefile.env
 include $(APPINFRA_ROOT)/scripts/make/Makefile.help
 include $(APPINFRA_ROOT)/scripts/make/Makefile.utils

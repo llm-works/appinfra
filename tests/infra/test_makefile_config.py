@@ -7,41 +7,81 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-MAKEFILE_CONFIG = REPO_ROOT / "appinfra" / "scripts" / "make" / "Makefile.config"
+MAKE_DIR = REPO_ROOT / "appinfra" / "scripts" / "make"
+MAKEFILE_CONFIG = MAKE_DIR / "Makefile.config"
 
 
 def _make(
-    tmp_path: Path, head: str, *args: str, env: dict[str, str] | None = None
+    tmp_path: Path,
+    head: str,
+    *args: str,
+    env: dict[str, str] | None = None,
+    include: Path = MAKEFILE_CONFIG,
 ) -> subprocess.CompletedProcess[str]:
     """Run `make ok` on a project Makefile whose `head` precedes the include."""
-    (tmp_path / "Makefile").write_text(
-        f"{head}\ninclude {MAKEFILE_CONFIG}\nok:\n\t@echo ok\n"
-    )
+    (tmp_path / "Makefile").write_text(f"{head}\ninclude {include}\nok:\n\t@echo ok\n")
     return subprocess.run(
         ["make", "--no-print-directory", "ok", *args],
         cwd=tmp_path,
         capture_output=True,
         text=True,
-        env={**os.environ, **(env or {})},
+        env={**_clean_env(), **(env or {})},
         check=False,
     )
 
 
+def _clean_env() -> dict[str, str]:
+    """The test environment without INFRA_* / APPINFRA_* names, plus an interpreter.
+
+    make check exports APPINFRA_* into the environment; inherited, they would
+    outrank the Makefile.local under test.
+    """
+    env = {
+        k: v for k, v in os.environ.items() if not k.startswith(("INFRA_", "APPINFRA_"))
+    }
+    return {**env, "APPINFRA_ENV_PYTHON": sys.executable}
+
+
 @pytest.mark.unit
-class TestInfraAssignmentGuard:
-    """A makefile assigning INFRA_* fails; INFRA_* from outside passes through."""
+class TestRenamedVariableCheck:
+    """INFRA_X stops make when APPINFRA_X is declared; other INFRA_* pass through."""
 
     def test_project_makefile_assignment_fails(self, tmp_path: Path) -> None:
         result = _make(tmp_path, "INFRA_DEV_PKG_NAME := mypkg")
         assert result.returncode != 0
-        assert "INFRA_DEV_PKG_NAME: framework variables are named APPINFRA_*" in (
+        assert "INFRA_DEV_PKG_NAME is renamed to APPINFRA_DEV_PKG_NAME" in (
             result.stderr
         )
+
+    def test_environment_fails(self, tmp_path: Path) -> None:
+        result = _make(tmp_path, "", env={"INFRA_CONTAINER_CMD": "podman"})
+        assert result.returncode != 0
+        assert "INFRA_CONTAINER_CMD is renamed to APPINFRA_CONTAINER_CMD" in (
+            result.stderr
+        )
+
+    def test_command_line_fails(self, tmp_path: Path) -> None:
+        result = _make(tmp_path, "", "INFRA_DEV_CQ_STRICT=false")
+        assert result.returncode != 0
+        assert "INFRA_DEV_CQ_STRICT is renamed to APPINFRA_DEV_CQ_STRICT" in (
+            result.stderr
+        )
+
+    def test_variable_without_a_default_fails(self, tmp_path: Path) -> None:
+        """Variables whose default is empty are declared too."""
+        result = _make(tmp_path, "", env={"INFRA_NO_CONFIRM": "1"})
+        assert result.returncode != 0
+        assert "INFRA_NO_CONFIRM is renamed to APPINFRA_NO_CONFIRM" in result.stderr
+
+    def test_exported_override_in_makefile_passes(self, tmp_path: Path) -> None:
+        result = _make(tmp_path, "export INFRA_TEST_LOGGING_LEVEL := debug")
+        assert result.returncode == 0, result.stderr
 
     def test_makefile_local_assignment_fails(self, tmp_path: Path) -> None:
         (tmp_path / "Makefile.local").write_text(
@@ -50,6 +90,32 @@ class TestInfraAssignmentGuard:
         result = _make(tmp_path, "")
         assert result.returncode != 0
         assert "INFRA_ENV_PYTHON" in result.stderr
+
+    def test_makefile_env_first_layout_fails(self, tmp_path: Path) -> None:
+        """A project including Makefile.env without Makefile.config is checked too."""
+        result = _make(
+            tmp_path, "INFRA_DEV_PKG_NAME := mypkg", include=MAKE_DIR / "Makefile.env"
+        )
+        assert result.returncode != 0
+        assert "INFRA_DEV_PKG_NAME" in result.stderr
+
+    def test_makefile_env_first_layout_loads_makefile_local(
+        self, tmp_path: Path
+    ) -> None:
+        (tmp_path / "Makefile.local").write_text("APPINFRA_DEV_PKG_NAME ?= fromlocal\n")
+        (tmp_path / "Makefile").write_text(
+            f"include {MAKE_DIR / 'Makefile.env'}\n"
+            "ok:\n\t@echo pkg=$(APPINFRA_DEV_PKG_NAME)\n"
+        )
+        result = subprocess.run(
+            ["make", "--no-print-directory", "ok"],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+            env=_clean_env(),
+            check=False,
+        )
+        assert result.stdout.strip() == "pkg=fromlocal", result.stderr
 
     def test_appinfra_assignment_passes(self, tmp_path: Path) -> None:
         result = _make(tmp_path, "APPINFRA_DEV_PKG_NAME := mypkg")

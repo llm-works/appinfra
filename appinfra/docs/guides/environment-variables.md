@@ -397,8 +397,9 @@ These environment variables control framework behavior (not config value overrid
 | `APPINFRA_CONTAINER_CMD` | `docker` | Container runtime used by `pg.*` Make targets (`ps`, `exec`, `volume`, ...). Set to `podman` to run the local-dev container layer under Podman. Exported to the `pg.sh` helper script. |
 | `APPINFRA_COMPOSE_CMD` | `docker compose` | Compose orchestrator paired with `APPINFRA_CONTAINER_CMD`. Set to `podman compose` alongside the container-cmd override. |
 
-These names are excluded from config overrides, so a config key such as `default` or
-`container` is never shadowed by them.
+Their `APPINFRA_` prefix is separate from the `INFRA_` override prefix, so they never reach config
+overrides and no config key such as `default` or `container` can be shadowed by them. While make
+runs, their old `INFRA_` names stop it with an error naming the replacement.
 
 ## Best Practices
 

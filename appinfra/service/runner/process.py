@@ -93,17 +93,28 @@ class ProcessRunner(Runner):
         self._transition(State.STARTING)
 
         try:
-            log_config = self._create_log_infrastructure()
+            log_config, listener = self._create_log_infrastructure()
             self._create_ipc_primitives()
             self._spawn_process(log_config)
             # After the fork, so its thread is not running while the child is
             # forked; the queue holds any records the child sends before then
-            assert self._log_listener is not None
-            self._log_listener.start()
+            listener.start()
         except Exception:
+            self._reap_spawned()
             self._cleanup_ipc()
             self._transition(State.FAILED)
             raise
+
+    def _reap_spawned(self) -> None:
+        """End a child that start() forked before failing, so none is left running."""
+        proc = self._process
+        if proc is None or not proc.is_alive():
+            return
+        proc.terminate()
+        proc.join(timeout=2.0)
+        if proc.is_alive():
+            proc.kill()
+            proc.join(timeout=1.0)
 
     def _run_setup(self) -> None:
         """Run service setup, transition to FAILED on error."""
@@ -115,12 +126,12 @@ class ProcessRunner(Runner):
                 raise
             raise SetupError(self.name, str(e)) from e
 
-    def _create_log_infrastructure(self) -> dict[str, Any]:
-        """Create logging infrastructure for subprocess."""
+    def _create_log_infrastructure(self) -> tuple[dict[str, Any], LogQueueListener]:
+        """Create the subprocess log queue and its listener, not yet started."""
         self._log_queue = mp.Queue()
         log_config = self.service.lg.queue_config(self._log_queue)
         self._log_listener = LogQueueListener(self._log_queue, self.service.lg)
-        return log_config
+        return log_config, self._log_listener
 
     def _create_ipc_primitives(self) -> None:
         """Create IPC primitives for subprocess communication."""

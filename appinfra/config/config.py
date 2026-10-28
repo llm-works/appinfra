@@ -215,7 +215,9 @@ class Config(DotDict):
                 `ConfigSpec.resolve()`. A `ConfigFile` carries its own
                 `origin`; passing both raises `ValueError`.
             enable_env_overrides: Whether to apply environment variable overrides
-            env_prefix: Prefix for environment variables (default: 'INFRA_')
+            env_prefix: Prefix for environment variables (default: 'INFRA_').
+                Must not overlap 'APPINFRA_', the prefix of appinfra's own
+                control variables.
             merge_strategy: Strategy for handling includes - "replace" or "merge" (default: "replace")
                            Note: Currently only "replace" is fully supported
             allowed_paths: Optional list of specific absolute paths (e.g. a
@@ -237,6 +239,11 @@ class Config(DotDict):
                 climb above `etc/` when the base's own includes do. A
                 `ConfigFile` from `ConfigSpec.resolve()` carries its
                 origin already. `~`-expanded and resolved once.
+
+        Raises:
+            ValueError: If env_prefix overlaps 'APPINFRA_' (checked whether or
+                not env overrides are enabled), or if both a `ConfigFile` and
+                `origin` are passed.
 
         Note:
             Path resolution is handled explicitly via the !path YAML tag. Use !path for paths
