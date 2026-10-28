@@ -39,11 +39,15 @@ def _make(
 def _clean_env() -> dict[str, str]:
     """The test environment without INFRA_* / APPINFRA_* names, plus an interpreter.
 
-    make check exports APPINFRA_* into the environment; inherited, they would
-    outrank the Makefile.local under test.
+    make check exports APPINFRA_* into the environment, and MAKEFLAGS carries a
+    parent make's command-line assignments; inherited, either would reach the
+    child make under test.
     """
     env = {
-        k: v for k, v in os.environ.items() if not k.startswith(("INFRA_", "APPINFRA_"))
+        k: v
+        for k, v in os.environ.items()
+        if not k.startswith(("INFRA_", "APPINFRA_"))
+        and k not in ("MAKEFLAGS", "MFLAGS", "MAKELEVEL")
     }
     return {**env, "APPINFRA_ENV_PYTHON": sys.executable}
 
@@ -130,7 +134,7 @@ class TestRenamedVariableCheck:
         assert result.returncode == 0, result.stderr
 
 
-def _python(tmp_path: Path, local: str, env: dict[str, str]) -> str:
+def _python(tmp_path: Path, local: str, env: dict[str, str], *args: str) -> str:
     """Return the PYTHON Makefile.env selects, given Makefile.local and the environment."""
     (tmp_path / "Makefile.local").write_text(local)
     (tmp_path / "Makefile").write_text(
@@ -142,7 +146,7 @@ def _python(tmp_path: Path, local: str, env: dict[str, str]) -> str:
         if k not in ("PYTHON", "APPINFRA_ENV_PYTHON")
     }
     result = subprocess.run(
-        ["make", "--no-print-directory", "ok"],
+        ["make", "--no-print-directory", "ok", *args],
         cwd=tmp_path,
         capture_output=True,
         text=True,
@@ -165,6 +169,12 @@ class TestInterpreterSelection:
         local = "APPINFRA_ENV_PYTHON ?= /local/python\n"
         env = {"APPINFRA_ENV_PYTHON": "/env/appinfra", "PYTHON": "/env/python"}
         assert _python(tmp_path, local, env) == "/env/appinfra"
+
+    def test_appinfra_env_python_beats_command_line_python(
+        self, tmp_path: Path
+    ) -> None:
+        env = {"APPINFRA_ENV_PYTHON": "/env/appinfra"}
+        assert _python(tmp_path, "", env, "PYTHON=/cli/python") == "/env/appinfra"
 
     def test_makefile_local_used_without_environment(self, tmp_path: Path) -> None:
         local = "APPINFRA_ENV_PYTHON ?= /local/python\n"
