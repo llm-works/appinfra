@@ -13,7 +13,7 @@ import time
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Self
 
 # Allow running from a source checkout without installing the package.
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
@@ -128,7 +128,7 @@ class DatabaseLoggingApp(App):
             def __init__(self, lg: Logger) -> None:
                 self.lg = lg
 
-            def __enter__(self) -> "MockSession":
+            def __enter__(self) -> Self:
                 return self
 
             def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
@@ -501,10 +501,10 @@ class DatabaseLoggingApp(App):
         """Create custom event data mapper."""
 
         def event_mapper(record: logging.LogRecord) -> dict[str, Any]:
-            extra_data = getattr(record, "_extra", {}) or {}
+            extra_data = getattr(record, "__infra__extra", None) or {}
             return {
                 "event_time": datetime.fromtimestamp(record.created),
-                "event_type": record.levelname.lower(),
+                "event_type": extra_data.get("event_type", record.levelname.lower()),
                 "event_source": record.name,
                 "event_data": json.dumps(
                     {
@@ -540,6 +540,7 @@ class DatabaseLoggingApp(App):
         for i in range(log_count):
             event_type = random.choice(event_types)
             event_data = {
+                "event_type": event_type,
                 "user_id": random.randint(1, 100),
                 "session_id": f"sess_{random.randint(100000, 999999)}",
                 "ip_address": f"10.0.{random.randint(1, 255)}.{random.randint(1, 255)}",

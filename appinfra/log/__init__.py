@@ -229,7 +229,7 @@ def derive_lg(
 
 def _create_capture_handler(
     config: LogConfig, numeric_level: int
-) -> "logging.StreamHandler[TextIO]":
+) -> logging.StreamHandler[TextIO]:
     """Create handler with appinfra formatter for capture_all_loggers."""
     from .config_holder import LogConfigHolder
     from .formatters import LogFormatter

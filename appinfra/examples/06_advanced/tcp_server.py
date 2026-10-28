@@ -9,6 +9,7 @@
 import http.server
 import json
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -26,26 +27,14 @@ class Syn(appinfra.time.TickerHandler):
     def __init__(self, lg: Logger) -> None:
         self._lg = lg
         self._last_t = time.monotonic()
-        # Set in ticker_start: manager proxies in multiprocessing mode
-        self._lock: Any = None
-        self._msg: Any = None
+        # Shared between the ticker thread and the server's request handling
+        self._lock = threading.Lock()
+        self._msg = {"last_t": self._last_t}
 
-    def ticker_start(self, manager: Any = None) -> None:
-        """Called when ticker starts in multiprocessing mode."""
+    def ticker_start(self, *args: Any, **kwargs: Any) -> None:
+        """Called when the ticker starts."""
         self._lg.info("start", extra={"after": appinfra.time.since(self._last_t)})
         self._last_t = time.monotonic()
-
-        if manager:
-            # Multiprocessing mode
-            self._lock = manager.Lock()
-            self._msg = manager.dict()
-        else:
-            # Single-process mode - use threading
-            import threading
-
-            if self._lock is None:
-                self._lock = threading.Lock()
-                self._msg = {"last_t": self._last_t}
 
     def ticker_tick(self) -> None:
         self._lg.info("tick", extra={"after": appinfra.time.since(self._last_t)})
@@ -55,15 +44,6 @@ class Syn(appinfra.time.TickerHandler):
 
     def do_GET(self, instance: http.server.BaseHTTPRequestHandler) -> None:
         """Handle GET requests - return current shared state."""
-        if self._lock is None or self._msg is None:
-            instance.send_response(500)
-            instance.send_header("Content-type", "application/json")
-            instance.end_headers()
-            instance.wfile.write(
-                json.dumps({"error": "Server not initialized"}).encode()
-            )
-            return
-
         with self._lock:
             try:
                 instance.send_response(200)
@@ -84,10 +64,11 @@ def main() -> int:
     config = LogConfig.from_params("info")
     lg = LoggerFactory.create_root(config)
 
-    # The ticker runs in its own process; the server serves the state it updates
+    # The ticker updates the state in a background thread; the server serves it
     syn = Syn(lg)
     ticker = appinfra.time.Ticker(lg, syn, secs=1)
-    server = appinfra.net.TCPServer(lg, 25444, syn, ticker=ticker)
+    threading.Thread(target=ticker.run, daemon=True).start()
+    server = appinfra.net.TCPServer(lg, 25444, syn)
     lg.info("starting tcp server...")
 
     try:

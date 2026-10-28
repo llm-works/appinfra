@@ -12,7 +12,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any
+from typing import Any, TypeVar
 
 
 class HookEvent(Enum):
@@ -68,6 +68,9 @@ class HookContext:
         self.duration = time.monotonic() - self.start_time
 
 
+_CallbackT = TypeVar("_CallbackT", bound=Callable[[HookContext], None])
+
+
 class ObservabilityHooks:
     """
     Simple callback-based observability system.
@@ -113,9 +116,7 @@ class ObservabilityHooks:
             self._hooks[event] = []
         self._hooks[event].append(callback)
 
-    def on(
-        self, event: HookEvent
-    ) -> Callable[[Callable[[HookContext], None]], Callable[[HookContext], None]]:
+    def on(self, event: HookEvent) -> Callable[[_CallbackT], _CallbackT]:
         """
         Decorator for registering event callbacks.
 
@@ -135,9 +136,7 @@ class ObservabilityHooks:
                 lg.info(f"Query: {context.query}")
         """
 
-        def decorator(
-            callback: Callable[[HookContext], None],
-        ) -> Callable[[HookContext], None]:
+        def decorator(callback: _CallbackT) -> _CallbackT:
             self.register(event, callback)
             return callback
 

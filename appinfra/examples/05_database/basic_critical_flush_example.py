@@ -18,7 +18,7 @@ import logging
 import sys
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Self
 from unittest.mock import Mock, patch
 
 # Allow running from a source checkout without installing the package.
@@ -46,7 +46,7 @@ class MockSession:
     def __init__(self, db_interface: SimpleDatabaseInterface) -> None:
         self.db_interface = db_interface
 
-    def __enter__(self) -> "MockSession":
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
