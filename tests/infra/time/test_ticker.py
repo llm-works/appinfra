@@ -572,10 +572,14 @@ class TestTickerControl:
         # Real time and a real thread: stop() comes from another thread while
         # run() waits out a 10s interval
         ticker = Ticker(mock_logger, mock_handler, secs=10, initial=True)
+        # run() clears the stop event on entry; waiting for the first tick
+        # (initial=True) guarantees stop() comes after that, not before
+        ticked = threading.Event()
+        mock_handler.ticker_tick.side_effect = ticked.set
 
         thread = threading.Thread(target=ticker.run, daemon=True)
         thread.start()
-        time.sleep(0.05)
+        assert ticked.wait(timeout=1.0)
 
         # Stop before next tick
         ticker.stop()
