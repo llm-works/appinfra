@@ -257,7 +257,7 @@ class BufferedChannel(Generic[TRequest, TResponse]):
         if not hasattr(request, "id"):
             raise ValueError("Request must have an 'id' attribute")
 
-        request_id = request.id  # type: ignore[union-attr]
+        request_id = request.id
         effective_timeout = timeout if timeout is not None else self._response_timeout
         deadline = time.monotonic() + effective_timeout
 
@@ -382,7 +382,7 @@ class QueueTransport(Generic[TRequest, TResponse]):
     def recv(self, timeout: float | None = None) -> TResponse:
         """Get next message from the inbound queue."""
         try:
-            return cast(TResponse, self._inbound.get(timeout=timeout))
+            return self._inbound.get(timeout=timeout)
         except queue.Empty:
             raise ChannelTimeoutError(f"Timeout waiting for message ({timeout}s)")
 
@@ -423,7 +423,7 @@ class ProcessQueueTransport(Generic[TRequest, TResponse]):
     def recv(self, timeout: float | None = None) -> TResponse:
         """Get next message from the inbound mp.Queue."""
         try:
-            return cast(TResponse, self._inbound.get(timeout=timeout))
+            return self._inbound.get(timeout=timeout)
         except queue.Empty:
             raise ChannelTimeoutError(f"Timeout waiting for message ({timeout}s)")
 

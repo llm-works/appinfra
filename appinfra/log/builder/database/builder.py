@@ -38,7 +38,7 @@ class DatabaseLoggingBuilder(LoggingBuilder):
         db_interface: Any,
         level: str | int | None = None,
         columns: dict[str, str] | None = None,
-        data_mapper: Callable | None = None,
+        data_mapper: Callable[..., Any] | None = None,
         batch_size: int = 1,
         flush_interval: float = 0.0,
         # Critical flush parameters
@@ -170,7 +170,7 @@ class DatabaseLoggingBuilder(LoggingBuilder):
         self,
         table_name: str,
         db_interface: Any,
-        data_mapper: Callable,
+        data_mapper: Callable[..., Any],
         level: str | int | None = None,
         batch_size: int = 1,
         flush_interval: float = 0.0,
@@ -244,7 +244,7 @@ def create_database_logger(name: str) -> DatabaseLoggingBuilder:
 # Helper functions for load_database_logging_config()
 
 
-def _load_config_from_handler(handler_config: dict) -> dict:
+def _load_config_from_handler(handler_config: dict[str, Any]) -> dict[str, Any]:
     """Load database logging config from handler configuration."""
     critical_flush_config = handler_config.get("critical_flush", {})
     return {
@@ -263,7 +263,7 @@ def _load_config_from_handler(handler_config: dict) -> dict:
     }
 
 
-def _load_config_from_top_level(config_dict: dict) -> dict:
+def _load_config_from_top_level(config_dict: dict[str, Any]) -> dict[str, Any]:
     """Load database logging config from top-level configuration (backward compatibility)."""
     db_config = config_dict.get("database_logging", {})
     critical_flush = db_config.get("critical_flush", {})
@@ -280,8 +280,8 @@ def _load_config_from_top_level(config_dict: dict) -> dict:
 
 
 def load_database_logging_config(
-    config_dict: dict, handler_config: dict | None = None
-) -> dict:
+    config_dict: dict[str, Any], handler_config: dict[str, Any] | None = None
+) -> dict[str, Any]:
     """
     Load database logging configuration from config dictionary.
 
@@ -307,10 +307,10 @@ def load_database_logging_config(
 
 def create_database_logger_from_config(
     name: str,
-    config_dict: dict,
+    config_dict: dict[str, Any],
     db_interface: Any,
     table_name: str = "error_logs",
-    handler_config: dict | None = None,
+    handler_config: dict[str, Any] | None = None,
 ) -> DatabaseLoggingBuilder:
     """
     Create a database logging builder from configuration.

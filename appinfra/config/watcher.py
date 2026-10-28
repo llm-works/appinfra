@@ -184,7 +184,7 @@ class ConfigWatcher:
 
         watcher = self  # Closure reference
 
-        class ConfigFileHandler(FileSystemEventHandler):  # type: ignore[misc]
+        class ConfigFileHandler(FileSystemEventHandler):
             def on_modified(self, event: Any) -> None:
                 if event.is_directory:
                     return

@@ -42,7 +42,9 @@ class CLIParser:
             raise RuntimeError("Parser not created. Call create_parser() first.")
         return self.parser.add_argument(*args, **kwargs)
 
-    def add_subparsers(self, dest: str, **kwargs: Any) -> argparse._SubParsersAction:
+    def add_subparsers(
+        self, dest: str, **kwargs: Any
+    ) -> "argparse._SubParsersAction[argparse.ArgumentParser]":
         """Add subparsers to the main parser."""
         if not self.parser:
             raise RuntimeError("Parser not created. Call create_parser() first.")

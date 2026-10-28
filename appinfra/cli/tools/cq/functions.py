@@ -106,7 +106,7 @@ class FunctionAnalyzer:
         for node in tree.body:  # type: ignore[attr-defined]
             if isinstance(node, ast.ClassDef):
                 # Process class methods
-                self._current_class = node.name  # type: ignore[assignment]
+                self._current_class = node.name
                 for item in node.body:
                     if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
                         info = self._analyze_function(item, file_path, is_method=True)  # type: ignore[arg-type]
@@ -492,7 +492,7 @@ class FunctionReporter:
         lines.extend(self._format_summary_section(critical, high, moderate))
         return "\n".join(lines)
 
-    def _violation_to_dict(self, func: FunctionInfo) -> dict:
+    def _violation_to_dict(self, func: FunctionInfo) -> dict[str, Any]:
         """Convert a violation FunctionInfo to a JSON-serializable dict."""
         return {
             "file": str(func.file_path),
@@ -506,7 +506,7 @@ class FunctionReporter:
             "custom_limit": func.custom_limit,
         }
 
-    def _exempt_to_dict(self, func: FunctionInfo) -> dict:
+    def _exempt_to_dict(self, func: FunctionInfo) -> dict[str, Any]:
         """Convert an exempt FunctionInfo to a JSON-serializable dict."""
         return {
             "file": str(func.file_path),
@@ -685,9 +685,9 @@ class CheckFunctionsTool(Tool):
     def _log_summary(self, violation_count: int, limit: int) -> None:
         """Log analysis summary."""
         if violation_count == 0:
-            self.lg.info("all functions within line limit", extra={"limit": limit})  # type: ignore[union-attr]
+            self.lg.info("all functions within line limit", extra={"limit": limit})
         else:
-            self.lg.info(  # type: ignore[union-attr]
+            self.lg.info(
                 "found functions violating the limit",
                 extra={"violations": violation_count, "limit": limit},
             )
@@ -717,17 +717,17 @@ class CheckFunctionsTool(Tool):
             Exit code: 0 on success, 1 if violations found in strict mode
         """
         limit = self.args.limit
-        self.lg.info("checking function sizes", extra={"limit": limit})  # type: ignore[union-attr]
+        self.lg.info("checking function sizes", extra={"limit": limit})
 
         python_files = collect_python_files(
             self.lg, [self.args.dir], self.args.exclude or [], self.args.include_tests
         )
-        self.lg.debug(  # type: ignore[union-attr]
+        self.lg.debug(
             "found Python files to analyze", extra={"files": len(python_files)}
         )
 
         if not python_files:
-            self.lg.warning("no Python files found to analyze")  # type: ignore[union-attr]
+            self.lg.warning("no Python files found to analyze")
             return 0
 
         all_violations, all_exempt = self._analyze_files(python_files, limit)

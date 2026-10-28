@@ -89,7 +89,7 @@ class LoggingBuilder(LoggingBuilderInterface):
         self._logger_class: type[Logger] = Logger
 
         # Extra fields to pre-populate in log records
-        self._extra: dict[str, Any] | collections.OrderedDict = {}
+        self._extra: dict[str, Any] | collections.OrderedDict[str, Any] = {}
 
         # Display options set explicitly through the API, by name. A composing
         # builder (the AppBuilder logging scope) forwards only these, so an

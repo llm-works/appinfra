@@ -22,7 +22,7 @@ from appinfra import Config
 from appinfra.log.handler_factory import HandlerFactory, HandlerRegistry
 
 
-def demo_handler_factory_generators():
+def demo_handler_factory_generators() -> None:
     """Demonstrate HandlerFactory generator methods."""
     print("=== HandlerFactory Generators ===")
 
@@ -37,7 +37,7 @@ def demo_handler_factory_generators():
     )
 
 
-def _iterate_all_handlers(registry):
+def _iterate_all_handlers(registry: HandlerRegistry) -> None:
     """Iterate and print all handlers."""
     print("\n3. Iterating through all handlers:")
     print("   HandlerRegistry.iter_handlers() yields all handlers:")
@@ -46,7 +46,7 @@ def _iterate_all_handlers(registry):
     print(f"\n   Total handlers loaded: {len(registry.handlers)}")
 
 
-def _iterate_enabled_handlers(registry):
+def _iterate_enabled_handlers(registry: HandlerRegistry) -> None:
     """Iterate and print enabled handlers."""
     print("\n4. Iterating through enabled handlers only:")
     print("   HandlerRegistry.iter_enabled_handlers() yields only enabled handlers:")
@@ -59,7 +59,7 @@ def _iterate_enabled_handlers(registry):
     print(f"   Enabled handlers (generator): {enabled_count}")
 
 
-def demo_handler_registry_generators():
+def demo_handler_registry_generators() -> None:
     """Demonstrate HandlerRegistry generator methods."""
     print("\n=== HandlerRegistry Generators ===")
 
@@ -76,7 +76,7 @@ def demo_handler_registry_generators():
     _iterate_enabled_handlers(registry)
 
 
-def demo_memory_efficiency():
+def demo_memory_efficiency() -> None:
     """Demonstrate memory efficiency of generators."""
     print("\n=== Memory Efficiency ===")
 
@@ -94,7 +94,7 @@ def demo_memory_efficiency():
     print("   ✓ Use generators when processing large handler collections")
 
 
-def _print_handler_examples():
+def _print_handler_examples() -> None:
     """Print handler usage examples."""
     print("\n6. Processing all handlers:")
     print("    # Iterate through all handlers (enabled or disabled)")
@@ -112,7 +112,7 @@ def _print_handler_examples():
     print("                     if h.__class__.__name__.endswith('FileHandlerConfig')]")
 
 
-def demo_practical_usage():
+def demo_practical_usage() -> None:
     """Show practical usage patterns."""
     print("\n=== Practical Usage Examples ===")
     _print_handler_examples()

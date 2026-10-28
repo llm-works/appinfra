@@ -336,7 +336,7 @@ class DocsShowTool(Tool):
         return 0
 
 
-def parse_frontmatter(content: str) -> dict:
+def parse_frontmatter(content: str) -> dict[str, Any]:
     """Extract YAML frontmatter from markdown content.
 
     Args:
@@ -410,7 +410,10 @@ class DocsFindTool(Tool):
         }
 
     def _display_results(
-        self, pattern: str, matches: list, opts: dict[str, Any]
+        self,
+        pattern: str,
+        matches: list[tuple[str, list[tuple[int, str]]]],
+        opts: dict[str, Any],
     ) -> None:
         """Display search results."""
         self.out.write(f"Found matches for '{pattern}' in {len(matches)} file(s):")

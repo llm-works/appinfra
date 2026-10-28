@@ -28,7 +28,7 @@ Log Level Control:
 import logging
 import sys
 import warnings
-from typing import Optional, Union
+from typing import Optional, TextIO, Union
 
 # Import LoggingBuilder components
 from .builder import (
@@ -196,7 +196,9 @@ def create_lg(
     return LoggerFactory.create(name, config, cls)
 
 
-def derive_lg(lg: Logger, tags: str | list, cls: type[Logger] | None = None) -> Logger:
+def derive_lg(
+    lg: Logger, tags: str | list[str], cls: type[Logger] | None = None
+) -> Logger:
     """
     Derive a logger with tags from a parent logger.
 
@@ -227,7 +229,7 @@ def derive_lg(lg: Logger, tags: str | list, cls: type[Logger] | None = None) -> 
 
 def _create_capture_handler(
     config: LogConfig, numeric_level: int
-) -> logging.StreamHandler:
+) -> "logging.StreamHandler[TextIO]":
     """Create handler with appinfra formatter for capture_all_loggers."""
     from .config_holder import LogConfigHolder
     from .formatters import LogFormatter

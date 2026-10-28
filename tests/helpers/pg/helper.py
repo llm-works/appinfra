@@ -9,8 +9,11 @@ It handles common setup tasks like configuration loading, database connection, a
 """
 
 import unittest
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar, TypeVar
+
+import sqlalchemy.orm
 
 from appinfra.config import Config
 from appinfra.db.pg import PG
@@ -18,8 +21,12 @@ from appinfra.log import LogConfig, Logger, LoggerFactory
 
 from .helper_core import PGTestHelperCore
 
+_T = TypeVar("_T", bound="PGTestCaseHelper")
 
-def _create_debug_table_for_test(test_helper, table_name_prefix, custom_schema):
+
+def _create_debug_table_for_test(
+    test_helper: PGTestHelperCore, table_name_prefix: str, custom_schema: str | None
+) -> tuple[sqlalchemy.orm.Session, str, bool]:
     """Create debug table with optional custom schema."""
     if custom_schema:
         return test_helper.create_debug_table_with_schema(
@@ -28,7 +35,7 @@ def _create_debug_table_for_test(test_helper, table_name_prefix, custom_schema):
     return test_helper.create_debug_table(table_name_prefix)
 
 
-def _log_test_failure(self, table_name):
+def _log_test_failure(self: "PGTestCaseHelper", table_name: str) -> None:
     """Log test failure with debugging information."""
     if hasattr(self, "lg") and self.lg:
         self.lg.warning(
@@ -40,7 +47,12 @@ def _log_test_failure(self, table_name):
         )
 
 
-def _run_test_with_debug_table(self, test_method, table_name_prefix, custom_schema):
+def _run_test_with_debug_table(
+    self: _T,
+    test_method: Callable[[_T], None],
+    table_name_prefix: str,
+    custom_schema: str | None,
+) -> None:
     """Run test with debug table, handling cleanup on success/failure."""
     session = None
     table_name = None
@@ -98,9 +110,15 @@ class PGTestCaseHelper(unittest.TestCase):
     test_config: Any
     lg: Logger
     pg: PG
+    _test_helper: ClassVar[PGTestHelperCore]
+    _test_helper_initialized: ClassVar[bool]
+    test_helper: PGTestHelperCore
+    # Set by the debug_table decorator for the duration of a test
+    session: sqlalchemy.orm.Session
+    table_name: str
 
     @classmethod
-    def set_config_path(cls, config_path):
+    def set_config_path(cls, config_path: str) -> None:
         """
         Set a custom configuration file path.
 
@@ -110,7 +128,7 @@ class PGTestCaseHelper(unittest.TestCase):
         cls._config_path = config_path
 
     @classmethod
-    def setUpClass(cls):
+    def setUpClass(cls) -> None:
         """Set up the test class with database connection."""
         # Load configuration
         config_path = cls._resolve_config_path()
@@ -207,7 +225,7 @@ class PGTestCaseHelper(unittest.TestCase):
             cls._db_available = False
             cls._skip_reason = f"Cannot connect to test database: {e}"
 
-    def setUp(self):
+    def setUp(self) -> None:
         """Set up each test."""
         if not self._db_available:
             self.skipTest(self._skip_reason)
@@ -222,7 +240,9 @@ class PGTestCaseHelper(unittest.TestCase):
             self.test_helper = self.__class__._test_helper
 
     @staticmethod
-    def debug_table(table_name_prefix="debug_test_table", custom_schema=None):
+    def debug_table(
+        table_name_prefix: str = "debug_test_table", custom_schema: str | None = None
+    ) -> Callable[[Callable[[_T], None]], Callable[[_T], None]]:
         """
         Decorator that automatically manages debug table cleanup based on test success/failure.
 
@@ -252,8 +272,8 @@ class PGTestCaseHelper(unittest.TestCase):
                 pass
         """
 
-        def decorator(test_method):
-            def wrapper(self):
+        def decorator(test_method: Callable[[_T], None]) -> Callable[[_T], None]:
+            def wrapper(self: _T) -> None:
                 _run_test_with_debug_table(
                     self, test_method, table_name_prefix, custom_schema
                 )

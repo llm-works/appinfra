@@ -24,7 +24,7 @@ from appinfra.log import LogConfig, LoggerFactory
 from appinfra.time import Ticker, TickerMode
 
 
-def example_with_handler():
+def example_with_handler() -> None:
     """Example: Non-blocking ticker with handler."""
     print("\n=== Example 1: With Handler ===")
 
@@ -35,7 +35,7 @@ def example_with_handler():
     ticker = Ticker(lg, lambda: lg.info("scheduled task executed"), secs=2.0)
 
     # Simulate message queue
-    messages = queue.Queue()
+    messages: queue.Queue[str] = queue.Queue()
     messages.put("msg1")
     messages.put("msg2")
 
@@ -57,7 +57,7 @@ def example_with_handler():
         ticker.try_tick()
 
 
-def example_without_handler():
+def example_without_handler() -> None:
     """Example: Timing oracle mode without handler."""
     print("\n=== Example 2: Without Handler (Timing Oracle) ===")
 
@@ -79,7 +79,7 @@ def example_without_handler():
         time.sleep(0.1)
 
 
-def example_strict_mode():
+def example_strict_mode() -> None:
     """Example: STRICT mode catches up if tasks run slow."""
     print("\n=== Example 3: STRICT Mode (Catch-up) ===")
 
@@ -110,7 +110,7 @@ def example_strict_mode():
     print(f"→ STRICT mode: {tick_count} ticks in 4 seconds (caught up after slow task)")
 
 
-def example_flex_mode():
+def example_flex_mode() -> None:
     """Example: FLEX mode never catches up."""
     print("\n=== Example 4: FLEX Mode (No Catch-up) ===")
 
@@ -143,7 +143,7 @@ def example_flex_mode():
     )
 
 
-def example_shared_timestamp():
+def example_shared_timestamp() -> None:
     """Example: Sharing timestamp for drift-free operation."""
     print("\n=== Example 5: Shared Timestamp (Drift-Free) ===")
 
@@ -168,7 +168,7 @@ def example_shared_timestamp():
         time.sleep(1.1)
 
 
-def example_spaced_mode():
+def example_spaced_mode() -> None:
     """Example: SPACED mode guarantees spacing from completion."""
     print("\n=== Example 6: SPACED Mode (Guaranteed Spacing) ===")
 
@@ -201,7 +201,7 @@ def example_spaced_mode():
     )
 
 
-def main():
+def main() -> int:
     """Run all examples."""
     example_with_handler()
     example_without_handler()

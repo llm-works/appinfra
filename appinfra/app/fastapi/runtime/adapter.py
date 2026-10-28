@@ -296,7 +296,6 @@ def _create_callback_middleware(
 ) -> type:
     """Create a middleware class for request/response/exception callbacks."""
     from starlette.middleware.base import BaseHTTPMiddleware
-    from starlette.responses import Response as ResponseType
 
     class CallbackMiddleware(BaseHTTPMiddleware):
         async def dispatch(self, request: Request, call_next: Any) -> Response:
@@ -306,10 +305,7 @@ def _create_callback_middleware(
             except Exception as exc:
                 await _run_exception_callbacks(exception_callbacks, request, exc)
                 raise
-            response = await _run_response_callbacks(
-                response_callbacks, request, response
-            )
-            return cast(ResponseType, response)
+            return await _run_response_callbacks(response_callbacks, request, response)
 
     return CallbackMiddleware
 

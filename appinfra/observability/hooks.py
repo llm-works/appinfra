@@ -113,7 +113,9 @@ class ObservabilityHooks:
             self._hooks[event] = []
         self._hooks[event].append(callback)
 
-    def on(self, event: HookEvent) -> Callable:
+    def on(
+        self, event: HookEvent
+    ) -> Callable[[Callable[[HookContext], None]], Callable[[HookContext], None]]:
         """
         Decorator for registering event callbacks.
 
@@ -133,7 +135,9 @@ class ObservabilityHooks:
                 lg.info(f"Query: {context.query}")
         """
 
-        def decorator(callback: Callable[[HookContext], None]) -> Callable:
+        def decorator(
+            callback: Callable[[HookContext], None],
+        ) -> Callable[[HookContext], None]:
             self.register(event, callback)
             return callback
 
@@ -239,7 +243,7 @@ class ObservabilityHooks:
         """Check if hooks are enabled."""
         return self._enabled
 
-    def get_callbacks(self, event: HookEvent) -> list[Callable]:
+    def get_callbacks(self, event: HookEvent) -> list[Callable[[HookContext], None]]:
         """
         Get all callbacks registered for an event.
 

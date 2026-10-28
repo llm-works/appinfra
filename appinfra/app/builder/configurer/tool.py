@@ -10,7 +10,7 @@ This module provides focused builder for configuring tools, commands, and plugin
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
-from typing import TYPE_CHECKING, Self
+from typing import TYPE_CHECKING, Any, Self
 
 from ...tools.base import Tool
 from ..plugin import Plugin
@@ -82,7 +82,7 @@ class ToolConfigurer:
     def with_cmd(
         self,
         name: str,
-        run_func: Callable,
+        run_func: Callable[..., Any],
         aliases: list[str] | None = None,
         help_text: str = "",
     ) -> Self:

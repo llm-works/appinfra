@@ -108,7 +108,7 @@ class ScaffoldTool(Tool):
         # Validate inputs
         validation_error = self._validate_inputs(name, path)
         if validation_error:
-            _report_error_to_stderr(self.lg, validation_error)  # type: ignore[union-attr]
+            _report_error_to_stderr(self.lg, validation_error)
             return 1
 
         # Generate project
@@ -139,7 +139,7 @@ class ScaffoldTool(Tool):
         makefile_style: str,
     ) -> int:
         """Generate project structure and files."""
-        self.lg.info(f"Creating project: {name}", extra={"path": str(project_path)})  # type: ignore[union-attr]
+        self.lg.info(f"Creating project: {name}", extra={"path": str(project_path)})
 
         try:
             self._create_structure(project_path, with_db, with_server)
@@ -153,7 +153,7 @@ class ScaffoldTool(Tool):
             _log_next_steps(self.lg, name, project_path)
             return 0
         except Exception as e:
-            self.lg.error("failed to create project", extra={"exception": e})  # type: ignore[union-attr]
+            self.lg.error("failed to create project", extra={"exception": e})
             return 1
 
     def _is_valid_project_name(self, name: str) -> bool:
@@ -182,7 +182,7 @@ class ScaffoldTool(Tool):
         (project_path / project_path.name / "etc").mkdir(parents=True)
         (project_path / "tests").mkdir(parents=True)
 
-        self.lg.debug("created directory structure")  # type: ignore[union-attr]
+        self.lg.debug("created directory structure")
 
     def _config_logging_section(self, with_logging_db: bool) -> list[str]:
         """Generate logging configuration section."""
@@ -265,7 +265,7 @@ class ScaffoldTool(Tool):
 
         config_path = project_path / name / "etc" / "infra.yaml"
         config_path.write_text("\n".join(config_lines) + "\n")
-        self.lg.debug(f"Generated config: {config_path}")  # type: ignore[union-attr]
+        self.lg.debug(f"Generated config: {config_path}")
 
     def _app_imports_section(self, name: str, with_db: bool) -> list[str]:
         """Generate imports section for app file."""
@@ -358,7 +358,7 @@ class ScaffoldTool(Tool):
         init_path = project_path / project_path.name / "__init__.py"
         init_path.write_text(f'"""{name} package."""\n\n__version__ = "0.1.0"\n')
 
-        self.lg.debug(f"Generated app: {app_path}")  # type: ignore[union-attr]
+        self.lg.debug(f"Generated app: {app_path}")
 
     def _generate_tests(self, project_path: Path, name: str) -> None:
         """Generate test files."""
@@ -390,7 +390,7 @@ class ScaffoldTool(Tool):
         # Create __init__.py for tests
         (project_path / "tests" / "__init__.py").write_text("")
 
-        self.lg.debug(f"Generated tests: {test_path}")  # type: ignore[union-attr]
+        self.lg.debug(f"Generated tests: {test_path}")
 
     def _generate_readme(self, project_path: Path, name: str) -> None:
         """Generate README.md file."""
@@ -478,17 +478,17 @@ class ScaffoldTool(Tool):
             template_path = template_files / template_name
 
             if not template_path.is_file():
-                self.lg.warning(f"Template not found: {template_name}")  # type: ignore[union-attr]
+                self.lg.warning(f"Template not found: {template_name}")
                 return
 
             template_content = template_path.read_text()
             makefile_content = template_content.replace("{{PROJECT_NAME}}", name)
 
             (project_path / "Makefile").write_text(makefile_content)
-            self.lg.debug(f"Generated {makefile_style} Makefile")  # type: ignore[union-attr]
+            self.lg.debug(f"Generated {makefile_style} Makefile")
 
         except Exception as e:
-            self.lg.error("failed to generate Makefile", extra={"exception": e})  # type: ignore[union-attr]
+            self.lg.error("failed to generate Makefile", extra={"exception": e})
 
     def _generate_supporting_files(self, project_path: Path, name: str) -> None:
         """Generate README, pyproject.toml, etc."""
@@ -496,4 +496,4 @@ class ScaffoldTool(Tool):
         self._generate_pyproject(project_path, name)
         self._generate_gitignore(project_path)
         self._generate_makefile(project_path, name)
-        self.lg.debug("generated supporting files")  # type: ignore[union-attr]
+        self.lg.debug("generated supporting files")

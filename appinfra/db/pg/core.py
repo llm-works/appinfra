@@ -11,7 +11,7 @@ initialization helper functions.
 import re
 import time
 from functools import lru_cache
-from typing import Any, cast
+from typing import Any
 
 import sqlalchemy
 import sqlalchemy.dialects.postgresql
@@ -149,7 +149,7 @@ class QueryLogger:
         formatted = self._whitespace_regex.sub(
             " ", query_str.replace("\n", " ").replace("\t", " ")
         )
-        return cast(str, formatted.strip())
+        return formatted.strip()
 
     def create_after_execute_hook(self) -> Any:
         """Create and return the after_execute event listener."""

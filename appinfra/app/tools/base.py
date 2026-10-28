@@ -226,7 +226,7 @@ class Tool(Traceable, ToolProtocol):
                 self.name, "args (parent does not have 'args' attribute)"
             )
 
-        return cast(argparse.Namespace, self.parent.args)  # type: ignore[attr-defined]
+        return cast(argparse.Namespace, self.parent.args)
 
     @property
     def kwargs(self) -> dict[str, Any] | None:
@@ -387,7 +387,7 @@ class Tool(Traceable, ToolProtocol):
     def add_tool(
         self,
         tool: Tool,
-        run_func: Callable | None = None,
+        run_func: Callable[..., Any] | None = None,
         default: str | None = None,
     ) -> Tool:
         """Add a tool to the group."""
@@ -399,7 +399,7 @@ class Tool(Traceable, ToolProtocol):
     def add_cmd(
         self,
         name: str,
-        run_func: Callable,
+        run_func: Callable[..., Any],
         aliases: list[str] | None = None,
         help_text: str = "",
     ) -> None:

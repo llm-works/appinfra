@@ -31,10 +31,10 @@ class ToolBuilder:
         self._aliases: list[str] = []
         self._help_text = ""
         self._description = ""
-        self._args: list[tuple] = []
+        self._args: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
         self._subcommands: list[tuple[str, ToolBuilder]] = []
-        self._run_func: Callable | None = None
-        self._setup_func: Callable | None = None
+        self._run_func: Callable[..., Any] | None = None
+        self._setup_func: Callable[..., Any] | None = None
         self._parent: Traceable | None = None
         self._group_default: str | None = None
 
@@ -68,12 +68,12 @@ class ToolBuilder:
         self._subcommands.append((name, builder))
         return self
 
-    def with_run_function(self, func: Callable) -> Self:
+    def with_run_function(self, func: Callable[..., Any]) -> Self:
         """Set the run function for the tool."""
         self._run_func = func
         return self
 
-    def with_setup_function(self, func: Callable) -> Self:
+    def with_setup_function(self, func: Callable[..., Any]) -> Self:
         """Set the setup function for the tool."""
         self._setup_func = func
         return self
@@ -126,8 +126,8 @@ class BuiltTool(Tool):
         self,
         parent: Traceable | None = None,
         config: ToolConfig | None = None,
-        run_func: Callable | None = None,
-        setup_func: Callable | None = None,
+        run_func: Callable[..., Any] | None = None,
+        setup_func: Callable[..., Any] | None = None,
         group_default: str | None = None,
     ):
         """
@@ -144,7 +144,7 @@ class BuiltTool(Tool):
         self._run_func = run_func
         self._setup_func = setup_func
         self._group_default = group_default
-        self._custom_args: list[tuple] = []
+        self._custom_args: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
         self._sub_tools: list[Tool] = []
 
     @property
@@ -198,7 +198,7 @@ class FunctionTool(Tool):
     def __init__(
         self,
         name: str,
-        func: Callable,
+        func: Callable[..., Any],
         parent: Traceable | None = None,
         aliases: list[str] | None = None,
         help_text: str = "",
@@ -229,7 +229,9 @@ class FunctionTool(Tool):
         return cast(int, self._func(**kwargs))
 
 
-def create_function_tool(name: str, func: Callable, **kwargs: Any) -> ToolBuilder:
+def create_function_tool(
+    name: str, func: Callable[..., Any], **kwargs: Any
+) -> ToolBuilder:
     """
     Create a tool builder for a simple function.
 

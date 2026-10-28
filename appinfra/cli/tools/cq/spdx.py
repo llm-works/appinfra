@@ -253,7 +253,7 @@ class CheckSpdxTool(Tool):
         try:
             files = tracked_source_files()
         except subprocess.CalledProcessError as e:
-            self.lg.warning("git ls-files failed", extra={"exception": e})  # type: ignore[union-attr]
+            self.lg.warning("git ls-files failed", extra={"exception": e})
             return 1
 
         if self.args.fix:
@@ -264,11 +264,9 @@ class CheckSpdxTool(Tool):
         """Check mode: report offenders, exit 1 if any."""
         offenders = collect_offenders(files)
         if not offenders:
-            self.lg.info(  # type: ignore[union-attr]
-                "SPDX headers OK", extra={"files_checked": len(files)}
-            )
+            self.lg.info("SPDX headers OK", extra={"files_checked": len(files)})
             return 0
-        self.lg.warning(  # type: ignore[union-attr]
+        self.lg.warning(
             "SPDX headers missing",
             extra={"missing_count": len(offenders), "total": len(files)},
         )
@@ -280,9 +278,7 @@ class CheckSpdxTool(Tool):
         try:
             package = self.args.package or derive_package_name()
         except (FileNotFoundError, KeyError, TypeError) as e:
-            self.lg.warning(  # type: ignore[union-attr]
-                "could not derive package name", extra={"exception": e}
-            )
+            self.lg.warning("could not derive package name", extra={"exception": e})
             return 1
         year = self.args.year or _dt.datetime.now().year
         header = build_header(package, year)
@@ -290,7 +286,7 @@ class CheckSpdxTool(Tool):
         if counts is None:
             return 1
         modified, skipped = counts
-        self.lg.info(  # type: ignore[union-attr]
+        self.lg.info(
             "SPDX headers " + ("(dry-run)" if self.args.dry_run else "applied"),
             extra={
                 "package": package,
@@ -308,8 +304,6 @@ class CheckSpdxTool(Tool):
         """Thin wrapper around `apply_headers` that logs the first read error."""
         modified, skipped, err = apply_headers(files, header, self.args.dry_run)
         if err is not None:
-            self.lg.warning(  # type: ignore[union-attr]
-                "read error", extra={"path": str(err)}
-            )
+            self.lg.warning("read error", extra={"path": str(err)})
             return None
         return modified, skipped

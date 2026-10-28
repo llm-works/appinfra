@@ -59,7 +59,7 @@ from appinfra import Config
 ETC_DIR = pathlib.Path(__file__).parent / "etc"
 
 
-def print_file_content(file_path: Path, max_lines: int | None = None):
+def print_file_content(file_path: Path, max_lines: int | None = None) -> None:
     """Print file content with line numbers for demonstration."""
     with open(file_path) as f:
         lines = f.readlines()
@@ -71,7 +71,7 @@ def print_file_content(file_path: Path, max_lines: int | None = None):
             print("    ...")
 
 
-def demo_basic_include():
+def demo_basic_include() -> None:
     """Demonstrate basic file inclusion."""
     print("=== Basic File Inclusion ===")
     print(f"\nFiles used: {ETC_DIR}/01_basic_main.yaml and 01_basic_database.yaml")
@@ -94,7 +94,7 @@ def demo_basic_include():
     print("\n✓ Basic inclusion working correctly")
 
 
-def demo_nested_includes():
+def demo_nested_includes() -> None:
     """Demonstrate nested/recursive includes."""
     print("\n=== Nested/Recursive Includes ===")
     print("\nFiles used: 02_nested_*.yaml (4 files)")
@@ -113,7 +113,7 @@ def demo_nested_includes():
     print("\n✓ Nested includes work correctly (4 levels deep)")
 
 
-def demo_variable_substitution():
+def demo_variable_substitution() -> None:
     """Demonstrate include with variable substitution."""
     print("\n=== Include with Variable Substitution ===")
     print("\nFiles used: 03_variables_*.yaml")
@@ -133,7 +133,7 @@ def demo_variable_substitution():
     print("\n✓ Variable substitution works across file boundaries")
 
 
-def demo_multiple_includes():
+def demo_multiple_includes() -> None:
     """Demonstrate multiple includes in one file."""
     print("\n=== Multiple Includes in One File ===")
     print("\nFiles used: 04_multiple_*.yaml (4 files)")
@@ -154,7 +154,7 @@ def demo_multiple_includes():
     print("\n✓ Multiple includes in one file work correctly")
 
 
-def _print_organized_structure():
+def _print_organized_structure() -> None:
     """Print the directory structure for organized config demo."""
     print("\nDirectory structure:")
     print("  etc/")
@@ -168,7 +168,7 @@ def _print_organized_structure():
     print("      └── handlers.yaml")
 
 
-def demo_organized_config():
+def demo_organized_config() -> None:
     """Demonstrate real-world organized configuration."""
     print("\n=== Real-World Organized Configuration ===")
     print(
@@ -195,7 +195,7 @@ def demo_organized_config():
     print("\n✓ Organized configuration structure works well")
 
 
-def _print_env_structure():
+def _print_env_structure() -> None:
     """Print the directory structure for environment-specific config demo."""
     print("\nDirectory structure:")
     print("  etc/")
@@ -207,7 +207,7 @@ def _print_env_structure():
     print("      └── prod/database.yaml")
 
 
-def _show_dev_config():
+def _show_dev_config() -> None:
     """Load and display development configuration."""
     print("\nDevelopment config (06_env_dev.yaml):")
     print_file_content(ETC_DIR / "06_env_dev.yaml")
@@ -221,7 +221,7 @@ def _show_dev_config():
     print(f"  database.debug: {dev_config.get('database.debug')}")
 
 
-def _show_prod_config():
+def _show_prod_config() -> None:
     """Load and display production configuration."""
     print("\nProduction config (06_env_prod.yaml):")
     print_file_content(ETC_DIR / "06_env_prod.yaml")
@@ -235,7 +235,7 @@ def _show_prod_config():
     print(f"  database.debug: {prod_config.get('database.debug')}")
 
 
-def demo_environment_specific():
+def demo_environment_specific() -> None:
     """Demonstrate environment-specific configuration."""
     print("\n=== Environment-Specific Configuration ===")
     print("\nFiles used: 06_env_*.yaml + env/dev/ and env/prod/")
@@ -247,7 +247,7 @@ def demo_environment_specific():
     print("\n✓ Environment-specific configuration pattern demonstrated")
 
 
-def demo_circular_detection():
+def demo_circular_detection() -> None:
     """Demonstrate circular dependency detection."""
     print("\n=== Circular Dependency Detection ===")
     print("\nFiles used: 07_circular_a.yaml and 07_circular_b.yaml")
@@ -268,7 +268,7 @@ def demo_circular_detection():
         print(f"  {str(e)}")
 
 
-def _print_path_practices():
+def _print_path_practices() -> None:
     """Print practices 1-3."""
     print("\n1. Use relative paths for portability:")
     print("   database: !include './database.yaml'  # Good")
@@ -287,7 +287,7 @@ def _print_path_practices():
     print("   Too deep nesting makes debugging harder")
 
 
-def _print_naming_practices():
+def _print_naming_practices() -> None:
     """Print practices 4-7."""
     print("\n4. Use descriptive filenames:")
     print("   database_connection.yaml  # Clear")
@@ -307,14 +307,14 @@ def _print_naming_practices():
     print("   (See 06_env_*.yaml for example)")
 
 
-def demo_best_practices():
+def demo_best_practices() -> None:
     """Demonstrate best practices for using includes."""
     print("\n=== Best Practices for YAML Includes ===")
     _print_path_practices()
     _print_naming_practices()
 
 
-def _print_summary():
+def _print_summary() -> None:
     """Print the demo completion summary."""
     print("\n=== Demo Complete ===")
     print("YAML file inclusion functionality has been demonstrated.")
@@ -330,7 +330,7 @@ def _print_summary():
     print("For detailed documentation, see etc/README.md")
 
 
-def _run_all_demos():
+def _run_all_demos() -> None:
     """Run all demonstration functions."""
     demo_basic_include()
     demo_nested_includes()
@@ -342,7 +342,7 @@ def _run_all_demos():
     demo_best_practices()
 
 
-def main():
+def main() -> int:
     """Main function to run the YAML include demos."""
     print("=== YAML File Inclusion Example ===")
     print("This example demonstrates how to use !include tags to organize")

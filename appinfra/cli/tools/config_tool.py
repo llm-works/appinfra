@@ -20,7 +20,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-import yaml  # type: ignore[import-untyped]
+import yaml
 
 from ...app.tools import Tool, ToolConfig
 from ...app.tracing.traceable import Traceable
@@ -122,7 +122,7 @@ class ConfigDumpTool(Tool):
 
         path = Path(config_path)
         if not path.exists():
-            self.lg.error("config file not found", extra={"path": config_path})  # type: ignore[union-attr]
+            self.lg.error("config file not found", extra={"path": config_path})
             return None
 
         try:
@@ -131,10 +131,10 @@ class ConfigDumpTool(Tool):
             data = cfg.to_dict()
             return {k: v for k, v in data.items() if not k.startswith("_")}
         except yaml.YAMLError as e:
-            self.lg.error("YAML parse error", extra={"exception": e})  # type: ignore[union-attr]
+            self.lg.error("YAML parse error", extra={"exception": e})
             return None
         except Exception as e:
-            self.lg.error("failed to load config", extra={"exception": e})  # type: ignore[union-attr]
+            self.lg.error("failed to load config", extra={"exception": e})
             return None
 
     def _filter_section(self, data: dict[str, Any]) -> dict[str, Any] | None:
@@ -146,7 +146,7 @@ class ConfigDumpTool(Tool):
         current: Any = data
         for part in section.split("."):
             if not isinstance(current, dict) or part not in current:
-                self.lg.error("section not found", extra={"section": section})  # type: ignore[union-attr]
+                self.lg.error("section not found", extra={"section": section})
                 return None
             current = current[part]
 
@@ -276,7 +276,10 @@ class ConfigSourceTool(Tool):
         ``[ ]``.
         """
         won = source.rule
-        mark = lambda r: "[x]" if won == r else "[ ]"  # noqa: E731
+
+        def mark(r: int) -> str:
+            return "[x]" if won == r else "[ ]"
+
         cfg = custom_cfg or ""
         etc = custom_etc or ""
         loaded_str = str(source.path)

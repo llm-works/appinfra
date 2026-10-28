@@ -7,27 +7,31 @@
 # ci-run: first
 # ci-run: second
 
+import argparse
 import sys
 from pathlib import Path
+from typing import Any
 
 # Allow running from a source checkout without installing the package.
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 from appinfra.app.builder.app import AppBuilder
+from appinfra.app.core.app import App
 from appinfra.app.tools.base import Tool, ToolConfig
+from appinfra.app.tracing.traceable import Traceable
 
 
 class StatusTool(Tool):
     """Status tool implementation."""
 
-    def __init__(self, parent=None):
+    def __init__(self, parent: Traceable | None = None) -> None:
         config = ToolConfig(name="status", aliases=["s"], help_text="status tool")
         super().__init__(parent, config)
 
-    def add_args(self, parser):
+    def add_args(self, parser: argparse.ArgumentParser) -> None:
         parser.add_argument("-x", action="store_true", help="x flag")
 
-    def run(self, **kwargs):
+    def run(self, **kwargs: Any) -> int:
         self.lg.info("running status...")
         return 0
 
@@ -35,7 +39,7 @@ class StatusTool(Tool):
 class FirstTool(Tool):
     """First tool with subcommands."""
 
-    def __init__(self, parent=None):
+    def __init__(self, parent: Traceable | None = None) -> None:
         config = ToolConfig(
             name="first", aliases=["f1"], help_text="First tool with subcommands"
         )
@@ -45,40 +49,40 @@ class FirstTool(Tool):
         # Add info command in constructor
         self.add_cmd("info", aliases=["i"], run_func=self._run_info)
 
-    def add_args(self, parser):
+    def add_args(self, parser: argparse.ArgumentParser) -> None:
         parser.add_argument("-d", action="store_true", help="x switch")
 
-    def setup(self, **kwargs):
+    def setup(self, **kwargs: Any) -> None:
         """Set up FirstTool-specific configuration."""
         super().setup(**kwargs)
         # FirstTool-specific setup logic here
         # Note: Framework automatically handles group/subtool setup
         self.lg.debug("firstTool setup complete")
 
-    def run(self, **kwargs):
+    def run(self, **kwargs: Any) -> int:
         self.lg.info("running 1...")
         return self.group.run(**kwargs)
 
-    def _run_info(self):
+    def _run_info(self) -> None:
         self.lg.info("running 1 info...")
 
 
 class SecondTool(Tool):
     """Second tool implementation."""
 
-    def __init__(self, parent=None):
+    def __init__(self, parent: Traceable | None = None) -> None:
         config = ToolConfig(name="second", aliases=["s2"], help_text="Second tool")
         super().__init__(parent, config)
 
-    def add_args(self, parser):
+    def add_args(self, parser: argparse.ArgumentParser) -> None:
         parser.add_argument("-y", action="store_true", help="y switch")
 
-    def run(self, **kwargs):
+    def run(self, **kwargs: Any) -> int:
         self.lg.info("running 2...")
         return 0
 
 
-def create_application():
+def create_application() -> App:
     """Create the application using AppBuilder with Tool classes."""
 
     # Create tool instances
@@ -104,7 +108,7 @@ def create_application():
     return app
 
 
-def main():
+def main() -> int:
     """Main function."""
     app = create_application()
     return app.main()

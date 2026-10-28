@@ -6,11 +6,14 @@
 # ci-requires: pg
 
 import json
+import logging
 import random
 import sys
 import time
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 # Allow running from a source checkout without installing the package.
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
@@ -19,10 +22,10 @@ import sqlalchemy
 
 from appinfra.app import App, AppBuilder
 from appinfra.db import Manager as DBManager
+from appinfra.log import Logger
 from appinfra.log.builder import (
     DatabaseLoggingBuilder,
     quick_audit_logger,
-    quick_custom_database_logger,
     quick_error_logger,
 )
 
@@ -30,7 +33,7 @@ from appinfra.log.builder import (
 class DatabaseLoggingApp(App):
     """Example application demonstrating database logging capabilities."""
 
-    def add_args(self):
+    def add_args(self) -> None:
         # Add default logging arguments
         super().add_args()
 
@@ -41,7 +44,7 @@ class DatabaseLoggingApp(App):
         self._add_flush_interval_arg()
         self._add_mock_db_arg()
 
-    def _add_demo_mode_arg(self):
+    def _add_demo_mode_arg(self) -> None:
         """Add demo mode argument."""
         self.parser.add_argument(
             "--demo-mode",
@@ -50,7 +53,7 @@ class DatabaseLoggingApp(App):
             help="database logging demo mode (default: basic)",
         )
 
-    def _add_log_count_arg(self):
+    def _add_log_count_arg(self) -> None:
         """Add log count argument."""
         self.parser.add_argument(
             "--log-count",
@@ -59,7 +62,7 @@ class DatabaseLoggingApp(App):
             help="number of log messages to generate (default: 10)",
         )
 
-    def _add_batch_size_arg(self):
+    def _add_batch_size_arg(self) -> None:
         """Add batch size argument."""
         self.parser.add_argument(
             "--batch-size",
@@ -68,7 +71,7 @@ class DatabaseLoggingApp(App):
             help="batch size for database logging (default: 3)",
         )
 
-    def _add_flush_interval_arg(self):
+    def _add_flush_interval_arg(self) -> None:
         """Add flush interval argument."""
         self.parser.add_argument(
             "--flush-interval",
@@ -77,7 +80,7 @@ class DatabaseLoggingApp(App):
             help="flush interval in seconds (default: 2.0)",
         )
 
-    def _add_mock_db_arg(self):
+    def _add_mock_db_arg(self) -> None:
         """Add mock database argument."""
         self.parser.add_argument(
             "--mock-db",
@@ -85,7 +88,7 @@ class DatabaseLoggingApp(App):
             help="use mock database interface instead of real database (default: False)",
         )
 
-    def setup_database(self):
+    def setup_database(self) -> None:
         """Set up database connection and create demo tables."""
         # Check if mock database mode is explicitly requested
         use_mock_db = getattr(self.args, "mock_db", False)
@@ -111,69 +114,69 @@ class DatabaseLoggingApp(App):
 
         self.lg.info("database setup completed", extra={"db_url": self.db.url})
 
-    def _create_mock_db_interface(self):
+    def _create_mock_db_interface(self) -> Any:
         """Create a mock database interface for demonstration when real DB is not available."""
         mock_session_cls = self._create_mock_session_class()
         mock_db_interface_cls = self._create_mock_db_interface_class(mock_session_cls)
         return mock_db_interface_cls(self.lg)
 
-    def _create_mock_session_class(self):
+    def _create_mock_session_class(self) -> type:
         """Create MockSession class for mock database."""
         mock_result_cls = self._create_mock_result_class()
 
         class MockSession:
-            def __init__(self, lg):
+            def __init__(self, lg: Logger) -> None:
                 self.lg = lg
 
-            def __enter__(self):
+            def __enter__(self) -> "MockSession":
                 return self
 
-            def __exit__(self, exc_type, exc_val, exc_tb):
+            def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
                 pass
 
-            def execute(self, query, params=None):
+            def execute(self, query: Any, params: Any = None) -> Any:
                 self.lg.info(f"Mock DB: Would execute: {str(query)[:100]}...")
                 if "COUNT" in str(query).upper():
                     return mock_result_cls([(0,)])
                 return mock_result_cls([])
 
-            def commit(self):
+            def commit(self) -> None:
                 self.lg.info("Mock DB: Would commit transaction")
 
         return MockSession
 
-    def _create_mock_result_class(self):
+    def _create_mock_result_class(self) -> type:
         """Create MockResult class for mock database."""
 
         class MockResult:
-            def __init__(self, rows):
+            def __init__(self, rows: list[tuple[Any, ...]]) -> None:
                 self.rows = rows
 
-            def fetchone(self):
+            def fetchone(self) -> tuple[Any, ...]:
                 return self.rows[0] if self.rows else (0,)
 
-            def fetchall(self):
+            def fetchall(self) -> list[tuple[Any, ...]]:
                 return self.rows
 
-            def keys(self):
+            def keys(self) -> list[str]:
                 return ["id", "timestamp", "message"]
 
         return MockResult
 
-    def _create_mock_db_interface_class(self, mock_session_cls):
+    def _create_mock_db_interface_class(self, mock_session_cls: type) -> type:
         """Create MockDBInterface class for mock database."""
 
         class MockDBInterface:
-            def __init__(self, lg):
+            def __init__(self, lg: Logger) -> None:
                 self.lg = lg
                 self.url = "mock://localhost/demo"
 
-            def session(self):
+            def session(self) -> Any:
                 return mock_session_cls(self.lg)
 
         return MockDBInterface
 
-    def _create_basic_logs_table(self, session):
+    def _create_basic_logs_table(self, session: Any) -> None:
         """Create basic logs table."""
         session.execute(
             sqlalchemy.text(
@@ -197,7 +200,7 @@ class DatabaseLoggingApp(App):
             )
         )
 
-    def _create_audit_logs_table(self, session):
+    def _create_audit_logs_table(self, session: Any) -> None:
         """Create audit logs table."""
         session.execute(
             sqlalchemy.text(
@@ -220,7 +223,7 @@ class DatabaseLoggingApp(App):
             )
         )
 
-    def _create_error_logs_table(self, session):
+    def _create_error_logs_table(self, session: Any) -> None:
         """Create error logs table."""
         session.execute(
             sqlalchemy.text(
@@ -243,7 +246,7 @@ class DatabaseLoggingApp(App):
             )
         )
 
-    def _create_custom_events_table(self, session):
+    def _create_custom_events_table(self, session: Any) -> None:
         """Create custom events table."""
         session.execute(
             sqlalchemy.text(
@@ -263,7 +266,7 @@ class DatabaseLoggingApp(App):
             )
         )
 
-    def _create_demo_tables(self):
+    def _create_demo_tables(self) -> None:
         """Create demo tables for different logging scenarios."""
         with self.db.session() as session:
             self._create_basic_logs_table(session)
@@ -273,7 +276,7 @@ class DatabaseLoggingApp(App):
             session.commit()
             self.lg.info("demo tables created successfully")
 
-    def run(self, **kwargs):
+    def run(self, **kwargs: Any) -> int:
         """Run the database logging demonstration."""
         params = self._get_demo_parameters()
         self._log_demo_start(params)
@@ -282,7 +285,7 @@ class DatabaseLoggingApp(App):
         self.lg.info("database logging demo completed")
         return 0
 
-    def _get_demo_parameters(self):
+    def _get_demo_parameters(self) -> dict[str, Any]:
         """Get demo parameters from args."""
         return {
             "demo_mode": getattr(self.args, "demo_mode", "basic"),
@@ -291,11 +294,11 @@ class DatabaseLoggingApp(App):
             "flush_interval": getattr(self.args, "flush_interval", 2.0),
         }
 
-    def _log_demo_start(self, params):
+    def _log_demo_start(self, params: dict[str, Any]) -> None:
         """Log demo start with parameters."""
         self.lg.info("starting database logging demo", extra=params)
 
-    def _run_demo(self, params):
+    def _run_demo(self, params: dict[str, Any]) -> None:
         """Run the appropriate demo based on mode."""
         demo_mode = params["demo_mode"]
         log_count = params["log_count"]
@@ -320,7 +323,7 @@ class DatabaseLoggingApp(App):
         if demo_mode in demo_map:
             demo_map[demo_mode]()
 
-    def _create_basic_db_logger(self, batch_size, flush_interval):
+    def _create_basic_db_logger(self, batch_size: int, flush_interval: float) -> Logger:
         """Create basic database logger."""
         return (
             DatabaseLoggingBuilder("db_demo")
@@ -334,7 +337,7 @@ class DatabaseLoggingApp(App):
             .build()
         )
 
-    def _get_sample_messages(self):
+    def _get_sample_messages(self) -> list[str]:
         """Get sample log messages."""
         return [
             "Application started successfully",
@@ -349,7 +352,7 @@ class DatabaseLoggingApp(App):
             "Cleanup task finished",
         ]
 
-    def _generate_basic_logs(self, db_logger, log_count):
+    def _generate_basic_logs(self, db_logger: Logger, log_count: int) -> None:
         """Generate sample log messages."""
         sample_messages = self._get_sample_messages()
 
@@ -372,7 +375,9 @@ class DatabaseLoggingApp(App):
 
             time.sleep(0.1)
 
-    def _demo_basic_logging(self, log_count, batch_size, flush_interval):
+    def _demo_basic_logging(
+        self, log_count: int, batch_size: int, flush_interval: float
+    ) -> None:
         """Demonstrate basic database logging."""
         self.lg.info("=== Basic Database Logging Demo ===")
 
@@ -384,7 +389,7 @@ class DatabaseLoggingApp(App):
 
         self._show_table_contents("demo_logs")
 
-    def _get_audit_actions(self):
+    def _get_audit_actions(self) -> list[str]:
         """Get list of audit actions."""
         return [
             "user_login",
@@ -399,7 +404,7 @@ class DatabaseLoggingApp(App):
             "settings_update",
         ]
 
-    def _generate_audit_logs(self, audit_logger, log_count):
+    def _generate_audit_logs(self, audit_logger: Logger, log_count: int) -> None:
         """Generate audit log messages."""
         audit_actions = self._get_audit_actions()
 
@@ -418,11 +423,11 @@ class DatabaseLoggingApp(App):
             audit_logger.info(f"User {user_id} performed {action}", extra=audit_data)
             time.sleep(0.05)
 
-    def _demo_audit_logging(self, log_count):
+    def _demo_audit_logging(self, log_count: int) -> None:
         """Demonstrate audit logging."""
         self.lg.info("=== Audit Logging Demo ===")
 
-        audit_logger = quick_audit_logger("audit_demo", self.db, "info")
+        audit_logger = quick_audit_logger("audit_demo", self.db, {"level": "info"})
         self._generate_audit_logs(audit_logger, log_count)
 
         for handler in audit_logger.handlers:
@@ -430,7 +435,7 @@ class DatabaseLoggingApp(App):
 
         self._show_table_contents("audit_logs")
 
-    def _get_error_types(self):
+    def _get_error_types(self) -> list[str]:
         """Get list of error types."""
         return [
             "database_connection_failed",
@@ -445,7 +450,9 @@ class DatabaseLoggingApp(App):
             "service_unavailable",
         ]
 
-    def _log_single_error(self, error_logger, error_type, error_context):
+    def _log_single_error(
+        self, error_logger: Logger, error_type: str, error_context: dict[str, Any]
+    ) -> None:
         """Log a single error with appropriate severity."""
         if random.random() < 0.3:
             error_logger.critical(f"Critical error: {error_type}", extra=error_context)
@@ -460,7 +467,7 @@ class DatabaseLoggingApp(App):
                     "Exception caught during processing", extra=error_context
                 )
 
-    def _generate_error_logs(self, error_logger, log_count):
+    def _generate_error_logs(self, error_logger: Logger, log_count: int) -> None:
         """Generate error log messages."""
         error_types = self._get_error_types()
 
@@ -478,11 +485,11 @@ class DatabaseLoggingApp(App):
             self._log_single_error(error_logger, error_type, error_context)
             time.sleep(0.05)
 
-    def _demo_error_logging(self, log_count):
+    def _demo_error_logging(self, log_count: int) -> None:
         """Demonstrate error logging."""
         self.lg.info("=== Error Logging Demo ===")
 
-        error_logger = quick_error_logger("error_demo", self.db, "warning")
+        error_logger = quick_error_logger("error_demo", self.db, {"level": "warning"})
         self._generate_error_logs(error_logger, log_count)
 
         for handler in error_logger.handlers:
@@ -490,10 +497,10 @@ class DatabaseLoggingApp(App):
 
         self._show_table_contents("error_logs")
 
-    def _create_event_mapper(self):
+    def _create_event_mapper(self) -> Callable[[logging.LogRecord], dict[str, Any]]:
         """Create custom event data mapper."""
 
-        def event_mapper(record):
+        def event_mapper(record: logging.LogRecord) -> dict[str, Any]:
             extra_data = getattr(record, "_extra", {}) or {}
             return {
                 "event_time": datetime.fromtimestamp(record.created),
@@ -515,7 +522,7 @@ class DatabaseLoggingApp(App):
 
         return event_mapper
 
-    def _generate_custom_events(self, custom_logger, log_count):
+    def _generate_custom_events(self, custom_logger: Logger, log_count: int) -> None:
         """Generate custom event log messages."""
         event_types = [
             "page_view",
@@ -543,13 +550,24 @@ class DatabaseLoggingApp(App):
             custom_logger.info(f"Event: {event_type}", extra=event_data)
             time.sleep(0.05)
 
-    def _demo_custom_logging(self, log_count, batch_size, flush_interval):
+    def _demo_custom_logging(
+        self, log_count: int, batch_size: int, flush_interval: float
+    ) -> None:
         """Demonstrate custom data mapping."""
         self.lg.info("=== Custom Database Logging Demo ===")
 
         event_mapper = self._create_event_mapper()
-        custom_logger = quick_custom_database_logger(
-            "custom_demo", "custom_events", self.db, event_mapper, "info"
+        custom_logger = (
+            DatabaseLoggingBuilder("custom_demo")
+            .with_level("info")
+            .with_custom_table(
+                "custom_events",
+                self.db,
+                event_mapper,
+                batch_size=batch_size,
+                flush_interval=flush_interval,
+            )
+            .build()
         )
 
         self._generate_custom_events(custom_logger, log_count)
@@ -559,7 +577,7 @@ class DatabaseLoggingApp(App):
 
         self._show_table_contents("custom_events")
 
-    def _generate_multi_table_logs(self, multi_logger, log_count):
+    def _generate_multi_table_logs(self, multi_logger: Logger, log_count: int) -> None:
         """Generate mixed log messages for multi-table demo."""
         for i in range(log_count):
             if i % 3 == 0:
@@ -579,7 +597,7 @@ class DatabaseLoggingApp(App):
 
             time.sleep(0.1)
 
-    def _demo_multi_table_logging(self, log_count):
+    def _demo_multi_table_logging(self, log_count: int) -> None:
         """Demonstrate logging to multiple tables simultaneously."""
         self.lg.info("=== Multi-Table Logging Demo ===")
 
@@ -599,7 +617,9 @@ class DatabaseLoggingApp(App):
         self._show_table_contents("audit_logs", "Multi-table audit logs")
         self._show_table_contents("error_logs", "Multi-table error logs")
 
-    def _demo_all_logging_types(self, log_count, batch_size, flush_interval):
+    def _demo_all_logging_types(
+        self, log_count: int, batch_size: int, flush_interval: float
+    ) -> None:
         """Demonstrate all logging types in sequence."""
         self.lg.info("=== All Logging Types Demo ===")
 
@@ -616,7 +636,7 @@ class DatabaseLoggingApp(App):
         time.sleep(1)
         self._demo_multi_table_logging(demo_count)
 
-    def _display_table_records(self, session, table_name):
+    def _display_table_records(self, session: Any, table_name: str) -> None:
         """Display recent records from a table."""
         result = session.execute(
             sqlalchemy.text(f"SELECT * FROM {table_name} ORDER BY id DESC LIMIT 5")
@@ -630,7 +650,7 @@ class DatabaseLoggingApp(App):
             row_dict = dict(zip(column_names, row))
             self.lg.info(f"  Record {i + 1}: {row_dict}")
 
-    def _show_table_contents(self, table_name, title=None):
+    def _show_table_contents(self, table_name: str, title: str | None = None) -> None:
         """Display the contents of a database table."""
         if title is None:
             title = f"Contents of {table_name}"
@@ -653,7 +673,7 @@ class DatabaseLoggingApp(App):
             self.lg.error(f"Error querying {table_name}: {e}")
 
 
-def create_application():
+def create_application() -> App:
     """Create the application using AppBuilder."""
     app = (
         AppBuilder("main_with_dblog")
@@ -670,7 +690,7 @@ def create_application():
     return app
 
 
-def main():
+def main() -> int:
     """Main function."""
     app = create_application()
     return app.main()

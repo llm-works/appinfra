@@ -12,7 +12,7 @@
 
 import sys
 
-from appinfra.app import AppBuilder
+from appinfra.app import AppBuilder, Tool
 
 app = (
     AppBuilder("quickstart")
@@ -25,7 +25,7 @@ app = (
 @app.tool(name="sync", help="Synchronize data")
 @app.argument("--force", action="store_true", help="Force sync")
 @app.argument("--limit", type=int, default=100)
-def sync_tool(self):
+def sync_tool(self: Tool) -> int:
     self.lg.info(f"Syncing {self.args.limit} items")
     if self.args.force:
         self.lg.warning("Force mode enabled")

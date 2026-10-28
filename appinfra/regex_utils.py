@@ -115,7 +115,9 @@ def _timeout_context(timeout_seconds: float) -> Any:
             signal.signal(signal.SIGALRM, old_handler)
 
 
-def safe_compile(pattern: str, flags: int = 0, timeout: float | None = 1.0) -> Pattern:
+def safe_compile(
+    pattern: str, flags: int = 0, timeout: float | None = 1.0
+) -> Pattern[str]:
     """
     Safely compile a regex pattern with complexity validation.
 
@@ -153,7 +155,7 @@ def safe_compile(pattern: str, flags: int = 0, timeout: float | None = 1.0) -> P
 
 
 def safe_match(
-    pattern: str | Pattern,
+    pattern: str | Pattern[str],
     string: str,
     flags: int = 0,
     timeout: float | None = 1.0,
@@ -192,7 +194,7 @@ def safe_match(
 
 
 def safe_search(
-    pattern: str | Pattern,
+    pattern: str | Pattern[str],
     string: str,
     flags: int = 0,
     timeout: float | None = 1.0,
@@ -227,7 +229,7 @@ def safe_search(
 
 
 def safe_findall(
-    pattern: str | Pattern,
+    pattern: str | Pattern[str],
     string: str,
     flags: int = 0,
     timeout: float | None = 1.0,

@@ -225,7 +225,7 @@ class AsyncBufferedChannel(Generic[TRequest, TResponse]):
         if not hasattr(request, "id"):
             raise ValueError("Request must have an 'id' attribute")
 
-        request_id = request.id  # type: ignore[union-attr]
+        request_id = request.id
         effective_timeout = timeout if timeout is not None else self._response_timeout
         deadline = time.monotonic() + effective_timeout
 
@@ -246,7 +246,7 @@ class AsyncBufferedChannel(Generic[TRequest, TResponse]):
         if not hasattr(request, "id"):
             raise ValueError("Request must have an 'id' attribute")
 
-        request_id = request.id  # type: ignore[union-attr]
+        request_id = request.id
         effective_timeout = timeout if timeout is not None else self._response_timeout
 
         await self.send(request, effective_timeout)

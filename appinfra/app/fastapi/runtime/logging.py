@@ -56,8 +56,8 @@ def setup_subprocess_logging(
         # (e.g., native code, C extensions that bypass Python logging)
         if redirect_stdio:
             log_stream = open(log_file, "a")  # noqa: SIM115
-            sys.stdout = log_stream  # type: ignore[assignment]
-            sys.stderr = log_stream  # type: ignore[assignment]
+            sys.stdout = log_stream
+            sys.stderr = log_stream
 
     return logger
 

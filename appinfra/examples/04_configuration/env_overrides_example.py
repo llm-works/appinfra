@@ -43,6 +43,7 @@ import tempfile
 
 # Add the project root to the path (examples/04_configuration/file.py -> project root is 2 levels up)
 from pathlib import Path
+from typing import Any
 from unittest.mock import patch
 
 # Allow running from a source checkout without installing the package.
@@ -52,7 +53,7 @@ from appinfra import Config
 from appinfra.log import LogConfig, LoggerFactory
 
 
-def load_config(**kwargs):
+def load_config(**kwargs: Any) -> Config:
     """Fresh Config per demo; env overrides are applied at load time.
 
     etc/env-overrides.yaml beside this script is the base; from_spec applies the
@@ -61,7 +62,7 @@ def load_config(**kwargs):
     return Config.from_spec("example-org", "env-overrides", **kwargs)
 
 
-def demo_basic_overrides():
+def demo_basic_overrides() -> None:
     """Demonstrate basic environment variable overrides."""
     print("=== Basic Environment Variable Overrides ===")
 
@@ -81,7 +82,7 @@ def demo_basic_overrides():
         print("✓ Basic overrides applied successfully")
 
 
-def _print_data_types(config):
+def _print_data_types(config: Config) -> None:
     """Print the data types of config values."""
     print(f"String: {config.test.string} (type: {type(config.test.string)})")
     print(f"Boolean: {config.test.boolean} (type: {type(config.test.boolean)})")
@@ -92,7 +93,7 @@ def _print_data_types(config):
     print("✓ Data type conversion working correctly")
 
 
-def demo_data_types():
+def demo_data_types() -> None:
     """Demonstrate different data types in environment variables."""
     print("\n=== Data Type Conversion ===")
 
@@ -120,7 +121,7 @@ def demo_data_types():
             os.unlink(temp_file)
 
 
-def demo_nested_overrides():
+def demo_nested_overrides() -> None:
     """Demonstrate nested configuration overrides."""
     print("\n=== Nested Configuration Overrides ===")
 
@@ -140,7 +141,7 @@ def demo_nested_overrides():
         print("✓ Nested overrides demonstration complete")
 
 
-def demo_custom_prefix():
+def demo_custom_prefix() -> None:
     """Demonstrate custom environment variable prefix."""
     print("\n=== Custom Environment Variable Prefix ===")
 
@@ -159,7 +160,7 @@ def demo_custom_prefix():
         print("✓ Custom prefix working correctly")
 
 
-def demo_check_overrides():
+def demo_check_overrides() -> None:
     """Demonstrate checking applied overrides."""
     print("\n=== Checking Applied Overrides ===")
 
@@ -180,7 +181,7 @@ def demo_check_overrides():
         print("✓ Override checking working correctly")
 
 
-def demo_disabled_overrides():
+def demo_disabled_overrides() -> None:
     """Demonstrate disabled environment overrides."""
     print("\n=== Disabled Environment Overrides ===")
 
@@ -195,7 +196,7 @@ def demo_disabled_overrides():
         print("✓ Environment overrides disabled correctly")
 
 
-def demo_logging_integration():
+def demo_logging_integration() -> None:
     """Demonstrate integration with logging system."""
     print("\n=== Logging System Integration ===")
 
@@ -213,14 +214,14 @@ def demo_logging_integration():
 
         print(f"Logger level: {logger.get_level()}")
         print(f"Logger disabled: {logger.disabled}")
-        print(f"Colors enabled: {logger.config.colors}")
+        print(f"Colors enabled: {log_config.colors}")
 
         logger.info("This message should appear (level: info)")
         logger.debug("This message should NOT appear (level: debug)")
         print("✓ Logging integration working correctly")
 
 
-def demo_variable_substitution():
+def demo_variable_substitution() -> None:
     """Demonstrate variable substitution with overrides."""
     print("\n=== Variable Substitution with Overrides ===")
 
@@ -233,7 +234,7 @@ def demo_variable_substitution():
         print("✓ Variable substitution using overridden values")
 
 
-def _print_override_values(config):
+def _print_override_values(config: Config) -> None:
     """Print override values from config using safe accessors."""
     print(f"  Logging level: {config.logging.level}")
     print(f"  Logging micros: {config.logging.micros}")
@@ -254,7 +255,7 @@ _MULTIPLE_OVERRIDE_ENVS = {
 }
 
 
-def demo_multiple_overrides():
+def demo_multiple_overrides() -> None:
     """Demonstrate multiple environment variable overrides."""
     print("\n=== Multiple Environment Variable Overrides ===")
 
@@ -265,7 +266,7 @@ def demo_multiple_overrides():
         print("✓ Multiple overrides demonstration complete")
 
 
-def demo_command_line_usage():
+def demo_command_line_usage() -> None:
     """Demonstrate command line usage patterns."""
     print("\n=== Command Line Usage Patterns ===")
 
@@ -287,7 +288,7 @@ def demo_command_line_usage():
     print("  python my_app.py")
 
 
-def _run_all_env_demos():
+def _run_all_env_demos() -> None:
     """Run all environment variable demo functions."""
     demo_basic_overrides()
     demo_data_types()
@@ -301,7 +302,7 @@ def _run_all_env_demos():
     demo_command_line_usage()
 
 
-def _print_env_summary():
+def _print_env_summary() -> None:
     """Print environment variable demo summary."""
     print("\n=== Demo Complete ===")
     print("Environment variable override functionality has been demonstrated.")
@@ -314,7 +315,7 @@ def _print_env_summary():
     print("- Useful for development, testing, and production environments")
 
 
-def main():
+def main() -> int:
     """Main function to run the environment variable overrides demos."""
     print("=== Environment Variable Overrides Example ===")
     print("This example demonstrates how to override configuration values")

@@ -70,7 +70,7 @@ class DatabaseHandler(logging.Handler):
         self.last_flush = datetime.now()
 
         # Cache INSERT statements per column set
-        self._sql_cache: dict[tuple, str] = {}
+        self._sql_cache: dict[tuple[str, ...], str] = {}
 
         # Set handler level with proper resolution
         level = handler_config.level or log_config.level
@@ -175,7 +175,7 @@ class DatabaseHandler(logging.Handler):
 
         return re.sub(r"[^a-zA-Z0-9_]", "_", name)
 
-    def _get_insert_sql(self, columns_tuple: tuple) -> str:
+    def _get_insert_sql(self, columns_tuple: tuple[str, ...]) -> str:
         """Get cached INSERT SQL statement for given columns."""
         if columns_tuple not in self._sql_cache:
             columns = list(columns_tuple)

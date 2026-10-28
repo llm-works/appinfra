@@ -36,6 +36,7 @@ Key Features Demonstrated:
 import sys
 import time
 from pathlib import Path
+from typing import Any
 
 # Allow running from a source checkout without installing the package.
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
@@ -44,7 +45,7 @@ from appinfra.log import LogConfig, Logger, LoggerFactory
 from appinfra.log.callback import CallbackRegistry
 
 
-def demo_boolean_false_disabled_logging():
+def demo_boolean_false_disabled_logging() -> None:
     """Demonstrate disabling logging with boolean False."""
     print("=== Disabled Logging with Boolean False ===")
 
@@ -69,7 +70,7 @@ def demo_boolean_false_disabled_logging():
     print("✓ No output was produced (as expected)")
 
 
-def demo_string_false_disabled_logging():
+def demo_string_false_disabled_logging() -> None:
     """Demonstrate disabling logging with string 'false'."""
     print("\n=== Disabled Logging with String 'false' ===")
 
@@ -92,7 +93,7 @@ def demo_string_false_disabled_logging():
     print("✓ No output was produced (as expected)")
 
 
-def demo_disabled_logging_with_callbacks():
+def demo_disabled_logging_with_callbacks() -> None:
     """Demonstrate that disabled logging doesn't trigger callbacks."""
     print("\n=== Disabled Logging with Callbacks ===")
 
@@ -100,7 +101,9 @@ def demo_disabled_logging_with_callbacks():
     callback_registry = CallbackRegistry()
     callback_called = False
 
-    def test_callback(level, logger, msg, args, kwargs):
+    def test_callback(
+        logger: Logger, level: int, msg: str, args: tuple[Any, ...], **kwargs: Any
+    ) -> None:
         nonlocal callback_called
         callback_called = True
         print(f"Callback triggered: {msg}")
@@ -124,7 +127,7 @@ def demo_disabled_logging_with_callbacks():
     print("✓ Callbacks were not triggered (as expected)")
 
 
-def demo_config_file_disabled_logging():
+def demo_config_file_disabled_logging() -> None:
     """Demonstrate disabling logging via configuration file."""
     print("\n=== Disabled Logging via Configuration File ===")
 
@@ -155,7 +158,7 @@ def demo_config_file_disabled_logging():
     print("✓ No output was produced (as expected)")
 
 
-def demo_performance_comparison():
+def demo_performance_comparison() -> None:
     """Demonstrate performance difference between enabled and disabled logging."""
     print("\n=== Performance Comparison ===")
 
@@ -187,7 +190,7 @@ def demo_performance_comparison():
     print("✓ Disabled logging is significantly faster")
 
 
-def demo_mixed_logging_scenarios():
+def demo_mixed_logging_scenarios() -> None:
     """Demonstrate mixed scenarios with enabled and disabled loggers."""
     print("\n=== Mixed Logging Scenarios ===")
 
@@ -209,7 +212,7 @@ def demo_mixed_logging_scenarios():
     print("\n✓ Mixed scenario demonstrates selective logging control")
 
 
-def _run_all_disabled_logging_demos():
+def _run_all_disabled_logging_demos() -> None:
     """Run all disabled logging demo functions."""
     demo_boolean_false_disabled_logging()
     demo_string_false_disabled_logging()
@@ -219,7 +222,7 @@ def _run_all_disabled_logging_demos():
     demo_mixed_logging_scenarios()
 
 
-def _print_disabled_logging_summary():
+def _print_disabled_logging_summary() -> None:
     """Print disabled logging demo summary."""
     print("\n=== Demo Complete ===")
     print("Disabled logging functionality has been demonstrated.")
@@ -230,7 +233,7 @@ def _print_disabled_logging_summary():
     print("- You can mix enabled and disabled loggers in the same application")
 
 
-def main():
+def main() -> int:
     """Main function to run the disabled logging demos."""
     print("=== Disabled Logging Example ===")
     print("This example demonstrates how to completely disable logging.")

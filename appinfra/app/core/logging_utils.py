@@ -234,7 +234,7 @@ def _add_default_console_handler(
     logger.addHandler(actual_handler)
 
 
-def _extract_topics_dict(topics_attr: Any) -> dict:
+def _extract_topics_dict(topics_attr: Any) -> dict[str, Any]:
     """
     Convert topics attribute to dictionary format.
 
@@ -260,7 +260,7 @@ def _extract_topics_dict(topics_attr: Any) -> dict:
         return {}
 
 
-def _load_topic_levels(config: Any, args_dict: dict | None) -> None:
+def _load_topic_levels(config: Any, args_dict: dict[str, Any] | None) -> None:
     """
     Load topic-based level rules from YAML config and CLI args.
 

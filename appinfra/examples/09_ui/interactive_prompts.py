@@ -36,7 +36,7 @@ from appinfra.ui import (
 )
 
 
-def demo_confirm():
+def demo_confirm() -> None:
     """Demonstrate confirmation prompts."""
     console.rule("Confirmation Prompts")
 
@@ -63,7 +63,7 @@ def demo_confirm():
     console.print()
 
 
-def demo_text_input():
+def demo_text_input() -> None:
     """Demonstrate text input prompts."""
     console.rule("Text Input")
 
@@ -77,7 +77,7 @@ def demo_text_input():
         console.print(f"Version: {version}")
 
         # With validation
-        def validate_port(value):
+        def validate_port(value: str) -> bool:
             try:
                 port = int(value)
                 return 1 <= port <= 65535
@@ -97,7 +97,7 @@ def demo_text_input():
     console.print()
 
 
-def demo_password_input():
+def demo_password_input() -> None:
     """Demonstrate password input prompts."""
     console.rule("Password Input")
 
@@ -116,7 +116,7 @@ def demo_password_input():
     console.print()
 
 
-def demo_select():
+def demo_select() -> None:
     """Demonstrate single selection prompts."""
     console.rule("Single Selection")
 
@@ -142,7 +142,7 @@ def demo_select():
     console.print()
 
 
-def demo_multiselect():
+def demo_multiselect() -> None:
     """Demonstrate multiple selection prompts."""
     console.rule("Multiple Selection")
 
@@ -181,7 +181,7 @@ def _show_project_summary(name: str, env: str, features: list[str]) -> None:
     console.print()
 
 
-def demo_combined_workflow():
+def demo_combined_workflow() -> None:
     """Demonstrate a complete workflow combining multiple prompts."""
     console.rule("Combined Workflow: New Project Setup")
 
@@ -204,7 +204,7 @@ def demo_combined_workflow():
     console.print()
 
 
-def main():
+def main() -> None:
     """Run all demos."""
     console.print()
     console.print("[bold blue]Interactive Prompts Demo[/bold blue]")

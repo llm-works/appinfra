@@ -314,7 +314,7 @@ class HandlerFactory:
         return handler_class(**config)
 
     @classmethod
-    def get_supported_types(cls) -> list:
+    def get_supported_types(cls) -> list[str]:
         """
         Get a list of all supported handler types.
 
