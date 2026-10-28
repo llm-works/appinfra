@@ -326,17 +326,17 @@ class Ticker:
         self._running = False
         self._stop_event = threading.Event()
         self._sched = (
-            sched.scheduler(time.monotonic, time.sleep) if secs is not None else None
+            sched.scheduler(time.monotonic, self._sched_delay)
+            if secs is not None
+            else None
         )
         # For context manager signal handling (stores previous handlers)
         self._prev_sigterm: Any = None
         self._prev_sigint: Any = None
         # For non-blocking API (try_tick/time_until_next_tick)
         self._last_tick_time: float | None = None
-        # API mode tracking (prevents mixing run() with try_tick())
-        self._api_mode: str | None = (
-            None  # "blocking" for run(), "nonblocking" for try_tick()
-        )
+        # API mode, "blocking" (run()) or "nonblocking" (try_tick()); no mixing
+        self._api_mode: str | None = None
 
     def run(self, *args: Any, **kwargs: Any) -> None:
         """
@@ -427,9 +427,7 @@ class Ticker:
                         self._handler.ticker_tick()
                     except Exception as e:
                         # Log error but continue running unless it's a critical error
-                        self._lg.exception(
-                            "Error in ticker_tick", extra={"exception": e}
-                        )
+                        self._lg.error("error in ticker_tick", extra={"exception": e})
         finally:
             self._running = False
             # Note: ticker_stop() is now called immediately in stop() method
@@ -462,12 +460,27 @@ class Ticker:
             try:
                 self._handler.ticker_tick()
             except Exception as e:
-                self._lg.exception("Error in ticker_tick", extra={"exception": e})
+                self._lg.error("error in ticker_tick", extra={"exception": e})
 
             # Calculate and schedule next tick
             tick_end_time = time.monotonic()
             delay = self._calculate_next_tick_delay(tick_start_time, tick_end_time)
             self._sched.enter(delay, 1, self._tick_sched, args, kwargs)
+
+    def _sched_delay(self, secs: float) -> None:
+        """
+        Wait for the scheduler's next event, waking as soon as stop() is called.
+
+        Once stopped, the pending ticks are cancelled here, on the run() thread,
+        so stop() never races the scheduler over the queue. This also drops a
+        successor that a tick running during stop() queued afterwards: every
+        wait now returns at once, and the scheduler would otherwise spin until
+        that tick's deadline.
+        """
+        assert self._sched is not None
+        if self._stop_event.wait(secs):
+            for event in self._sched.queue:
+                self._sched.cancel(event)
 
     def _handle_first_tick_sched(
         self, tick_start_time: float, args: tuple[Any, ...], kwargs: dict[str, Any]
@@ -482,9 +495,7 @@ class Ticker:
         try:
             self._handler.ticker_before_first_tick(*args, **kwargs)  # type: ignore
         except Exception as e:
-            self._lg.exception(
-                "Error in ticker_before_first_tick", extra={"exception": e}
-            )
+            self._lg.error("error in ticker_before_first_tick", extra={"exception": e})
 
         if not self._initial:
             # Initialize timing for delayed first tick
@@ -616,23 +627,18 @@ class Ticker:
         handler's ticker_stop method immediately. The ticker will stop after
         the current tick completes.
         """
+        # In scheduled mode the run() thread wakes on this event and cancels the
+        # pending ticks itself (_sched_delay), so only one thread touches the queue
         self._stop_event.set()
 
-        if self._running:
-            # For scheduled mode, we need to cancel pending events
-            if self._sched is not None:
-                # Cancel all pending events
-                for event in self._sched.queue:
-                    self._sched.cancel(event)
-
-            # Call ticker_stop handler immediately so cleanup logging
-            # happens during the shutdown phase, not in finally block
-            if self._handler is not None:
-                try:
-                    self._handler.ticker_stop()
-                except Exception:
-                    # Log error but continue with stop
-                    self._lg.exception("Error in ticker_stop callback")
+        # Call ticker_stop handler immediately so cleanup logging
+        # happens during the shutdown phase, not in finally block
+        if self._running and self._handler is not None:
+            try:
+                self._handler.ticker_stop()
+            except Exception as e:
+                # Log error but continue with stop
+                self._lg.error("error in ticker_stop callback", extra={"exception": e})
 
     def is_running(self) -> bool:
         """
@@ -664,13 +670,13 @@ class Ticker:
         """Validate user-provided 'now' parameter to catch common timing mistakes."""
         if now < 0:
             self._lg.warning(
-                "Invalid 'now' parameter: negative value",
+                "invalid 'now' parameter: negative value",
                 extra={"now": now, "caller": caller},
             )
         elif self._last_tick_time is not None and now < self._last_tick_time - 10.0:
             # Allow small backwards jumps (clock adjustments), but warn on large ones
             self._lg.warning(
-                "Suspicious 'now' parameter: far in past relative to last tick",
+                "suspicious 'now' parameter: far in past relative to last tick",
                 extra={
                     "now": now,
                     "last_tick_time": self._last_tick_time,
@@ -861,8 +867,8 @@ class Ticker:
                 try:
                     self._handler.ticker_before_first_tick()
                 except Exception as e:
-                    self._lg.exception(
-                        "Error in ticker_before_first_tick", extra={"exception": e}
+                    self._lg.error(
+                        "error in ticker_before_first_tick", extra={"exception": e}
                     )
 
         # Execute tick via handler if present
@@ -870,7 +876,7 @@ class Ticker:
             try:
                 self._handler.ticker_tick()
             except Exception as e:
-                self._lg.exception("Error in ticker_tick", extra={"exception": e})
+                self._lg.error("error in ticker_tick", extra={"exception": e})
 
     def _update_tick_timing(self, now: float) -> None:
         """Update timing state based on mode after tick execution."""

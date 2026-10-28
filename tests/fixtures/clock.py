@@ -10,9 +10,15 @@ modules that schedule work (Ticker, RateLimiter, ETA) with a proxy whose
 instantly. Timing tests then run in microseconds with exact assertions, and
 host load or CI jitter cannot make them flaky. The real ``time`` module is
 untouched, so pytest and everything else keep real time.
+
+The Ticker also waits on a ``threading.Event`` (its scheduler's delay and the
+iterator), so the fixture gives the ticker module an ``Event`` whose ``wait()``
+advances the same clock. Tests on the virtual clock are single-threaded: a
+wait that is not already set runs out its full timeout.
 """
 
 import importlib
+import threading
 import time
 from typing import Any
 
@@ -53,16 +59,53 @@ class _TimeProxy:
         return getattr(time, name)
 
 
+class _FakeEvent:
+    """A threading.Event for one thread whose wait() advances the virtual clock."""
+
+    def __init__(self, clock: FakeClock) -> None:
+        self._clock = clock
+        self._flag = False
+
+    def set(self) -> None:
+        self._flag = True
+
+    def clear(self) -> None:
+        self._flag = False
+
+    def is_set(self) -> bool:
+        return self._flag
+
+    def wait(self, timeout: float | None = None) -> bool:
+        if not self._flag and timeout is not None:
+            self._clock.sleep(timeout)
+        return self._flag
+
+
+class _ThreadingProxy:
+    """Stands in for the ticker module's `threading`: Event on the clock, the rest real."""
+
+    def __init__(self, clock: FakeClock) -> None:
+        self._clock = clock
+
+    def Event(self) -> _FakeEvent:  # noqa: N802 - mirrors threading.Event
+        return _FakeEvent(self._clock)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(threading, name)
+
+
 @pytest.fixture
 def fake_clock(monkeypatch: pytest.MonkeyPatch) -> FakeClock:
     """Run Ticker, RateLimiter and ETA on a virtual clock for one test.
 
     Objects that capture time functions when constructed (a Ticker's
-    scheduler) must be created after this fixture is set up, which pytest
+    scheduler and stop event) must be created after this fixture is set up, which pytest
     guarantees for objects the test body creates.
     """
     clock = FakeClock()
     proxy = _TimeProxy(clock)
     for name in _CLOCKED_MODULES:
         monkeypatch.setattr(importlib.import_module(name), "time", proxy)
+    ticker = importlib.import_module("appinfra.time.ticker")
+    monkeypatch.setattr(ticker, "threading", _ThreadingProxy(clock))
     return clock

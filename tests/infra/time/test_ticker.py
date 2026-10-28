@@ -299,7 +299,7 @@ class TestScheduledMode:
         # Should have called ticker_before_first_tick once
         mock_handler.ticker_before_first_tick.assert_called_once()
         # Should have logged the exception
-        mock_logger.exception.assert_called()
+        mock_logger.error.assert_called()
         # Ticker should continue and call ticker_tick despite error
         assert mock_handler.ticker_tick.call_count >= 1
 
@@ -568,16 +568,12 @@ class TestTickerControl:
         thread.join(timeout=1.0)
 
     def test_stop_cancels_scheduled_events(self, mock_logger, mock_handler):
-        """Test stop cancels pending scheduled events."""
-        # Real time and a real thread: stop() comes from another thread. The
-        # scheduler's wait cannot be interrupted, so run() returns only when the
-        # current interval ends; a short interval keeps the join from timing out
-        ticker = Ticker(mock_logger, mock_handler, secs=0.3)
+        """Test stop wakes run() mid-interval and cancels pending events."""
+        # Real time and a real thread: stop() comes from another thread while
+        # run() waits out a 10s interval
+        ticker = Ticker(mock_logger, mock_handler, secs=10, initial=True)
 
-        def run_and_stop():
-            ticker.run()
-
-        thread = threading.Thread(target=run_and_stop, daemon=True)
+        thread = threading.Thread(target=ticker.run, daemon=True)
         thread.start()
         time.sleep(0.05)
 
@@ -585,7 +581,24 @@ class TestTickerControl:
         ticker.stop()
         thread.join(timeout=1.0)
 
-        # Should have cancelled pending events
+        assert not thread.is_alive()
+        assert ticker._sched.queue == []
+
+    def test_stop_from_handler_ends_run(self, mock_logger):
+        """Test stop() during a tick drops the tick queued after it."""
+        # The tick queues its successor after stop() returns; run() must drop it
+        # rather than wait for (or spin until) its deadline. A real thread, so a
+        # regression fails the join instead of hanging the test
+        handler = Mock(spec=TickerHandler)
+        ticker = Ticker(mock_logger, handler, secs=10, initial=True)
+        handler.ticker_tick.side_effect = ticker.stop
+
+        thread = threading.Thread(target=ticker.run, daemon=True)
+        thread.start()
+        thread.join(timeout=1.0)
+
+        assert not thread.is_alive()
+        assert handler.ticker_tick.call_count == 1
         assert ticker._sched.queue == []
 
 
@@ -1112,7 +1125,7 @@ class TestNonBlockingAPI:
         assert ticker.try_tick() is True
 
         # Error should be logged
-        mock_logger.exception.assert_called()
+        mock_logger.error.assert_called()
 
     def test_flex_mode_waits_full_interval(self, mock_logger, fake_clock):
         """Test FLEX mode maintains interval from tick start with no catch-up."""
@@ -1360,7 +1373,7 @@ class TestNonBlockingAPI:
         assert ticker.try_tick() is True
 
         # Exception should be logged
-        assert mock_logger.exception.called
+        assert mock_logger.error.called
 
         # Should still maintain spacing even after exception
         assert ticker.time_until_next_tick() == 0.5

@@ -52,6 +52,8 @@ earlier: pre-release builds (0.13.1.devN) would not satisfy it. -->
   that fails to build raises `LogConfigError`, as with the other builders.
 - `StoreConformance`'s racing-prune test no longer stalls for seconds under load, and it races
   writers against prune in every run.
+- `Ticker.stop()` ends a scheduled `run()` right away; it used to return only when the current
+  interval ran out.
 
 ## [0.13.0] - 2026-10-25
 
