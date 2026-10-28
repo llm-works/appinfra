@@ -12,11 +12,13 @@ from __future__ import annotations
 
 import json
 import logging
+import traceback
 from collections.abc import Callable
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from ...config import LogConfig
+from ...serialize import sanitize_extra
 from ..interface import HandlerConfig
 
 if TYPE_CHECKING:
@@ -108,13 +110,12 @@ class DatabaseHandlerConfig(HandlerConfig):
     def _map_exception_info(
         self, record: logging.LogRecord, data: dict[str, Any]
     ) -> None:
-        """Map exception info from log record to data dict."""
-        if record.exc_info:
-            import traceback
-
-            data[self.columns["exception"]] = "".join(
-                traceback.format_exception(*record.exc_info)
-            )
+        """Map the exception traceback, from exc_info or else extra["exception"]."""
+        exc = record.exc_info[1] if record.exc_info else None
+        if exc is None:
+            exc = (getattr(record, "__infra__extra", None) or {}).get("exception")
+        if isinstance(exc, BaseException):
+            data[self.columns["exception"]] = "".join(traceback.format_exception(exc))
 
     def _default_data_mapper(self, record: logging.LogRecord) -> dict[str, Any]:
         """Default data mapper for log records."""
@@ -132,7 +133,7 @@ class DatabaseHandlerConfig(HandlerConfig):
         # Extra fields
         extra = getattr(record, "__infra__extra", None)
         if extra:
-            data[self.columns["extra"]] = json.dumps(extra)
+            data[self.columns["extra"]] = json.dumps(sanitize_extra(extra))
 
         # Exception info
         self._map_exception_info(record, data)

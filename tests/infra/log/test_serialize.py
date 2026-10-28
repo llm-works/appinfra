@@ -9,7 +9,7 @@ Covers:
 
 - ``coerce_leaf`` coerces ``sqlalchemy.engine.url.URL`` via ``str()``.
 - ``coerce_tree`` recurses through dict/list/tuple containers.
-- ``JSONFormatter._sanitize_extra_fields`` emits the coerced form.
+- ``sanitize_extra`` emits the coerced form.
 - ``MPQueueHandler`` preserves coerced values across its pickle sanitizer.
 """
 
@@ -17,7 +17,7 @@ import pytest
 
 from appinfra.log.builder.json import JSONFormatter
 from appinfra.log.mp.queue_handler import MPQueueHandler
-from appinfra.log.serialize import coerce_leaf, coerce_tree
+from appinfra.log.serialize import coerce_leaf, coerce_tree, sanitize_extra
 
 try:
     from sqlalchemy.engine.url import URL as SAURL
@@ -141,29 +141,25 @@ class TestCoerceTree:
 class TestJSONFormatterSanitize:
     @pytest.mark.skipif(not _HAVE_SA, reason="sqlalchemy not installed")
     def test_url_rendered_as_string(self):
-        formatter = JSONFormatter()
-        out = formatter._sanitize_extra_fields({"url": _make_url()})
+        out = sanitize_extra({"url": _make_url()})
         assert isinstance(out["url"], str)
         assert "secret" not in out["url"]
 
     @pytest.mark.skipif(not _HAVE_SA, reason="sqlalchemy not installed")
     def test_url_nested_in_dict(self):
-        formatter = JSONFormatter()
-        out = formatter._sanitize_extra_fields({"cfg": {"url": _make_url()}})
+        out = sanitize_extra({"cfg": {"url": _make_url()}})
         assert isinstance(out["cfg"]["url"], str)
         assert "secret" not in out["cfg"]["url"]
 
     def test_plain_values_unchanged(self):
-        formatter = JSONFormatter()
         extra = {"s": "x", "n": 1, "lst": [1, 2], "d": {"a": 1}}
-        out = formatter._sanitize_extra_fields(extra)
+        out = sanitize_extra(extra)
         assert out == extra
 
     def test_secret_str_masked_in_extra(self):
         from appinfra.yaml import SecretStr
 
-        formatter = JSONFormatter()
-        out = formatter._sanitize_extra_fields({"pwd": SecretStr("hunter2")})
+        out = sanitize_extra({"pwd": SecretStr("hunter2")})
         assert "hunter2" not in str(out)
 
     @pytest.mark.skipif(not _HAVE_SA, reason="sqlalchemy not installed")

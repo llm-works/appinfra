@@ -13,7 +13,28 @@ plain ``tuple``. ``coerce_leaf`` / ``coerce_tree`` give those values their
 preferred string form before either path runs.
 """
 
+import json
 from typing import Any
+
+
+def sanitize_extra(extra: dict[str, Any]) -> dict[str, Any]:
+    """Return a JSON-serializable copy of a log record's ``extra`` fields.
+
+    Each value is walked with ``coerce_tree`` first, so opaque types with a
+    preferred ``__str__`` form reach the encoder as their string form rather
+    than being destructured; a value that still cannot be encoded (an
+    exception object, for one) becomes its ``str()``.
+    """
+    sanitized = {}
+    for key, value in extra.items():
+        key = coerce_leaf(key)
+        try:
+            value = coerce_tree(value)
+            json.dumps(value)
+            sanitized[key] = value
+        except Exception:
+            sanitized[key] = str(value)
+    return sanitized
 
 
 def coerce_leaf(value: Any) -> Any:

@@ -54,6 +54,8 @@ earlier: pre-release builds (0.13.1.devN) would not satisfy it. -->
   writers against prune in every run.
 - `Ticker.stop()` ends a scheduled `run()` right away; it used to return only when the current
   interval ran out.
+- An exception logged as `extra={"exception": e}` reaches JSON output with its traceback, and the
+  database handler stores it instead of dropping the record.
 
 ## [0.13.0] - 2026-10-25
 
