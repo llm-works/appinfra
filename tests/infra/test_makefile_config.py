@@ -176,6 +176,18 @@ class TestInterpreterSelection:
         env = {"APPINFRA_ENV_PYTHON": "/env/appinfra"}
         assert _python(tmp_path, "", env, "PYTHON=/cli/python") == "/env/appinfra"
 
+    def test_empty_environment_value_counts_as_unset(self, tmp_path: Path) -> None:
+        """An exported VAR= falls through to the ~/.venv default, not to empty."""
+        venv_python = tmp_path / "home" / ".venv" / "bin" / "python"
+        venv_python.parent.mkdir(parents=True)
+        venv_python.touch()
+        env = {
+            "APPINFRA_ENV_PYTHON": "",
+            "PYTHON": "",
+            "HOME": str(tmp_path / "home"),
+        }
+        assert _python(tmp_path, "", env) == str(venv_python)
+
     def test_makefile_local_used_without_environment(self, tmp_path: Path) -> None:
         local = "APPINFRA_ENV_PYTHON ?= /local/python\n"
         assert _python(tmp_path, local, {}) == "/local/python"
