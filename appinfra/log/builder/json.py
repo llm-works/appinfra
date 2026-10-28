@@ -16,7 +16,7 @@ from typing import Any, Self
 
 from ..config import LogConfig
 from ..logger import Logger
-from ..serialize import sanitize_extra
+from ..serialize import record_traceback, sanitize_extra
 from .builder import LoggingBuilder
 
 # Helper functions for JSONFormatter._record_to_dict()
@@ -86,18 +86,14 @@ def _add_location_fields(
 def _add_exception_fields(
     data: dict[str, Any], formatter: Any, record: logging.LogRecord
 ) -> None:
-    """Add the exception traceback, from exc_info or else extra["exception"]."""
+    """Add the exception traceback if the record carries one."""
     if not (
         formatter.include_exception and formatter.should_include_field("exception")
     ):
         return
-    exc_info = record.exc_info
-    if not exc_info:
-        exc = (getattr(record, "__infra__extra", None) or {}).get("exception")
-        if isinstance(exc, BaseException):
-            exc_info = (type(exc), exc, exc.__traceback__)
-    if exc_info:
-        data["exception"] = formatter._format_exception(exc_info)
+    text = record_traceback(record)
+    if text is not None:
+        data["exception"] = text
 
 
 def _add_custom_fields(data: dict[str, Any], formatter: Any) -> None:
@@ -234,18 +230,6 @@ class JSONFormatter(logging.Formatter):
             locations.append(f"{record.pathname}:{record.lineno}")
 
         return locations or None
-
-    def _format_exception(self, exc_info: Any) -> str | None:
-        """Format exception traceback as string."""
-        if not exc_info:
-            return None
-
-        try:
-            import traceback
-
-            return "".join(traceback.format_exception(*exc_info))
-        except Exception:
-            return f"Exception formatting failed: {exc_info[1]}"
 
     def _dict_to_json(self, data: dict[str, Any]) -> str:
         """Convert dictionary to JSON string."""

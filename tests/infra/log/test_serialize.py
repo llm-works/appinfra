@@ -17,7 +17,12 @@ import pytest
 
 from appinfra.log.builder.json import JSONFormatter
 from appinfra.log.mp.queue_handler import MPQueueHandler
-from appinfra.log.serialize import coerce_leaf, coerce_tree, sanitize_extra
+from appinfra.log.serialize import (
+    coerce_leaf,
+    coerce_tree,
+    record_traceback,
+    sanitize_extra,
+)
 
 try:
     from sqlalchemy.engine.url import URL as SAURL
@@ -205,3 +210,65 @@ class TestQueueHandlerSanitize:
         out = handler._sanitize_for_pickle({"url": _make_url()}, set())
         assert isinstance(out["url"], str)
         assert "secret" not in out["url"]
+
+
+# =============================================================================
+# record_traceback
+# =============================================================================
+
+
+def _raised(msg: str) -> ValueError:
+    try:
+        raise ValueError(msg)
+    except ValueError as e:
+        return e
+
+
+def _raised_elsewhere(msg: str) -> ValueError:
+    try:
+        raise ValueError(msg)
+    except ValueError as e:
+        return e
+
+
+def _record(exc_info=None, extra=None):
+    import logging
+
+    record = logging.LogRecord("t", logging.ERROR, "t.py", 1, "m", (), exc_info)
+    if extra is not None:
+        setattr(record, "__infra__extra", extra)
+    return record
+
+
+@pytest.mark.unit
+class TestRecordTraceback:
+    def test_none_without_exception(self):
+        assert record_traceback(_record(extra={"k": 1})) is None
+
+    def test_exc_info_formats_the_supplied_traceback(self):
+        # The tuple's traceback wins over the exception's own __traceback__
+        exc, other = _raised("first"), _raised_elsewhere("second")
+        text = record_traceback(
+            _record(exc_info=(ValueError, exc, other.__traceback__))
+        )
+        assert "ValueError: first" in text
+        assert "in _raised_elsewhere" in text
+        assert "in _raised\n" not in text
+
+    def test_exc_text_from_queue_preparation(self):
+        record = _record()
+        record.exc_text = "Traceback ...\nValueError: prepared"
+        assert record_traceback(record) == "Traceback ...\nValueError: prepared"
+
+    def test_extra_exception(self):
+        text = record_traceback(_record(extra={"exception": _raised("boom")}))
+        assert "Traceback (most recent call last)" in text
+        assert "ValueError: boom" in text
+
+    def test_extra_exception_formatted_from_queue_preparation(self):
+        extra = {"exception_formatted": "Traceback ...\nValueError: boom"}
+        assert record_traceback(_record(extra=extra)) == extra["exception_formatted"]
+
+    def test_formatting_failure_falls_back_to_message(self):
+        text = record_traceback(_record(exc_info=(ValueError, ValueError("x"), 42)))
+        assert text == "Exception formatting failed: x"

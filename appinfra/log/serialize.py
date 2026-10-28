@@ -14,7 +14,36 @@ preferred string form before either path runs.
 """
 
 import json
+import logging
+import traceback
 from typing import Any
+
+
+def record_traceback(record: logging.LogRecord) -> str | None:
+    """Return a record's exception traceback as text, wherever logging put it.
+
+    Checked in order: ``exc_info`` (the full tuple), ``exc_text`` (exc_info
+    already formatted, as ``MPQueueHandler`` does before pickling),
+    ``extra["exception"]`` (from its ``__traceback__``), and
+    ``extra["exception_formatted"]`` (``MPQueueHandler``'s rendering of it).
+    """
+    if record.exc_info and record.exc_info[0] is not None:
+        return _format_exception(record.exc_info)
+    if record.exc_text:
+        return record.exc_text
+    extra = getattr(record, "__infra__extra", None) or {}
+    exc = extra.get("exception")
+    if isinstance(exc, BaseException):
+        return _format_exception((type(exc), exc, exc.__traceback__))
+    formatted = extra.get("exception_formatted")
+    return formatted if isinstance(formatted, str) else None
+
+
+def _format_exception(exc_info: Any) -> str:
+    try:
+        return "".join(traceback.format_exception(*exc_info))
+    except Exception:
+        return f"Exception formatting failed: {exc_info[1]}"
 
 
 def sanitize_extra(extra: dict[str, Any]) -> dict[str, Any]:

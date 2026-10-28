@@ -321,51 +321,6 @@ class TestExtractLocation:
 
 
 # =============================================================================
-# Test exception formatting
-# =============================================================================
-
-
-@pytest.mark.unit
-class TestFormatException:
-    """Test exception traceback formatting."""
-
-    def test_format_exception_none(self):
-        """Test formatting None exception info."""
-        formatter = JSONFormatter()
-        result = formatter._format_exception(None)
-        assert result is None
-
-    def test_format_exception_with_traceback(self):
-        """Test formatting actual exception info."""
-        formatter = JSONFormatter()
-
-        try:
-            raise ValueError("Test error")
-        except ValueError:
-            import sys
-
-            exc_info = sys.exc_info()
-
-        result = formatter._format_exception(exc_info)
-
-        assert "ValueError" in result
-        assert "Test error" in result
-        assert "Traceback" in result
-
-    def test_format_exception_error_handling(self):
-        """Test fallback when traceback formatting fails."""
-        formatter = JSONFormatter()
-
-        # Create invalid exc_info that will cause format_exception to fail
-        exc_info = (ValueError, ValueError("Test"), None)
-
-        # Even with minimal exc_info, should not raise
-        result = formatter._format_exception(exc_info)
-        # Should contain some error info
-        assert result is not None
-
-
-# =============================================================================
 # Test dict to JSON conversion
 # =============================================================================
 
