@@ -10,10 +10,11 @@
 # If config_file is empty, uses default_config_file
 # All filenames are resolved from etc_dir
 #
-# pgserver.postgres_conf is a curated whitelist of postgres knobs. Each one
-# becomes a Make var PG_<UPPER>; values flow into compose-substituted slots in
-# docker-compose.{single,repl}.yaml of the form
-# `${PG_<UPPER>:-<key>=<postgres-default>}`. Unknown keys error out.
+# The variables are the _APPINFRA_PG_* wire protocol read by pg.sh (see its
+# header). pgserver.postgres_conf is a curated whitelist of postgres knobs.
+# Each one becomes _APPINFRA_PG_<UPPER>; values flow into compose-substituted
+# slots in docker-compose.{single,repl}.yaml of the form
+# `${_APPINFRA_PG_<UPPER>:-<key>=<postgres-default>}`. Unknown keys error out.
 
 CONFIG_FILE="$1"
 CONFIG_KEY="$2"
@@ -26,10 +27,10 @@ fi
 
 FULL_PATH="$ETC_DIR/$CONFIG_FILE"
 
-# Empty postgres_conf vars on missing file — recipes that need PG_* will fail
-# at recipe time, but parse-time completes.
+# Empty vars on missing file — recipes that need them will fail at recipe
+# time, but parse-time completes.
 if [ ! -f "$FULL_PATH" ]; then
-    echo "PG_CONTAINER_NAME:=|PG_VERSION:=|PG_PORT:=|PG_IMAGE:=|PG_REPLICA_ENABLED:=false|PG_PORT_R:=|PG_MAX_CONNECTIONS:=|PG_SHARED_PRELOAD_LIBRARIES:=|PG_WORK_MEM:=|PG_AUTOVACUUM:="
+    echo "_APPINFRA_PG_CONTAINER_NAME:=|_APPINFRA_PG_VERSION:=|_APPINFRA_PG_PORT:=|_APPINFRA_PG_IMAGE:=|_APPINFRA_PG_REPLICA_ENABLED:=false|_APPINFRA_PG_PORT_R:=|_APPINFRA_PG_MAX_CONNECTIONS:=|_APPINFRA_PG_SHARED_PRELOAD_LIBRARIES:=|_APPINFRA_PG_WORK_MEM:=|_APPINFRA_PG_AUTOVACUUM:="
     exit 0
 fi
 
@@ -80,16 +81,16 @@ for k, v in postgres_conf.items():
 knobs = {k.upper(): render(k, postgres_conf[k]) for k in postgres_conf}
 
 parts = [
-    f'PG_CONTAINER_NAME:={cfg.get(\"name\", \"\")}',
-    f'PG_VERSION:={cfg.get(\"version\", \"\")}',
-    f'PG_PORT:={cfg.get(\"port\", \"\")}',
-    f'PG_IMAGE:={cfg.get(\"image\", \"\")}',
-    f'PG_REPLICA_ENABLED:={replica_enabled}',
-    f'PG_PORT_R:={replica_port}',
-    f'PG_MAX_CONNECTIONS:={knobs.get(\"MAX_CONNECTIONS\", \"\")}',
-    f'PG_SHARED_PRELOAD_LIBRARIES:={knobs.get(\"SHARED_PRELOAD_LIBRARIES\", \"\")}',
-    f'PG_WORK_MEM:={knobs.get(\"WORK_MEM\", \"\")}',
-    f'PG_AUTOVACUUM:={knobs.get(\"AUTOVACUUM\", \"\")}',
+    f'_APPINFRA_PG_CONTAINER_NAME:={cfg.get(\"name\", \"\")}',
+    f'_APPINFRA_PG_VERSION:={cfg.get(\"version\", \"\")}',
+    f'_APPINFRA_PG_PORT:={cfg.get(\"port\", \"\")}',
+    f'_APPINFRA_PG_IMAGE:={cfg.get(\"image\", \"\")}',
+    f'_APPINFRA_PG_REPLICA_ENABLED:={replica_enabled}',
+    f'_APPINFRA_PG_PORT_R:={replica_port}',
+    f'_APPINFRA_PG_MAX_CONNECTIONS:={knobs.get(\"MAX_CONNECTIONS\", \"\")}',
+    f'_APPINFRA_PG_SHARED_PRELOAD_LIBRARIES:={knobs.get(\"SHARED_PRELOAD_LIBRARIES\", \"\")}',
+    f'_APPINFRA_PG_WORK_MEM:={knobs.get(\"WORK_MEM\", \"\")}',
+    f'_APPINFRA_PG_AUTOVACUUM:={knobs.get(\"AUTOVACUUM\", \"\")}',
 ]
 print('|'.join(parts))
 "

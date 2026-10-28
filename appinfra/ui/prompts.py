@@ -10,11 +10,12 @@ flags, and auto-detects non-TTY environments.
 """
 
 import getpass
-import os
 import re
 import sys
 from collections.abc import Callable, Sequence
 from typing import Any, cast
+
+from ._env import env_flag
 
 # Check for questionary availability
 try:
@@ -63,16 +64,12 @@ def _is_interactive() -> bool:
 
 def _get_auto_confirm() -> bool:
     """Check if auto-confirm is enabled via environment."""
-    return os.environ.get("APPINFRA_YES", "").lower() in ("1", "true", "yes")
+    return env_flag("APPINFRA_YES")
 
 
 def _get_non_interactive() -> bool:
     """Check if non-interactive mode is forced via environment."""
-    return os.environ.get("APPINFRA_NON_INTERACTIVE", "").lower() in (
-        "1",
-        "true",
-        "yes",
-    )
+    return env_flag("APPINFRA_NON_INTERACTIVE")
 
 
 class NonInteractiveError(Exception):

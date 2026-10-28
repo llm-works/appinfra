@@ -57,8 +57,8 @@ class TestScaffoldWorkflow:
         fake_python = project_path / "fake_python.sh"
         fake_python.write_text(
             "#!/bin/bash\n"
-            "# Fail if trying to import appinfra\n"
-            'if echo "$@" | grep -q "import appinfra"; then\n'
+            "# Fail if trying to locate appinfra\n"
+            'if echo "$@" | grep -q "appinfra"; then\n'
             "  exit 1\n"
             "fi\n"
             f'exec {sys.executable} "$@"\n'
@@ -187,8 +187,8 @@ class TestScaffoldWorkflow:
         assert "install:" in makefile_content
         assert "clean:" in makefile_content
         assert "test:" in makefile_content
-        assert "APPINFRA_ROOT" not in makefile_content, (
-            "Standalone should not reference APPINFRA_ROOT"
+        assert "APPINFRA_SCRIPTS" not in makefile_content, (
+            "Standalone should not reference APPINFRA_SCRIPTS"
         )
         assert "COVERAGE_PKG" not in makefile_content, (
             "Standalone should not have COVERAGE_PKG"
@@ -200,17 +200,18 @@ class TestScaffoldWorkflow:
         """Verify framework Makefile has expected content."""
         assert "Makefile.env" in makefile_content
         assert f"APPINFRA_DEV_PKG_NAME := {project_name}" in makefile_content
-        assert "APPINFRA_ROOT" in makefile_content
+        assert "APPINFRA_SCRIPTS" in makefile_content
         for makefile in [
+            "Makefile.config",
             "Makefile.help",
             "Makefile.utils",
             "Makefile.clean",
             "Makefile.dev",
             "Makefile.pytest",
         ]:
-            assert (
-                f"include $(APPINFRA_ROOT)/scripts/make/{makefile}" in makefile_content
-            ), f"Should include {makefile}"
+            assert f"include $(APPINFRA_SCRIPTS)/make/{makefile}" in makefile_content, (
+                f"Should include {makefile}"
+            )
         assert "run::" in makefile_content, "Should use double-colon rules"
 
     def test_framework_scaffold_generation(self):
@@ -234,6 +235,49 @@ class TestScaffoldWorkflow:
         assert "test.coverage" in make_output
         assert "fmt" in make_output
         assert "lint" in make_output
+
+    def _make_env(self) -> dict[str, str]:
+        """Environment for make in a scaffolded project, free of this run's make.
+
+        The repo goes first on ``PYTHONPATH`` so the project locates this
+        appinfra (``importlib.resources``, as with an installed wheel).
+        """
+        env = {
+            k: v
+            for k, v in os.environ.items()
+            if not k.startswith(("INFRA_", "APPINFRA_", "_APPINFRA_"))
+            and k not in ("MAKEFLAGS", "MFLAGS", "MAKELEVEL", "PYTHON")
+        }
+        env["PYTHONPATH"] = os.pathsep.join(
+            p for p in (str(self.infra_root), env.get("PYTHONPATH", "")) if p
+        )
+        env["APPINFRA_PYTHON"] = sys.executable
+        return env
+
+    @pytest.mark.parametrize("target", ["help", "lint", "test", "check"])
+    def test_framework_project_make_targets(self, target: str):
+        """A fresh framework scaffold passes its own make targets, without stray stderr."""
+        project_name = f"testapp_make_{target}"
+        result = self._run_scaffold(project_name, "--makefile-style=framework")
+        assert result.returncode == 0, (
+            f"Scaffold should succeed. stderr: {result.stderr}"
+        )
+
+        make_result = subprocess.run(
+            ["make", "--no-print-directory", target],
+            capture_output=True,
+            text=True,
+            cwd=str(self.temp_dir / project_name),
+            env=self._make_env(),
+            timeout=300,
+        )
+        assert make_result.returncode == 0, (
+            f"make {target} should succeed.\nstdout: {make_result.stdout}\n"
+            f"stderr: {make_result.stderr}"
+        )
+        assert "Error" not in make_result.stderr, make_result.stderr
+        if target == "help":
+            self._verify_framework_targets(make_result.stdout)
 
     def test_standalone_makefile_help_works(self):
         """Test standalone Makefile help target works."""
@@ -314,16 +358,19 @@ class TestScaffoldWorkflow:
         fake_python = self._create_fake_python_without_infra(project_path)
 
         # Try to run make help with Python that can't find infra
+        env = self._make_env()
+        del env["APPINFRA_PYTHON"]
         make_result = subprocess.run(
             ["make", "help", f"PYTHON={fake_python}"],
             capture_output=True,
             text=True,
             cwd=str(project_path),
+            env=env,
         )
 
         # Verify make failed with clear error
         assert make_result.returncode != 0, "make should fail when infra not found"
-        assert "Cannot locate infra" in make_result.stderr, (
+        assert "Cannot locate appinfra" in make_result.stderr, (
             "Should show clear error message"
         )
 

@@ -6,7 +6,7 @@
 # Provides install, install.e (editable), and uninstall targets.
 # Separate from Makefile.dev so projects can use dev tools without package install.
 #
-# `install` builds a wheel per $(PYTHON_ENVS) entry (so C-extension or
+# `install` builds a wheel per $(APPINFRA_PYTHON_ENVS) entry (so C-extension or
 # version-specific wheels stay valid for their target), installs it, and drops a
 # copy into <sys.prefix>/share/$(APPINFRA_DEV_PKG_NAME)/wheels/ for each env.
 # Consumers (e.g. container builds) can pull from that per-prefix location
@@ -26,7 +26,7 @@
 #
 # Required variables:
 #   APPINFRA_DEV_PKG_NAME - Package name to install/uninstall
-#   PYTHON_ENVS           - Python environments to install to
+#   APPINFRA_PYTHON_ENVS           - Python environments to install to
 #
 # Optional variables:
 #   APPINFRA_DEV_INSTALL_EXTRAS - Comma-separated extras (e.g., "dev,ui")
@@ -45,7 +45,7 @@ install:: areyousure ## installs $(APPINFRA_DEV_PKG_NAME) to all environments; e
 	@echo "* cleaning build artifacts..."
 	@rm -rf *.egg-info .dist .build dist build
 	@echo "* installing $(APPINFRA_DEV_PKG_NAME) to all environments..."
-	@for pyenv in $(PYTHON_ENVS); do \
+	@for pyenv in $(APPINFRA_PYTHON_ENVS); do \
 		if [ -x "$$pyenv" ]; then \
 			echo "  → $$pyenv"; \
 			prefix="$$($$pyenv -c 'import sys; print(sys.prefix)')" || exit 1; \
@@ -85,11 +85,11 @@ install:: areyousure ## installs $(APPINFRA_DEV_PKG_NAME) to all environments; e
 	@echo "* install done"
 .PHONY: install
 
-install.e:: areyousure ## installs $(APPINFRA_DEV_PKG_NAME) (editable) to all environments in PYTHON_ENVS
+install.e:: areyousure ## installs $(APPINFRA_DEV_PKG_NAME) (editable) to all environments in APPINFRA_PYTHON_ENVS
 	@echo "* cleaning build artifacts..."
 	@rm -rf *.egg-info .dist .build dist build
 	@echo "* installing $(APPINFRA_DEV_PKG_NAME) (editable) to all environments..."
-	@for pyenv in $(PYTHON_ENVS); do \
+	@for pyenv in $(APPINFRA_PYTHON_ENVS); do \
 		if [ -x "$$pyenv" ]; then \
 			echo "  → $$pyenv"; \
 			if [ -n "$(APPINFRA_DEV_INSTALL_EXTRAS)" ]; then \
@@ -107,9 +107,9 @@ install.e:: areyousure ## installs $(APPINFRA_DEV_PKG_NAME) (editable) to all en
 	@echo "* install.e done"
 .PHONY: install.e
 
-uninstall:: areyousure ## uninstalls $(APPINFRA_DEV_PKG_NAME) from all environments in PYTHON_ENVS
+uninstall:: areyousure ## uninstalls $(APPINFRA_DEV_PKG_NAME) from all environments in APPINFRA_PYTHON_ENVS
 	@echo "* uninstalling $(APPINFRA_DEV_PKG_NAME) from all environments..."
-	@for pyenv in $(PYTHON_ENVS); do \
+	@for pyenv in $(APPINFRA_PYTHON_ENVS); do \
 		if [ -x "$$pyenv" ]; then \
 			echo "  → $$pyenv"; \
 			$$pyenv -m pip uninstall -q -y $(APPINFRA_DEV_PKG_NAME) 2>/dev/null || true; \

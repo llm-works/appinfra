@@ -5,7 +5,7 @@
 PostgreSQL lifecycle commands.
 
 Parent tool `pg` with per-verb sub-tools. Each sub-tool projects the
-resolved YAML config (``pgserver.*`` / ``dbs.*``) into the ``_INFRA_PG_*``
+resolved YAML config (``pgserver.*`` / ``dbs.*``) into the ``_APPINFRA_PG_*``
 wire protocol and execs ``appinfra/scripts/pg.sh <verb>``. Location of
 pg.sh is resolved from ``appinfra.__file__`` so wheel installs work
 without a repo checkout.
@@ -89,7 +89,7 @@ def _project_postgres_conf(postgres_conf: Any) -> dict[str, str]:
 
 def _project_env(cfg: Any) -> dict[str, str]:
     """
-    Project resolved YAML config → ``_INFRA_PG_*`` wire-protocol env vars.
+    Project resolved YAML config → ``_APPINFRA_PG_*`` wire-protocol env vars.
 
     Mirrors ``appinfra/scripts/pg-config.sh`` + ``Makefile.pg`` so the CLI
     path and the Make path produce identical container state. Missing
@@ -101,18 +101,20 @@ def _project_env(cfg: Any) -> dict[str, str]:
     knobs = _project_postgres_conf(cfg.get("pgserver.postgres_conf", {}) or {})
 
     return {
-        "_INFRA_PG_CONTAINER_NAME": str(cfg.get("pgserver.name", "") or ""),
-        "_INFRA_PG_VERSION": str(version),
-        "_INFRA_PG_HOST": str(cfg.get("pgserver.host", "127.0.0.1") or "127.0.0.1"),
-        "_INFRA_PG_PORT": str(cfg.get("pgserver.port", "") or ""),
-        "_INFRA_PG_PORT_R": str(cfg.get("pgserver.replica.port", "") or ""),
-        "_INFRA_PG_USER": str(cfg.get("pgserver.user", "postgres") or "postgres"),
-        "_INFRA_PG_REPLICA_ENABLED": "true" if replica_enabled else "false",
-        "_INFRA_PG_IMAGE": resolved_image,
-        "_INFRA_PG_MAX_CONNECTIONS": knobs.get("MAX_CONNECTIONS", ""),
-        "_INFRA_PG_SHARED_PRELOAD_LIBRARIES": knobs.get("SHARED_PRELOAD_LIBRARIES", ""),
-        "_INFRA_PG_WORK_MEM": knobs.get("WORK_MEM", ""),
-        "_INFRA_PG_AUTOVACUUM": knobs.get("AUTOVACUUM", ""),
+        "_APPINFRA_PG_CONTAINER_NAME": str(cfg.get("pgserver.name", "") or ""),
+        "_APPINFRA_PG_VERSION": str(version),
+        "_APPINFRA_PG_HOST": str(cfg.get("pgserver.host", "127.0.0.1") or "127.0.0.1"),
+        "_APPINFRA_PG_PORT": str(cfg.get("pgserver.port", "") or ""),
+        "_APPINFRA_PG_PORT_R": str(cfg.get("pgserver.replica.port", "") or ""),
+        "_APPINFRA_PG_USER": str(cfg.get("pgserver.user", "postgres") or "postgres"),
+        "_APPINFRA_PG_REPLICA_ENABLED": "true" if replica_enabled else "false",
+        "_APPINFRA_PG_IMAGE": resolved_image,
+        "_APPINFRA_PG_MAX_CONNECTIONS": knobs.get("MAX_CONNECTIONS", ""),
+        "_APPINFRA_PG_SHARED_PRELOAD_LIBRARIES": knobs.get(
+            "SHARED_PRELOAD_LIBRARIES", ""
+        ),
+        "_APPINFRA_PG_WORK_MEM": knobs.get("WORK_MEM", ""),
+        "_APPINFRA_PG_AUTOVACUUM": knobs.get("AUTOVACUUM", ""),
     }
 
 
@@ -148,7 +150,7 @@ def _detect_runtime_env() -> dict[str, str]:
 # Verbs that are safe no-ops when the resolved config carries no
 # ``pgserver.name`` — nothing to stop, inspect, or tail. The rest need a
 # configured server and refuse with a hint instead of leaking pg.sh's
-# ``_INFRA_PG_CONTAINER_NAME required`` guard error.
+# ``_APPINFRA_PG_CONTAINER_NAME required`` guard error.
 _NO_CONFIG_NOOP_VERBS = frozenset({"down", "info", "logs"})
 
 
@@ -246,13 +248,13 @@ class PgUpTool(_PgVerbTool):
         )
 
     def _extra_env(self) -> dict[str, str]:
-        """Set _INFRA_PG_MODE, _INFRA_PG_WAIT, and _INFRA_PG_WAIT_TIMEOUT from flags."""
+        """Set _APPINFRA_PG_MODE, _APPINFRA_PG_WAIT, and _APPINFRA_PG_WAIT_TIMEOUT from flags."""
         env = {
-            "_INFRA_PG_MODE": "repl" if self.args.repl else "single",
-            "_INFRA_PG_WAIT": "0" if self.args.no_wait else "1",
+            "_APPINFRA_PG_MODE": "repl" if self.args.repl else "single",
+            "_APPINFRA_PG_WAIT": "0" if self.args.no_wait else "1",
         }
         if self.args.timeout is not None:
-            env["_INFRA_PG_WAIT_TIMEOUT"] = str(self.args.timeout)
+            env["_APPINFRA_PG_WAIT_TIMEOUT"] = str(self.args.timeout)
         return env
 
 
@@ -278,10 +280,10 @@ class PgDownTool(_PgVerbTool):
         )
 
     def _extra_env(self) -> dict[str, str]:
-        """Set _INFRA_PG_WAIT and _INFRA_PG_WAIT_TIMEOUT from flags."""
-        env = {"_INFRA_PG_WAIT": "0" if self.args.no_wait else "1"}
+        """Set _APPINFRA_PG_WAIT and _APPINFRA_PG_WAIT_TIMEOUT from flags."""
+        env = {"_APPINFRA_PG_WAIT": "0" if self.args.no_wait else "1"}
         if self.args.timeout is not None:
-            env["_INFRA_PG_WAIT_TIMEOUT"] = str(self.args.timeout)
+            env["_APPINFRA_PG_WAIT_TIMEOUT"] = str(self.args.timeout)
         return env
 
 
@@ -307,10 +309,10 @@ class PgRebootTool(_PgVerbTool):
         )
 
     def _extra_env(self) -> dict[str, str]:
-        """Set _INFRA_PG_WAIT and _INFRA_PG_WAIT_TIMEOUT from flags."""
-        env = {"_INFRA_PG_WAIT": "0" if self.args.no_wait else "1"}
+        """Set _APPINFRA_PG_WAIT and _APPINFRA_PG_WAIT_TIMEOUT from flags."""
+        env = {"_APPINFRA_PG_WAIT": "0" if self.args.no_wait else "1"}
         if self.args.timeout is not None:
-            env["_INFRA_PG_WAIT_TIMEOUT"] = str(self.args.timeout)
+            env["_APPINFRA_PG_WAIT_TIMEOUT"] = str(self.args.timeout)
         return env
 
 
@@ -372,8 +374,8 @@ class PgCleanTool(_PgVerbTool):
         )
 
     def _extra_env(self) -> dict[str, str]:
-        """Project --db list into the _INFRA_PG_DATABASES allowlist."""
-        return {"_INFRA_PG_DATABASES": " ".join(self.args.db)}
+        """Project --db list into the _APPINFRA_PG_DATABASES allowlist."""
+        return {"_APPINFRA_PG_DATABASES": " ".join(self.args.db)}
 
 
 # Exact resource names touched by `pg erase` for a given pgserver.name.
@@ -704,7 +706,7 @@ class PgTool(Tool):
 
     Grouping-only; requires an explicit subcommand. Each subcommand reads
     the resolved YAML config and execs ``appinfra/scripts/pg.sh`` under the
-    ``_INFRA_PG_*`` wire protocol.
+    ``_APPINFRA_PG_*`` wire protocol.
     """
 
     def __init__(self, parent: Traceable | None = None):

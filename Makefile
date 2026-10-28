@@ -39,11 +39,11 @@ APPINFRA_DEV_DOCSTRING_THRESHOLD := 95
 # Install with all optional extras
 APPINFRA_DEV_INSTALL_EXTRAS := all
 
-# PostgreSQL configuration (filename only - resolved from ETC_DIR)
+# PostgreSQL configuration (filename only - resolved from APPINFRA_ETC_DIR)
 APPINFRA_PG_CONFIG_FILE := pg.yaml
 #APPINFRA_PG_CONFIG_KEY := pgserver
 
-# Documentation configuration (filename only - resolved from ETC_DIR)
+# Documentation configuration (filename only - resolved from APPINFRA_ETC_DIR)
 APPINFRA_DOCS_CONFIG_FILE := mkdocs.yaml
 
 # ============================================================================

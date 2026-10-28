@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright 2026 The appinfra Authors
 
-"""Tests for appinfra/scripts/make/Makefile.config's INFRA_* assignment guard."""
+"""Tests for Makefile.config / Makefile.env: config loading, interpreter, empty values."""
 
 from __future__ import annotations
 
@@ -49,59 +49,16 @@ def _clean_env() -> dict[str, str]:
         if not k.startswith(("INFRA_", "APPINFRA_"))
         and k not in ("MAKEFLAGS", "MFLAGS", "MAKELEVEL")
     }
-    return {**env, "APPINFRA_ENV_PYTHON": sys.executable}
+    return {**env, "APPINFRA_PYTHON": sys.executable}
 
 
 @pytest.mark.unit
-class TestRenamedVariableCheck:
-    """INFRA_X stops make when APPINFRA_X is declared; other INFRA_* pass through."""
-
-    def test_project_makefile_assignment_fails(self, tmp_path: Path) -> None:
-        result = _make(tmp_path, "INFRA_DEV_PKG_NAME := mypkg")
-        assert result.returncode != 0
-        assert "INFRA_DEV_PKG_NAME is renamed to APPINFRA_DEV_PKG_NAME" in (
-            result.stderr
-        )
-
-    def test_environment_fails(self, tmp_path: Path) -> None:
-        result = _make(tmp_path, "", env={"INFRA_CONTAINER_CMD": "podman"})
-        assert result.returncode != 0
-        assert "INFRA_CONTAINER_CMD is renamed to APPINFRA_CONTAINER_CMD" in (
-            result.stderr
-        )
-
-    def test_command_line_fails(self, tmp_path: Path) -> None:
-        result = _make(tmp_path, "", "INFRA_DEV_CQ_STRICT=false")
-        assert result.returncode != 0
-        assert "INFRA_DEV_CQ_STRICT is renamed to APPINFRA_DEV_CQ_STRICT" in (
-            result.stderr
-        )
-
-    def test_variable_without_a_default_fails(self, tmp_path: Path) -> None:
-        """Variables whose default is empty are declared too."""
-        result = _make(tmp_path, "", env={"INFRA_NO_CONFIRM": "1"})
-        assert result.returncode != 0
-        assert "INFRA_NO_CONFIRM is renamed to APPINFRA_NO_CONFIRM" in result.stderr
+class TestConfigLoading:
+    """Makefile.local loads in every layout; INFRA_* config overrides pass through."""
 
     def test_exported_override_in_makefile_passes(self, tmp_path: Path) -> None:
         result = _make(tmp_path, "export INFRA_TEST_LOGGING_LEVEL := debug")
         assert result.returncode == 0, result.stderr
-
-    def test_makefile_local_assignment_fails(self, tmp_path: Path) -> None:
-        (tmp_path / "Makefile.local").write_text(
-            "INFRA_ENV_PYTHON ?= /usr/bin/python3\n"
-        )
-        result = _make(tmp_path, "")
-        assert result.returncode != 0
-        assert "INFRA_ENV_PYTHON" in result.stderr
-
-    def test_makefile_env_first_layout_fails(self, tmp_path: Path) -> None:
-        """A project including Makefile.env without Makefile.config is checked too."""
-        result = _make(
-            tmp_path, "INFRA_DEV_PKG_NAME := mypkg", include=MAKE_DIR / "Makefile.env"
-        )
-        assert result.returncode != 0
-        assert "INFRA_DEV_PKG_NAME" in result.stderr
 
     def test_makefile_env_first_layout_loads_makefile_local(
         self, tmp_path: Path
@@ -135,15 +92,17 @@ class TestRenamedVariableCheck:
 
 
 def _python(tmp_path: Path, local: str, env: dict[str, str], *args: str) -> str:
-    """Return the PYTHON Makefile.env selects, given Makefile.local and the environment."""
+    """Return the PYTHON Makefile.env resolves, given Makefile.local and the environment.
+
+    Also asserts that APPINFRA_PYTHON holds the same resolved path.
+    """
     (tmp_path / "Makefile.local").write_text(local)
     (tmp_path / "Makefile").write_text(
-        f"include {MAKE_DIR / 'Makefile.env'}\nok:\n\t@echo $(PYTHON)\n"
+        f"include {MAKE_DIR / 'Makefile.env'}\n"
+        "ok:\n\t@echo $(PYTHON)\n\t@echo $(APPINFRA_PYTHON)\n"
     )
     base = {
-        k: v
-        for k, v in _clean_env().items()
-        if k not in ("PYTHON", "APPINFRA_ENV_PYTHON")
+        k: v for k, v in _clean_env().items() if k not in ("PYTHON", "APPINFRA_PYTHON")
     }
     result = subprocess.run(
         ["make", "--no-print-directory", "ok", *args],
@@ -154,40 +113,269 @@ def _python(tmp_path: Path, local: str, env: dict[str, str], *args: str) -> str:
         check=False,
     )
     assert result.returncode == 0, result.stderr
-    return result.stdout.strip()
+    python, appinfra_python = result.stdout.splitlines()
+    assert python == appinfra_python
+    return python
+
+
+@pytest.fixture
+def venv_home(tmp_path: Path) -> dict[str, str]:
+    """A HOME whose ~/.venv/bin/python exists, as the environment to pass."""
+    venv_python = tmp_path / "home" / ".venv" / "bin" / "python"
+    venv_python.parent.mkdir(parents=True)
+    venv_python.touch()
+    return {"HOME": str(tmp_path / "home")}
 
 
 @pytest.mark.unit
 class TestInterpreterSelection:
-    """The environment outranks the project Makefile and Makefile.local."""
+    """Environment or command line, then Makefile.local; APPINFRA_PYTHON first per tier."""
 
     def test_environment_python_beats_makefile_local(self, tmp_path: Path) -> None:
-        local = "APPINFRA_ENV_PYTHON ?= /local/python\n"
+        local = "APPINFRA_PYTHON ?= /local/python\n"
         assert _python(tmp_path, local, {"PYTHON": "/env/python"}) == "/env/python"
 
-    def test_environment_appinfra_env_python_beats_all(self, tmp_path: Path) -> None:
-        local = "APPINFRA_ENV_PYTHON ?= /local/python\n"
-        env = {"APPINFRA_ENV_PYTHON": "/env/appinfra", "PYTHON": "/env/python"}
+    def test_command_line_python_beats_makefile_local(self, tmp_path: Path) -> None:
+        local = "APPINFRA_PYTHON ?= /local/python\n"
+        assert _python(tmp_path, local, {}, "PYTHON=/cli/python") == "/cli/python"
+
+    def test_environment_appinfra_python_beats_all(self, tmp_path: Path) -> None:
+        local = "APPINFRA_PYTHON ?= /local/python\n"
+        env = {"APPINFRA_PYTHON": "/env/appinfra", "PYTHON": "/env/python"}
         assert _python(tmp_path, local, env) == "/env/appinfra"
 
-    def test_appinfra_env_python_beats_command_line_python(
-        self, tmp_path: Path
-    ) -> None:
-        env = {"APPINFRA_ENV_PYTHON": "/env/appinfra"}
+    def test_appinfra_python_beats_command_line_python(self, tmp_path: Path) -> None:
+        env = {"APPINFRA_PYTHON": "/env/appinfra"}
         assert _python(tmp_path, "", env, "PYTHON=/cli/python") == "/env/appinfra"
 
-    def test_empty_environment_value_counts_as_unset(self, tmp_path: Path) -> None:
-        """An exported VAR= falls through to the ~/.venv default, not to empty."""
-        venv_python = tmp_path / "home" / ".venv" / "bin" / "python"
-        venv_python.parent.mkdir(parents=True)
-        venv_python.touch()
-        env = {
-            "APPINFRA_ENV_PYTHON": "",
-            "PYTHON": "",
-            "HOME": str(tmp_path / "home"),
-        }
-        assert _python(tmp_path, "", env) == str(venv_python)
+    def test_command_line_appinfra_python_beats_environment_python(
+        self, tmp_path: Path
+    ) -> None:
+        env = {"PYTHON": "/env/python"}
+        args = ("APPINFRA_PYTHON=/cli/appinfra",)
+        assert _python(tmp_path, "", env, *args) == "/cli/appinfra"
 
-    def test_makefile_local_used_without_environment(self, tmp_path: Path) -> None:
-        local = "APPINFRA_ENV_PYTHON ?= /local/python\n"
-        assert _python(tmp_path, local, {}) == "/local/python"
+    def test_makefile_local_appinfra_python_beats_its_python(
+        self, tmp_path: Path
+    ) -> None:
+        local = "APPINFRA_PYTHON ?= /local/appinfra\nPYTHON ?= /local/python\n"
+        assert _python(tmp_path, local, {}) == "/local/appinfra"
+
+    def test_makefile_local_python_used(self, tmp_path: Path) -> None:
+        assert _python(tmp_path, "PYTHON ?= /local/python\n", {}) == "/local/python"
+
+    def test_venv_default(self, tmp_path: Path, venv_home: dict[str, str]) -> None:
+        expected = f"{venv_home['HOME']}/.venv/bin/python"
+        assert _python(tmp_path, "", venv_home) == expected
+
+
+@pytest.mark.unit
+class TestEmptyValues:
+    """An APPINFRA_* or PYTHON the environment or command line sets empty stops make."""
+
+    @pytest.mark.parametrize(
+        "name", ["APPINFRA_PYTHON", "PYTHON", "APPINFRA_PYTEST_COVERAGE_THRESHOLD"]
+    )
+    def test_environment(self, tmp_path: Path, name: str) -> None:
+        result = _make(tmp_path, "", env={name: ""})
+        assert result.returncode != 0
+        assert f"{name} set but empty" in result.stderr
+
+    @pytest.mark.parametrize(
+        "name", ["APPINFRA_PYTHON", "PYTHON", "APPINFRA_PYTEST_COVERAGE_THRESHOLD"]
+    )
+    def test_command_line(self, tmp_path: Path, name: str) -> None:
+        result = _make(tmp_path, "", f"{name}=")
+        assert result.returncode != 0
+        assert f"{name} set but empty" in result.stderr
+
+    def test_all_empty_names_reported(self, tmp_path: Path) -> None:
+        result = _make(tmp_path, "", "PYTHON=", env={"APPINFRA_DEV_CQ_EXCLUDE": ""})
+        assert "APPINFRA_DEV_CQ_EXCLUDE" in result.stderr
+        assert "PYTHON" in result.stderr
+
+    def test_makefile_empty_value_allowed(self, tmp_path: Path) -> None:
+        """An empty value the project's own Makefile sets is a value, not an error."""
+        result = _make(tmp_path, "APPINFRA_DEV_CQ_LINT_SELECT :=")
+        assert result.returncode == 0, result.stderr
+
+    def test_sub_make_inherits_empty_exports(self, tmp_path: Path) -> None:
+        """A sub-make sees the parent's exported settings, some empty by default."""
+        (tmp_path / "Makefile").write_text(
+            f"include {MAKEFILE_CONFIG}\n"
+            "export APPINFRA_DEV_CQ_EXCLUDE\n"
+            "ok:\n\t@$(MAKE) --no-print-directory inner\n"
+            "inner:\n\t@echo inner-ok\n"
+        )
+        result = subprocess.run(
+            ["make", "--no-print-directory", "ok"],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+            env=_clean_env(),
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr
+        assert "inner-ok" in result.stdout
+
+
+def _areyousure(
+    tmp_path: Path, env: dict[str, str], answer: str = "", local: str = ""
+) -> subprocess.CompletedProcess[str]:
+    """Run a target guarded by areyousure, answering the prompt with `answer`."""
+    (tmp_path / "Makefile.local").write_text(local)
+    (tmp_path / "Makefile").write_text(
+        f"include {MAKE_DIR / 'Makefile.env'}\ninclude {MAKE_DIR / 'Makefile.utils'}\n"
+        "ok: areyousure\n\t@echo done\n"
+    )
+    return subprocess.run(
+        ["make", "--no-print-directory", "ok"],
+        cwd=tmp_path,
+        input=answer,
+        capture_output=True,
+        text=True,
+        env={**_clean_env(), **env},
+        check=False,
+    )
+
+
+@pytest.mark.unit
+class TestAreYouSure:
+    """APPINFRA_YES=true|1|y|yes (any case) skips the prompt; otherwise it asks."""
+
+    @pytest.mark.parametrize("value", ["true", "1", "y", "yes", "TRUE", "Y", "Yes"])
+    def test_yes_values_skip_prompt(self, tmp_path: Path, value: str) -> None:
+        result = _areyousure(tmp_path, {"APPINFRA_YES": value})
+        assert result.returncode == 0, result.stderr
+        assert "Are you sure" not in result.stdout
+        assert "done" in result.stdout
+
+    def test_makefile_local_value_skips_prompt(self, tmp_path: Path) -> None:
+        result = _areyousure(tmp_path, {}, local="APPINFRA_YES ?= 1\n")
+        assert result.returncode == 0, result.stderr
+        assert "done" in result.stdout
+
+    @pytest.mark.parametrize("value", ["0", "no", "false"])
+    def test_other_values_prompt(self, tmp_path: Path, value: str) -> None:
+        result = _areyousure(tmp_path, {"APPINFRA_YES": value}, answer="n\n")
+        assert result.returncode != 0
+        assert "Are you sure" in result.stdout
+        assert "done" not in result.stdout
+
+    @pytest.mark.parametrize("answer", ["y\n", "yes\n", "Y\n"])
+    def test_prompt_accepts_yes(self, tmp_path: Path, answer: str) -> None:
+        result = _areyousure(tmp_path, {}, answer=answer)
+        assert result.returncode == 0, result.stderr
+        assert "done" in result.stdout
+
+    def test_prompt_without_input_fails(self, tmp_path: Path) -> None:
+        result = _areyousure(tmp_path, {})
+        assert result.returncode != 0
+        assert "done" not in result.stdout
+
+
+BOOLEANS = [
+    "APPINFRA_DRY_RUN",
+    "APPINFRA_DEV_CQ_STRICT",
+    "APPINFRA_DEV_CQ_SPDX",
+    "APPINFRA_DEV_CHECK_EXAMPLES",
+    "APPINFRA_YES",
+    "APPINFRA_NON_INTERACTIVE",
+]
+TRUE = ["true", "1", "y", "yes", "TRUE", "Yes"]
+FALSE = ["false", "0", "n", "no", "FALSE", "No"]
+
+
+def _bool_value(
+    tmp_path: Path, name: str, env: dict[str, str], *args: str
+) -> subprocess.CompletedProcess[str]:
+    """Run make printing NAME as Make sees it and as a recipe's environment holds it."""
+    (tmp_path / "Makefile").write_text(
+        f"include {MAKEFILE_CONFIG}\nok:\n\t@echo $({name}) $${name}\n"
+    )
+    return subprocess.run(
+        ["make", "--no-print-directory", "ok", *args],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        env={**_clean_env(), **env},
+        check=False,
+    )
+
+
+@pytest.mark.unit
+class TestBooleanSettings:
+    """Every on/off setting takes the same values and reaches recipes as true/false."""
+
+    @pytest.mark.parametrize("name", BOOLEANS)
+    @pytest.mark.parametrize("value", TRUE)
+    def test_true_values(self, tmp_path: Path, name: str, value: str) -> None:
+        result = _bool_value(tmp_path, name, {name: value})
+        assert result.stdout.split() == ["true", "true"], result.stderr
+
+    @pytest.mark.parametrize("name", BOOLEANS)
+    @pytest.mark.parametrize("value", FALSE)
+    def test_false_values(self, tmp_path: Path, name: str, value: str) -> None:
+        result = _bool_value(tmp_path, name, {name: value})
+        assert result.stdout.split() == ["false", "false"], result.stderr
+
+    @pytest.mark.parametrize("name", BOOLEANS)
+    def test_default_is_false(self, tmp_path: Path, name: str) -> None:
+        result = _bool_value(tmp_path, name, {})
+        assert result.stdout.split() == ["false", "false"], result.stderr
+
+    def test_command_line_value_normalized(self, tmp_path: Path) -> None:
+        result = _bool_value(tmp_path, "APPINFRA_DRY_RUN", {}, "APPINFRA_DRY_RUN=Yes")
+        assert result.stdout.split() == ["true", "true"], result.stderr
+
+    def test_makefile_local_value_normalized(self, tmp_path: Path) -> None:
+        (tmp_path / "Makefile.local").write_text("APPINFRA_DEV_CQ_STRICT ?= 1\n")
+        result = _bool_value(tmp_path, "APPINFRA_DEV_CQ_STRICT", {})
+        assert result.stdout.split() == ["true", "true"], result.stderr
+
+    @pytest.mark.parametrize("value", ["ture", "on", "2", "yes no"])
+    def test_other_values_stop_make(self, tmp_path: Path, value: str) -> None:
+        result = _bool_value(tmp_path, "APPINFRA_DRY_RUN", {"APPINFRA_DRY_RUN": value})
+        assert result.returncode != 0
+        assert "APPINFRA_DRY_RUN=" in result.stderr
+        assert "is not a boolean" in result.stderr
+
+
+BOOL_SH = MAKE_DIR.parent / "_bool.sh"
+
+
+def _bool_sh(
+    value: str | None, default: str = "false"
+) -> subprocess.CompletedProcess[str]:
+    env = {k: v for k, v in _clean_env().items() if k != "X"}
+    if value is not None:
+        env["X"] = value
+    return subprocess.run(
+        ["bash", "-c", f'. "{BOOL_SH}"; appinfra_bool X {default}'],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+    )
+
+
+@pytest.mark.unit
+class TestBoolSh:
+    """scripts/_bool.sh applies the same rule for scripts run outside make."""
+
+    @pytest.mark.parametrize("value", TRUE)
+    def test_true_values(self, value: str) -> None:
+        assert _bool_sh(value).stdout.strip() == "true"
+
+    @pytest.mark.parametrize("value", FALSE)
+    def test_false_values(self, value: str) -> None:
+        assert _bool_sh(value).stdout.strip() == "false"
+
+    def test_unset_takes_default(self) -> None:
+        assert _bool_sh(None, default="true").stdout.strip() == "true"
+
+    @pytest.mark.parametrize("value", ["", "ture", "on", "2"])
+    def test_other_values_fail(self, value: str) -> None:
+        result = _bool_sh(value)
+        assert result.returncode == 2
+        assert "X=" in result.stderr and "is not a boolean" in result.stderr

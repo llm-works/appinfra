@@ -11,35 +11,33 @@
 #   APPINFRA_DOCS_OUTPUT_DIR  - Output directory for build (default: .site)
 
 # Path to this Makefile's directory
-docs_local := $(dir $(realpath $(lastword $(MAKEFILE_LIST))))
+_APPINFRA_DOCS_MAKE_DIR := $(dir $(realpath $(lastword $(MAKEFILE_LIST))))
 
 # Resolve mkdocs config path using docs-config.sh
-# If APPINFRA_DOCS_CONFIG_FILE is set, use it directly from ETC_DIR
+# If APPINFRA_DOCS_CONFIG_FILE is set, use it directly from APPINFRA_ETC_DIR
 # If empty, extract 'docs' section from APPINFRA_DEFAULT_CONFIG_FILE
-# Gated on PyYAML availability so `make setup` can run from a fresh venv (see Makefile.config).
-# When skipped, MKDOCS_CONFIG is left undefined — docs.* targets will fail at recipe time,
-# but parse-time (and `make setup`) completes.
-ifdef _INFRA_PYYAML_OK
-MKDOCS_CONFIG := $(shell CURDIR=$(CURDIR) $(docs_local)/../docs-config.sh "$(APPINFRA_DOCS_CONFIG_FILE)" $(ETC_DIR) $(APPINFRA_DEFAULT_CONFIG_FILE))
-endif
+# Recursive (=) on purpose: resolved only when a docs.* recipe expands it, so
+# parsing (every other target, and `make setup` before PyYAML is installed)
+# never runs the script or prints its errors.
+_APPINFRA_MKDOCS_CONFIG = $(shell CURDIR=$(CURDIR) $(_APPINFRA_DOCS_MAKE_DIR)/../docs-config.sh "$(APPINFRA_DOCS_CONFIG_FILE)" $(APPINFRA_ETC_DIR) $(APPINFRA_DEFAULT_CONFIG_FILE))
 
 ##@ Documentation
 
 docs.serve:: ## Serve documentation with live reload
-	$(PYTHON) -m mkdocs serve -f $(MKDOCS_CONFIG)
+	$(PYTHON) -m mkdocs serve -f $(_APPINFRA_MKDOCS_CONFIG)
 .PHONY: docs.serve
 
 docs.check:: ## Validate documentation without permanent output
 	@echo "* validating documentation build..."
-	@$(PYTHON) -m mkdocs build -f $(MKDOCS_CONFIG) -d /tmp/infra-mkdocs-check -q
+	@$(PYTHON) -m mkdocs build -f $(_APPINFRA_MKDOCS_CONFIG) -d /tmp/infra-mkdocs-check -q
 	@rm -rf /tmp/infra-mkdocs-check
 	@echo "* documentation validation passed"
 .PHONY: docs.check
 
 docs.build:: ## Build static documentation site
-	$(PYTHON) -m mkdocs build -f $(MKDOCS_CONFIG) -d $(APPINFRA_DOCS_OUTPUT_DIR)
+	$(PYTHON) -m mkdocs build -f $(_APPINFRA_MKDOCS_CONFIG) -d $(APPINFRA_DOCS_OUTPUT_DIR)
 .PHONY: docs.build
 
 docs.deploy:: areyousure ## Deploy documentation to GitHub Pages
-	$(PYTHON) -m mkdocs gh-deploy -f $(MKDOCS_CONFIG)
+	$(PYTHON) -m mkdocs gh-deploy -f $(_APPINFRA_MKDOCS_CONFIG)
 .PHONY: docs.deploy

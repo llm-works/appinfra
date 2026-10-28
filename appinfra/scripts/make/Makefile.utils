@@ -9,14 +9,22 @@
 #   dangerous_target: areyousure
 #       @echo "doing something dangerous"
 
-define areyousure
-	@if [ "$$APPINFRA_NO_CONFIRM" = "1" ]; then \
-		echo "APPINFRA_NO_CONFIRM=1, skipping confirmation"; \
+# APPINFRA_YES is a boolean setting, already true or false (Makefile.config)
+ifndef _APPINFRA_CONFIG_LOADED
+include $(dir $(lastword $(MAKEFILE_LIST)))Makefile.config
+endif
+
+# APPINFRA_YES=true answers yes without asking; otherwise the prompt takes y or
+# yes (any case). Patterns, not ${var,,}: the recipe shell is /bin/sh
+define _APPINFRA_AREYOUSURE
+	@if [ "$(APPINFRA_YES)" = "true" ]; then \
+		echo "APPINFRA_YES=true, skipping confirmation"; \
 	else \
-		echo -n "Are you sure? [y/N] " && read ans && [ $${ans:-N} = y ]; \
+		printf "Are you sure? [y/N] " && read ans && \
+		case "$$ans" in [Yy]|[Yy][Ee][Ss]) ;; *) exit 1;; esac; \
 	fi
 endef
 
 areyousure:
-	$(call areyousure)
+	$(call _APPINFRA_AREYOUSURE)
 .PHONY: areyousure

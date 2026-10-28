@@ -404,7 +404,7 @@ class TestAppImportsSection:
         lines = tool._app_imports_section("myproject", with_db=False)
 
         content = "\n".join(lines)
-        assert "from appinfra.app import App, AppBuilder" in content
+        assert "from appinfra.app import AppBuilder" in content
         assert "from appinfra.db import PG" not in content
 
     def test_imports_with_database(self):

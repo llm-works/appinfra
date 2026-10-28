@@ -25,18 +25,18 @@
 #   include $(infra)/scripts/make/Makefile.clean
 
 # Determine the directory containing this Makefile
-_infra_make_dir := $(dir $(lastword $(MAKEFILE_LIST)))
+_APPINFRA_MAKE_DIR := $(dir $(lastword $(MAKEFILE_LIST)))
 
 # Load configuration first
-include $(_infra_make_dir)Makefile.config
+include $(_APPINFRA_MAKE_DIR)Makefile.config
 
 # Include all modules
-include $(_infra_make_dir)Makefile.env
-include $(_infra_make_dir)Makefile.help
-include $(_infra_make_dir)Makefile.utils
-include $(_infra_make_dir)Makefile.dev
-include $(_infra_make_dir)Makefile.install
-include $(_infra_make_dir)Makefile.pytest
-include $(_infra_make_dir)Makefile.docs
-include $(_infra_make_dir)Makefile.pg
-include $(_infra_make_dir)Makefile.clean
+include $(_APPINFRA_MAKE_DIR)Makefile.env
+include $(_APPINFRA_MAKE_DIR)Makefile.help
+include $(_APPINFRA_MAKE_DIR)Makefile.utils
+include $(_APPINFRA_MAKE_DIR)Makefile.dev
+include $(_APPINFRA_MAKE_DIR)Makefile.install
+include $(_APPINFRA_MAKE_DIR)Makefile.pytest
+include $(_APPINFRA_MAKE_DIR)Makefile.docs
+include $(_APPINFRA_MAKE_DIR)Makefile.pg
+include $(_APPINFRA_MAKE_DIR)Makefile.clean

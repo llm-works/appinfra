@@ -45,10 +45,22 @@ earlier: pre-release builds (0.13.1.devN) would not satisfy it. -->
   `appinfra.cli.tools.cq` (`tool`, `functions`, `spdx`).
 - **Breaking:** `GitRuntimeSource()` no longer takes `check_dirty`; the parameter had no effect.
 - **Breaking:** the framework's Make and tooling variables are renamed from `INFRA_*` to
-  `APPINFRA_*` (`APPINFRA_DEV_PKG_NAME`, `APPINFRA_ROOT`, ...); every `INFRA_*` variable is now a
-  config override. Make stops on the old name of any variable a project sets; exported, an old
-  name is read as a config override and fails on its undeclared yaml path. `Config` rejects an
-  `env_prefix` that overlaps `APPINFRA_`.
+  `APPINFRA_*` (`APPINFRA_DEV_PKG_NAME`, `APPINFRA_PYTEST_WORKERS`, ...); every `INFRA_*` variable
+  is now a config override. Old names are not read: set in a Makefile they are ignored;
+  exported, they fail the config load as undeclared overrides. `Config` rejects an `env_prefix`
+  that overlaps `APPINFRA_`.
+- **Breaking:** every other framework name moves into `APPINFRA_*` (settings) or `_APPINFRA_*`
+  (internal): `ETC_DIR` → `APPINFRA_ETC_DIR`, `PYTHON_ENVS` → `APPINFRA_PYTHON_ENVS`,
+  `run_pytest(_serial)` → `APPINFRA_RUN_PYTEST(_SERIAL)`, and the scaffold's `APPINFRA_ROOT` →
+  `APPINFRA_SCRIPTS` (the scripts directory). The interpreter is `APPINFRA_PYTHON` or `PYTHON`.
+  Old names are ignored.
+- **Breaking:** `APPINFRA_NO_CONFIRM` is removed; `APPINFRA_YES` answers every confirmation, the
+  `areyousure` prompt of destructive Make targets included.
+- **Breaking:** every on/off setting (`APPINFRA_DRY_RUN`, `APPINFRA_DEV_CQ_STRICT`, `APPINFRA_YES`,
+  ...) takes `true`, `1`, `y`, `yes` or `false`, `0`, `n`, `no`, in any case; any other value is
+  an error. `APPINFRA_DRY_RUN=1` used to be the only on value, `true` for the others.
+- **Breaking:** an `APPINFRA_*` or `PYTHON` that the environment or the command line sets empty
+  stops make; it used to run the setting empty, hiding `Makefile.local` and the default.
 - A `Ticker.stop()` while the ticker is not running is kept: the next `run()` returns at once,
   without calling the handler. A `stop()` right after starting the `run()` thread used to be lost.
 
@@ -67,6 +79,9 @@ earlier: pre-release builds (0.13.1.devN) would not satisfy it. -->
   `extra={"exception": e}` or sent through the multiprocess queue; the database handler used to
   drop a record with an exception in `extra`.
 - `INFRA_TEST_LOGGING_LEVEL` overrides `test.logging.level`; `Config` used to skip it.
+- A project from `appinfra scaffold` passes its own `make lint` and `make check`, and the
+  framework style finds an installed appinfra; it used to look in the wrong directory.
+- `make` no longer prints a docs config error on every call when the docs config is missing.
 
 ## [0.13.0] - 2026-10-25
 

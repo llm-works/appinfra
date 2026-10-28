@@ -2,14 +2,14 @@
 # Essential replication params come first; user knobs from pgserver.postgres_conf
 # fill the named slots below (curated whitelist; see docker-compose.single.yaml).
 #
-# Makefile-orchestrated: NAME / IMAGE / PORT / PORT_R are required env vars; the
-# PG_* slots default to postgres's built-in values when unset. All are set by
-# Makefile.pg from the pgserver config. Not intended for direct
-# `docker compose -f ...` invocation.
+# pg.sh-orchestrated: reads the _APPINFRA_PG_* wire variables from the
+# environment. CONTAINER_NAME / IMAGE / PORT / PORT_R are required; the
+# postgres_conf slots default to postgres's built-in values when unset. Not
+# intended for direct `docker compose -f ...` invocation.
 services:
   postgres-primary:
-    container_name: ${NAME:?}-primary
-    image: ${IMAGE:?}
+    container_name: ${_APPINFRA_PG_CONTAINER_NAME:?}-primary
+    image: ${_APPINFRA_PG_IMAGE:?}
     command:
       - postgres
       - -c
@@ -23,13 +23,13 @@ services:
       - -c
       - hba_file=/etc/postgresql/pg_hba.conf
       - -c
-      - ${PG_MAX_CONNECTIONS:-max_connections=128}
+      - ${_APPINFRA_PG_MAX_CONNECTIONS:-max_connections=128}
       - -c
-      - ${PG_SHARED_PRELOAD_LIBRARIES:-shared_preload_libraries=}
+      - ${_APPINFRA_PG_SHARED_PRELOAD_LIBRARIES:-shared_preload_libraries=}
       - -c
-      - ${PG_WORK_MEM:-work_mem=4MB}
+      - ${_APPINFRA_PG_WORK_MEM:-work_mem=4MB}
       - -c
-      - ${PG_AUTOVACUUM:-autovacuum=on}
+      - ${_APPINFRA_PG_AUTOVACUUM:-autovacuum=on}
     restart: always
     volumes:
       - "$PWD:$PWD"
@@ -39,10 +39,10 @@ services:
       - ${PWD}/scripts/docker/pg/pg_hba.conf:/etc/postgresql/pg_hba.conf:ro
     working_dir: $PWD
     ports:
-      - ${PORT:?}:${PORT}
+      - ${_APPINFRA_PG_PORT:?}:${_APPINFRA_PG_PORT}
     environment:
       - POSTGRES_HOST_AUTH_METHOD=trust
-      - PGPORT=${PORT}
+      - PGPORT=${_APPINFRA_PG_PORT}
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 5s
@@ -50,8 +50,8 @@ services:
       retries: 5
 
   postgres-standby:
-    container_name: ${NAME:?}-standby
-    image: ${IMAGE:?}
+    container_name: ${_APPINFRA_PG_CONTAINER_NAME:?}-standby
+    image: ${_APPINFRA_PG_IMAGE:?}
     restart: always
     volumes:
       - "$PWD:$PWD"
@@ -59,10 +59,10 @@ services:
       - pgdata_standby:/var/lib/postgresql
     working_dir: $PWD
     ports:
-      - ${PORT_R:?}:${PORT_R}
+      - ${_APPINFRA_PG_PORT_R:?}:${_APPINFRA_PG_PORT_R}
     environment:
       - POSTGRES_HOST_AUTH_METHOD=trust
-      - PGPORT=${PORT_R}
+      - PGPORT=${_APPINFRA_PG_PORT_R}
     depends_on:
       postgres-primary:
         condition: service_healthy
@@ -74,20 +74,20 @@ services:
         # block traversal by the postgres user. Pre-create the parent as postgres.
         install -d -o postgres -g postgres -m 755 \"$$(dirname \"$$pgdata\")\"
         rm -rf \"$$pgdata\"/*
-        until pg_isready -h postgres-primary -p ${PORT} -U postgres; do
+        until pg_isready -h postgres-primary -p ${_APPINFRA_PG_PORT} -U postgres; do
           echo 'Waiting for primary to be ready...'
           sleep 2
         done
         echo 'Primary is ready, starting base backup...'
-        PGPASSWORD='' pg_basebackup -h postgres-primary -p ${PORT} -U postgres -D \"$$pgdata\" -Fp -Xs -P -R
+        PGPASSWORD='' pg_basebackup -h postgres-primary -p ${_APPINFRA_PG_PORT} -U postgres -D \"$$pgdata\" -Fp -Xs -P -R
         chown -R postgres:postgres \"$$pgdata\"
         chmod 0700 \"$$pgdata\"
         echo 'Base backup complete, starting standby server...'
         exec gosu postgres postgres \
-          -c \"${PG_MAX_CONNECTIONS:-max_connections=128}\" \
-          -c \"${PG_SHARED_PRELOAD_LIBRARIES:-shared_preload_libraries=}\" \
-          -c \"${PG_WORK_MEM:-work_mem=4MB}\" \
-          -c \"${PG_AUTOVACUUM:-autovacuum=on}\"
+          -c \"${_APPINFRA_PG_MAX_CONNECTIONS:-max_connections=128}\" \
+          -c \"${_APPINFRA_PG_SHARED_PRELOAD_LIBRARIES:-shared_preload_libraries=}\" \
+          -c \"${_APPINFRA_PG_WORK_MEM:-work_mem=4MB}\" \
+          -c \"${_APPINFRA_PG_AUTOVACUUM:-autovacuum=on}\"
       "
 
 volumes:

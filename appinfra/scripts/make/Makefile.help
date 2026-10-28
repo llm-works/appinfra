@@ -20,21 +20,21 @@
 
 # Helper to reorder MAKEFILE_LIST so main Makefile appears last
 # This ensures included files' sections appear before the main file's sections
-_help_makefile_list = $(wordlist 2,$(words $(MAKEFILE_LIST)),$(MAKEFILE_LIST)) $(firstword $(MAKEFILE_LIST))
+_APPINFRA_HELP_MAKEFILE_LIST = $(wordlist 2,$(words $(MAKEFILE_LIST)),$(MAKEFILE_LIST)) $(firstword $(MAKEFILE_LIST))
 
 # Build filter pattern for disabled targets (awk regex)
 # Combines APPINFRA_DISABLE_TARGETS (exact match) and APPINFRA_DISABLE_GROUPS (prefix match)
 # Use deferred assignment (=) so values set by later includes are picked up
-_help_disabled_targets = $(APPINFRA_DISABLE_TARGETS)
-_help_disabled_groups = $(APPINFRA_DISABLE_GROUPS)
+_APPINFRA_HELP_DISABLED_TARGETS = $(APPINFRA_DISABLE_TARGETS)
+_APPINFRA_HELP_DISABLED_GROUPS = $(APPINFRA_DISABLE_GROUPS)
 
 # A bare `make` shows this help, whatever target an earlier include defines first
 .DEFAULT_GOAL := help
 
 .PHONY: help
 help: ## Display this help message
-	@awk -v disabled_targets="$(_help_disabled_targets)" \
-	     -v disabled_groups="$(_help_disabled_groups)" \
+	@awk -v disabled_targets="$(_APPINFRA_HELP_DISABLED_TARGETS)" \
+	     -v disabled_groups="$(_APPINFRA_HELP_DISABLED_GROUPS)" \
 	'BEGIN { \
 		FS = ":.*##"; \
 		printf "\nUsage:\n  make \033[36m<target>\033[0m\n"; \
@@ -62,4 +62,4 @@ help: ## Display this help message
 	} \
 	/^##@/ { \
 		printf "\n\033[1m%s\033[0m\n", substr($$0, 5); \
-	}' $(_help_makefile_list)
+	}' $(_APPINFRA_HELP_MAKEFILE_LIST)
