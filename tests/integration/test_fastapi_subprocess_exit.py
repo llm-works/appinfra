@@ -30,6 +30,8 @@ import pytest
 import requests
 from starlette.requests import Request
 
+from tests.helpers.fork import forks_in_xdist_worker
+
 
 def _fastapi_available() -> bool:
     try:
@@ -196,6 +198,7 @@ def _build_server_with_shutdown_callback(port: int, marker_path: Path) -> Any:
 class TestSubprocessExit:
     """The uvicorn subprocess exits promptly when told to or orphaned."""
 
+    @forks_in_xdist_worker
     def test_stop_does_not_escalate(self) -> None:
         """stop() returns well before its timeout and the child exits cleanly."""
         port = _free_port()
@@ -209,6 +212,7 @@ class TestSubprocessExit:
         assert time.monotonic() - started < 2.0
         assert proc.exitcode == 0
 
+    @forks_in_xdist_worker
     def test_shutdown_callback_executes_on_stop(self) -> None:
         """Shutdown callbacks registered via the builder run when stop() is called."""
         port = _free_port()
@@ -228,6 +232,7 @@ class TestSubprocessExit:
                 if proc.is_alive():
                     proc.kill()
 
+    @forks_in_xdist_worker
     def test_stop_fails_request_waiting_on_ipc(self) -> None:
         """A request waiting on IPC fails at once instead of blocking stop()."""
         port = _free_port()

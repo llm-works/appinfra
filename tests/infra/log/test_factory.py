@@ -23,6 +23,7 @@ from appinfra.log.config import LogConfig
 from appinfra.log.config_holder import LogConfigHolder
 from appinfra.log.errors import LogConfigError, LoggerExistsError, LoggerNotFoundError
 from appinfra.log.factory import LoggerFactory
+from tests.helpers.fork import forks_in_xdist_worker
 
 # =============================================================================
 # Fixtures
@@ -532,6 +533,7 @@ def _create_root_in_child(conn) -> None:
     "fork" not in __import__("multiprocessing").get_all_start_methods(),
     reason="needs the fork start method",
 )
+@forks_in_xdist_worker
 def test_forked_child_may_create_an_inherited_name(log_config):
     """A logger inherited across fork belongs to the parent; the child can create the name."""
     import multiprocessing

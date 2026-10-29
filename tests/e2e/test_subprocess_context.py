@@ -16,6 +16,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.helpers.fork import forks_in_xdist_worker
+
 
 def _worker_loop(
     config_path: str,
@@ -80,6 +82,7 @@ class TestSubprocessContextHotReload:
         except ImportError:
             pytest.skip("watchdog not installed - skipping subprocess context tests")
 
+    @forks_in_xdist_worker
     def test_two_processes_see_config_change(self):
         """Test that both subprocess workers see config hot-reload changes."""
         with tempfile.TemporaryDirectory() as tmpdir:
