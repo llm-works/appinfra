@@ -28,6 +28,7 @@ earlier: pre-release builds (0.13.1.devN) would not satisfy it. -->
   until it ends, for up to 10s.
 - `APPINFRA_PYTEST_PERF_DIR`: the directory `make check` and `make test.perf` collect
   performance tests from (default `tests`).
+- `PG.dispose()` closes the pooled connections of a `PG` and of its cached `ScopedPG`s.
 
 ### Changed
 - `make check` runs the Performance group on one pytest-xdist worker instead of several.
@@ -84,6 +85,10 @@ earlier: pre-release builds (0.13.1.devN) would not satisfy it. -->
 - The `check` extra requires mypy 2, whose stricter checks can report new errors in a project.
 - The `fastapi` extra caps fastapi below 0.163 and uvicorn below 0.55 (both were below 1.0): both
   break APIs in minor releases.
+- The `dev` extra installs `httpx2` in place of `httpx`, and Starlette 1.2 or later, whose test
+  client uses `httpx2`.
+- **Breaking:** the database `Interface` declares `dispose()` as abstract; a subclass must
+  implement it to be instantiated.
 
 ### Fixed
 - `password(confirm=True)` accepts a matching confirmation; with questionary installed it always
@@ -109,6 +114,10 @@ earlier: pre-release builds (0.13.1.devN) would not satisfy it. -->
   to `ticker=`; it failed with an `AttributeError`, calling a `Ticker.start()` that does not exist.
 - A `Ticker` can be pickled, so `TCPServer(..., ticker=)` starts its ticker process under the spawn
   and forkserver start methods (macOS, Python 3.14 on Linux); it failed on the ticker's lock.
+- The `appinfra.db.pg.testing` fixtures (`pg_isolated`, `pg_migrate_factory`,
+  `make_migrate_fixture`) close their pooled connections at teardown; psycopg used to report each
+  one with a `ResourceWarning` at garbage collection.
+- `Manager.close_all()` also closes the connections of each `PG`'s cached `ScopedPG`s.
 
 ## [0.13.0] - 2026-10-25
 

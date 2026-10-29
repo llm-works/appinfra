@@ -219,13 +219,17 @@ class TestHandlersReachRootLogger:
         logger, registry = setup_logging_from_config(
             builder._config, {"log_level": "info"}
         )
-        logger.info("written through the scope's handler")
+        try:
+            logger.info("written through the scope's handler")
 
-        assert [h._handler_name for h in registry.iter_enabled_handlers()] == [
-            "builder_0"
-        ]
-        assert "written through the scope's handler" in log_file.read_text()
-        logger.handlers.clear()
+            assert [h._handler_name for h in registry.iter_enabled_handlers()] == [
+                "builder_0"
+            ]
+            assert "written through the scope's handler" in log_file.read_text()
+        finally:
+            for handler in logger.handlers:
+                handler.close()
+            logger.handlers.clear()
 
 
 # =============================================================================

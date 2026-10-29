@@ -119,6 +119,16 @@ def _setup_database_with_lock(config: dict[str, Any]) -> None:
         engine.dispose()
 
 
+def _drop_and_dispose(pg: PG) -> None:
+    """Drop the test schema, then close the pool's connections even if the drop fails."""
+    try:
+        if pg._schema_mgr:
+            pg._schema_mgr.drop_schema(cascade=True)
+            pg._schema_mgr.remove_listeners()
+    finally:
+        pg.dispose()
+
+
 # =============================================================================
 # Core Fixtures
 # =============================================================================
@@ -236,15 +246,12 @@ def pg_isolated(
 
     pg = PG(pg_test_logger, pg_test_config, schema=pg_test_schema)
 
-    if pg._schema_mgr:
-        pg._schema_mgr.reset_schema()
-
-    yield pg
-
-    # Clean up schema at session end
-    if pg._schema_mgr:
-        pg._schema_mgr.drop_schema(cascade=True)
-        pg._schema_mgr.remove_listeners()
+    try:
+        if pg._schema_mgr:
+            pg._schema_mgr.reset_schema()
+        yield pg
+    finally:
+        _drop_and_dispose(pg)
 
 
 @pytest.fixture
@@ -353,17 +360,13 @@ def pg_migrate_factory(
 
         pg = PG(pg_test_logger, config, schema=pg_test_schema)
 
-        if pg._schema_mgr:
-            pg._schema_mgr.reset_schema()
-
-        pg.migrate(base)
-
         try:
+            if pg._schema_mgr:
+                pg._schema_mgr.reset_schema()
+            pg.migrate(base)
             yield pg
         finally:
-            if pg._schema_mgr:
-                pg._schema_mgr.drop_schema(cascade=True)
-                pg._schema_mgr.remove_listeners()
+            _drop_and_dispose(pg)
 
     return _factory
 
@@ -425,15 +428,13 @@ def make_migrate_fixture(
 
         pg = PG(pg_test_logger, config, schema=pg_test_schema)
 
-        if pg._schema_mgr:
-            pg._schema_mgr.reset_schema()
-        pg.migrate(base)
-
-        yield pg
-
-        if pg._schema_mgr:
-            pg._schema_mgr.drop_schema(cascade=True)
-            pg._schema_mgr.remove_listeners()
+        try:
+            if pg._schema_mgr:
+                pg._schema_mgr.reset_schema()
+            pg.migrate(base)
+            yield pg
+        finally:
+            _drop_and_dispose(pg)
 
     return _migrate_fixture
 

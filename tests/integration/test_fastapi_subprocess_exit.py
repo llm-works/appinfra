@@ -18,6 +18,8 @@ import multiprocessing as mp
 import os
 import signal
 import socket
+import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -29,6 +31,8 @@ from typing import Any
 import pytest
 import requests
 from starlette.requests import Request
+
+from tests.helpers.fork import forks_in_xdist_worker
 
 
 def _fastapi_available() -> bool:
@@ -123,15 +127,31 @@ def _pid_gone(pid: int) -> bool:
         os.kill(pid, 0)
     except ProcessLookupError:
         return True
+    # None: reaped between the kill and the lookup; a zombie whose parent died is
+    # reaped by whatever adopted it, at any moment
+    return _proc_state(pid) in (None, "Z")
+
+
+def _proc_state(pid: int) -> str | None:
+    """The process's state letter (R, S, Z, ...), or None if it no longer exists.
+
+    /proc on Linux; macOS has none, so BSD ps there. A lookup that fails for any
+    other reason raises: reading it as gone let the port check race a server that
+    was still shutting down.
+    """
+    if sys.platform == "darwin":
+        ps = subprocess.run(
+            ["ps", "-o", "stat=", "-p", str(pid)], capture_output=True, text=True
+        )
+        if ps.returncode != 0 and not ps.stderr.strip():
+            return None  # no such process: exit 1 with no output
+        ps.check_returncode()
+        return ps.stdout.strip()[:1] or None
     try:
         with open(f"/proc/{pid}/stat") as f:
-            return f.read().rsplit(")", 1)[1].split()[0] == "Z"
+            return f.read().rsplit(")", 1)[1].split()[0]
     except (FileNotFoundError, ProcessLookupError):
-        # reaped between the kill and the read: a zombie whose parent died is
-        # reaped by whatever adopted it, at any moment
-        return True
-    except OSError:
-        return False
+        return None
 
 
 def _port_bindable(port: int) -> bool:
@@ -196,6 +216,7 @@ def _build_server_with_shutdown_callback(port: int, marker_path: Path) -> Any:
 class TestSubprocessExit:
     """The uvicorn subprocess exits promptly when told to or orphaned."""
 
+    @forks_in_xdist_worker
     def test_stop_does_not_escalate(self) -> None:
         """stop() returns well before its timeout and the child exits cleanly."""
         port = _free_port()
@@ -209,6 +230,7 @@ class TestSubprocessExit:
         assert time.monotonic() - started < 2.0
         assert proc.exitcode == 0
 
+    @forks_in_xdist_worker
     def test_shutdown_callback_executes_on_stop(self) -> None:
         """Shutdown callbacks registered via the builder run when stop() is called."""
         port = _free_port()
@@ -228,6 +250,7 @@ class TestSubprocessExit:
                 if proc.is_alive():
                     proc.kill()
 
+    @forks_in_xdist_worker
     def test_stop_fails_request_waiting_on_ipc(self) -> None:
         """A request waiting on IPC fails at once instead of blocking stop()."""
         port = _free_port()

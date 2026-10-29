@@ -25,6 +25,8 @@ import pytest
 import requests
 from starlette.requests import Request
 
+from tests.helpers.fork import forks_in_xdist_worker
+
 
 def _get_real_fastapi():
     """Get the real fastapi package, avoiding test directory shadowing."""
@@ -160,6 +162,7 @@ async def _ipc_echo_handler(data: str, request: Request):
 
 
 @pytest.mark.integration
+@forks_in_xdist_worker
 class TestFastAPIIPCWithLifecycleCallbacks:
     """Integration tests for IPC + lifecycle callback interaction."""
 

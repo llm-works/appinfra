@@ -73,9 +73,6 @@ _APPINFRA_DEV_EXAMPLES_PG = $(if $(and $(_APPINFRA_PG_HOST),$(_APPINFRA_PG_PORT)
 _APPINFRA_DEV_EXAMPLES_PG_FLAG = $(if $(_APPINFRA_DEV_EXAMPLES_PG),--pg $(_APPINFRA_DEV_EXAMPLES_PG))
 export _APPINFRA_DEV_EXAMPLES_PG
 
-# Python test wrapper with warning suppression
-_APPINFRA_PYTHON_TEST = PYTHONWARNINGS="ignore::ResourceWarning,ignore::RuntimeWarning" ${PYTHON}
-
 ##@ Health Check
 
 doctor:: ## Run project health checks

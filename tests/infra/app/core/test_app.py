@@ -26,6 +26,7 @@ from appinfra.app.core.config import ConfigLoader
 from appinfra.app.tools.base import Tool, ToolConfig
 from appinfra.dot_dict import DotDict
 from appinfra.yaml import deep_merge
+from tests.helpers.fork import forks_in_xdist_worker
 
 
 def create_test_tool(name: str, aliases: list = None):
@@ -1131,6 +1132,7 @@ def _pool_task(i: int) -> int:
     "fork" not in __import__("multiprocessing").get_all_start_methods(),
     reason="needs the fork start method",
 )
+@forks_in_xdist_worker
 def test_subprocess_context_in_a_reused_pool_worker():
     """One pool worker runs two tasks, each with its own root logger."""
     import multiprocessing

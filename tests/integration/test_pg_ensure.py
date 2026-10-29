@@ -239,31 +239,36 @@ class TestEnsureObjectConcurrent:
             # Each worker gets its own PG + connection pool → distinct sessions,
             # which is the actual production shape.
             pg = PG(pg_logger, pg_config)
-            start_barrier.wait()  # release all workers at once
-            with pg.session() as session:
-                conn = session.connection()
+            try:
+                start_barrier.wait()  # release all workers at once
+                with pg.session() as session:
+                    conn = session.connection()
 
-                def create_fn():
-                    nonlocal create_calls
-                    # Wait for all workers to reach create_fn before any
-                    # proceeds — ensures contention on the advisory lock.
-                    # A broken barrier means other workers already proceeded; fine.
-                    with contextlib.suppress(threading.BrokenBarrierError):
-                        create_barrier.wait()
-                    with create_lock:
-                        create_calls += 1
-                    session.execute(
-                        text(f'CREATE TABLE public."{ephemeral_table_name}" (id int)')
+                    def create_fn():
+                        nonlocal create_calls
+                        # Wait for all workers to reach create_fn before any
+                        # proceeds — ensures contention on the advisory lock.
+                        # A broken barrier means other workers already proceeded; fine.
+                        with contextlib.suppress(threading.BrokenBarrierError):
+                            create_barrier.wait()
+                        with create_lock:
+                            create_calls += 1
+                        session.execute(
+                            text(
+                                f'CREATE TABLE public."{ephemeral_table_name}" (id int)'
+                            )
+                        )
+
+                    ensure_object(
+                        session,
+                        key=key,
+                        exists_fn=lambda: table_exists(
+                            conn, ephemeral_table_name, schema="public"
+                        ),
+                        create_fn=create_fn,
                     )
-
-                ensure_object(
-                    session,
-                    key=key,
-                    exists_fn=lambda: table_exists(
-                        conn, ephemeral_table_name, schema="public"
-                    ),
-                    create_fn=create_fn,
-                )
+            finally:
+                pg.dispose()
 
         errors: list[BaseException] = []
         with ThreadPoolExecutor(max_workers=n_workers) as pool:
@@ -280,7 +285,10 @@ class TestEnsureObjectConcurrent:
         assert create_calls == 1
         # Verify the table actually exists (DDL committed).
         pg = PG(pg_logger, pg_config)
-        with pg.session() as session:
-            assert table_exists(
-                session.connection(), ephemeral_table_name, schema="public"
-            )
+        try:
+            with pg.session() as session:
+                assert table_exists(
+                    session.connection(), ephemeral_table_name, schema="public"
+                )
+        finally:
+            pg.dispose()

@@ -27,6 +27,7 @@ from appinfra.cas import (
 from appinfra.cas import file as file_store
 from appinfra.cas.conformance import Age, StoreConformance
 from appinfra.log import Logger
+from tests.helpers.fork import forks_in_xdist_worker
 
 pytestmark = pytest.mark.unit
 
@@ -214,6 +215,7 @@ class TestFileLayout:
         assert FileStore(LG, tmp_path)._lg.name.endswith("/cas")
 
     @pytest.mark.integration
+    @forks_in_xdist_worker
     def test_death_between_commit_and_ref_move(self, tmp_path: Path) -> None:
         """A process killed after storing a commit but before moving the ref changes no ref."""
         store = FileStore(LG, tmp_path)
@@ -278,6 +280,7 @@ class TestFileLayout:
         assert store.list_refs("r") == {}
 
     @pytest.mark.integration
+    @forks_in_xdist_worker
     def test_concurrent_moves_across_processes(self, tmp_path: Path) -> None:
         """The ref lock holds across processes: one writer wins."""
         repo = FileStore(LG, tmp_path).repo("r")
@@ -290,6 +293,7 @@ class TestFileLayout:
         assert repo.get_ref("main") == heads[results.index(True)]
 
     @pytest.mark.integration
+    @forks_in_xdist_worker
     def test_exclusive_lock_holds_across_processes(self, tmp_path: Path) -> None:
         """A put in another process waits for the exclusive lock."""
         store = FileStore(LG, tmp_path)

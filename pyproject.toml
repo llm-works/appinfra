@@ -55,7 +55,9 @@ dev = [
     "pytest-asyncio>=0.24.0,<2.0.0",  # 0.24 adds asyncio_default_fixture_loop_scope
     "hypothesis>=6.0.0,<7.0.0",
     "pip-audit>=2.0.0,<3.0.0",
-    "httpx>=0.24.0,<1.0.0",
+    # starlette.testclient takes httpx2 from Starlette 1.2 on and warns when it falls back to httpx
+    "httpx2>=2.0.0,<3.0.0",
+    "starlette>=1.2.0,<2.0.0",
 ]
 validation = [
     "pydantic>=2.0.0,<3.0.0",
@@ -197,11 +199,9 @@ addopts = "-v --tb=short"
 pythonpath = ["."]
 # Set explicitly: unset, pytest-asyncio warns in every pytest process
 asyncio_default_fixture_loop_scope = "function"
-# Suppress passlib deprecation warning for 'crypt' module (Python 3.13+)
-# See: https://github.com/pyca/passlib/issues/148 - remove when passlib releases a fix
-filterwarnings = [
-    "ignore:'crypt' is deprecated:DeprecationWarning:passlib",
-]
+# Any warning fails the test that raises it. A known one is ignored per test, with the reason
+# beside the mark (tests/helpers/fork.py), never here for the whole suite.
+filterwarnings = ["error"]
 markers = [
     "unit: Unit tests (fast, isolated, no external dependencies)",
     "integration: Integration tests (may use DB, network, filesystem)",

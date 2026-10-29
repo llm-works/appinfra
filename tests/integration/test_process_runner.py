@@ -9,6 +9,7 @@ import pytest
 
 from appinfra.log import Logger
 from appinfra.service import ProcessRunner, Service, State
+from tests.helpers.fork import forks_in_xdist_worker
 
 
 class SimpleProcessService(Service):
@@ -36,6 +37,7 @@ class SimpleProcessService(Service):
 
 
 @pytest.mark.integration
+@forks_in_xdist_worker
 class TestProcessRunnerIntegration:
     """Integration tests for ProcessRunner with real subprocesses."""
 
