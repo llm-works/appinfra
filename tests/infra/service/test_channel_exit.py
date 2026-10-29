@@ -9,6 +9,7 @@ import queue
 import subprocess
 import sys
 import textwrap
+import threading
 from typing import Any
 
 import pytest
@@ -104,3 +105,56 @@ def test_close_delivers_to_a_live_reader(use_async: bool) -> None:
         outbound.close()
         inbound.close()
     assert received == _COUNT, f"lost {_COUNT - received} of {_COUNT} messages"
+
+
+# Well past the pipe buffer, so a sender that exits mid-write could leave part of it
+_LARGE = "x" * (1024 * 1024)
+
+
+def _send_large_then_exit(outbound: Any, inbound: Any, use_async: bool) -> None:
+    """Send one message larger than the pipe buffer, close and return."""
+    if use_async:
+
+        async def main() -> None:
+            transport = AsyncProcessQueueTransport(outbound=outbound, inbound=inbound)
+            outbound.put(_LARGE)
+            await transport.close()
+
+        asyncio.run(main())
+    else:
+        transport = ProcessQueueTransport(outbound=outbound, inbound=inbound)
+        transport.send(_LARGE)
+        transport.close()
+
+
+@pytest.mark.parametrize("use_async", [False, True], ids=["sync", "async"])
+def test_stalled_reader_never_sees_a_partial_message(use_async: bool) -> None:
+    """A reader that starts after the sender gave up gets nothing or all, not a hang.
+
+    The reader holds the pipe's write end too, so half a message would block its
+    read forever: no EOF ever arrives, and get()'s timeout does not cover the body.
+    """
+    ctx = multiprocessing.get_context("spawn")
+    outbound, inbound = ctx.Queue(), ctx.Queue()
+    proc = ctx.Process(
+        target=_send_large_then_exit, args=(outbound, inbound, use_async)
+    )
+    proc.start()
+    proc.join(timeout=30)  # the sender is gone before anyone reads
+    outcome: list[Any] = []
+
+    def read() -> None:
+        try:
+            outcome.append(len(outbound.get(timeout=2)))
+        except queue.Empty:
+            outcome.append("empty")
+
+    reader = threading.Thread(target=read, daemon=True)
+    reader.start()
+    reader.join(timeout=10)
+    try:
+        assert not reader.is_alive(), "reader blocked on a partial message"
+        assert outcome in (["empty"], [len(_LARGE)])
+    finally:
+        outbound.close()
+        inbound.close()

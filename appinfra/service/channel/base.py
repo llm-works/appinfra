@@ -15,6 +15,7 @@ This module provides:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import threading
 import time
 import uuid
@@ -71,6 +72,9 @@ def send_slice(deadline: float | None) -> float:
 #: Longest close() lets an mp.Queue's feeder thread write sent messages to the pipe.
 QUEUE_FLUSH_TIMEOUT = 1.0
 
+#: Longest close() then reads back its own unread messages so the feeder can finish.
+QUEUE_DRAIN_TIMEOUT = 1.0
+
 
 def _feeder(q: Any) -> threading.Thread | None:
     """The thread that writes put() messages to q's pipe; None before the first put().
@@ -80,19 +84,47 @@ def _feeder(q: Any) -> threading.Thread | None:
     return getattr(q, "_thread", None)
 
 
-def close_queue(q: Any) -> None:
-    """Close an mp.Queue, letting its feeder write sent messages for QUEUE_FLUSH_TIMEOUT.
+def _drain_one(q: Any, timeout: float) -> None:
+    """Read and drop one whole message from q's pipe, if one arrives within timeout.
 
-    The feeder keeps writing after close(), and interpreter exit joins it. With a full
-    pipe and no reader it never finishes, so a feeder still running at the deadline
-    has its exit join cancelled: the process exits, and what it had not written is lost.
+    Under q's cross-process read lock, as get() reads, so a peer reading at the same
+    time still gets whole messages; get() itself refuses once close() has run. The
+    feeder keeps the read end open until it exits.
+    """
+    if not q._rlock.acquire(True, timeout):
+        return
+    try:
+        with contextlib.suppress(OSError, EOFError):  # the feeder exited and closed it
+            if q._reader.poll(timeout):
+                q._reader.recv_bytes()
+    finally:
+        q._rlock.release()
+
+
+def close_queue(q: Any) -> None:
+    """Close an mp.Queue without hanging interpreter exit or splitting a message.
+
+    The feeder keeps writing after close(), and interpreter exit joins it. It gets
+    QUEUE_FLUSH_TIMEOUT to write sent messages for a reader that is still reading. If
+    the pipe stays full (no reader, or a stalled one), close() reads back and drops the
+    unread messages for up to QUEUE_DRAIN_TIMEOUT, so the feeder finishes on a message
+    boundary and exits. Cancelling the exit join instead would let the process exit
+    mid-message and leave a partial one that blocks the next reader forever: every
+    process holding the queue holds its write end, so no EOF ever arrives.
     """
     q.close()
     feeder = _feeder(q)
-    if feeder is not None:
+    try:
+        if feeder is None:
+            return
         feeder.join(QUEUE_FLUSH_TIMEOUT)
-    if feeder is None or feeder.is_alive():
-        q.cancel_join_thread()
+        deadline = time.monotonic() + QUEUE_DRAIN_TIMEOUT
+        while feeder.is_alive() and time.monotonic() < deadline:
+            _drain_one(q, 0.05)
+    finally:
+        # Last resort, e.g. a dead peer holding the read lock: exit rather than hang
+        if feeder is None or feeder.is_alive():
+            q.cancel_join_thread()
 
 
 async def close_queue_async(q: Any) -> None:
@@ -102,9 +134,12 @@ async def close_queue_async(q: Any) -> None:
     """
     q.close()
     feeder = _feeder(q)
-    deadline = time.monotonic() + QUEUE_FLUSH_TIMEOUT
+    drain_at = time.monotonic() + QUEUE_FLUSH_TIMEOUT
+    deadline = drain_at + QUEUE_DRAIN_TIMEOUT
     try:
         while feeder is not None and feeder.is_alive() and time.monotonic() < deadline:
+            if time.monotonic() >= drain_at:
+                _drain_one(q, 0)
             await asyncio.sleep(0.01)
     finally:
         if feeder is None or feeder.is_alive():

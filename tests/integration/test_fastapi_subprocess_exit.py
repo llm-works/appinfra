@@ -18,6 +18,7 @@ import multiprocessing as mp
 import os
 import signal
 import socket
+import subprocess
 import tempfile
 import threading
 import time
@@ -120,20 +121,21 @@ def _start_pending_request(port: int) -> tuple[threading.Thread, dict[str, Any]]
 
 
 def _pid_gone(pid: int) -> bool:
-    """True if the process no longer exists or is a zombie awaiting reaping."""
+    """True if the process no longer exists or is a zombie awaiting reaping.
+
+    ps, not /proc, so it also holds on macOS: there a missing /proc read as gone
+    while the server was still shutting down and holding its port.
+    """
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
         return True
-    try:
-        with open(f"/proc/{pid}/stat") as f:
-            return f.read().rsplit(")", 1)[1].split()[0] == "Z"
-    except (FileNotFoundError, ProcessLookupError):
-        # reaped between the kill and the read: a zombie whose parent died is
-        # reaped by whatever adopted it, at any moment
-        return True
-    except OSError:
-        return False
+    ps = subprocess.run(
+        ["ps", "-o", "stat=", "-p", str(pid)], capture_output=True, text=True
+    )
+    # nonzero: reaped between the kill and ps; a zombie whose parent died is
+    # reaped by whatever adopted it, at any moment
+    return ps.returncode != 0 or ps.stdout.strip().startswith("Z")
 
 
 def _port_bindable(port: int) -> bool:
