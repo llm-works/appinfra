@@ -699,7 +699,7 @@ class ScopedPG:
         """
         Get a raw database connection for this schema.
 
-        Use for operations requiring direct connection access (COPY, psycopg2).
+        Use for operations requiring direct connection access (COPY, psycopg).
         Schema is enforced at connection level via the pool's connect listener.
 
         Returns:

@@ -38,7 +38,7 @@ Issues = "https://github.com/llm-works/appinfra/issues"
 check = [
     "coverage>=7.4.0,<8.0.0",
     "ruff>=0.16.0,<1.0.0",  # 0.16 is the first to format-check the Python blocks in .md files
-    "mypy>=1.9.0,<2.0.0",
+    "mypy>=2.0.0,<3.0.0",
     "pytest>=8.0.0,<10.0.0",
     "pytest-cov>=4.0.0,<8.0.0",
     "pytest-xdist>=3.2.0,<4.0.0",
@@ -67,8 +67,10 @@ docs = [
     "mkdocs-autorefs>=1.4.0,<2.0.0",
 ]
 fastapi = [
-    "fastapi>=0.100.0,<1.0.0",
-    "uvicorn[standard]>=0.23.0,<1.0.0",
+    # Both are 0.x and break APIs in minor releases: capped one minor past the newest
+    # tested version, raised after testing a newer one
+    "fastapi>=0.100.0,<0.163",
+    "uvicorn[standard]>=0.23.0,<0.55",
 ]
 hotreload = [
     "watchdog>=3.0.0,<5.0.0",
@@ -79,9 +81,11 @@ ui = [
     "InquirerPy>=0.3.0,<1.0.0",
 ]
 sql = [
-    "sqlalchemy>=2.0.0,<2.1.0",
-    "sqlalchemy-utils>=0.42.0,<1.0.0",
-    "psycopg2-binary>=2.9.0,<3.0.0",
+    # 2.1 maps postgresql:// URLs to psycopg 3; 2.0 maps them to psycopg2
+    "sqlalchemy>=2.1.0,<3.0.0",
+    # 0.43 no longer subclasses ScalarAttributeImpl, which SQLAlchemy 2.1 made private
+    "sqlalchemy-utils>=0.43.0,<1.0.0",
+    "psycopg[binary]>=3.2.0,<4.0.0",
 ]
 service = [
     # No additional dependencies - service module uses stdlib only
