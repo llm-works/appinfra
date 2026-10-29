@@ -4,6 +4,7 @@
 """Tests for Server runtime."""
 
 import multiprocessing as mp
+import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -245,6 +246,30 @@ class TestServerSubprocessMode:
 
         kwargs = mock_dependencies["ProcessRunner"].call_args.kwargs
         assert kwargs["start_method"] == start_method
+
+    @pytest.mark.parametrize(
+        ("max_restarts", "max_retries"), [(0, sys.maxsize), (3, 3)]
+    )
+    def test_start_subprocess_maps_max_restarts(
+        self, mock_dependencies, mock_lg, max_restarts, max_retries
+    ):
+        """max_restarts=0 means unlimited restarts; other values pass through."""
+        from appinfra.app.fastapi.runtime.server import Server
+
+        mock_dependencies["instance"].process = MagicMock(pid=12345)
+        server = Server(
+            mock_lg,
+            name="test",
+            config=ApiConfig(max_restarts=max_restarts),
+            adapter=MagicMock(),
+            request_q=mp.Queue(),
+            response_q=mp.Queue(),
+        )
+
+        server.start_subprocess()
+
+        policy = mock_dependencies["ProcessRunner"].call_args.kwargs["policy"]
+        assert policy.max_retries == max_retries
 
     def test_start_subprocess_sets_default_ipc_config(self, mock_dependencies, mock_lg):
         """Test start_subprocess sets default IPCConfig if not set."""

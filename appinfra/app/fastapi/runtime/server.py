@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import multiprocessing as mp
+import sys
 from multiprocessing.process import BaseProcess
 from typing import TYPE_CHECKING, Any
 
@@ -195,7 +196,8 @@ class Server:
 
         # Map config to RestartPolicy
         policy = RestartPolicy(
-            max_retries=self._config.max_restarts,
+            # ApiConfig documents 0 as unlimited; RestartPolicy's 0 means no restarts
+            max_retries=self._config.max_restarts or sys.maxsize,
             backoff=self._config.restart_delay,
             backoff_multiplier=1.0,  # Linear backoff like SubprocessManager
             restart_on_failure=self._config.auto_restart,

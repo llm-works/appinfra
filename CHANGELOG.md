@@ -124,6 +124,7 @@ earlier: pre-release builds (0.13.1.devN) would not satisfy it. -->
 - `ProcessRunner`'s monitor restarts a service that raised or exited non-zero, as the FastAPI
   subprocess server relies on; it used to end the runner in `DONE` or `FAILED` without a restart.
   A service process that raised now exits with code 1, and a failed restart logs a warning.
+  The FastAPI server's `max_restarts=0` restarts without limit, as documented, instead of never.
 - The `appinfra.db.pg.testing` fixtures (`pg_isolated`, `pg_migrate_factory`,
   `make_migrate_fixture`) close their pooled connections at teardown; psycopg used to report each
   one with a `ResourceWarning` at garbage collection.
