@@ -387,10 +387,12 @@ arrives. `BufferedChannel` calls both in short slices so that `close()` interrup
 
 ### Process Channels and Exit
 
-The process transports use `multiprocessing.Queue`, so its rule applies: a process that sent
-messages exits only after they have been consumed ([Joining processes that use
-queues](https://docs.python.org/3/library/multiprocessing.html#programming-guidelines)). Messages
-nobody reads keep the sender's process alive at exit.
+The process transports use `multiprocessing.Queue`, so its rule applies ([Joining processes that
+use queues](https://docs.python.org/3/library/multiprocessing.html#programming-guidelines)): at
+exit, a process waits until its queue's feeder thread has written every message it sent into the
+pipe. Unread messages that fit in the pipe do not delay exit, but once the pipe is full the
+feeder blocks until a reader takes from it, so messages nobody reads can keep the sender alive.
+Pipe capacity varies by system and can be as small as one page, so code must not rely on it.
 
 - `RunnerFactory.create_process_runner_with_channel()` handles the parent side. The service runs
   as a daemon process, which multiprocessing terminates at exit before the queues flush, so

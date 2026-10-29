@@ -244,8 +244,8 @@ class TestAsyncQueueChannelFactory:
 def _consume_without_reply(channel: Channel, count: int) -> asyncio.Future[None]:
     """Read *count* messages from *channel* on a thread and never answer them.
 
-    A process that put items on a multiprocessing queue exits only after they
-    have been consumed, so a test leaving requests unread never exits.
+    A process exits only after its queue's feeder has written everything it put into the
+    pipe; with more unread requests than the pipe holds, the test's process never exits.
     """
     loop = asyncio.get_running_loop()
     done: asyncio.Future[None] = loop.create_future()
