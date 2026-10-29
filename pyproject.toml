@@ -195,6 +195,8 @@ testpaths = ["tests"]
 python_files = ["test_*.py", "*_test.py"]
 addopts = "-v --tb=short"
 pythonpath = ["."]
+# Set explicitly: unset, pytest-asyncio warns in every pytest process
+asyncio_default_fixture_loop_scope = "function"
 # Suppress passlib deprecation warning for 'crypt' module (Python 3.13+)
 # See: https://github.com/pyca/passlib/issues/148 - remove when passlib releases a fix
 filterwarnings = [
