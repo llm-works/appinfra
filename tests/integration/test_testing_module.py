@@ -171,6 +171,7 @@ class TestMakeMigrateFixture:
         finally:
             if pg._schema_mgr:
                 pg._schema_mgr.drop_schema(cascade=True)
+            pg.dispose()
 
 
 @pytest.mark.integration
@@ -214,21 +215,23 @@ class TestPgMigrateFactory:
             engine = pg.engine
             schema = pg.schema
 
-        # After context exit, schema should be dropped
-        # We need a new connection to check (the old PG is cleaned up)
-        # The schema should not exist anymore
-        with engine.connect() as conn:
-            result = conn.execute(
-                text(
-                    """
-                    SELECT COUNT(*)
-                    FROM information_schema.schemata
-                    WHERE schema_name = :schema
-                    """
-                ),
-                {"schema": schema},
-            )
-            assert result.scalar() == 0
+        # After context exit, schema should be dropped. The factory disposed the
+        # engine's pool; this query opens a new one, closed again below.
+        try:
+            with engine.connect() as conn:
+                result = conn.execute(
+                    text(
+                        """
+                        SELECT COUNT(*)
+                        FROM information_schema.schemata
+                        WHERE schema_name = :schema
+                        """
+                    ),
+                    {"schema": schema},
+                )
+                assert result.scalar() == 0
+        finally:
+            engine.dispose()
 
     def test_factory_accepts_extensions(self, pg_migrate_factory):
         """Test that pg_migrate_factory accepts extensions parameter."""

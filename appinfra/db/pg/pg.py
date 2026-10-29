@@ -320,6 +320,25 @@ class PG(Interface):
             self._scoped_cache.clear()
         self._lg.trace("disposed scoped cache")
 
+    def dispose(self) -> None:
+        """
+        Close every pooled connection, this instance's and its cached ScopedPGs'.
+
+        Call when done with the instance. An engine that is only dropped leaves its
+        idle connections open until garbage collection, where psycopg reports each one
+        with a ResourceWarning. A query after dispose() opens a new pool.
+
+        Example:
+            >>> pg = PG(logger, config)
+            >>> try:
+            ...     ...  # use pg
+            ... finally:
+            ...     pg.dispose()
+        """
+        self.dispose_scoped_cache()
+        self._engine.dispose()
+        self._lg.trace("disposed pg")
+
     def connect(self) -> Any:
         """
         Establish a connection to the PostgreSQL database.

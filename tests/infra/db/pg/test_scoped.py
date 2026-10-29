@@ -315,6 +315,25 @@ class TestPGScopedCaching:
         assert pg._scoped_cache == {}
         pg._lg.trace.assert_called_once()
 
+    def test_dispose_disposes_scoped_cache_and_engine(self):
+        """Test PG.dispose() disposes cached ScopedPGs and then its own engine."""
+        import threading
+
+        from appinfra.db.pg import PG
+
+        pg = object.__new__(PG)
+        pg._lg = MagicMock()
+        pg._scoped_cache_lock = threading.Lock()
+        mock_scoped = MagicMock()
+        pg._scoped_cache = {"schema_a": mock_scoped}
+        pg._engine = MagicMock()
+
+        pg.dispose()
+
+        mock_scoped._pg._engine.dispose.assert_called_once()
+        assert pg._scoped_cache == {}
+        pg._engine.dispose.assert_called_once()
+
 
 @pytest.mark.unit
 class TestScopedPGDispose:

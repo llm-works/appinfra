@@ -28,6 +28,7 @@ earlier: pre-release builds (0.13.1.devN) would not satisfy it. -->
   until it ends, for up to 10s.
 - `APPINFRA_PYTEST_PERF_DIR`: the directory `make check` and `make test.perf` collect
   performance tests from (default `tests`).
+- `PG.dispose()` closes the pooled connections of a `PG` and of its cached `ScopedPG`s.
 
 ### Changed
 - `make check` runs the Performance group on one pytest-xdist worker instead of several.
@@ -113,6 +114,9 @@ earlier: pre-release builds (0.13.1.devN) would not satisfy it. -->
   and forkserver start methods (macOS, Python 3.14 on Linux); it failed on the ticker's lock.
 - Closing a process channel (`ProcessQueueTransport`, `AsyncProcessQueueTransport`) no longer
   blocks interpreter exit when the peer stopped reading; messages not yet written are dropped.
+- The `appinfra.db.pg.testing` fixtures (`pg_isolated`, `pg_migrate_factory`,
+  `make_migrate_fixture`) close their pooled connections at teardown; psycopg used to report each
+  one with a `ResourceWarning` at garbage collection.
 
 ## [0.13.0] - 2026-10-25
 

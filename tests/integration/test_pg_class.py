@@ -16,8 +16,6 @@ import sqlalchemy
 from sqlalchemy import text
 from sqlalchemy.orm import declarative_base
 
-from appinfra.db.pg.pg import PG
-
 # All tests in this module exercise a real PG instance; skip the whole module
 # with the sentinel reason if PG is unreachable.
 pytestmark = pytest.mark.require_pg
@@ -329,10 +327,10 @@ class TestPGMigration:
         name = result.fetchone()[0]
         assert name == "seeded"
 
-    def test_migrate_runs_hooks_in_order(self, pg_config, pg_logger, pg_debug_table):
+    def test_migrate_runs_hooks_in_order(self, pg_config, make_pg, pg_debug_table):
         """Test that migrate() runs hooks in correct order: before -> tables -> after."""
         # Use fresh PG instance to avoid hook pollution from other tests
-        pg = PG(pg_logger, pg_config)
+        pg = make_pg(pg_config)
         execution_order = []
 
         @pg.on_before_migrate
@@ -359,9 +357,9 @@ class TestPGMigration:
 class TestPGConfigValidation:
     """Test configuration validation."""
 
-    def test_pg_initialization_with_valid_config(self, pg_config, pg_logger):
+    def test_pg_initialization_with_valid_config(self, pg_config, make_pg):
         """Test PG initialization with valid configuration."""
-        pg = PG(pg_logger, pg_config)
+        pg = make_pg(pg_config)
         assert pg is not None
 
         # Verify we can create a session
