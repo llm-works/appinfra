@@ -55,6 +55,7 @@ Example Usage:
 
 import multiprocessing
 import socketserver
+import threading
 from typing import Any
 
 from ..log import Logger
@@ -132,11 +133,30 @@ def _start_ticker_process(
     return proc
 
 
-def _start_ticker_in_process(handler: Any, lg: Any) -> None:
-    """Start ticker in single-process mode if handler supports it."""
-    if handler is not None and isinstance(handler, Ticker):
-        handler.start()
-        lg.debug("ticker started in single-process mode")
+def _start_ticker_in_process(handler: Any, lg: Any) -> threading.Thread | None:
+    """Run the handler's ticker in a background thread if the handler is a Ticker.
+
+    Ticker.run() blocks until stop(), so it runs beside the HTTP server's
+    serve_forever() in the same process.
+    """
+    if not isinstance(handler, Ticker):
+        return None
+    thread = threading.Thread(target=handler.run, name="ticker", daemon=True)
+    thread.start()
+    lg.debug("ticker started in single-process mode")
+    return thread
+
+
+def _stop_ticker_thread(
+    handler: Any, thread: threading.Thread | None, lg: Any, timeout: float = 5.0
+) -> None:
+    """Stop the in-process ticker and wait for its thread to end."""
+    if thread is None:
+        return
+    handler.stop()
+    thread.join(timeout=timeout)
+    if thread.is_alive():
+        lg.warning("ticker thread did not stop", extra={"timeout": timeout})
 
 
 def _run_http_server_with_cleanup(
@@ -332,9 +352,10 @@ class Server:
         """
         self._lg.debug("running server in process", extra={"port": self._port})
 
+        thread = None
         try:
             try:
-                _start_ticker_in_process(self._handler, self._lg)
+                thread = _start_ticker_in_process(self._handler, self._lg)
             except Exception as e:
                 self._lg.error("failed to start ticker", extra={"exception": e})
                 raise ServerStartupError(f"Ticker startup failed: {e}") from e
@@ -350,5 +371,7 @@ class Server:
         except Exception as e:
             self._lg.error("single-process server run failed", extra={"exception": e})
             raise ServerStartupError(f"Single-process server run failed: {e}") from e
+        finally:
+            _stop_ticker_thread(self._handler, thread, self._lg)
 
         return 0

@@ -14,6 +14,7 @@ Tests TCP server implementation including:
 """
 
 import socketserver
+import threading
 from unittest.mock import MagicMock, Mock, patch
 
 import pytest
@@ -31,6 +32,7 @@ from appinfra.net.tcp import (
     _Server,
     _start_ticker_in_process,
     _start_ticker_process,
+    _stop_ticker_thread,
 )
 from appinfra.time.ticker import Ticker, TickerHandler
 
@@ -150,15 +152,19 @@ class TestHelperFunctions:
             mock_logger.debug.assert_called_with("ticker process started")
             assert proc == mock_process
 
-    def test_start_ticker_in_process_with_ticker(self, mock_logger):
-        """Test starting ticker in single-process mode."""
-        mock_handler = Mock(spec=Ticker)
-        mock_handler.start = Mock()
+    def test_start_ticker_in_process_runs_and_stops_real_ticker(self, mock_logger):
+        """A real Ticker handler ticks in a background thread until stopped."""
+        ticked = threading.Event()
+        ticker = Ticker(mock_logger, ticked.set, secs=0.01)
 
-        _start_ticker_in_process(mock_handler, mock_logger)
+        thread = _start_ticker_in_process(ticker, mock_logger)
 
-        mock_handler.start.assert_called_once()
-        mock_logger.debug.assert_called_with("ticker started in single-process mode")
+        assert thread is not None
+        assert ticked.wait(timeout=5)
+        _stop_ticker_thread(ticker, thread, mock_logger)
+        assert not thread.is_alive()
+        mock_logger.warning.assert_not_called()
+        mock_logger.debug.assert_any_call("ticker started in single-process mode")
 
     def test_start_ticker_in_process_without_ticker(self, mock_handler, mock_logger):
         """Test starting ticker when handler is not a Ticker."""
@@ -405,6 +411,19 @@ class TestServerRunInProcess:
             server.run()
 
         mock_logger.error.assert_called()
+
+    def test_run_in_process_stops_real_ticker_when_server_returns(self, mock_logger):
+        """A Ticker handler ticks while the server serves and stops when it returns."""
+        ticked = threading.Event()
+        ticker = Ticker(mock_logger, ticked.set, secs=0.01)
+
+        def serve(*args, **kwargs):
+            assert ticked.wait(timeout=5)
+
+        with patch("appinfra.net.tcp._run_http_server_with_cleanup", side_effect=serve):
+            assert Server(mock_logger, 8080, ticker).run() == 0
+
+        assert not ticker.is_running()
 
 
 # =============================================================================
@@ -663,7 +682,6 @@ class TestIntegrationScenarios:
         # Create handler that is both a request handler and ticker
         handler = Mock(spec=Ticker)
         handler.do_GET = Mock()
-        handler.start = Mock()
 
         server = Server(mock_logger, 8080, handler)
         result = server.run()
