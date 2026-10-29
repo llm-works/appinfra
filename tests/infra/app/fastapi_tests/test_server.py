@@ -5,7 +5,7 @@
 
 import multiprocessing as mp
 import sys
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, PropertyMock, patch
 
 import pytest
 
@@ -529,6 +529,7 @@ class TestServerStart:
         mock_runner = MagicMock()
         # Simulate process exiting after first check
         mock_runner.is_alive.side_effect = [True, False]
+        mock_runner.monitoring = False  # no auto-restart
 
         with (
             patch.object(server, "start_subprocess"),
@@ -539,6 +540,57 @@ class TestServerStart:
 
             # Should have checked is_alive until it returned False
             assert mock_runner.is_alive.call_count == 2
+
+    def test_start_waits_while_a_restart_is_pending(self, mock_dependencies, mock_lg):
+        """A dead process with restarts left keeps start() blocking until none are."""
+        from appinfra.app.fastapi.runtime.server import Server
+
+        server = Server(
+            mock_lg,
+            name="test",
+            config=ApiConfig(),
+            adapter=MagicMock(),
+            request_q=mp.Queue(),
+            response_q=mp.Queue(),
+        )
+        runner = MagicMock()
+        runner.is_alive.return_value = False
+        runner.monitoring = True
+        type(runner).can_restart = PropertyMock(side_effect=[True, True, True, False])
+
+        with patch.object(server, "start_subprocess"), patch("time.sleep") as sleep:
+            server._runner = runner
+            server.start()
+
+        assert sleep.call_count == 3
+
+    @pytest.mark.parametrize(
+        ("monitoring", "can_restart"), [(False, True), (True, False)]
+    )
+    def test_start_returns_when_no_restart_can_follow(
+        self, mock_dependencies, mock_lg, monitoring, can_restart
+    ):
+        """No monitor, or no restarts left: start() returns once the process is gone."""
+        from appinfra.app.fastapi.runtime.server import Server
+
+        server = Server(
+            mock_lg,
+            name="test",
+            config=ApiConfig(),
+            adapter=MagicMock(),
+            request_q=mp.Queue(),
+            response_q=mp.Queue(),
+        )
+        runner = MagicMock()
+        runner.is_alive.return_value = False
+        runner.monitoring = monitoring
+        runner.can_restart = can_restart
+
+        with patch.object(server, "start_subprocess"), patch("time.sleep") as sleep:
+            server._runner = runner
+            server.start()
+
+        assert sleep.call_count == 0
 
     def test_start_direct_mode(self, mock_dependencies, mock_lg):
         """Test start() in direct mode."""

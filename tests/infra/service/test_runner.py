@@ -675,6 +675,16 @@ class TestRunnerRestart:
         ]
         assert len(failures) == 2
 
+    def test_can_restart(self):
+        """can_restart holds until max_retries is reached, and never when disabled."""
+        runner = ThreadRunner(SimpleService(), RestartPolicy(max_retries=2))
+        assert runner.can_restart
+        runner._retries = 2
+        assert not runner.can_restart
+
+        disabled = RestartPolicy(restart_on_failure=False)
+        assert not ThreadRunner(SimpleService(), disabled).can_restart
+
     def test_restart_disabled(self):
         """Restart can be disabled."""
 

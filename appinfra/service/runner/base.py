@@ -67,6 +67,13 @@ class Runner(ABC):
         """Number of restart attempts since last successful start."""
         return self._retries
 
+    @property
+    def can_restart(self) -> bool:
+        """True if the restart policy still allows another restart attempt."""
+        return (
+            self.policy.restart_on_failure and self._retries < self.policy.max_retries
+        )
+
     def on_state_change(self, hook: StateHook) -> None:
         """Register a callback for state changes.
 

@@ -249,6 +249,12 @@ class ProcessRunner(Runner):
         )
         self._monitor_thread.start()
 
+    @property
+    def monitoring(self) -> bool:
+        """True while the start_monitor() thread is running."""
+        thread = self._monitor_thread
+        return thread is not None and thread.is_alive()
+
     def stop_monitor(self, timeout: float = 2.0) -> None:
         """Stop the monitor thread.
 
