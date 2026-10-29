@@ -15,14 +15,11 @@ ENV PYTHONUNBUFFERED=1 \
 
 # Install system dependencies
 # - postgresql-client: Required for integration tests
-# - gcc, libpq-dev: Required for building psycopg2-binary
 # - make: Required for Makefile targets
 # - jq: Required for YAML parsing scripts
 # - bc: Required for elapsed time calculations in check.sh
 # - procps: Required for ps, which check.sh uses to stop its process tree
 RUN apt-get update && apt-get install -y \
-    gcc \
-    libpq-dev \
     postgresql-client \
     make \
     jq \
