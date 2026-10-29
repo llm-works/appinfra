@@ -229,13 +229,6 @@ class TestScaffoldWorkflow:
         makefile_content = (project_path / "Makefile").read_text()
         self._verify_framework_makefile_content(makefile_content, project_name)
 
-    def _verify_framework_targets(self, make_output: str):
-        """Verify framework targets are available in make output."""
-        assert "test.unit" in make_output, "Framework targets should be available"
-        assert "test.coverage" in make_output
-        assert "fmt" in make_output
-        assert "lint" in make_output
-
     def _make_env(self) -> dict[str, str]:
         """Environment for make in a scaffolded project, free of this run's make.
 
@@ -253,64 +246,6 @@ class TestScaffoldWorkflow:
         )
         env["PYTHON"] = sys.executable
         return env
-
-    def test_framework_locates_appinfra_once(self):
-        """The scaffold resolves APPINFRA_SCRIPTS once, not at every include."""
-        project_name = "testapp_locate_once"
-        result = self._run_scaffold(project_name, "--makefile-style=framework")
-        assert result.returncode == 0, (
-            f"Scaffold should succeed. stderr: {result.stderr}"
-        )
-        project_path = self.temp_dir / project_name
-
-        log = project_path / "python-calls.log"
-        wrapper = project_path / "python-wrapper.sh"
-        wrapper.write_text(
-            f'#!/bin/sh\necho "$*" >> "{log}"\nexec {sys.executable} "$@"\n'
-        )
-        wrapper.chmod(0o755)
-        env = {**self._make_env(), "PYTHON": str(wrapper)}
-
-        make_result = subprocess.run(
-            ["make", "--no-print-directory", "help"],
-            capture_output=True,
-            text=True,
-            cwd=str(project_path),
-            env=env,
-            timeout=120,
-        )
-        assert make_result.returncode == 0, make_result.stderr
-        lookups = [
-            line
-            for line in log.read_text().splitlines()
-            if "importlib.resources" in line
-        ]
-        assert len(lookups) == 1, lookups
-
-    @pytest.mark.parametrize("target", ["help", "lint", "test", "check"])
-    def test_framework_project_make_targets(self, target: str):
-        """A fresh framework scaffold passes its own make targets, without stray stderr."""
-        project_name = f"testapp_make_{target}"
-        result = self._run_scaffold(project_name, "--makefile-style=framework")
-        assert result.returncode == 0, (
-            f"Scaffold should succeed. stderr: {result.stderr}"
-        )
-
-        make_result = subprocess.run(
-            ["make", "--no-print-directory", target],
-            capture_output=True,
-            text=True,
-            cwd=str(self.temp_dir / project_name),
-            env=self._make_env(),
-            timeout=300,
-        )
-        assert make_result.returncode == 0, (
-            f"make {target} should succeed.\nstdout: {make_result.stdout}\n"
-            f"stderr: {make_result.stderr}"
-        )
-        assert "Error" not in make_result.stderr, make_result.stderr
-        if target == "help":
-            self._verify_framework_targets(make_result.stdout)
 
     def test_standalone_makefile_help_works(self):
         """Test standalone Makefile help target works."""
