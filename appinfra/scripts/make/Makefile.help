@@ -36,6 +36,10 @@ _APPINFRA_HELP_DISABLED_GROUPS = $(APPINFRA_DISABLE_GROUPS)
 # A bare `make` shows this help, whatever target an earlier include defines first
 .DEFAULT_GOAL := help
 
+# is_disabled matches a target exactly against APPINFRA_DISABLE_TARGETS and by
+# prefix against APPINFRA_DISABLE_GROUPS. The awk program has no # comments:
+# make 3.81 (macOS) joins the continued recipe lines into one, so a comment
+# would run to the end of the program.
 .PHONY: help
 help: ## Display this help message
 	@awk -v disabled_targets="$(_APPINFRA_HELP_DISABLED_TARGETS)" \
@@ -43,16 +47,13 @@ help: ## Display this help message
 	'BEGIN { \
 		FS = ":.*##"; \
 		printf "\nUsage:\n  make \033[36m<target>\033[0m\n"; \
-		# Build arrays for filtering \
 		n_targets = split(disabled_targets, arr_targets, " "); \
 		n_groups = split(disabled_groups, arr_groups, " "); \
 	} \
 	function is_disabled(target) { \
-		# Check exact match against disabled targets \
 		for (i = 1; i <= n_targets; i++) { \
 			if (target == arr_targets[i]) return 1; \
 		} \
-		# Check prefix match against disabled groups \
 		for (i = 1; i <= n_groups; i++) { \
 			if (arr_groups[i] != "" && index(target, arr_groups[i]) == 1) return 1; \
 		} \

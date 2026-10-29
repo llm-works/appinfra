@@ -97,6 +97,8 @@ earlier: pre-release builds (0.13.1.devN) would not satisfy it. -->
 - A project from `appinfra scaffold` passes its own `make lint` and `make check`, and the
   framework style finds an installed appinfra; it used to look in the wrong directory.
 - `make` no longer prints a docs config error on every call when the docs config is missing.
+- `make help`, and a bare `make`, work with the make 3.81 that macOS ships; they failed with an
+  awk syntax error.
 
 ## [0.13.0] - 2026-10-25
 

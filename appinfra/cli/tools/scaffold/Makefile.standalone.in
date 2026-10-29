@@ -1,12 +1,12 @@
 # Python Environment Detection
-# Supports: PYTHON env var, Makefile.local, ~/.venv fallback
+# PYTHON from the command line, the environment or Makefile.local; otherwise
+# python3 on PATH (an activated venv, conda or pyenv)
 -include Makefile.local
 
 ifndef PYTHON
-  ifneq ($(wildcard $(HOME)/.venv/bin/python),)
-    PYTHON := $(HOME)/.venv/bin/python
-  else
-    $(error No Python found. Set PYTHON env var, create ~/.venv, or add PYTHON= to Makefile.local)
+  PYTHON := $(shell command -v python3 2>/dev/null)
+  ifeq ($(PYTHON),)
+    $(error No Python found: python3 is not on PATH. Activate an environment, or set PYTHON, e.g. PYTHON := /path/to/python in Makefile.local)
   endif
 endif
 
@@ -20,7 +20,7 @@ help: ## display this help
 
 ##@ Development
 
-install: ## installs project with dev dependencies using ~/.venv virtual environment
+install: ## installs project with dev dependencies into PYTHON's environment
 	@echo "* installing dependencies..."
 	$(PYTHON) -m pip install ".[dev]"
 	@echo "* installation done"
