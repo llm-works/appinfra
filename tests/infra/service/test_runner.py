@@ -685,6 +685,28 @@ class TestRunnerRestart:
         disabled = RestartPolicy(restart_on_failure=False)
         assert not ThreadRunner(SimpleService(), disabled).can_restart
 
+    def test_restart_pending_through_the_last_attempt(self):
+        """The last allowed restart counts as pending while it runs.
+
+        _maybe_restart() counts the attempt before making it, so can_restart is
+        already False during it; a waiter must not give up on that attempt.
+        """
+        runner = ThreadRunner(SimpleService(), RestartPolicy(max_retries=1, backoff=0))
+        during: list[bool] = []
+        with (
+            patch.object(
+                runner,
+                "_stop_for_restart",
+                lambda: during.append(runner.restart_pending),
+            ),
+            patch.object(runner, "start"),
+            patch.object(runner, "wait_healthy"),
+        ):
+            assert runner._maybe_restart()
+
+        assert during == [True]
+        assert not runner.restart_pending  # attempt over, no retries left
+
     def test_restart_disabled(self):
         """Restart can be disabled."""
 

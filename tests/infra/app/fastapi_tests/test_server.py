@@ -556,7 +556,9 @@ class TestServerStart:
         runner = MagicMock()
         runner.is_alive.return_value = False
         runner.monitoring = True
-        type(runner).can_restart = PropertyMock(side_effect=[True, True, True, False])
+        type(runner).restart_pending = PropertyMock(
+            side_effect=[True, True, True, False]
+        )
 
         with patch.object(server, "start_subprocess"), patch("time.sleep") as sleep:
             server._runner = runner
@@ -565,10 +567,10 @@ class TestServerStart:
         assert sleep.call_count == 3
 
     @pytest.mark.parametrize(
-        ("monitoring", "can_restart"), [(False, True), (True, False)]
+        ("monitoring", "restart_pending"), [(False, True), (True, False)]
     )
     def test_start_returns_when_no_restart_can_follow(
-        self, mock_dependencies, mock_lg, monitoring, can_restart
+        self, mock_dependencies, mock_lg, monitoring, restart_pending
     ):
         """No monitor, or no restarts left: start() returns once the process is gone."""
         from appinfra.app.fastapi.runtime.server import Server
@@ -584,7 +586,7 @@ class TestServerStart:
         runner = MagicMock()
         runner.is_alive.return_value = False
         runner.monitoring = monitoring
-        runner.can_restart = can_restart
+        runner.restart_pending = restart_pending
 
         with patch.object(server, "start_subprocess"), patch("time.sleep") as sleep:
             server._runner = runner

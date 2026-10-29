@@ -175,7 +175,7 @@ class Server:
         The monitor thread is a daemon: returning between a crash and the restart
         would end the interpreter and the restart with it.
         """
-        while runner.is_alive() or (runner.monitoring and runner.can_restart):
+        while runner.is_alive() or (runner.monitoring and runner.restart_pending):
             time.sleep(0.5)
 
     def _validate_subprocess_mode(self) -> None:

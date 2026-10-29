@@ -50,6 +50,7 @@ class Runner(ABC):
         self._state = State.CREATED
         self._hooks: list[StateHook] = []
         self._retries = 0
+        self._restarting = False
         self._lock = threading.Lock()
 
     @property
@@ -73,6 +74,15 @@ class Runner(ABC):
         return (
             self.policy.restart_on_failure and self._retries < self.policy.max_retries
         )
+
+    @property
+    def restart_pending(self) -> bool:
+        """True while a restart attempt runs or the policy allows another one.
+
+        The attempt in progress counts: _maybe_restart() counts it before making
+        it, so can_restart is already False during the last allowed attempt.
+        """
+        return self._restarting or self.can_restart
 
     def on_state_change(self, hook: StateHook) -> None:
         """Register a callback for state changes.
@@ -199,11 +209,12 @@ class Runner(ABC):
             return False
 
         backoff = self._calculate_backoff()
+        # Before counting it, so restart_pending holds without a gap
+        self._restarting = True
         self._retries += 1
 
-        time.sleep(backoff)
-
         try:
+            time.sleep(backoff)
             # Ensure cleanup before restart (handles residual state)
             self._stop_for_restart()
             self.start()
@@ -215,6 +226,8 @@ class Runner(ABC):
                 extra={"exception": e, "service": self.name, "attempt": self._retries},
             )
             return False
+        finally:
+            self._restarting = False
 
     def _calculate_backoff(self) -> float:
         """Calculate backoff delay for current retry."""
