@@ -4,7 +4,9 @@
 """Tests for async service channel communication."""
 
 import asyncio
+import threading
 from dataclasses import dataclass
+from unittest.mock import Mock
 
 import pytest
 
@@ -18,6 +20,7 @@ from appinfra.service import (
     ChannelTimeoutError,
     Message,
 )
+from appinfra.service.channel.base import close_queue_async
 
 
 @dataclass
@@ -518,3 +521,38 @@ class TestAsyncChannelStreaming:
 
         assert len(chunks) == 1
         assert chunks[0].result == "done"
+
+
+class TestCloseQueueAsync:
+    """close_queue_async() cancels the exit join whenever the feeder may still run."""
+
+    @pytest.mark.asyncio
+    async def test_finished_feeder_keeps_exit_join(self) -> None:
+        """A feeder that finished writing needs no cancelled join."""
+        feeder = threading.Thread(target=lambda: None)
+        feeder.start()
+        feeder.join()
+        q = Mock(_thread=feeder)
+
+        await close_queue_async(q)
+
+        q.close.assert_called_once()
+        q.cancel_join_thread.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_cancelled_wait_still_cancels_exit_join(self) -> None:
+        """Cancelling close() mid-wait still keeps a stuck feeder from blocking exit."""
+        release = threading.Event()
+        feeder = threading.Thread(target=release.wait, daemon=True)
+        feeder.start()
+        q = Mock(_thread=feeder)
+        try:
+            task = asyncio.create_task(close_queue_async(q))
+            await asyncio.sleep(0.05)  # inside the wait for the feeder
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            q.cancel_join_thread.assert_called_once()
+        finally:
+            release.set()
+            feeder.join()

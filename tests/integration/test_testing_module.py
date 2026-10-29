@@ -169,9 +169,11 @@ class TestMakeMigrateFixture:
                 )
                 assert result.scalar() == 1
         finally:
-            if pg._schema_mgr:
-                pg._schema_mgr.drop_schema(cascade=True)
-            pg.dispose()
+            try:
+                if pg._schema_mgr:
+                    pg._schema_mgr.drop_schema(cascade=True)
+            finally:
+                pg.dispose()
 
 
 @pytest.mark.integration

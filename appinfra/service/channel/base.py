@@ -96,14 +96,19 @@ def close_queue(q: Any) -> None:
 
 
 async def close_queue_async(q: Any) -> None:
-    """close_queue() without blocking the event loop while the feeder writes."""
+    """close_queue() without blocking the event loop while the feeder writes.
+
+    A cancelled wait still cancels the exit join, so a stuck feeder cannot hang exit.
+    """
     q.close()
     feeder = _feeder(q)
     deadline = time.monotonic() + QUEUE_FLUSH_TIMEOUT
-    while feeder is not None and feeder.is_alive() and time.monotonic() < deadline:
-        await asyncio.sleep(0.01)
-    if feeder is None or feeder.is_alive():
-        q.cancel_join_thread()
+    try:
+        while feeder is not None and feeder.is_alive() and time.monotonic() < deadline:
+            await asyncio.sleep(0.01)
+    finally:
+        if feeder is None or feeder.is_alive():
+            q.cancel_join_thread()
 
 
 class RedeliveryBuffer:
