@@ -117,6 +117,7 @@ earlier: pre-release builds (0.13.1.devN) would not satisfy it. -->
 - The `appinfra.db.pg.testing` fixtures (`pg_isolated`, `pg_migrate_factory`,
   `make_migrate_fixture`) close their pooled connections at teardown; psycopg used to report each
   one with a `ResourceWarning` at garbage collection.
+- `Manager.close_all()` also closes the connections of each `PG`'s cached `ScopedPG`s.
 
 ## [0.13.0] - 2026-10-25
 

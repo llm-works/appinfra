@@ -502,15 +502,11 @@ class TestConnectionManagement:
     """Test database connection lifecycle management."""
 
     @patch("appinfra.db.db.pg.PG")
-    def test_close_all_disposes_engines(
+    def test_close_all_disposes_databases(
         self, mock_pg_class, mock_logger, valid_pg_config
     ):
-        """Test close_all disposes all database engines."""
-        mock_engine = Mock()
-        mock_engine.dispose = Mock()
-
+        """Test close_all disposes every database."""
         mock_db = Mock()
-        mock_db.engine = mock_engine
         mock_pg_class.return_value = mock_db
 
         with patch("appinfra.db.db.LoggerFactory.derive", return_value=mock_logger):
@@ -519,8 +515,8 @@ class TestConnectionManagement:
 
             manager.close_all()
 
-            # Should dispose both engines
-            assert mock_engine.dispose.call_count == 2
+            # Should dispose both databases
+            assert mock_db.dispose.call_count == 2
             assert len(manager._dbs) == 0
             mock_logger.info.assert_called_with("closed all database connections")
 
@@ -529,11 +525,8 @@ class TestConnectionManagement:
         self, mock_pg_class, mock_logger, valid_pg_config
     ):
         """Test close_all handles errors gracefully."""
-        mock_engine = Mock()
-        mock_engine.dispose.side_effect = Exception("Dispose failed")
-
         mock_db = Mock()
-        mock_db.engine = mock_engine
+        mock_db.dispose.side_effect = Exception("Dispose failed")
         mock_pg_class.return_value = mock_db
 
         with patch("appinfra.db.db.LoggerFactory.derive", return_value=mock_logger):

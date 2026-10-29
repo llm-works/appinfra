@@ -274,8 +274,7 @@ class Manager:
         """
         for name, db in self._dbs.items():
             try:
-                if hasattr(db, "engine") and hasattr(db.engine, "dispose"):
-                    db.engine.dispose()
+                db.dispose()
                 self._lg.debug("closed database connection", extra={"db": name})
             except Exception as e:
                 self._lg.error(
