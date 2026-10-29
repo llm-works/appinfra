@@ -10,6 +10,8 @@ import multiprocessing as mp
 import sys
 import threading
 import time
+from multiprocessing.context import BaseContext
+from multiprocessing.process import BaseProcess
 from multiprocessing.synchronize import Event as MPEvent
 from typing import Any
 
@@ -65,6 +67,7 @@ class ProcessRunner(Runner):
         service: Service,
         policy: RestartPolicy | None = None,
         stop_timeout: float = 5.0,
+        start_method: str | None = None,
     ) -> None:
         """Initialize process runner.
 
@@ -72,10 +75,16 @@ class ProcessRunner(Runner):
             service: Service to run (must be picklable).
             policy: Restart policy.
             stop_timeout: Seconds to wait for graceful stop.
+            start_method: multiprocessing start method ("fork", "spawn",
+                "forkserver") for the service process and its queues and events;
+                None uses multiprocessing's default. Under fork, a restart forks
+                from the monitor thread, which Python 3.12+ warns may deadlock the
+                child; spawn or forkserver avoids it.
         """
         super().__init__(service, policy)
         self.stop_timeout = stop_timeout
-        self._process: mp.Process | None = None
+        self._start_method = start_method
+        self._process: BaseProcess | None = None
         self._shutdown_event: MPEvent | None = None
         self._healthy_event: MPEvent | None = None
         self._error_queue: mp.Queue[BaseException] | None = None
@@ -94,9 +103,12 @@ class ProcessRunner(Runner):
         self._transition(State.STARTING)
 
         try:
-            log_config, listener = self._create_log_infrastructure()
-            self._create_ipc_primitives()
-            self._spawn_process(log_config)
+            # One context for the process and every queue and event it uses:
+            # multiprocessing refuses a lock from another context in the child
+            ctx = mp.get_context(self._start_method)
+            log_config, listener = self._create_log_infrastructure(ctx)
+            self._create_ipc_primitives(ctx)
+            self._spawn_process(ctx, log_config)
             # After the fork, so its thread is not running while the child is
             # forked; the queue holds any records the child sends before then
             listener.start()
@@ -130,20 +142,22 @@ class ProcessRunner(Runner):
                 raise
             raise SetupError(self.name, str(e)) from e
 
-    def _create_log_infrastructure(self) -> tuple[dict[str, Any], LogQueueListener]:
+    def _create_log_infrastructure(
+        self, ctx: BaseContext
+    ) -> tuple[dict[str, Any], LogQueueListener]:
         """Create the subprocess log queue and its listener, not yet started."""
-        self._log_queue = mp.Queue()
+        self._log_queue = ctx.Queue()
         log_config = self.service.lg.queue_config(self._log_queue)
         self._log_listener = LogQueueListener(self._log_queue, self.service.lg)
         return log_config, self._log_listener
 
-    def _create_ipc_primitives(self) -> None:
+    def _create_ipc_primitives(self, ctx: BaseContext) -> None:
         """Create IPC primitives for subprocess communication."""
-        self._shutdown_event = mp.Event()
-        self._healthy_event = mp.Event()
-        self._error_queue = mp.Queue()
+        self._shutdown_event = ctx.Event()
+        self._healthy_event = ctx.Event()
+        self._error_queue = ctx.Queue()
 
-    def _spawn_process(self, log_config: dict[str, Any]) -> None:
+    def _spawn_process(self, ctx: BaseContext, log_config: dict[str, Any]) -> None:
         """Spawn the subprocess."""
         # Temporarily nullify logger to make service picklable on macOS.
         # macOS uses spawn (not fork), requiring all subprocess args to be
@@ -154,7 +168,8 @@ class ProcessRunner(Runner):
             setattr(self.service, "_lg", None)
 
         try:
-            self._process = mp.Process(
+            # typeshed declares Process on each concrete context, not BaseContext
+            self._process = ctx.Process(  # type: ignore[attr-defined]
                 target=_process_entry,
                 args=(
                     self.service,
@@ -346,7 +361,7 @@ class ProcessRunner(Runner):
         return None
 
     @property
-    def process(self) -> mp.Process | None:
+    def process(self) -> BaseProcess | None:
         """Underlying process, or None if not started."""
         return self._process
 

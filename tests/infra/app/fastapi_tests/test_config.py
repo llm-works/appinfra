@@ -131,6 +131,7 @@ class TestApiConfig:
         assert config.auto_restart is True
         assert config.restart_delay == 1.0
         assert config.max_restarts == 5
+        assert config.start_method is None
         assert config.uvicorn is not None
         assert config.ipc is None
 

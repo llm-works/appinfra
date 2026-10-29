@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import multiprocessing as mp
 import queue
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
 
@@ -115,8 +116,8 @@ class ChannelPairFactory(Protocol):
         ...
 
 
-def _make_queues(queue_cls: type, max_size: int) -> tuple[Any, Any]:
-    """Create a pair of queues."""
+def _make_queues(queue_cls: Callable[..., Any], max_size: int) -> tuple[Any, Any]:
+    """Create a pair of queues with *queue_cls* (a queue class or a context's Queue)."""
     if max_size > 0:
         return queue_cls(maxsize=max_size), queue_cls(maxsize=max_size)
     return queue_cls(), queue_cls()
@@ -164,13 +165,19 @@ class ProcessQueueChannelFactory:
 
     IMPORTANT: Create pairs BEFORE spawning the child process.
 
+    The queues come from the multiprocessing context of *start_method* (None:
+    the default), which must match the start method of the child that uses them.
+
     Example:
         factory = ProcessQueueChannelFactory(ChannelConfig(response_timeout=60.0))
         pair = factory.create_pair()
     """
 
-    def __init__(self, config: ChannelConfig | None = None) -> None:
+    def __init__(
+        self, config: ChannelConfig | None = None, start_method: str | None = None
+    ) -> None:
         self._config = config or ChannelConfig()
+        self._start_method = start_method
 
     @property
     def config(self) -> ChannelConfig:
@@ -179,7 +186,8 @@ class ProcessQueueChannelFactory:
 
     def create_pair(self) -> ChannelPair:
         """Create a connected channel pair using multiprocessing.Queue transport."""
-        q1, q2 = _make_queues(mp.Queue, self._config.max_queue_size)
+        ctx = mp.get_context(self._start_method)
+        q1, q2 = _make_queues(ctx.Queue, self._config.max_queue_size)
         timeout = self._config.response_timeout
 
         parent: BufferedChannel[Any, Any] = BufferedChannel(
@@ -214,14 +222,22 @@ class AsyncQueueChannelFactory:
 
 
 class AsyncProcessQueueChannelFactory:
-    """Factory for async parent <-> sync subprocess channel pairs."""
+    """Factory for async parent <-> sync subprocess channel pairs.
 
-    def __init__(self, config: ChannelConfig | None = None) -> None:
+    The queues come from the multiprocessing context of *start_method* (None:
+    the default), which must match the start method of the child that uses them.
+    """
+
+    def __init__(
+        self, config: ChannelConfig | None = None, start_method: str | None = None
+    ) -> None:
         self._config = config or ChannelConfig()
+        self._start_method = start_method
 
     def create_pair(self) -> AsyncProcessChannelPair:
         """Create an async parent + sync child channel pair."""
-        q1, q2 = _make_queues(mp.Queue, self._config.max_queue_size)
+        ctx = mp.get_context(self._start_method)
+        q1, q2 = _make_queues(ctx.Queue, self._config.max_queue_size)
         timeout = self._config.response_timeout
 
         parent: AsyncBufferedChannel[Any, Any] = AsyncBufferedChannel(

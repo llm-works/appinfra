@@ -224,6 +224,28 @@ class TestServerSubprocessMode:
         mock_dependencies["instance"].start.assert_called_once()
         mock_dependencies["instance"].wait_healthy.assert_called_once()
 
+    @pytest.mark.parametrize("start_method", [None, "spawn"])
+    def test_start_subprocess_passes_start_method(
+        self, mock_dependencies, mock_lg, start_method
+    ):
+        """The configured start method reaches the ProcessRunner (None: the default)."""
+        from appinfra.app.fastapi.runtime.server import Server
+
+        mock_dependencies["instance"].process = MagicMock(pid=12345)
+        server = Server(
+            mock_lg,
+            name="test",
+            config=ApiConfig(start_method=start_method),
+            adapter=MagicMock(),
+            request_q=mp.Queue(),
+            response_q=mp.Queue(),
+        )
+
+        server.start_subprocess()
+
+        kwargs = mock_dependencies["ProcessRunner"].call_args.kwargs
+        assert kwargs["start_method"] == start_method
+
     def test_start_subprocess_sets_default_ipc_config(self, mock_dependencies, mock_lg):
         """Test start_subprocess sets default IPCConfig if not set."""
         from appinfra.app.fastapi.runtime.server import Server

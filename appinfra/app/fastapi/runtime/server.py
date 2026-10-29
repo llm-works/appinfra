@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import multiprocessing as mp
+from multiprocessing.process import BaseProcess
 from typing import TYPE_CHECKING, Any
 
 from ....service import ProcessRunner
@@ -200,9 +201,14 @@ class Server:
             restart_on_failure=self._config.auto_restart,
         )
 
-        return ProcessRunner(service, policy=policy, stop_timeout=5.0)
+        return ProcessRunner(
+            service,
+            policy=policy,
+            stop_timeout=5.0,
+            start_method=self._config.start_method,
+        )
 
-    def start_subprocess(self) -> mp.Process:
+    def start_subprocess(self) -> BaseProcess:
         """
         Start server in subprocess (non-blocking).
 

@@ -16,6 +16,9 @@ pinning an older appinfra resolves a release with no `check` extra and pip only 
 earlier: pre-release builds (0.13.1.devN) would not satisfy it. -->
 
 ### Added
+- `start_method=` on `ProcessRunner`, `RunnerFactory`, the process channel factories and the FastAPI
+  subprocess builder (`with_start_method()`); spawn or forkserver keeps restarts from forking off
+  the monitor thread. `ProcessRunner.process` and `start_subprocess()` are typed `BaseProcess`.
 - `appinfra cq dup` reports duplicated code blocks (pylint's duplicate-code; pylint joins the
   `check` extra). `appinfra cq dead` reports private definitions nothing refers to. `# cq: keep
   <reason>` exempts a finding, on the definition line or within every copy of a block. `make

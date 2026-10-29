@@ -159,6 +159,27 @@ ProcessRunner features:
 - IPC for shutdown signaling and health status
 - Service must be picklable
 
+#### Start method and restarts
+
+`start_monitor()` restarts a service whose process raised or exited non-zero, according to its
+`RestartPolicy`. The restart runs on the monitor thread. Under the fork start method, the default
+on Linux before Python 3.14, the restarted process is forked from that thread: Python 3.12+ warns
+that this may deadlock the child, which inherits any lock another thread of the parent holds at
+that moment. Spawn and forkserver start a fresh interpreter instead:
+
+```python
+runner = ProcessRunner(
+    service, policy=RestartPolicy(max_retries=5), start_method="forkserver"
+)
+
+# RunnerFactory applies it to the runner and its channel queues alike
+factory = RunnerFactory(lg, start_method="forkserver")
+result = factory.create_process_runner_with_channel(service)
+```
+
+`start_method=None` (the default) uses multiprocessing's default. Queues and events passed to the
+service must come from the same start method: multiprocessing refuses them in the child otherwise.
+
 ## Scheduled Services
 
 For periodic execution, extend `ScheduledService`:

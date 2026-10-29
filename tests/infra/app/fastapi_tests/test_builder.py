@@ -352,6 +352,16 @@ class TestSubprocessConfigurer:
         assert builder._api.restart_delay == 2.0
         assert builder._api.max_restarts == 10
 
+    def test_start_method_configuration(self, mock_fastapi, mock_lg):
+        """with_start_method() sets the subprocess's multiprocessing start method."""
+        from appinfra.app.fastapi.builder.server import ServerBuilder
+
+        builder = ServerBuilder(mock_lg, "test-api")
+        assert builder._api.start_method is None
+        builder.subprocess.with_start_method("forkserver").done()
+
+        assert builder._api.start_method == "forkserver"
+
     def test_toggling_auto_restart_keeps_delay_and_limit(self, mock_fastapi, mock_lg):
         """Each restart setting is its own setter; toggling one leaves the others."""
         from appinfra.app.fastapi.builder.server import ServerBuilder

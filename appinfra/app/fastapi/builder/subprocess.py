@@ -172,6 +172,16 @@ class SubprocessConfigurer(Generic[P]):
         self._parent._api.max_restarts = count
         return self
 
+    def with_start_method(self, method: str) -> Self:
+        """multiprocessing start method for the subprocess ("fork", "spawn", "forkserver").
+
+        Spawn or forkserver keeps restarts from forking off the monitor thread.
+        The queues given to with_ipc() must come from the same start method:
+        ``ctx = mp.get_context(method); request_q, response_q = ctx.Queue(), ctx.Queue()``.
+        """
+        self._parent._api.start_method = method
+        return self
+
     def with_config(self, config: IPCConfig) -> Self:
         """Set entire IPC config at once."""
         self._parent._api.ipc = replace(config)
