@@ -697,13 +697,13 @@ class ScopedPG:
 
     def connect(self) -> Any:
         """
-        Get a raw database connection for this schema.
+        Get a SQLAlchemy connection for this schema.
 
-        Use for operations requiring direct connection access (COPY, psycopg).
+        Use for operations that need a connection rather than a session.
         Schema is enforced at connection level via the pool's connect listener.
 
         Returns:
-            Database connection object
+            SQLAlchemy Connection
 
         Example:
             >>> with scoped.connect() as conn:
