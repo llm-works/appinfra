@@ -34,11 +34,11 @@ jobs:
           python-version: '3.12'
           cache: 'pip'
 
-      - name: Install dependencies
+      - name: Install dependencies via make setup
         run: |
           python -m pip install --upgrade pip
-          # all extras: mypy checks the optional modules against their libraries' types
-          python -m pip install -e ".[all]"
+          # every extra: mypy checks the optional modules against their libraries' types
+          make setup
           python -m pip install zizmor==1.31.1 actionlint-py==1.7.12.25
 
       - name: Lint workflows
@@ -309,13 +309,13 @@ jobs:
           python-version: '3.12'
           cache: 'pip'
 
-      - name: Install dependencies
+      - name: Install dependencies via make setup
         run: |
           python -m pip install --upgrade pip
-          # [all] matches the Dockerfile-based test matrix: includes sql,
-          # fastapi, validation, etc. that integration tests import via
-          # tests/conftest.py and tests/helpers/pg.
-          python -m pip install -e ".[all]"
+          # every extra, as in the Dockerfile-based test matrix: integration
+          # tests import sql, fastapi, validation etc. via tests/conftest.py
+          # and tests/helpers/pg
+          make setup
           sudo apt-get update
           sudo apt-get install -y podman-compose postgresql-client
 

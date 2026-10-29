@@ -50,6 +50,32 @@ class FailOnceService(Service):
         return True
 
 
+class FailAlwaysService(Service):
+    """Healthy only on its first run, which exits non-zero once told to; later runs
+    exit at once, before reporting healthy, so every restart attempt fails."""
+
+    def __init__(self, lg: Logger, counter: str) -> None:
+        self._lg = lg
+        self._counter = Path(counter)
+        self._healthy = False
+
+    @property
+    def name(self) -> str:
+        return "fail-always"
+
+    def execute(self) -> None:
+        runs = _runs(self._counter) + 1
+        self._counter.write_text(str(runs))
+        if runs == 1:
+            self._healthy = True
+            while not _go(self._counter).exists():
+                time.sleep(0.01)
+        os._exit(3)
+
+    def is_healthy(self) -> bool:
+        return self._healthy
+
+
 def _fail(failure: str) -> None:
     if failure == "exception":
         raise RuntimeError("service failed")
@@ -96,18 +122,37 @@ def run_fail_once(
         runner.stop()
 
 
-def _run_parent(
-    method: str, failure: str, counter: Path, runner_method: str | None = None
-) -> subprocess.CompletedProcess[str]:
-    """Run run_fail_once in its own interpreter, since the start method is process-wide.
+def run_fail_always(counter: str, restart_on_failure: bool) -> None:
+    """Run FailAlwaysService under the monitor with one restart allowed; print its
+    runs and whether the monitor still runs once no restart can follow."""
+    runner = ProcessRunner(
+        FailAlwaysService(Logger(name="test"), counter),
+        policy=RestartPolicy(
+            max_retries=1, backoff=0.1, restart_on_failure=restart_on_failure
+        ),
+    )
+    runner.start()
+    try:
+        runner.wait_healthy(timeout=10.0)
+        runner.start_monitor(interval=0.1)
+        _go(Path(counter)).touch()
+        deadline = time.monotonic() + 10.0
+        while runner.monitoring and time.monotonic() < deadline:
+            time.sleep(0.05)
+        print(f"runs={_runs(Path(counter))} monitoring={runner.monitoring}")
+    finally:
+        runner.stop()
+
+
+def _run_parent(func: str, *args: object) -> subprocess.CompletedProcess[str]:
+    """Run *func* from this module in its own interpreter, since the start method
+    is process-wide.
 
     Every DeprecationWarning is printed: os.fork() drops its fork-from-thread
     warning when filters make it an error, so stderr is the only place to see it.
     """
-    code = (
-        "from tests.integration.test_process_runner_restart import run_fail_once; "
-        f"run_fail_once({method!r}, {failure!r}, {str(counter)!r}, {runner_method!r})"
-    )
+    call = f"{func}({', '.join(repr(a) for a in args)})"
+    code = f"from tests.integration.test_process_runner_restart import {func}; {call}"
     try:
         proc = subprocess.run(
             [sys.executable, "-W", "always::DeprecationWarning", "-c", code],
@@ -117,7 +162,7 @@ def _run_parent(
             timeout=60,
         )
     except subprocess.TimeoutExpired:
-        pytest.fail(f"{method}/{failure}: the parent did not exit within 60 s")
+        pytest.fail(f"{call}: the parent did not exit within 60 s")
     assert proc.returncode == 0, proc.stderr
     return proc
 
@@ -128,7 +173,7 @@ def test_monitor_restarts_a_failed_service(
     method: str, failure: str, tmp_path: Path
 ) -> None:
     """A service that raised or exited non-zero is restarted and runs again."""
-    out = _run_parent(method, failure, tmp_path / "runs").stdout
+    out = _run_parent("run_fail_once", method, failure, str(tmp_path / "runs")).stdout
     assert "runs=2 state=RUNNING" in out, out
 
 
@@ -137,8 +182,8 @@ def test_monitor_does_not_restart_an_interrupted_service(
     method: str, tmp_path: Path
 ) -> None:
     """KeyboardInterrupt, as from Ctrl-C, is a shutdown: the runner ends DONE."""
-    out = _run_parent(method, "interrupt", tmp_path / "runs").stdout
-    assert "runs=1 state=DONE" in out, out
+    proc = _run_parent("run_fail_once", method, "interrupt", str(tmp_path / "runs"))
+    assert "runs=1 state=DONE" in proc.stdout, proc.stdout
 
 
 @pytest.mark.parametrize("runner_method", ["forkserver", "spawn"])
@@ -150,6 +195,20 @@ def test_runner_start_method_restarts_without_forking_from_a_thread(
     The restart runs on the monitor thread. Under fork it forks from that thread,
     and Python 3.12+ warns "This process ... is multi-threaded" on stderr.
     """
-    proc = _run_parent("fork", "exit", tmp_path / "runs", runner_method)
+    proc = _run_parent(
+        "run_fail_once", "fork", "exit", str(tmp_path / "runs"), runner_method
+    )
     assert "runs=2 state=RUNNING" in proc.stdout, proc.stdout
     assert "is multi-threaded" not in proc.stderr, proc.stderr
+
+
+@pytest.mark.parametrize(
+    ("restart_on_failure", "runs"), [(True, 2), (False, 1)], ids=["exhausted", "off"]
+)
+def test_monitor_stops_once_no_restart_can_follow(
+    restart_on_failure: bool, runs: int, tmp_path: Path
+) -> None:
+    """The monitor ends once the process is dead and the policy allows no restart:
+    after the last allowed attempt failed, or after a crash with restarts off."""
+    out = _run_parent("run_fail_always", str(tmp_path / "runs"), restart_on_failure)
+    assert f"runs={runs} monitoring=False" in out.stdout, out.stdout
