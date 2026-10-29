@@ -9,14 +9,10 @@ This module provides:
 - RedeliveryBuffer: Shared O(1) buffer for out-of-order message redelivery
 - validate_response: Shared response validation logic
 - send_slice: Wait slice for close-aware sends
-- close_queue / close_queue_async: Close an mp.Queue without hanging interpreter exit
 """
 
 from __future__ import annotations
 
-import asyncio
-import contextlib
-import threading
 import time
 import uuid
 from collections import deque
@@ -67,94 +63,6 @@ def send_slice(deadline: float | None) -> float:
     if deadline is None:
         return SEND_POLL_INTERVAL
     return max(0.0, min(SEND_POLL_INTERVAL, deadline - time.monotonic()))
-
-
-#: Longest close() lets an mp.Queue's feeder thread write sent messages to the pipe.
-QUEUE_FLUSH_TIMEOUT = 1.0
-
-#: Longest close() keeps draining its own unread messages without reading one.
-QUEUE_DRAIN_TIMEOUT = 1.0
-
-
-def _feeder(q: Any) -> threading.Thread | None:
-    """The thread that writes put() messages to q's pipe; None before the first put().
-
-    Private CPython attribute: mp.Queue has no public join with a timeout.
-    """
-    return getattr(q, "_thread", None)
-
-
-def _drain_one(q: Any, timeout: float) -> bool:
-    """Read and drop one whole message from q's pipe; True if one arrived in time.
-
-    Under q's cross-process read lock, as get() reads, so a peer reading at the same
-    time still gets whole messages; get() itself refuses once close() has run. The
-    feeder keeps the read end open until it exits.
-    """
-    if not q._rlock.acquire(True, timeout):
-        return False
-    try:
-        with contextlib.suppress(OSError, EOFError):  # the feeder exited and closed it
-            if q._reader.poll(timeout):
-                q._reader.recv_bytes()
-                return True
-        return False
-    finally:
-        q._rlock.release()
-
-
-def close_queue(q: Any) -> None:
-    """Close an mp.Queue without hanging interpreter exit or splitting a message.
-
-    The feeder keeps writing after close(), and interpreter exit joins it. It gets
-    QUEUE_FLUSH_TIMEOUT to write sent messages for a reader that is still reading. If
-    the pipe stays full (no reader, or a stalled one), close() reads back and drops the
-    unread messages until the feeder exits, so it always stops on a message boundary.
-    Draining is what lets the feeder progress, so it only gives up when nothing has
-    arrived for QUEUE_DRAIN_TIMEOUT: a dead peer holding the read lock. Exiting mid-
-    message would leave a partial one that blocks the next reader forever: every
-    process holding the queue holds its write end, so no EOF ever arrives.
-    """
-    q.close()
-    feeder = _feeder(q)
-    try:
-        if feeder is None:
-            return
-        feeder.join(QUEUE_FLUSH_TIMEOUT)
-        last_read = time.monotonic()
-        while feeder.is_alive() and time.monotonic() - last_read < QUEUE_DRAIN_TIMEOUT:
-            if _drain_one(q, 0.05):
-                last_read = time.monotonic()
-    finally:
-        # Last resort, the read lock held by a dead peer: exit rather than hang
-        if feeder is None or feeder.is_alive():
-            q.cancel_join_thread()
-
-
-async def close_queue_async(q: Any) -> None:
-    """close_queue() without blocking the event loop while the feeder writes.
-
-    It yields after every drained message and sleeps only when none was waiting. A
-    cancelled wait still cancels the exit join, so a stuck feeder cannot hang exit.
-    """
-    q.close()
-    feeder = _feeder(q)
-    drain_at = time.monotonic() + QUEUE_FLUSH_TIMEOUT
-    last_read = drain_at
-    try:
-        while feeder is not None and feeder.is_alive():
-            now = time.monotonic()
-            if now >= drain_at:
-                if _drain_one(q, 0):
-                    last_read = time.monotonic()
-                    await asyncio.sleep(0)
-                    continue
-                if now - last_read >= QUEUE_DRAIN_TIMEOUT:
-                    break
-            await asyncio.sleep(0.01)
-    finally:
-        if feeder is None or feeder.is_alive():
-            q.cancel_join_thread()
 
 
 class RedeliveryBuffer:

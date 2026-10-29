@@ -37,7 +37,7 @@ import time
 from typing import Any, Generic, Protocol, TypeVar, cast, runtime_checkable
 
 from ..errors import ChannelClosedError, ChannelFullError, ChannelTimeoutError
-from .base import RedeliveryBuffer, close_queue, send_slice, validate_response
+from .base import RedeliveryBuffer, send_slice, validate_response
 
 TRequest = TypeVar("TRequest")
 TResponse = TypeVar("TResponse")
@@ -428,16 +428,12 @@ class ProcessQueueTransport(Generic[TRequest, TResponse]):
             raise ChannelTimeoutError(f"Timeout waiting for message ({timeout}s)")
 
     def close(self) -> None:
-        """Close both multiprocessing queues.
-
-        Sent messages reach a reader that is still reading. If the pipe stays full,
-        close() returns after QUEUE_FLUSH_TIMEOUT and the process can exit; messages
-        not written by then are lost (see close_queue).
-        """
+        """Close both multiprocessing queues."""
         self._closed = True
-        for q in (self._outbound, self._inbound):
-            with contextlib.suppress(Exception):
-                close_queue(q)
+        with contextlib.suppress(Exception):
+            self._outbound.close()
+        with contextlib.suppress(Exception):
+            self._inbound.close()
 
     @property
     def is_closed(self) -> bool:

@@ -114,9 +114,6 @@ earlier: pre-release builds (0.13.1.devN) would not satisfy it. -->
   to `ticker=`; it failed with an `AttributeError`, calling a `Ticker.start()` that does not exist.
 - A `Ticker` can be pickled, so `TCPServer(..., ticker=)` starts its ticker process under the spawn
   and forkserver start methods (macOS, Python 3.14 on Linux); it failed on the ticker's lock.
-- Closing a process channel (`ProcessQueueTransport`, `AsyncProcessQueueTransport`) no longer
-  blocks interpreter exit when the peer stopped reading: after 1 s, messages it has not read are
-  dropped.
 - The `appinfra.db.pg.testing` fixtures (`pg_isolated`, `pg_migrate_factory`,
   `make_migrate_fixture`) close their pooled connections at teardown; psycopg used to report each
   one with a `ResourceWarning` at garbage collection.
