@@ -67,6 +67,7 @@ class RunnerFactory:
         channel_config: ChannelConfig | None = None,
         channel_factory: ChannelPairFactory | None = None,
         stop_timeout: float = 5.0,
+        start_method: str | None = None,
     ) -> None:
         """
         Initialize factory.
@@ -79,12 +80,16 @@ class RunnerFactory:
             channel_factory: Custom transport factory. When provided, all
                 channel creation uses this instead of the built-in factories.
             stop_timeout: Default stop timeout for ProcessRunner
+            start_method: multiprocessing start method for ProcessRunners and
+                their built-in channel queues alike; None uses the default.
+                See ProcessRunner for why spawn or forkserver suits restarts.
         """
         self._lg = lg
         self._default_policy = default_policy
         self._custom_channel_factory = channel_factory
         self._channel_config = channel_config
         self._stop_timeout = stop_timeout
+        self._start_method = start_method
 
     def create_thread_runner(
         self,
@@ -152,7 +157,10 @@ class RunnerFactory:
             stop_timeout if stop_timeout is not None else self._stop_timeout
         )
         return ProcessRunner(
-            service, policy=effective_policy, stop_timeout=effective_timeout
+            service,
+            policy=effective_policy,
+            stop_timeout=effective_timeout,
+            start_method=self._start_method,
         )
 
     def create_process_runner_with_channel(
@@ -210,4 +218,6 @@ class RunnerFactory:
                 "ensure transport is process-safe (picklable)",
             )
             return self._custom_channel_factory.create_pair()
-        return ProcessQueueChannelFactory(self._channel_config).create_pair()
+        return ProcessQueueChannelFactory(
+            self._channel_config, start_method=self._start_method
+        ).create_pair()

@@ -50,6 +50,7 @@ class Runner(ABC):
         self._state = State.CREATED
         self._hooks: list[StateHook] = []
         self._retries = 0
+        self._restarting = False
         self._lock = threading.Lock()
 
     @property
@@ -66,6 +67,22 @@ class Runner(ABC):
     def retries(self) -> int:
         """Number of restart attempts since last successful start."""
         return self._retries
+
+    @property
+    def can_restart(self) -> bool:
+        """True if the restart policy still allows another restart attempt."""
+        return (
+            self.policy.restart_on_failure and self._retries < self.policy.max_retries
+        )
+
+    @property
+    def restart_pending(self) -> bool:
+        """True while a restart attempt runs or the policy allows another one.
+
+        The attempt in progress counts: _maybe_restart() counts it before making
+        it, so can_restart is already False during the last allowed attempt.
+        """
+        return self._restarting or self.can_restart
 
     def on_state_change(self, hook: StateHook) -> None:
         """Register a callback for state changes.
@@ -175,11 +192,15 @@ class Runner(ABC):
             return self._maybe_restart()
         return False
 
+    def _stop_for_restart(self) -> None:
+        """Clean up the failed execution before a restart."""
+        self.stop()
+
     def _maybe_restart(self) -> bool:
         """Attempt restart based on policy.
 
-        Performs cleanup via stop() before restarting to ensure no residual
-        state from the failed execution.
+        Cleans up via _stop_for_restart() before restarting to ensure no
+        residual state from the failed execution.
         """
         if not self.policy.restart_on_failure:
             return False
@@ -188,18 +209,25 @@ class Runner(ABC):
             return False
 
         backoff = self._calculate_backoff()
+        # Before counting it, so restart_pending holds without a gap
+        self._restarting = True
         self._retries += 1
 
-        time.sleep(backoff)
-
         try:
+            time.sleep(backoff)
             # Ensure cleanup before restart (handles residual state)
-            self.stop()
+            self._stop_for_restart()
             self.start()
             self.wait_healthy()
             return True
-        except Exception:
+        except Exception as e:
+            self.service.lg.warning(
+                "restart failed",
+                extra={"exception": e, "service": self.name, "attempt": self._retries},
+            )
             return False
+        finally:
+            self._restarting = False
 
     def _calculate_backoff(self) -> float:
         """Calculate backoff delay for current retry."""

@@ -4,7 +4,8 @@
 """Tests for Server runtime."""
 
 import multiprocessing as mp
-from unittest.mock import MagicMock, patch
+import sys
+from unittest.mock import MagicMock, PropertyMock, patch
 
 import pytest
 
@@ -223,6 +224,52 @@ class TestServerSubprocessMode:
         mock_dependencies["ProcessRunner"].assert_called_once()
         mock_dependencies["instance"].start.assert_called_once()
         mock_dependencies["instance"].wait_healthy.assert_called_once()
+
+    @pytest.mark.parametrize("start_method", [None, "spawn"])
+    def test_start_subprocess_passes_start_method(
+        self, mock_dependencies, mock_lg, start_method
+    ):
+        """The configured start method reaches the ProcessRunner (None: the default)."""
+        from appinfra.app.fastapi.runtime.server import Server
+
+        mock_dependencies["instance"].process = MagicMock(pid=12345)
+        server = Server(
+            mock_lg,
+            name="test",
+            config=ApiConfig(start_method=start_method),
+            adapter=MagicMock(),
+            request_q=mp.Queue(),
+            response_q=mp.Queue(),
+        )
+
+        server.start_subprocess()
+
+        kwargs = mock_dependencies["ProcessRunner"].call_args.kwargs
+        assert kwargs["start_method"] == start_method
+
+    @pytest.mark.parametrize(
+        ("max_restarts", "max_retries"), [(0, sys.maxsize), (3, 3)]
+    )
+    def test_start_subprocess_maps_max_restarts(
+        self, mock_dependencies, mock_lg, max_restarts, max_retries
+    ):
+        """max_restarts=0 means unlimited restarts; other values pass through."""
+        from appinfra.app.fastapi.runtime.server import Server
+
+        mock_dependencies["instance"].process = MagicMock(pid=12345)
+        server = Server(
+            mock_lg,
+            name="test",
+            config=ApiConfig(max_restarts=max_restarts),
+            adapter=MagicMock(),
+            request_q=mp.Queue(),
+            response_q=mp.Queue(),
+        )
+
+        server.start_subprocess()
+
+        policy = mock_dependencies["ProcessRunner"].call_args.kwargs["policy"]
+        assert policy.max_retries == max_retries
 
     def test_start_subprocess_sets_default_ipc_config(self, mock_dependencies, mock_lg):
         """Test start_subprocess sets default IPCConfig if not set."""
@@ -482,6 +529,7 @@ class TestServerStart:
         mock_runner = MagicMock()
         # Simulate process exiting after first check
         mock_runner.is_alive.side_effect = [True, False]
+        mock_runner.monitoring = False  # no auto-restart
 
         with (
             patch.object(server, "start_subprocess"),
@@ -492,6 +540,59 @@ class TestServerStart:
 
             # Should have checked is_alive until it returned False
             assert mock_runner.is_alive.call_count == 2
+
+    def test_start_waits_while_a_restart_is_pending(self, mock_dependencies, mock_lg):
+        """A dead process with restarts left keeps start() blocking until none are."""
+        from appinfra.app.fastapi.runtime.server import Server
+
+        server = Server(
+            mock_lg,
+            name="test",
+            config=ApiConfig(),
+            adapter=MagicMock(),
+            request_q=mp.Queue(),
+            response_q=mp.Queue(),
+        )
+        runner = MagicMock()
+        runner.is_alive.return_value = False
+        runner.monitoring = True
+        type(runner).restart_pending = PropertyMock(
+            side_effect=[True, True, True, False]
+        )
+
+        with patch.object(server, "start_subprocess"), patch("time.sleep") as sleep:
+            server._runner = runner
+            server.start()
+
+        assert sleep.call_count == 3
+
+    @pytest.mark.parametrize(
+        ("monitoring", "restart_pending"), [(False, True), (True, False)]
+    )
+    def test_start_returns_when_no_restart_can_follow(
+        self, mock_dependencies, mock_lg, monitoring, restart_pending
+    ):
+        """No monitor, or no restarts left: start() returns once the process is gone."""
+        from appinfra.app.fastapi.runtime.server import Server
+
+        server = Server(
+            mock_lg,
+            name="test",
+            config=ApiConfig(),
+            adapter=MagicMock(),
+            request_q=mp.Queue(),
+            response_q=mp.Queue(),
+        )
+        runner = MagicMock()
+        runner.is_alive.return_value = False
+        runner.monitoring = monitoring
+        runner.restart_pending = restart_pending
+
+        with patch.object(server, "start_subprocess"), patch("time.sleep") as sleep:
+            server._runner = runner
+            server.start()
+
+        assert sleep.call_count == 0
 
     def test_start_direct_mode(self, mock_dependencies, mock_lg):
         """Test start() in direct mode."""

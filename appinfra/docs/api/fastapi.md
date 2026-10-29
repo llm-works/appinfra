@@ -195,6 +195,32 @@ server = (
 )
 ```
 
+#### Start method
+
+A restart runs on the monitor thread. Under the fork start method, the default on Linux before
+Python 3.14, the new server process is forked from that thread, which Python 3.12+ warns may
+deadlock the child. `with_start_method("forkserver")` or `"spawn"` avoids it. The IPC queues must
+come from the same start method:
+
+```python
+import multiprocessing as mp
+
+ctx = mp.get_context("forkserver")
+request_q, response_q = ctx.Queue(), ctx.Queue()
+
+server = (
+    ServerBuilder(lg, "myapi")
+    .subprocess.with_ipc(request_q, response_q)
+    .with_start_method("forkserver")
+    .done()
+    .build()
+)
+```
+
+Queues from another start method fail at `start_subprocess()` with multiprocessing's
+`RuntimeError: A SemLock created in a fork context is being shared with a process in a spawn
+context`. Without `with_start_method()`, the server uses multiprocessing's default.
+
 ### Rate Limiting
 
 Add per-IP or global rate limiting via `with_rate_limiter()`. Uses a raw ASGI middleware (not

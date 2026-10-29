@@ -93,12 +93,17 @@ def _wait_exited(runner: Runner) -> None:
         time.sleep(0.01)
 
 
-def run_echo(method: str) -> None:
-    """Start EchoService under *method*, submit one request, print the reply, stop."""
+def run_echo(method: str, runner_method: str | None = None) -> None:
+    """Start EchoService, submit one request, print the reply, stop.
+
+    *method* is the interpreter's default start method, *runner_method* the
+    factory's own for the runner and its channel (None: the default).
+    """
     mp.set_start_method(method, force=True)
     lg = Logger(name="test")
     service = EchoService(lg)
-    result = RunnerFactory(lg).create_process_runner_with_channel(service)
+    factory = RunnerFactory(lg, start_method=runner_method)
+    result = factory.create_process_runner_with_channel(service)
     service.channel = result.service_channel
     result.runner.start()
     try:
@@ -111,15 +116,15 @@ def run_echo(method: str) -> None:
         result.service_channel.close()
 
 
-def _run_parent(func: str, method: str) -> subprocess.CompletedProcess[str]:
-    """Run *func* from this module as the parent, in its own interpreter.
+def _run_parent(func: str, *args: str | None) -> subprocess.CompletedProcess[str]:
+    """Run *func*(*args*) from this module as the parent, in its own interpreter.
 
     The start method is process-wide, so each one gets a fresh interpreter; that
     interpreter exiting is part of the check.
     """
-    code = (
-        f"from tests.integration.test_process_channel import {func}; {func}({method!r})"
-    )
+    call = ", ".join(repr(a) for a in args)
+    code = f"from tests.integration.test_process_channel import {func}; {func}({call})"
+    method = "/".join(str(a) for a in args)
     try:
         return subprocess.run(
             [sys.executable, "-c", code],
@@ -150,3 +155,15 @@ def test_parent_exits_after_its_service_died(method: str) -> None:
     proc = _run_parent("run_dead_child", method)
     assert proc.returncode == 0, proc.stderr
     assert "closed" in proc.stdout, proc.stdout + proc.stderr
+
+
+@pytest.mark.parametrize("runner_method", ["forkserver", "spawn"])
+def test_factory_start_method_reaches_runner_and_channel(runner_method: str) -> None:
+    """RunnerFactory's start method applies to the runner and its channel queues alike.
+
+    Under a fork default, queues from the default context would be refused by a
+    forkserver or spawn child ("SemLock created in a fork context").
+    """
+    proc = _run_parent("run_echo", "fork", runner_method)
+    assert proc.returncode == 0, proc.stderr
+    assert "reply=pong:ping" in proc.stdout, proc.stdout + proc.stderr

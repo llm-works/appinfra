@@ -6,6 +6,9 @@
 from __future__ import annotations
 
 import multiprocessing as mp
+import sys
+import time
+from multiprocessing.process import BaseProcess
 from typing import TYPE_CHECKING, Any
 
 from ....service import ProcessRunner
@@ -160,14 +163,20 @@ class Server:
         """
         if self.is_subprocess_mode:
             self.start_subprocess()
-            # Block until process exits
             if self._runner:
-                while self._runner.is_alive():
-                    import time
-
-                    time.sleep(0.5)
+                self._wait_while_running(self._runner)
         else:
             self._run_direct()
+
+    @staticmethod
+    def _wait_while_running(runner: ProcessRunner) -> None:
+        """Block while the server process runs or the monitor may still restart it.
+
+        The monitor thread is a daemon: returning between a crash and the restart
+        would end the interpreter and the restart with it.
+        """
+        while runner.is_alive() or (runner.monitoring and runner.restart_pending):
+            time.sleep(0.5)
 
     def _validate_subprocess_mode(self) -> None:
         """Validate that subprocess mode can be started."""
@@ -194,15 +203,21 @@ class Server:
 
         # Map config to RestartPolicy
         policy = RestartPolicy(
-            max_retries=self._config.max_restarts,
+            # ApiConfig documents 0 as unlimited; RestartPolicy's 0 means no restarts
+            max_retries=self._config.max_restarts or sys.maxsize,
             backoff=self._config.restart_delay,
             backoff_multiplier=1.0,  # Linear backoff like SubprocessManager
             restart_on_failure=self._config.auto_restart,
         )
 
-        return ProcessRunner(service, policy=policy, stop_timeout=5.0)
+        return ProcessRunner(
+            service,
+            policy=policy,
+            stop_timeout=5.0,
+            start_method=self._config.start_method,
+        )
 
-    def start_subprocess(self) -> mp.Process:
+    def start_subprocess(self) -> BaseProcess:
         """
         Start server in subprocess (non-blocking).
 

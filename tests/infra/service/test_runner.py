@@ -5,6 +5,8 @@
 
 import threading
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -22,6 +24,14 @@ from appinfra.service import (
     State,
     ThreadRunner,
 )
+
+
+@contextmanager
+def _mock_mp_context() -> Iterator[tuple[MagicMock, MagicMock, MagicMock]]:
+    """Patch ProcessRunner's multiprocessing context; yield its Process, Event, Queue."""
+    with patch("appinfra.service.runner.process.mp.get_context") as get_context:
+        ctx = get_context.return_value
+        yield ctx.Process, ctx.Event, ctx.Queue
 
 
 # Module-level service for ProcessRunner tests (must be picklable)
@@ -357,9 +367,7 @@ class TestProcessRunner:
     def test_start_transitions_states(self, lg):
         """start() transitions through INITD -> STARTING."""
         with (
-            patch("appinfra.service.runner.process.mp.Process") as mock_process,
-            patch("appinfra.service.runner.process.mp.Event"),
-            patch("appinfra.service.runner.process.mp.Queue"),
+            _mock_mp_context() as (mock_process, _, _),
             patch("appinfra.service.runner.process.LogQueueListener"),
         ):
             mock_process.return_value.is_alive.return_value = True
@@ -410,9 +418,7 @@ class TestProcessRunner:
     def test_state_hooks_called(self, lg):
         """State hooks are called on transitions."""
         with (
-            patch("appinfra.service.runner.process.mp.Process"),
-            patch("appinfra.service.runner.process.mp.Event"),
-            patch("appinfra.service.runner.process.mp.Queue"),
+            _mock_mp_context(),
             patch("appinfra.service.runner.process.LogQueueListener"),
         ):
             transitions = []
@@ -442,9 +448,7 @@ class TestProcessRunner:
     def test_stop_running_process(self, lg):
         """stop() terminates a running process."""
         with (
-            patch("appinfra.service.runner.process.mp.Process") as mock_process,
-            patch("appinfra.service.runner.process.mp.Event") as mock_event,
-            patch("appinfra.service.runner.process.mp.Queue"),
+            _mock_mp_context() as (mock_process, mock_event, _),
             patch("appinfra.service.runner.process.LogQueueListener"),
         ):
             mock_process.return_value.is_alive.return_value = False
@@ -463,9 +467,7 @@ class TestProcessRunner:
     def test_start_failure_after_fork_ends_the_child(self, lg):
         """A failure after the fork terminates the forked child before start() raises."""
         with (
-            patch("appinfra.service.runner.process.mp.Process") as mock_process,
-            patch("appinfra.service.runner.process.mp.Event"),
-            patch("appinfra.service.runner.process.mp.Queue"),
+            _mock_mp_context() as (mock_process, _, _),
             patch("appinfra.service.runner.process.LogQueueListener") as mock_listener,
         ):
             child = mock_process.return_value
@@ -488,9 +490,7 @@ class TestProcessRunner:
     def test_start_failure_kills_a_child_that_ignores_terminate(self, lg):
         """A child still alive after terminate() is killed."""
         with (
-            patch("appinfra.service.runner.process.mp.Process") as mock_process,
-            patch("appinfra.service.runner.process.mp.Event"),
-            patch("appinfra.service.runner.process.mp.Queue"),
+            _mock_mp_context() as (mock_process, _, _),
             patch("appinfra.service.runner.process.LogQueueListener") as mock_listener,
         ):
             child = mock_process.return_value
@@ -509,9 +509,7 @@ class TestProcessRunner:
     def test_is_alive_when_running(self, lg):
         """is_alive() returns True when process is alive."""
         with (
-            patch("appinfra.service.runner.process.mp.Process") as mock_process,
-            patch("appinfra.service.runner.process.mp.Event"),
-            patch("appinfra.service.runner.process.mp.Queue"),
+            _mock_mp_context() as (mock_process, _, _),
             patch("appinfra.service.runner.process.LogQueueListener"),
         ):
             mock_process.return_value.is_alive.return_value = True
@@ -525,9 +523,7 @@ class TestProcessRunner:
     def test_is_healthy_when_running(self, lg):
         """is_healthy() returns True when process alive and healthy event set."""
         with (
-            patch("appinfra.service.runner.process.mp.Process") as mock_process,
-            patch("appinfra.service.runner.process.mp.Event") as mock_event,
-            patch("appinfra.service.runner.process.mp.Queue"),
+            _mock_mp_context() as (mock_process, mock_event, _),
             patch("appinfra.service.runner.process.LogQueueListener"),
         ):
             mock_process.return_value.is_alive.return_value = True
@@ -542,9 +538,7 @@ class TestProcessRunner:
     def test_pid_when_running(self, lg):
         """pid returns process ID when running."""
         with (
-            patch("appinfra.service.runner.process.mp.Process") as mock_process,
-            patch("appinfra.service.runner.process.mp.Event"),
-            patch("appinfra.service.runner.process.mp.Queue"),
+            _mock_mp_context() as (mock_process, _, _),
             patch("appinfra.service.runner.process.LogQueueListener"),
         ):
             mock_process.return_value.is_alive.return_value = True
@@ -559,9 +553,7 @@ class TestProcessRunner:
     def test_exit_code_when_stopped(self, lg):
         """exit_code returns code when process stopped."""
         with (
-            patch("appinfra.service.runner.process.mp.Process") as mock_process,
-            patch("appinfra.service.runner.process.mp.Event"),
-            patch("appinfra.service.runner.process.mp.Queue"),
+            _mock_mp_context() as (mock_process, _, _),
             patch("appinfra.service.runner.process.LogQueueListener"),
         ):
             mock_process.return_value.is_alive.return_value = False
@@ -578,9 +570,7 @@ class TestProcessRunner:
         from queue import Empty
 
         with (
-            patch("appinfra.service.runner.process.mp.Process"),
-            patch("appinfra.service.runner.process.mp.Event"),
-            patch("appinfra.service.runner.process.mp.Queue") as mock_queue_cls,
+            _mock_mp_context() as (_, _, mock_queue_cls),
             patch("appinfra.service.runner.process.LogQueueListener"),
         ):
             # Create separate mocks for log queue and error queue
@@ -613,9 +603,7 @@ class TestProcessRunner:
     def test_stop_with_stubborn_process(self, lg):
         """stop() kills a process that won't terminate."""
         with (
-            patch("appinfra.service.runner.process.mp.Process") as mock_process,
-            patch("appinfra.service.runner.process.mp.Event") as mock_event,
-            patch("appinfra.service.runner.process.mp.Queue"),
+            _mock_mp_context() as (mock_process, mock_event, _),
             patch("appinfra.service.runner.process.LogQueueListener"),
         ):
             # Process stays alive through terminate, dies on kill()
@@ -649,6 +637,9 @@ class TestRunnerRestart:
         """Restart stops after max_retries."""
 
         class AlwaysFails(Service):
+            def __init__(self) -> None:
+                self._lg = MagicMock()
+
             @property
             def name(self) -> str:
                 return "always-fails"
@@ -657,7 +648,8 @@ class TestRunnerRestart:
                 raise RuntimeError("always fails")
 
         policy = RestartPolicy(max_retries=2, backoff=0.01)
-        runner = ThreadRunner(AlwaysFails(), policy)
+        service = AlwaysFails()
+        runner = ThreadRunner(service, policy)
 
         runner.start()
         with pytest.raises(RunError):
@@ -674,6 +666,46 @@ class TestRunnerRestart:
         # Third attempt should not restart (max reached)
         result = runner.check()
         assert result is False
+
+        # Each failed restart is logged, not dropped
+        failures = [
+            c
+            for c in service._lg.warning.call_args_list
+            if c.args == ("restart failed",)
+        ]
+        assert len(failures) == 2
+
+    def test_can_restart(self):
+        """can_restart holds until max_retries is reached, and never when disabled."""
+        runner = ThreadRunner(SimpleService(), RestartPolicy(max_retries=2))
+        assert runner.can_restart
+        runner._retries = 2
+        assert not runner.can_restart
+
+        disabled = RestartPolicy(restart_on_failure=False)
+        assert not ThreadRunner(SimpleService(), disabled).can_restart
+
+    def test_restart_pending_through_the_last_attempt(self):
+        """The last allowed restart counts as pending while it runs.
+
+        _maybe_restart() counts the attempt before making it, so can_restart is
+        already False during it; a waiter must not give up on that attempt.
+        """
+        runner = ThreadRunner(SimpleService(), RestartPolicy(max_retries=1, backoff=0))
+        during: list[bool] = []
+        with (
+            patch.object(
+                runner,
+                "_stop_for_restart",
+                lambda: during.append(runner.restart_pending),
+            ),
+            patch.object(runner, "start"),
+            patch.object(runner, "wait_healthy"),
+        ):
+            assert runner._maybe_restart()
+
+        assert during == [True]
+        assert not runner.restart_pending  # attempt over, no retries left
 
     def test_restart_disabled(self):
         """Restart can be disabled."""

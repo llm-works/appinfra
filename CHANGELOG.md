@@ -16,6 +16,9 @@ pinning an older appinfra resolves a release with no `check` extra and pip only 
 earlier: pre-release builds (0.13.1.devN) would not satisfy it. -->
 
 ### Added
+- `start_method=` on `ProcessRunner`, `RunnerFactory`, the process channel factories and the FastAPI
+  subprocess builder (`with_start_method()`); spawn or forkserver keeps restarts from forking off
+  the monitor thread. `ProcessRunner.process` and `start_subprocess()` are typed `BaseProcess`.
 - `appinfra cq dup` reports duplicated code blocks (pylint's duplicate-code; pylint joins the
   `check` extra). `appinfra cq dead` reports private definitions nothing refers to. `# cq: keep
   <reason>` exempts a finding, on the definition line or within every copy of a block. `make
@@ -118,6 +121,10 @@ earlier: pre-release builds (0.13.1.devN) would not satisfy it. -->
   under the spawn and forkserver start methods; `ProcessRunner` failed to pickle the channel's lock.
 - A process using `create_process_runner_with_channel()` exits when requests to its service are
   still unread; it used to hang at exit, waiting to deliver them to the already stopped service.
+- `ProcessRunner`'s monitor restarts a service that raised or exited non-zero, as the FastAPI
+  subprocess server relies on; it used to end the runner in `DONE` or `FAILED` without a restart.
+  A service process that raised now exits with code 1, and a failed restart logs a warning.
+  The FastAPI server's blocking `start()` waits through restarts; `max_restarts=0` is unlimited.
 - The `appinfra.db.pg.testing` fixtures (`pg_isolated`, `pg_migrate_factory`,
   `make_migrate_fixture`) close their pooled connections at teardown; psycopg used to report each
   one with a `ResourceWarning` at garbage collection.
