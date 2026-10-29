@@ -4,6 +4,7 @@
 """Tests for async service channel communication."""
 
 import asyncio
+import threading
 from dataclasses import dataclass
 
 import pytest
@@ -12,6 +13,7 @@ from appinfra.service import (
     AsyncChannel,
     AsyncProcessQueueChannelFactory,
     AsyncQueueChannelFactory,
+    Channel,
     ChannelClosedError,
     ChannelConfig,
     ChannelResponseError,
@@ -239,6 +241,28 @@ class TestAsyncQueueChannelFactory:
         await pair.close()
 
 
+def _consume_without_reply(channel: Channel, count: int) -> asyncio.Future[None]:
+    """Read *count* messages from *channel* on a thread and never answer them.
+
+    A process exits only after its queue's feeder has written everything it put into the
+    pipe; with more unread requests than the pipe holds, the test's process never exits.
+    """
+    loop = asyncio.get_running_loop()
+    done: asyncio.Future[None] = loop.create_future()
+
+    def consume() -> None:
+        try:
+            for _ in range(count):
+                channel.recv(timeout=10.0)
+        except BaseException as e:
+            loop.call_soon_threadsafe(done.set_exception, e)
+        else:
+            loop.call_soon_threadsafe(done.set_result, None)
+
+    threading.Thread(target=consume, daemon=True).start()
+    return done
+
+
 class TestAsyncProcessChannel:
     """Tests for AsyncChannel (process transport)."""
 
@@ -320,6 +344,7 @@ class TestAsyncProcessChannel:
         executor, so they reach mp.Queue.get() only after close().
         """
         pair = AsyncProcessQueueChannelFactory().create_pair()
+        consumed = _consume_without_reply(pair.child, 100)
         tasks = [
             asyncio.create_task(
                 pair.parent.submit(Request(id=str(i), data="x"), timeout=30.0)
@@ -327,6 +352,7 @@ class TestAsyncProcessChannel:
             for i in range(100)
         ]
         await asyncio.sleep(0.3)
+        await asyncio.wait_for(consumed, timeout=10.0)
 
         await pair.parent.close()
         results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -338,6 +364,7 @@ class TestAsyncProcessChannel:
     async def test_close_fails_queued_sends_with_closed_error(self) -> None:
         """A send still queued in the executor at close() raises ChannelClosedError."""
         pair = AsyncProcessQueueChannelFactory().create_pair()
+        consumed = _consume_without_reply(pair.child, 100)
         submits = [
             asyncio.create_task(
                 pair.parent.submit(Request(id=str(i), data="x"), timeout=30.0)
@@ -345,6 +372,7 @@ class TestAsyncProcessChannel:
             for i in range(100)
         ]
         await asyncio.sleep(0.3)  # executor is now busy with recv polls
+        await asyncio.wait_for(consumed, timeout=10.0)
 
         sends = [
             asyncio.create_task(pair.parent.send(Request(id=f"s{i}", data="x")))

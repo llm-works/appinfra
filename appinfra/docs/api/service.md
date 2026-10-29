@@ -385,6 +385,24 @@ arrives. `BufferedChannel` calls both in short slices so that `close()` interrup
 | `AsyncQueueChannelFactory` | `AsyncQueueTransport` (`asyncio.Queue`) | Async coroutine communication |
 | `AsyncProcessQueueChannelFactory` | `AsyncProcessQueueTransport` (`mp.Queue`) | Async parent, sync child subprocess |
 
+### Process Channels and Exit
+
+The process transports use `multiprocessing.Queue`, so its rule applies ([Joining processes that
+use queues](https://docs.python.org/3/library/multiprocessing.html#programming-guidelines)): at
+exit, a process waits until its queue's feeder thread has written every message it sent into the
+pipe. Unread messages that fit in the pipe do not delay exit, but once the pipe is full the
+feeder blocks until a reader takes from it, so messages nobody reads can keep the sender alive.
+Pipe capacity varies by system and can be as small as one page, so code must not rely on it.
+
+- `RunnerFactory.create_process_runner_with_channel()` handles the parent side. The service runs
+  as a daemon process, which multiprocessing terminates at exit before the queues flush, so
+  requests the service has not read are dropped instead of blocking exit.
+- Elsewhere, consume every message sent, or call `allow_exit_without_flush()` on the sending
+  `ProcessQueueTransport` where unread messages may be dropped at exit.
+- A channel passed to a child under the spawn or forkserver start method is pickled, by
+  `ProcessRunner` as part of the service or as a `Process` argument; this works only while the
+  child starts. The child's copy starts with an empty redelivery buffer.
+
 ## Factories
 
 Centralized creation of service components:
