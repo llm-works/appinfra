@@ -286,6 +286,10 @@ class MySQL(Interface):
     def migrate(self):
         pass
 
+    def dispose(self):
+        # Close every pooled connection; Manager.close_all() calls it
+        pass
+
     # ... etc
 ```
 

@@ -87,6 +87,8 @@ earlier: pre-release builds (0.13.1.devN) would not satisfy it. -->
   break APIs in minor releases.
 - The `dev` extra installs `httpx2` in place of `httpx`, and Starlette 1.2 or later, whose test
   client uses `httpx2`.
+- **Breaking:** the database `Interface` declares `dispose()` as abstract; a subclass must
+  implement it to be instantiated.
 
 ### Fixed
 - `password(confirm=True)` accepts a matching confirmation; with questionary installed it always
@@ -113,7 +115,8 @@ earlier: pre-release builds (0.13.1.devN) would not satisfy it. -->
 - A `Ticker` can be pickled, so `TCPServer(..., ticker=)` starts its ticker process under the spawn
   and forkserver start methods (macOS, Python 3.14 on Linux); it failed on the ticker's lock.
 - Closing a process channel (`ProcessQueueTransport`, `AsyncProcessQueueTransport`) no longer
-  blocks interpreter exit when the peer stopped reading; messages not yet written are dropped.
+  blocks interpreter exit when the peer stopped reading: after 1 s, messages it has not read are
+  dropped.
 - The `appinfra.db.pg.testing` fixtures (`pg_isolated`, `pg_migrate_factory`,
   `make_migrate_fixture`) close their pooled connections at teardown; psycopg used to report each
   one with a `ResourceWarning` at garbage collection.

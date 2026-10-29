@@ -48,6 +48,9 @@ class ConcreteInterfaceImpl(Interface):
     def session(self):
         return "mock_session"
 
+    def dispose(self):
+        pass
+
 
 # =============================================================================
 # Test Interface Abstract Base Class
@@ -124,6 +127,9 @@ class TestAbstractMethodCoverage:
             def session(self):
                 return None
 
+            def dispose(self):
+                pass
+
         with pytest.raises(TypeError, match="abstract"):
             PartialImpl()
 
@@ -148,6 +154,9 @@ class TestAbstractMethodCoverage:
             def session(self):
                 return None
 
+            def dispose(self):
+                pass
+
         with pytest.raises(TypeError, match="abstract"):
             PartialImpl()
 
@@ -171,6 +180,9 @@ class TestAbstractMethodCoverage:
 
             def session(self):
                 return None
+
+            def dispose(self):
+                pass
 
         with pytest.raises(TypeError, match="abstract"):
             PartialImpl()
@@ -197,6 +209,9 @@ class TestAbstractMethodCoverage:
             def session(self):
                 return None
 
+            def dispose(self):
+                pass
+
         with pytest.raises(TypeError, match="abstract"):
             PartialImpl()
 
@@ -222,6 +237,9 @@ class TestAbstractMethodCoverage:
             def session(self):
                 return None
 
+            def dispose(self):
+                pass
+
         with pytest.raises(TypeError, match="abstract"):
             PartialImpl()
 
@@ -246,6 +264,37 @@ class TestAbstractMethodCoverage:
 
             def migrate(self):
                 pass
+
+            def dispose(self):
+                pass
+
+        with pytest.raises(TypeError, match="abstract"):
+            PartialImpl()
+
+    def test_abstract_dispose_not_implemented(self):
+        """Test that dispose() method is abstract."""
+
+        class PartialImpl(Interface):
+            @property
+            def cfg(self):
+                return {}
+
+            @property
+            def url(self):
+                return "url"
+
+            @property
+            def engine(self):
+                return "engine"
+
+            def connect(self):
+                return None
+
+            def migrate(self):
+                pass
+
+            def session(self):
+                return None
 
         with pytest.raises(TypeError, match="abstract"):
             PartialImpl()

@@ -9,10 +9,13 @@ This module provides:
 - RedeliveryBuffer: Shared O(1) buffer for out-of-order message redelivery
 - validate_response: Shared response validation logic
 - send_slice: Wait slice for close-aware sends
+- close_queue / close_queue_async: Close an mp.Queue without hanging interpreter exit
 """
 
 from __future__ import annotations
 
+import asyncio
+import threading
 import time
 import uuid
 from collections import deque
@@ -63,6 +66,44 @@ def send_slice(deadline: float | None) -> float:
     if deadline is None:
         return SEND_POLL_INTERVAL
     return max(0.0, min(SEND_POLL_INTERVAL, deadline - time.monotonic()))
+
+
+#: Longest close() lets an mp.Queue's feeder thread write sent messages to the pipe.
+QUEUE_FLUSH_TIMEOUT = 1.0
+
+
+def _feeder(q: Any) -> threading.Thread | None:
+    """The thread that writes put() messages to q's pipe; None before the first put().
+
+    Private CPython attribute: mp.Queue has no public join with a timeout.
+    """
+    return getattr(q, "_thread", None)
+
+
+def close_queue(q: Any) -> None:
+    """Close an mp.Queue, letting its feeder write sent messages for QUEUE_FLUSH_TIMEOUT.
+
+    The feeder keeps writing after close(), and interpreter exit joins it. With a full
+    pipe and no reader it never finishes, so a feeder still running at the deadline
+    has its exit join cancelled: the process exits, and what it had not written is lost.
+    """
+    q.close()
+    feeder = _feeder(q)
+    if feeder is not None:
+        feeder.join(QUEUE_FLUSH_TIMEOUT)
+    if feeder is None or feeder.is_alive():
+        q.cancel_join_thread()
+
+
+async def close_queue_async(q: Any) -> None:
+    """close_queue() without blocking the event loop while the feeder writes."""
+    q.close()
+    feeder = _feeder(q)
+    deadline = time.monotonic() + QUEUE_FLUSH_TIMEOUT
+    while feeder is not None and feeder.is_alive() and time.monotonic() < deadline:
+        await asyncio.sleep(0.01)
+    if feeder is None or feeder.is_alive():
+        q.cancel_join_thread()
 
 
 class RedeliveryBuffer:

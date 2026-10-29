@@ -83,3 +83,10 @@ class Interface(abc.ABC):
             Database session instance
         """
         # pragma: no cover
+
+    @abc.abstractmethod
+    def dispose(self) -> None:
+        """
+        Close every pooled connection; safe to call more than once.
+        """
+        # pragma: no cover
