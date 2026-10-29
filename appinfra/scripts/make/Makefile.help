@@ -18,6 +18,11 @@
 # - Multiple file handling: Custom implementation for this project
 # - Target pattern extended to support dots (test.unit, docs.build, etc.)
 
+# Defaults are declared in Makefile.config; load it when the project has not
+ifndef _APPINFRA_CONFIG_LOADED
+include $(dir $(lastword $(MAKEFILE_LIST)))Makefile.config
+endif
+
 # Helper to reorder MAKEFILE_LIST so main Makefile appears last
 # This ensures included files' sections appear before the main file's sections
 _APPINFRA_HELP_MAKEFILE_LIST = $(wordlist 2,$(words $(MAKEFILE_LIST)),$(MAKEFILE_LIST)) $(firstword $(MAKEFILE_LIST))

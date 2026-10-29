@@ -6,7 +6,7 @@
 import os
 
 # One rule for every on/off setting, the same as Makefile.config's and
-# scripts/_bool.sh's; compared case-insensitively. Unset means off; set but
+# scripts/_settings.sh's; compared case-insensitively. Unset means off; set but
 # empty is an error, as in Makefile.config.
 TRUE_VALUES = frozenset({"true", "1", "y", "yes"})
 FALSE_VALUES = frozenset({"false", "0", "n", "no"})

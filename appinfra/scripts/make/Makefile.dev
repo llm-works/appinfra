@@ -33,8 +33,14 @@
 #   APPINFRA_DEV_SKIP_TARGETS  - Space-separated list of targets to skip (project provides own)
 #                             Supported: fmt lint type cq
 
-# Path to this Makefile's directory (for deriving paths)
+# Path to this Makefile's directory (for deriving paths), taken before the
+# include below changes MAKEFILE_LIST
 _APPINFRA_DEV_MAKE_DIR := $(dir $(lastword $(MAKEFILE_LIST)))
+
+# Defaults are declared in Makefile.config; load it when the project has not
+ifndef _APPINFRA_CONFIG_LOADED
+include $(_APPINFRA_DEV_MAKE_DIR)Makefile.config
+endif
 
 # Export for subprocesses
 export APPINFRA_DEV_PKG_NAME
@@ -100,7 +106,7 @@ setup:: ## sets up dev environment with all dependencies for all APPINFRA_PYTHON
 
 ifeq ($(filter fmt,$(APPINFRA_DEV_SKIP_TARGETS)),)
 fmt:: ## Format code with ruff
-ifeq ($(APPINFRA_DRY_RUN),true)
+ifneq ($(call _APPINFRA_ON,APPINFRA_DRY_RUN),)
 	@echo "[DRY RUN] Would run: ruff format ."
 else
 	@echo "* running formatter..."
@@ -120,7 +126,7 @@ endif # skip fmt.check
 
 ifeq ($(filter lint,$(APPINFRA_DEV_SKIP_TARGETS)),)
 lint:: ## Lint code with ruff
-ifeq ($(APPINFRA_DRY_RUN),true)
+ifneq ($(call _APPINFRA_ON,APPINFRA_DRY_RUN),)
 	@echo "[DRY RUN] Would run: ruff check ."
 else
 	@echo "* running linter..."
@@ -159,7 +165,7 @@ type:: ## Run type checking with mypy
 		echo ""; \
 		exit 1; \
 	fi
-ifeq ($(APPINFRA_DRY_RUN),true)
+ifneq ($(call _APPINFRA_ON,APPINFRA_DRY_RUN),)
 	@echo "[DRY RUN] Would run: mypy $(APPINFRA_DEV_PKG_NAME)/"
 else
 	@echo "* running type checker..."
@@ -189,8 +195,8 @@ ifeq ($(filter cq,$(APPINFRA_DEV_SKIP_TARGETS)),)
 cq:: ## Code quality: function sizes, plus duplicated/dead code when enabled (reports only)
 	@echo "* checking code quality..."
 	@$(PYTHON) -m appinfra.cli.cli -l error cq cf $(_APPINFRA_CQ_EXCLUDE_FLAGS) || [ $$? -eq 42 ]
-	@$(call _APPINFRA_CQ_RUN,$(_APPINFRA_CQ_DUP_CMD),$(call _APPINFRA_CQ_REPORT,$(APPINFRA_DEV_CQ_DUP)))
-	@$(call _APPINFRA_CQ_RUN,$(_APPINFRA_CQ_DEAD_CMD),$(call _APPINFRA_CQ_REPORT,$(APPINFRA_DEV_CQ_DEAD)))
+	@$(call _APPINFRA_CQ_RUN,$(_APPINFRA_CQ_DUP_CMD),$(call _APPINFRA_CQ_REPORT,$(call _APPINFRA_MODE_VALUE,APPINFRA_DEV_CQ_DUP)))
+	@$(call _APPINFRA_CQ_RUN,$(_APPINFRA_CQ_DEAD_CMD),$(call _APPINFRA_CQ_REPORT,$(call _APPINFRA_MODE_VALUE,APPINFRA_DEV_CQ_DEAD)))
 	@echo "* code quality check done"
 endif # skip cq
 .PHONY: cq
@@ -199,8 +205,8 @@ ifeq ($(filter cq,$(APPINFRA_DEV_SKIP_TARGETS)),)
 cq.strict:: ## Code quality: fails on function sizes, and on duplicated/dead code set to strict
 	@echo "* checking code quality (strict mode)..."
 	@$(PYTHON) -m appinfra.cli.cli -l error cq cf --strict $(_APPINFRA_CQ_EXCLUDE_FLAGS)
-	@$(call _APPINFRA_CQ_RUN,$(_APPINFRA_CQ_DUP_CMD),$(APPINFRA_DEV_CQ_DUP))
-	@$(call _APPINFRA_CQ_RUN,$(_APPINFRA_CQ_DEAD_CMD),$(APPINFRA_DEV_CQ_DEAD))
+	@$(call _APPINFRA_CQ_RUN,$(_APPINFRA_CQ_DUP_CMD),$(call _APPINFRA_MODE_VALUE,APPINFRA_DEV_CQ_DUP))
+	@$(call _APPINFRA_CQ_RUN,$(_APPINFRA_CQ_DEAD_CMD),$(call _APPINFRA_MODE_VALUE,APPINFRA_DEV_CQ_DEAD))
 	@echo "* code quality check passed"
 endif # skip cq.strict
 .PHONY: cq.strict

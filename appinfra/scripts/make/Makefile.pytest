@@ -16,7 +16,7 @@
 #   APPINFRA_PYTEST_PERF_DIR           - Directory test.perf and make check's Performance group
 #                                     collect from (default: tests); narrowing it skips
 #                                     importing the rest of the test tree
-#   APPINFRA_PYTEST_WORKERS            - pytest-xdist worker count, auto or N (default: empty = no -n flag)
+#   APPINFRA_PYTEST_WORKERS            - pytest-xdist worker count, auto, logical or N (default: empty = no -n flag)
 #                                     Never applied to test.perf targets. Not read by check.sh
 #                                     (make check), which runs suites concurrently with its own
 #                                     per-suite worker heuristic

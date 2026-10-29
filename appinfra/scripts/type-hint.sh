@@ -8,9 +8,9 @@
 
 set -e
 
-# Default to project venv if PYTHON not set
+# Default to python3 on PATH if PYTHON not set, as Makefile.env does
 if [ -z "$PYTHON" ]; then
-    PYTHON="$HOME/.venv/bin/python"
+    PYTHON="$(command -v python3)"
 fi
 
 echo "=== Type Hint Coverage Report ==="

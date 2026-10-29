@@ -395,9 +395,9 @@ These environment variables control framework behavior (not config value overrid
 | `APPINFRA_DEFAULT_CONFIG_FILE` | `infra.yaml` | Config filename the `pg.*` and `docs.*` Make targets fall back to when `APPINFRA_PG_CONFIG_FILE` / `APPINFRA_DOCS_CONFIG_FILE` are empty |
 | `APPINFRA_CONTAINER_CMD` | `docker` | Container runtime used by `pg.*` Make targets (`ps`, `exec`, `volume`, ...). Set to `podman` to run the local-dev container layer under Podman. Exported to the `pg.sh` helper script. |
 | `APPINFRA_COMPOSE_CMD` | `docker compose` | Compose orchestrator paired with `APPINFRA_CONTAINER_CMD`. Set to `podman compose` alongside the container-cmd override. |
-| `APPINFRA_YES` | unset | `true`, `1`, `y` or `yes` (any case) answers yes to every confirmation: the `areyousure` prompt of destructive Make targets (e.g., `pg.server.down`, `pg.server.clean`, `uninstall`) and the prompts of `appinfra.ui.prompts`. Intended for CI and other non-interactive contexts. |
-| `APPINFRA_NON_INTERACTIVE` | unset | `true`, `1`, `y` or `yes` (any case) turns off interactive (TTY) progress rendering. |
-| `APPINFRA_TEST_PG_URL` | unset | PostgreSQL URL the default `pg_test_config` fixture of `appinfra.db.pg.testing` uses; unset skips the tests that need it. |
+| `APPINFRA_YES` | `false` | `true`, `1`, `y` or `yes` (any case) answers yes to every confirmation: the `areyousure` prompt of destructive Make targets (e.g., `pg.server.down`, `pg.server.clean`, `uninstall`) and the prompts of `appinfra.ui.prompts`. Intended for CI and other non-interactive contexts. |
+| `APPINFRA_NON_INTERACTIVE` | `false` | `true`, `1`, `y` or `yes` (any case) turns off interactive (TTY) progress rendering. |
+| `APPINFRA_TEST_PG_URL` | (empty) | PostgreSQL URL the default `pg_test_config` fixture of `appinfra.db.pg.testing` uses; unset or empty skips the tests that need it. |
 
 Their `APPINFRA_` prefix is separate from the `INFRA_` override prefix, so they never reach config
 overrides and no config key such as `default` or `container` can be shadowed by them.

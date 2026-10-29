@@ -14,7 +14,9 @@ pip install appinfra
 
 ```makefile
 # Makefile - using pip-installed appinfra
-APPINFRA_SCRIPTS ?= $(shell appinfra scripts-path)
+ifeq ($(origin APPINFRA_SCRIPTS),undefined)
+APPINFRA_SCRIPTS := $(shell appinfra scripts-path)
+endif
 
 # Configure your project
 APPINFRA_DEV_PKG_NAME ?= myproject
@@ -51,7 +53,9 @@ Either way, `APPINFRA_SCRIPTS` is appinfra's scripts directory, so the includes 
 
 ```makefile
 # Recommended setup (pip install)
-APPINFRA_SCRIPTS ?= $(shell appinfra scripts-path)
+ifeq ($(origin APPINFRA_SCRIPTS),undefined)
+APPINFRA_SCRIPTS := $(shell appinfra scripts-path)
+endif
 
 # Configure your project
 APPINFRA_DEV_PKG_NAME ?= myproject
@@ -72,7 +76,7 @@ include $(APPINFRA_SCRIPTS)/make/Makefile.clean
 **Critical:** Include order matters. Always follow this sequence:
 
 ```makefile
-# 1. REQUIRED FIRST - Handles config loading and deprecation
+# 1. REQUIRED FIRST - loads Makefile.local, the defaults and the setting checks
 include $(APPINFRA_SCRIPTS)/make/Makefile.config
 
 # 2. Core modules (order matters)
@@ -125,7 +129,9 @@ include $(APPINFRA_SCRIPTS)/make/Makefile.all
 
 ```makefile
 # Makefile
-APPINFRA_SCRIPTS ?= $(shell appinfra scripts-path)
+ifeq ($(origin APPINFRA_SCRIPTS),undefined)
+APPINFRA_SCRIPTS := $(shell appinfra scripts-path)
+endif
 APPINFRA_DEV_PKG_NAME ?= myproject
 
 include $(APPINFRA_SCRIPTS)/make/Makefile.all
@@ -135,7 +141,9 @@ include $(APPINFRA_SCRIPTS)/make/Makefile.all
 
 ```makefile
 # Makefile
-APPINFRA_SCRIPTS ?= $(shell appinfra scripts-path)
+ifeq ($(origin APPINFRA_SCRIPTS),undefined)
+APPINFRA_SCRIPTS := $(shell appinfra scripts-path)
+endif
 APPINFRA_DEV_PKG_NAME ?= myproject
 APPINFRA_DEV_CQ_STRICT ?= true
 APPINFRA_PYTEST_TESTS_DIR ?= tests
@@ -275,7 +283,9 @@ myproject/
 
 ```makefile
 # Makefile
-APPINFRA_SCRIPTS ?= $(shell appinfra scripts-path)
+ifeq ($(origin APPINFRA_SCRIPTS),undefined)
+APPINFRA_SCRIPTS := $(shell appinfra scripts-path)
+endif
 APPINFRA_DEV_PKG_NAME ?= myproject
 APPINFRA_DISABLE_GROUPS ?= pg.
 

@@ -21,6 +21,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.helpers.makefile_registry import registry
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PKG = REPO_ROOT / "appinfra"
 MAKE_DIR = PKG / "scripts" / "make"
@@ -273,37 +275,95 @@ class TestPublicSettings:
         }
         assert bad == {}
 
-    def test_every_setting_documented(self) -> None:
-        docs = " ".join(path.read_text() for path in DOCS)
-        undocumented = sorted(
-            n for n in _declared() if not re.search(rf"\b{n}\b", docs)
+    def test_every_setting_documented_with_its_default(self) -> None:
+        """Every setting has a docs table row, and each row shows its ?= default."""
+        documented = _documented_defaults()
+        wrong = {}
+        for name, value in _declared_defaults().items():
+            expected = PROSE_DEFAULTS.get(name) or (
+                f"`{value}`" if value else "(empty)"
+            )
+            cells = documented.get(name, [])
+            if not cells or any(cell != expected for cell in cells):
+                wrong[name] = {"expected": expected, "documented": cells}
+        assert wrong == {}
+
+    def test_script_fallbacks_match_defaults(self) -> None:
+        """A script run outside make falls back to the same default make declares."""
+        defaults = _declared_defaults()
+        wrong = sorted(
+            f"{name}={value!r} ({loc}), make default {defaults.get(name)!r}"
+            for name, value, loc in _script_fallbacks()
+            if value != defaults.get(name)
+            and (name, value) not in SCRIPT_FALLBACK_EXCEPTIONS
         )
-        assert undocumented == []
+        assert wrong == []
 
     def test_registry_types_each_setting_once(self) -> None:
         """Every declared setting has exactly one type in Makefile.config's registry."""
-        registry = _registry()
-        names = [name for names in registry.values() for name in names]
+        names = [name for names in registry().values() for name in names]
         assert sorted(names) == sorted(set(names)), "a setting has more than one type"
         assert sorted(names) == sorted(_declared())
 
+    def test_type_table_matches_registry(self) -> None:
+        """The docs type table names exactly the settings of each registry list."""
+        text = DOCS[0].read_text()
+        lists = registry()
+        for label, list_name in TYPE_ROWS.items():
+            m = re.search(rf"^\| {label} \|.*\| ([^|]*) \|$", text, re.MULTILINE)
+            assert m, f"type table row {label!r} not found"
+            named = re.findall(r"`(APPINFRA_[A-Z0-9_]+)`", m[1])
+            assert sorted(named) == sorted(lists[list_name]), label
 
-_REGISTRY_LISTS = [
-    "_APPINFRA_BOOLEANS",
-    "_APPINFRA_MODES",
-    "_APPINFRA_PERCENTS",
-    "_APPINFRA_INTEGERS",
-    "_APPINFRA_WORKERS",
-    "_APPINFRA_TEXTS",
-]
+
+# Defaults the docs describe in words instead of the make expression
+PROSE_DEFAULTS = {
+    "APPINFRA_SCRIPTS": "the framework's own directory",
+    "APPINFRA_DEV_CHECK_SCRIPT": "the framework's `check.sh`",
+}
+
+# Rows of the type table in makefile-customization.md, by registry list
+TYPE_ROWS = {
+    "on/off": "_APPINFRA_BOOLEANS",
+    "mode": "_APPINFRA_MODES",
+    "percent": "_APPINFRA_PERCENTS",
+    "integer": "_APPINFRA_INTEGERS",
+    "worker count": "_APPINFRA_WORKERS",
+}
 
 
-def _registry() -> dict[str, list[str]]:
-    """The type lists of Makefile.config's setting registry, as make expands them."""
+# Script fallbacks that differ from the make default on purpose: outside make
+# there is no $(CURDIR), and pg.sh tests whether the runtime is set
+SCRIPT_FALLBACK_EXCEPTIONS = {
+    ("APPINFRA_DEV_PROJECT_ROOT", '$(dirname "$SCRIPT_DIR")'),
+    ("APPINFRA_CONTAINER_CMD", ""),
+}
+
+
+def _script_fallbacks() -> list[tuple[str, str, str]]:
+    """(name, fallback, location) for each ${NAME:-v}, ${NAME-v} and appinfra_bool NAME v."""
+    found = []
+    for path in sorted((PKG / "scripts").rglob("*.sh")):
+        for i, line in enumerate(path.read_text().splitlines(), 1):
+            hits = re.findall(r"\$\{(APPINFRA_[A-Z0-9_]+):?-([^}]*)\}", line)
+            hits += re.findall(r"appinfra_bool (APPINFRA_[A-Z0-9_]+) (\w+)", line)
+            found += [(name, value, f"{path.name}:{i}") for name, value in hits]
+    return found
+
+
+def _declared_defaults() -> dict[str, str]:
+    """Each setting's ?= value in Makefile.config."""
     text = MAKEFILE_CONFIG.read_text()
-    registry = {}
-    for name in _REGISTRY_LISTS:
-        m = re.search(rf"^{name} := ((?:.*\\\n)*.*)$", text, re.MULTILINE)
-        assert m, f"{name} not found in Makefile.config"
-        registry[name] = m[1].replace("\\\n", " ").split()
-    return registry
+    return dict(
+        re.findall(r"^(APPINFRA_[A-Z0-9_]+) \?=[ \t]*(.*)$", text, re.MULTILINE)
+    )
+
+
+def _documented_defaults() -> dict[str, list[str]]:
+    """The default cell of each setting's row in the docs tables."""
+    cells: dict[str, list[str]] = {}
+    for path in DOCS:
+        for line in path.read_text().splitlines():
+            if m := re.match(r"^\| `(APPINFRA_[A-Z0-9_]+)` \| ([^|]*) \|", line):
+                cells.setdefault(m[1], []).append(m[2].strip())
+    return cells

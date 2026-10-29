@@ -11,8 +11,12 @@ APPINFRA_ETC_DIR ?= $(CURDIR)/$(APPINFRA_DEV_PKG_NAME)/etc
 # appinfra's scripts directory (what `appinfra scripts-path` prints), located
 # through the interpreter that has appinfra installed. Set APPINFRA_SCRIPTS
 # to use another copy, e.g. a submodule: submodules/appinfra/appinfra/scripts
-APPINFRA_SCRIPTS ?= $(shell $(or $(APPINFRA_PYTHON),$(PYTHON),$(wildcard $(HOME)/.venv/bin/python),python3) \
+# Resolved once with := (not ?=): a recursive variable would run the lookup
+# again at every use, after Makefile.local may have changed the interpreter.
+ifeq ($(origin APPINFRA_SCRIPTS),undefined)
+APPINFRA_SCRIPTS := $(shell $(or $(PYTHON),python3) \
     -c "from importlib.resources import files; print(files('appinfra') / 'scripts')" 2>/dev/null)
+endif
 ifeq ($(APPINFRA_SCRIPTS),)
   $(error Cannot locate appinfra. Install the appinfra package or set APPINFRA_SCRIPTS=/path/to/appinfra/scripts)
 endif

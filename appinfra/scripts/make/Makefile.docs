@@ -10,8 +10,14 @@
 #   APPINFRA_DOCS_CONFIG_FILE - Config filename (empty = use APPINFRA_DEFAULT_CONFIG_FILE)
 #   APPINFRA_DOCS_OUTPUT_DIR  - Output directory for build (default: .site)
 
-# Path to this Makefile's directory
+# Path to this Makefile's directory, taken before the include below changes
+# MAKEFILE_LIST
 _APPINFRA_DOCS_MAKE_DIR := $(dir $(realpath $(lastword $(MAKEFILE_LIST))))
+
+# Defaults are declared in Makefile.config; load it when the project has not
+ifndef _APPINFRA_CONFIG_LOADED
+include $(_APPINFRA_DOCS_MAKE_DIR)Makefile.config
+endif
 
 # Resolve mkdocs config path using docs-config.sh
 # If APPINFRA_DOCS_CONFIG_FILE is set, use it directly from APPINFRA_ETC_DIR

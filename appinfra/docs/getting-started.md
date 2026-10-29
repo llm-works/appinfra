@@ -415,17 +415,18 @@ appinfra version --json
 ## Custom Python Environments
 
 Make targets automatically detect Python in this order:
-1. `APPINFRA_PYTHON` or `PYTHON` on the command line or in the environment (highest priority)
+1. `PYTHON` on the command line or in the environment (highest priority)
 2. `Makefile.local` file (project-local override, gitignored)
-3. `~/.venv/bin/python` (default virtualenv)
+3. `PYTHON` in the project Makefile
+4. `python3` on `PATH`: an activated venv, conda environment or pyenv version
 
 To use a different environment (e.g., conda with CUDA), create a `Makefile.local`:
 
 ```bash
-echo 'APPINFRA_PYTHON := /path/to/your/python' > Makefile.local
+echo 'PYTHON := /path/to/your/python' > Makefile.local
 ```
 
-An `APPINFRA_PYTHON` or `PYTHON` from the command line or the environment still overrides it.
+A `PYTHON` from the command line or the environment still overrides it.
 
 All Make commands will then use your custom Python:
 

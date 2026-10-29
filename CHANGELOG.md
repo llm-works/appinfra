@@ -53,16 +53,24 @@ earlier: pre-release builds (0.13.1.devN) would not satisfy it. -->
   that overlaps `APPINFRA_`.
 - **Breaking:** every other framework name moves into `APPINFRA_*` (settings) or `_APPINFRA_*`
   (internal): `ETC_DIR` → `APPINFRA_ETC_DIR`, `PYTHON_ENVS` → `APPINFRA_PYTHON_ENVS`,
-  `run_pytest(_serial)` → `APPINFRA_RUN_PYTEST(_SERIAL)`, and the scaffold's `APPINFRA_ROOT` →
-  `APPINFRA_SCRIPTS` (the scripts directory). The interpreter is `APPINFRA_PYTHON` or `PYTHON`.
-  Old names are ignored.
-- **Breaking:** `APPINFRA_NO_CONFIRM` is removed; `APPINFRA_YES` answers every confirmation, the
+  `run_pytest(_serial)` → `APPINFRA_RUN_PYTEST(_SERIAL)`, and the scaffold's `INFRA_ROOT` →
+  `APPINFRA_SCRIPTS` (the scripts directory). The Postgres module's `PG_*` variables (`PG_PORT`,
+  `PG_HOST`, `PG_INCLUDED`, ...) become internal `_APPINFRA_PG_*`. The interpreter is `PYTHON`
+  alone; `INFRA_ENV_PYTHON` is removed. Old names are ignored.
+- **Breaking:** without `PYTHON` set, make uses `python3` on `PATH` (an activated venv, conda or
+  pyenv), not `~/.venv/bin/python`. To keep that interpreter, set
+  `PYTHON := $(HOME)/.venv/bin/python` in `Makefile.local`.
+- **Breaking:** a make of one appinfra project run inside another's make (e.g. a submodule's
+  `test.all`) stops, since the inherited settings would replace its own; run it with a clean
+  environment: `env -i HOME="$$HOME" PATH="$$PATH" $(MAKE) -C <dir> <target>`.
+- **Breaking:** `INFRA_NO_CONFIRM` is removed; `APPINFRA_YES` answers every confirmation, the
   `areyousure` prompt of destructive Make targets included.
 - **Breaking:** every on/off setting (`APPINFRA_DRY_RUN`, `APPINFRA_DEV_CQ_STRICT`, `APPINFRA_YES`,
   ...) takes `true`, `1`, `y`, `yes` or `false`, `0`, `n`, `no`, in any case; any other value is
-  an error. `APPINFRA_DRY_RUN=1` used to be the only on value, `true` for the others.
+  an error. Dry run used to take only `1`, the others only `true`.
 - **Breaking:** make checks every setting's value against its type (mode, percent, integer,
-  worker count), and an `APPINFRA_*` name that is not an appinfra setting stops make.
+  worker count), and an `APPINFRA_*` name that is not an appinfra setting stops make (from the
+  environment, it warns).
 - **Breaking:** settings follow one precedence: command line, environment, `Makefile.local`
   (assigned with `:=`), project Makefile (with `?=`), defaults. An environment value now
   outranks a `Makefile.local` assignment; a `:=` in the project Makefile pins its value.

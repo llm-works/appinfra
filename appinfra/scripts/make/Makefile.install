@@ -31,6 +31,11 @@
 # Optional variables:
 #   APPINFRA_DEV_INSTALL_EXTRAS - Comma-separated extras (e.g., "dev,ui")
 
+# Defaults are declared in Makefile.config; load it when the project has not
+ifndef _APPINFRA_CONFIG_LOADED
+include $(dir $(lastword $(MAKEFILE_LIST)))Makefile.config
+endif
+
 # Reject APPINFRA_DEV_PKG_NAME values that would escape sys.prefix/share/ when used
 # as a path component (empty, `.`, `..`, leading/trailing `.` or `-`).
 # PEP 503 normalized distribution names: starts and ends with alphanumeric;

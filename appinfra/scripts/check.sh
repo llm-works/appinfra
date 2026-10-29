@@ -67,13 +67,14 @@ done
 
 # shellcheck source=./_ui.sh
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_ui.sh"
-# shellcheck source=./_bool.sh
-. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_bool.sh"
+# shellcheck source=./_settings.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_settings.sh"
+appinfra_trim_settings
 
 # Exit code for "warnings but ok" from cq tool (violations in non-strict mode)
 EXIT_CODE_WARNING=42
 
-PYTHON="${PYTHON:-~/.venv/bin/python}"
+PYTHON="${PYTHON:-$(command -v python3)}"
 PKG_NAME="${APPINFRA_DEV_PKG_NAME:-appinfra}"
 CQ_STRICT="$(appinfra_bool APPINFRA_DEV_CQ_STRICT false)" || exit 2
 CHECK_EXAMPLES="$(appinfra_bool APPINFRA_DEV_CHECK_EXAMPLES false)" || exit 2
@@ -243,9 +244,9 @@ fi
 CQ_LINT_SELECT="${APPINFRA_DEV_CQ_LINT_SELECT-C90,SIM,RET,PIE,PERF,FURB,C4}"
 
 # Duplicated code (pylint) and dead private code checks over the package. Each takes false (off),
-# warn (default: report the count, never fail) or strict (fail on findings).
-CQ_DUP="${APPINFRA_DEV_CQ_DUP:-warn}"
-CQ_DEAD="${APPINFRA_DEV_CQ_DEAD:-warn}"
+# warn (default: report the count, never fail) or strict (fail on findings); any case.
+CQ_DUP="$(printf '%s' "${APPINFRA_DEV_CQ_DUP:-warn}" | tr '[:upper:]' '[:lower:]')"
+CQ_DEAD="$(printf '%s' "${APPINFRA_DEV_CQ_DEAD:-warn}" | tr '[:upper:]' '[:lower:]')"
 for _cq_var in APPINFRA_DEV_CQ_DUP:"$CQ_DUP" APPINFRA_DEV_CQ_DEAD:"$CQ_DEAD"; do
     case "${_cq_var#*:}" in
         false|warn|strict) ;;

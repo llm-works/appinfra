@@ -28,7 +28,9 @@ The framework uses a consistent naming convention for configuration variables:
 ### Quick Start
 
 ```makefile
-APPINFRA_SCRIPTS ?= $(shell appinfra scripts-path)
+ifeq ($(origin APPINFRA_SCRIPTS),undefined)
+APPINFRA_SCRIPTS := $(shell appinfra scripts-path)
+endif
 
 # Set your configuration
 APPINFRA_DEV_PKG_NAME ?= myproject
@@ -48,7 +50,9 @@ include $(APPINFRA_SCRIPTS)/make/Makefile.clean
 Or include everything:
 
 ```makefile
-APPINFRA_SCRIPTS ?= $(shell appinfra scripts-path)
+ifeq ($(origin APPINFRA_SCRIPTS),undefined)
+APPINFRA_SCRIPTS := $(shell appinfra scripts-path)
+endif
 APPINFRA_DEV_PKG_NAME ?= myproject
 include $(APPINFRA_SCRIPTS)/make/Makefile.all
 ```
@@ -80,9 +84,19 @@ against the environment (make applies a makefile assignment over an environment 
 framework runs); `Makefile.local` and the command line still override it. `make config` shows
 which of these each setting came from.
 
+`APPINFRA_SCRIPTS` is the one setting a project Makefile resolves with `:=`, guarded so the
+environment and the command line still win: it locates the framework before the first include,
+and a recursive `?=` would run the lookup again at every use, after `Makefile.local` may have
+changed the interpreter. For the same reason `Makefile.local`, read after the first include,
+cannot choose the framework copy: an `APPINFRA_SCRIPTS` that does not name the copy make loaded
+stops make.
+
 ```makefile
 # Project Makefile
 APPINFRA_DEV_PKG_NAME ?= myproject
+ifeq ($(origin APPINFRA_SCRIPTS),undefined)
+APPINFRA_SCRIPTS := $(shell appinfra scripts-path)
+endif
 include $(APPINFRA_SCRIPTS)/make/Makefile.all
 ```
 
@@ -188,7 +202,7 @@ $ make config
 Configuration
 =============
 
-Python:          /home/me/.venv/bin/python (APPINFRA_PYTHON, Makefile.local)
+Python:          /home/me/.venv/bin/python (Makefile.local)
 Version:         Python 3.12.13
 Local overrides: /home/me/myproject/Makefile.local
 
@@ -340,7 +354,7 @@ All framework variables use `?=` (conditional assignment), making them easy to o
 
 ```bash
 # Override PYTHON for a single command
-make test PYTHON=~/.venv/bin/python
+make test PYTHON=$HOME/.venv/bin/python
 
 # Override multiple variables
 make test PYTHON=python3.12 APPINFRA_PYTEST_ARGS="-v -x --pdb"
@@ -350,10 +364,12 @@ make test PYTHON=python3.12 APPINFRA_PYTEST_ARGS="-v -x --pdb"
 
 ```makefile
 # Your app's Makefile
-APPINFRA_SCRIPTS ?= $(shell appinfra scripts-path)
+ifeq ($(origin APPINFRA_SCRIPTS),undefined)
+APPINFRA_SCRIPTS := $(shell appinfra scripts-path)
+endif
 
-# Override before including framework
-PYTHON = /usr/local/bin/python3.12
+# Before the include; the environment and the command line still override it
+PYTHON ?= /usr/local/bin/python3.12
 
 # Include framework
 include $(APPINFRA_SCRIPTS)/make/Makefile.pytest
@@ -426,27 +442,31 @@ These targets should be used as-is, not extended:
 
 All configuration variables follow the `APPINFRA_<MODULE>_<VAR>` naming convention, and the
 `APPINFRA_` prefix belongs to appinfra: an `APPINFRA_*` name that is not one of the settings
-below stops make, so a misspelled setting cannot be silently ignored. Names starting with
+below stops make when a Makefile, `Makefile.local` or the command line sets it, so a misspelled
+setting cannot be silently ignored. From the environment, which projects on other appinfra
+versions share, such a name only prints a warning. Names starting with
 `_APPINFRA_` are internal to the framework and not settings. Set settings before including the
-framework Makefiles. A setting the environment or the command line sets empty stops make: unset
+framework Makefiles: the name and type checks run when Makefile.config is read, so a setting
+assigned after the include skips them (an on/off or mode value is still checked when the
+framework reads it). A setting the environment or the command line sets empty stops make: unset
 it or give it a value.
 
 Each setting has a type, and a value that does not fit it stops make:
 
 | Type | Values | Settings |
 |------|--------|----------|
-| on/off | `true`, `1`, `y`, `yes` or `false`, `0`, `n`, `no`, any case; recipes, `check.sh` and Python see `true` or `false` | `APPINFRA_DRY_RUN`, `APPINFRA_DEV_CQ_STRICT`, `APPINFRA_DEV_CQ_SPDX`, `APPINFRA_DEV_CHECK_EXAMPLES`, `APPINFRA_YES`, `APPINFRA_NON_INTERACTIVE` |
+| on/off | `true`, `1`, `y`, `yes` or `false`, `0`, `n`, `no`, any case; exported as written, and `check.sh` and Python read it by the same rule | `APPINFRA_DRY_RUN`, `APPINFRA_DEV_CQ_STRICT`, `APPINFRA_DEV_CQ_SPDX`, `APPINFRA_DEV_CHECK_EXAMPLES`, `APPINFRA_YES`, `APPINFRA_NON_INTERACTIVE` |
 | mode | `false`, `warn` or `strict`, any case | `APPINFRA_DEV_CQ_DUP`, `APPINFRA_DEV_CQ_DEAD` |
 | percent | a number from 0 to 100, e.g. `80` or `95.5` | `APPINFRA_DEV_DOCSTRING_THRESHOLD`, `APPINFRA_PYTEST_COVERAGE_THRESHOLD` |
 | integer | a whole number, 0 or more | `APPINFRA_PYTEST_HANG_DUMP_SECONDS` |
-| worker count | empty, `auto` or a whole number above 0 | `APPINFRA_PYTEST_WORKERS` |
+| worker count | empty, `auto`, `logical` or a whole number above 0 | `APPINFRA_PYTEST_WORKERS` |
 | text | anything | every other setting |
 
 **Environment (ENV):**
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `APPINFRA_PYTHON` | `~/.venv/bin/python` | Python interpreter. `PYTHON` is accepted too; a value from the environment or the command line outranks one from the Makefile or `Makefile.local`, and within each `APPINFRA_PYTHON` comes first. After resolution both hold the resolved path |
+| `PYTHON` | `python3` on `PATH` | Python interpreter: the standard name, with the same precedence as the `APPINFRA_*` settings |
 | `APPINFRA_PYTHON_ENVS` | `$(PYTHON)` | Interpreters `make install`, `install.e`, `uninstall` and `setup` act on |
 | `APPINFRA_SCRIPTS` | the framework's own directory | appinfra's scripts directory, as printed by `appinfra scripts-path`; set before the includes to locate the framework |
 
@@ -486,7 +506,7 @@ Each setting has a type, and a value that does not fit it stops make:
 | `APPINFRA_PYTEST_COVERAGE_THRESHOLD` | `80` | Coverage threshold for `make check` (0 to disable) |
 | `APPINFRA_PYTEST_TESTS_DIR` | `tests` | Tests directory |
 | `APPINFRA_PYTEST_PERF_DIR` | `tests` | Directory `test.perf*` and `make check`'s Performance group collect from. Pointing it at the directory holding the performance tests skips importing the rest of the test tree |
-| `APPINFRA_PYTEST_WORKERS` | (empty) | pytest-xdist worker count (`auto` or N) for `test.*` targets; empty runs pytest in-process. Never applied to `test.perf*`. `make check` ignores it: `check.sh` runs suites concurrently with its own per-suite worker heuristic |
+| `APPINFRA_PYTEST_WORKERS` | (empty) | pytest-xdist worker count (`auto`, `logical`, which needs `psutil`, or N) for `test.*` targets; empty runs pytest in-process. Never applied to `test.perf*`. `make check` ignores it: `check.sh` runs suites concurrently with its own per-suite worker heuristic |
 | `APPINFRA_PYTEST_ARGS` | (empty) | Additional pytest arguments |
 | `APPINFRA_PYTEST_HANG_DUMP_SECONDS` | `120` | In `make check`, a test still running after this many seconds gets a row below the checklist and its process's stacks in the check's log; the test is neither stopped nor failed. `0` disables it |
 
@@ -546,7 +566,9 @@ Here's a complete example of an app extending the framework:
 # Example app Makefile
 
 # Configuration (before includes)
-APPINFRA_SCRIPTS ?= $(shell appinfra scripts-path)
+ifeq ($(origin APPINFRA_SCRIPTS),undefined)
+APPINFRA_SCRIPTS := $(shell appinfra scripts-path)
+endif
 APPINFRA_DEV_PKG_NAME ?= myapp
 APPINFRA_DEV_CQ_STRICT ?= true
 APPINFRA_DISABLE_TARGETS ?= pg.clean pg.clean.internal  # Hide destructive targets (wrapper + internal)
@@ -606,8 +628,10 @@ to your project's `tests/` directory:
 
 ```makefile
 # Your project's Makefile
-APPINFRA_SCRIPTS ?= $(shell appinfra scripts-path)
-PYTHON = ~/.venv/bin/python
+ifeq ($(origin APPINFRA_SCRIPTS),undefined)
+APPINFRA_SCRIPTS := $(shell appinfra scripts-path)
+endif
+PYTHON ?= $(HOME)/.venv/bin/python
 include $(APPINFRA_SCRIPTS)/make/Makefile.pytest
 
 # Now you can run:
@@ -625,7 +649,9 @@ Override this for your project:
 
 ```makefile
 # Your project's Makefile
-APPINFRA_SCRIPTS ?= $(shell appinfra scripts-path)
+ifeq ($(origin APPINFRA_SCRIPTS),undefined)
+APPINFRA_SCRIPTS := $(shell appinfra scripts-path)
+endif
 APPINFRA_DEV_PKG_NAME ?= myproject
 # APPINFRA_PYTEST_COVERAGE_PKG inherits from APPINFRA_DEV_PKG_NAME automatically
 
@@ -654,8 +680,13 @@ include $(APPINFRA_SCRIPTS)/make/Makefile.pytest
 .PHONY: test.infra
 test.infra:  ## Test the infra submodule
 	@echo "Testing infra submodule..."
-	$(MAKE) -C submodules/appinfra test.all
+	env -i HOME="$$HOME" PATH="$$PATH" $(MAKE) -C submodules/appinfra test.all
 ```
+
+The submodule runs with a clean environment: the framework exports its settings, and as
+environment values they would outrank the submodule's own Makefile and `Makefile.local`. A make
+of one appinfra project run inside another's make with the inherited environment stops with an
+error.
 
 Note: With pip install, there's no submodule to test - appinfra is just a dependency.
 
@@ -686,7 +717,9 @@ MyFramework/
 
 ```makefile
 # MyFramework/Makefile
-APPINFRA_SCRIPTS ?= $(shell appinfra scripts-path)
+ifeq ($(origin APPINFRA_SCRIPTS),undefined)
+APPINFRA_SCRIPTS := $(shell appinfra scripts-path)
+endif
 APPINFRA_DEV_PKG_NAME ?= myframework
 
 include $(APPINFRA_SCRIPTS)/make/Makefile.config
@@ -714,7 +747,9 @@ Only include the framework Makefiles you actually need:
 
 ```makefile
 # Good - include only what you use
-APPINFRA_SCRIPTS ?= $(shell appinfra scripts-path)
+ifeq ($(origin APPINFRA_SCRIPTS),undefined)
+APPINFRA_SCRIPTS := $(shell appinfra scripts-path)
+endif
 include $(APPINFRA_SCRIPTS)/make/Makefile.config  # Always include first
 include $(APPINFRA_SCRIPTS)/make/Makefile.env
 include $(APPINFRA_SCRIPTS)/make/Makefile.pytest
@@ -806,7 +841,9 @@ clean::  # OK
 
 ```makefile
 # Correct order
-APPINFRA_SCRIPTS ?= $(shell appinfra scripts-path)
+ifeq ($(origin APPINFRA_SCRIPTS),undefined)
+APPINFRA_SCRIPTS := $(shell appinfra scripts-path)
+endif
 include $(APPINFRA_SCRIPTS)/make/Makefile.clean  # Framework first
 
 clean::  # Your extension second
@@ -916,7 +953,7 @@ When using `--makefile-style=framework`, the generated Makefile includes the fra
    ```
 
 2. **The installed package**: the directory `appinfra scripts-path` prints, located through
-   `APPINFRA_PYTHON`, `PYTHON`, `~/.venv/bin/python` or `python3`, the first one set.
+   `PYTHON`, or `python3` on `PATH` when it is not set.
 
 3. **Error if not found**:
    ```

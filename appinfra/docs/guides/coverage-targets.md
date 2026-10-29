@@ -47,7 +47,7 @@ All targets:
 - Include pattern: `infra/*` (project code only)
 - Exclude pattern: `*/site-packages/*` (external libraries)
 - Test pattern: `*_test.py` (unit tests)
-- Uses: `~/.venv/bin/python`
+- Uses: `$(PYTHON)`, by default `python3` on `PATH`
 
 ### Coverage Threshold
 

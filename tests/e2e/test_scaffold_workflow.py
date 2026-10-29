@@ -251,8 +251,41 @@ class TestScaffoldWorkflow:
         env["PYTHONPATH"] = os.pathsep.join(
             p for p in (str(self.infra_root), env.get("PYTHONPATH", "")) if p
         )
-        env["APPINFRA_PYTHON"] = sys.executable
+        env["PYTHON"] = sys.executable
         return env
+
+    def test_framework_locates_appinfra_once(self):
+        """The scaffold resolves APPINFRA_SCRIPTS once, not at every include."""
+        project_name = "testapp_locate_once"
+        result = self._run_scaffold(project_name, "--makefile-style=framework")
+        assert result.returncode == 0, (
+            f"Scaffold should succeed. stderr: {result.stderr}"
+        )
+        project_path = self.temp_dir / project_name
+
+        log = project_path / "python-calls.log"
+        wrapper = project_path / "python-wrapper.sh"
+        wrapper.write_text(
+            f'#!/bin/sh\necho "$*" >> "{log}"\nexec {sys.executable} "$@"\n'
+        )
+        wrapper.chmod(0o755)
+        env = {**self._make_env(), "PYTHON": str(wrapper)}
+
+        make_result = subprocess.run(
+            ["make", "--no-print-directory", "help"],
+            capture_output=True,
+            text=True,
+            cwd=str(project_path),
+            env=env,
+            timeout=120,
+        )
+        assert make_result.returncode == 0, make_result.stderr
+        lookups = [
+            line
+            for line in log.read_text().splitlines()
+            if "importlib.resources" in line
+        ]
+        assert len(lookups) == 1, lookups
 
     @pytest.mark.parametrize("target", ["help", "lint", "test", "check"])
     def test_framework_project_make_targets(self, target: str):
@@ -358,8 +391,8 @@ class TestScaffoldWorkflow:
         fake_python = self._create_fake_python_without_infra(project_path)
 
         # Try to run make help with Python that can't find infra
+        # PYTHON on the command line outranks the environment's
         env = self._make_env()
-        del env["APPINFRA_PYTHON"]
         make_result = subprocess.run(
             ["make", "help", f"PYTHON={fake_python}"],
             capture_output=True,

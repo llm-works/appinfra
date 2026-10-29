@@ -328,7 +328,6 @@ jobs:
       - name: Configure container runtime override
         run: |
           cat > Makefile.local <<'EOF'
-          PYTHON              := python
           APPINFRA_CONTAINER_CMD := podman
           APPINFRA_COMPOSE_CMD   := podman-compose
           EOF
@@ -378,15 +377,6 @@ jobs:
           python-version: '3.12'
           cache: 'pip'
 
-      - name: Configure Python for Makefile
-        run: |
-          # Makefile.env requires PYTHON/APPINFRA_PYTHON to point to an
-          # executable. The setup-python action puts python on PATH; resolve
-          # it to an absolute path so `[ -x "$pyenv" ]` checks in Makefile.dev
-          # pass under `make setup`.
-          echo "APPINFRA_PYTHON := $(which python)" > Makefile.local
-          cat Makefile.local
-
       - name: Install dependencies via make setup
         run: |
           python -m pip install --upgrade pip
@@ -417,9 +407,6 @@ jobs:
         with:
           python-version: '3.12'
           cache: 'pip'
-
-      - name: Configure Python for Makefile
-        run: echo "APPINFRA_PYTHON := $(which python)" > Makefile.local
 
       - name: Install dependencies via make setup
         run: |
@@ -514,17 +501,13 @@ jobs:
           python-version: '3.12'
           cache: 'pip'
 
-      - name: Configure Python for Makefile
-        run: |
-          echo "APPINFRA_PYTHON := $(which python)" > Makefile.local
-
       - name: Install dependencies via make setup
         run: |
           python -m pip install --upgrade pip
           make setup
 
       - name: Run make check (raw-parallel for readable logs)
-        run: PYTHON=$(which python) APPINFRA_DEV_PROJECT_ROOT=$(pwd) bash appinfra/scripts/check.sh --raw-parallel
+        run: APPINFRA_DEV_PROJECT_ROOT=$(pwd) bash appinfra/scripts/check.sh --raw-parallel
 
       - name: Stop postgres
         if: always()
