@@ -38,7 +38,7 @@ PostgreSQL interface with connection pooling, query monitoring, and session mana
 pip install appinfra[sql]
 ```
 
-This installs sqlalchemy, sqlalchemy-utils, and psycopg2-binary.
+This installs sqlalchemy, sqlalchemy-utils, and psycopg (`psycopg[binary]`).
 
 ## PG (PostgreSQL)
 

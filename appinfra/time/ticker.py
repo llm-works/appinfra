@@ -325,19 +325,40 @@ class Ticker:
         self._mode = mode
         self._first = True
         self._running = False
-        self._stop_event = threading.Event()
-        self._lifecycle = threading.Lock()  # guards run() startup against stop()
-        self._sched = (
-            sched.scheduler(time.monotonic, self._sched_delay)
-            if secs is not None
-            else None
-        )
+        self._init_sync()
         # For context manager signal handling (stores previous handlers)
         self._prev_sigterm: Any = None
         self._prev_sigint: Any = None
         self._last_tick_time: float | None = None  # try_tick/time_until_next_tick
         # API mode, "blocking" (run()) or "nonblocking" (try_tick()); no mixing
         self._api_mode: str | None = None
+
+    def _init_sync(self) -> None:
+        """Create the thread-sync objects, which a process cannot share or pickle."""
+        self._stop_event = threading.Event()
+        self._lifecycle = threading.Lock()  # guards run() startup against stop()
+        self._sched: sched.scheduler | None = (
+            sched.scheduler(time.monotonic, self._sched_delay)
+            if self._secs is not None
+            else None
+        )
+
+    def __getstate__(self) -> dict[str, Any]:
+        """
+        Pickle the ticker without its thread-sync objects.
+
+        The spawn and forkserver start methods pickle a ticker passed to a new
+        process; the copy gets fresh ones, as a forked child gets copies.
+        """
+        state = self.__dict__.copy()
+        for name in ("_stop_event", "_lifecycle", "_sched"):
+            del state[name]
+        return state
+
+    def __setstate__(self, state: dict[str, Any]) -> None:
+        """Restore a pickled ticker with fresh thread-sync objects."""
+        self.__dict__.update(state)
+        self._init_sync()
 
     def run(self, *args: Any, **kwargs: Any) -> None:
         """

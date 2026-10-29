@@ -62,7 +62,7 @@ Alternatively, install directly with pip:
 
 ```bash
 pip install .                  # Base package
-pip install ".[sql]"           # Database support (sqlalchemy, psycopg2)
+pip install ".[sql]"           # Database support (sqlalchemy, psycopg)
 pip install ".[dev]"           # Development tools
 pip install ".[ui]"            # Rich terminal UI
 pip install ".[all]"           # Everything (dev + all optional features)

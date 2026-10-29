@@ -78,6 +78,12 @@ earlier: pre-release builds (0.13.1.devN) would not satisfy it. -->
   stops make; it used to run the setting empty, hiding `Makefile.local` and the default.
 - A `Ticker.stop()` while the ticker is not running is kept: the next `run()` returns at once,
   without calling the handler. A `stop()` right after starting the `run()` thread used to be lost.
+- **Breaking:** the `sql` extra requires SQLAlchemy 2.1 and installs psycopg 3 (`psycopg[binary]`)
+  instead of psycopg2; SQLAlchemy 2.1 maps `postgresql://` URLs to psycopg 3. Code that imports
+  psycopg2 itself must depend on it directly.
+- The `check` extra requires mypy 2, whose stricter checks can report new errors in a project.
+- The `fastapi` extra caps fastapi below 0.163 and uvicorn below 0.55 (both were below 1.0): both
+  break APIs in minor releases.
 
 ### Fixed
 - `password(confirm=True)` accepts a matching confirmation; with questionary installed it always
@@ -99,6 +105,10 @@ earlier: pre-release builds (0.13.1.devN) would not satisfy it. -->
 - `make` no longer prints a docs config error on every call when the docs config is missing.
 - `make help`, and a bare `make`, work with the make 3.81 that macOS ships; they failed with an
   awk syntax error.
+- `TCPServer` in single-process mode refuses a `Ticker` handler at startup with a message pointing
+  to `ticker=`; it failed with an `AttributeError`, calling a `Ticker.start()` that does not exist.
+- A `Ticker` can be pickled, so `TCPServer(..., ticker=)` starts its ticker process under the spawn
+  and forkserver start methods (macOS, Python 3.14 on Linux); it failed on the ticker's lock.
 
 ## [0.13.0] - 2026-10-25
 

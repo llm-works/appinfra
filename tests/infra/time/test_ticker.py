@@ -14,7 +14,10 @@ Tests the Ticker and TickerHandler functionality including:
 - Error handling
 """
 
+import functools
 import logging
+import multiprocessing
+import pickle
 import threading
 import time
 from unittest.mock import Mock
@@ -22,6 +25,7 @@ from unittest.mock import Mock
 import pytest
 
 from appinfra.errors import TickerAPIError, TickerConfigError, TickerStateError
+from appinfra.log import create_lg
 from appinfra.time.ticker import Ticker, TickerHandler, TickerMode
 
 # =============================================================================
@@ -1757,3 +1761,44 @@ class TestBlockingAPITimingModes:
         # Every tick starts exactly one interval after the previous one completed
         gaps = [tick_times[i + 1] - completion_times[i] for i in range(3)]
         assert gaps == [0.25, 0.25, 0.25]
+
+
+@pytest.mark.unit
+class TestPickling:
+    """A ticker crosses a spawn/forkserver process boundary by pickling."""
+
+    @pytest.mark.parametrize("secs", [1.0, None])
+    def test_round_trip_gets_fresh_sync_objects(self, secs):
+        """The copy works and has its own event, lock and scheduler."""
+        ticker = Ticker(create_lg("ticker-pickle", "info"), print, secs=secs)
+        ticker.stop()
+
+        copy = pickle.loads(pickle.dumps(ticker))
+
+        assert copy._stop_event is not ticker._stop_event
+        assert not copy._stop_event.is_set()
+        assert copy._lifecycle.acquire(blocking=False)
+        assert (copy._sched is None) == (secs is None)
+        assert copy._secs == secs
+
+
+@pytest.mark.integration
+class TestSpawnProcess:
+    """run_started in a spawn-context process, as TCPServer's ticker= mode starts it."""
+
+    def test_ticks_in_spawned_process(self):
+        ctx = multiprocessing.get_context("spawn")
+        ticks = ctx.Queue()
+        ticker = Ticker(
+            create_lg("ticker-spawn", "info"),
+            functools.partial(ticks.put, "tick"),
+            secs=0.01,
+        )
+
+        proc = ctx.Process(target=ticker.run_started)
+        proc.start()
+        try:
+            assert ticks.get(timeout=30) == "tick"
+        finally:
+            proc.terminate()
+            proc.join(timeout=10)

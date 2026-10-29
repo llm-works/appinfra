@@ -57,7 +57,8 @@ class TestSQLiteInit:
             "appinfra.db.sqlite.sqlite.LoggerFactory.derive", return_value=mock_logger
         ):
             db = SQLite(mock_logger, memory_config)
-            assert db.url == "sqlite:///:memory:"
+            # SQLAlchemy 2.1 renders the name escaped (sqlite:///%3Amemory%3A)
+            assert sqlalchemy.make_url(db.url).database == ":memory:"
 
     def test_init_with_file_url(self, mock_logger, tmp_path):
         """Test initialization with file-based database."""
@@ -105,7 +106,7 @@ class TestSQLiteProperties:
 
     def test_url_property(self, sqlite_db):
         """Test url property returns URL string."""
-        assert sqlite_db.url == "sqlite:///:memory:"
+        assert sqlalchemy.make_url(sqlite_db.url).database == ":memory:"
 
     def test_engine_property(self, sqlite_db):
         """Test engine property returns SQLAlchemy engine."""
