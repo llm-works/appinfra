@@ -328,7 +328,6 @@ jobs:
       - name: Configure container runtime override
         run: |
           cat > Makefile.local <<'EOF'
-          PYTHON              := python
           APPINFRA_CONTAINER_CMD := podman
           APPINFRA_COMPOSE_CMD   := podman-compose
           EOF
@@ -351,7 +350,7 @@ jobs:
       - name: Stop postgres
         if: always()
         env:
-          APPINFRA_NO_CONFIRM: '1'
+          APPINFRA_YES: '1'
         run: make pg.server.down
 
   # Fresh-install check: verify `make check` passes on a clean ubuntu runner
@@ -377,15 +376,6 @@ jobs:
         with:
           python-version: '3.12'
           cache: 'pip'
-
-      - name: Configure Python for Makefile
-        run: |
-          # Makefile.env requires PYTHON/APPINFRA_ENV_PYTHON to point to an
-          # executable. The setup-python action puts python on PATH; resolve
-          # it to an absolute path so `[ -x "$pyenv" ]` checks in Makefile.dev
-          # pass under `make setup`.
-          echo "APPINFRA_ENV_PYTHON := $(which python)" > Makefile.local
-          cat Makefile.local
 
       - name: Install dependencies via make setup
         run: |
@@ -418,9 +408,6 @@ jobs:
           python-version: '3.12'
           cache: 'pip'
 
-      - name: Configure Python for Makefile
-        run: echo "APPINFRA_ENV_PYTHON := $(which python)" > Makefile.local
-
       - name: Install dependencies via make setup
         run: |
           python -m pip install --upgrade pip
@@ -441,7 +428,7 @@ jobs:
           [ "$mode" = "2775" ] || { echo "ERROR: pre-create chmod 2775 did not stick (got $mode)"; exit 1; }
 
       - name: Run make install
-        run: APPINFRA_NO_CONFIRM=1 make install
+        run: APPINFRA_YES=1 make install
 
       - name: Verify published wheel path and modes
         run: |
@@ -465,7 +452,7 @@ jobs:
         run: |
           python -m venv /tmp/fresh-venv
           test ! -d /tmp/fresh-venv/share || { echo "ERROR: fresh venv unexpectedly has share/"; exit 1; }
-          if APPINFRA_NO_CONFIRM=1 PYTHON_ENVS=/tmp/fresh-venv/bin/python make install > /tmp/install.log 2>&1; then
+          if APPINFRA_YES=1 APPINFRA_PYTHON_ENVS=/tmp/fresh-venv/bin/python make install > /tmp/install.log 2>&1; then
             echo "ERROR: make install should have failed but succeeded"
             cat /tmp/install.log
             exit 1
@@ -514,17 +501,13 @@ jobs:
           python-version: '3.12'
           cache: 'pip'
 
-      - name: Configure Python for Makefile
-        run: |
-          echo "APPINFRA_ENV_PYTHON := $(which python)" > Makefile.local
-
       - name: Install dependencies via make setup
         run: |
           python -m pip install --upgrade pip
           make setup
 
       - name: Run make check (raw-parallel for readable logs)
-        run: PYTHON=$(which python) APPINFRA_DEV_PROJECT_ROOT=$(pwd) bash appinfra/scripts/check.sh --raw-parallel
+        run: APPINFRA_DEV_PROJECT_ROOT=$(pwd) bash appinfra/scripts/check.sh --raw-parallel
 
       - name: Stop postgres
         if: always()

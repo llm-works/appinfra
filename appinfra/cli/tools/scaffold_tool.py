@@ -274,7 +274,9 @@ class ScaffoldTool(Tool):
             f"{name} - Application entry point",
             '"""',
             "",
-            "from appinfra.app import App, AppBuilder",
+            "import sys",
+            "",
+            "from appinfra.app import AppBuilder",
             "from appinfra.app.tools import Tool, ToolConfig",
         ]
         if with_db:
@@ -322,15 +324,15 @@ class ScaffoldTool(Tool):
             "    # Build application; etc/infra.yaml beside this file is the base config",
             "    app = (",
             '        AppBuilder("' + name + '")',
-            '        .config.with_spec("'
-            + name
-            + '", "'
-            + name
-            + '", filename="infra.yaml")',
+            # Trailing comma: ruff keeps one argument per line for any name length
+            "        .config.with_spec(",
+            f'            "{name}",',
+            f'            "{name}",',
+            '            filename="infra.yaml",',
+            "        )",
             "        .done()",
-            "        .tools",
-            "            .with_tool(ExampleTool())",
-            "            .done()",
+            "        .tools.with_tool(ExampleTool())",
+            "        .done()",
             "        .build()",
             "    )",
             "",
@@ -339,7 +341,7 @@ class ScaffoldTool(Tool):
             "",
             "",
             'if __name__ == "__main__":',
-            "    exit(main())",
+            "    sys.exit(main())",
         ]
 
     def _generate_app(
@@ -368,6 +370,7 @@ class ScaffoldTool(Tool):
             '"""',
             "",
             "import unittest",
+            "",
             f"from {name}.__main__ import ExampleTool",
             "",
             "",

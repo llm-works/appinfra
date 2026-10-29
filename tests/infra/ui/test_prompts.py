@@ -77,6 +77,11 @@ class TestGetAutoConfirm:
         with patch.dict(os.environ, {"APPINFRA_YES": "yes"}):
             assert _get_auto_confirm() is True
 
+    def test_auto_confirm_when_env_y(self):
+        """Test returns True when APPINFRA_YES is y."""
+        with patch.dict(os.environ, {"APPINFRA_YES": "y"}):
+            assert _get_auto_confirm() is True
+
     def test_auto_confirm_case_insensitive(self):
         """Test env check is case insensitive."""
         with patch.dict(os.environ, {"APPINFRA_YES": "TRUE"}):

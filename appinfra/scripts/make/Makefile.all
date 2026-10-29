@@ -7,36 +7,36 @@
 # Makefiles instead of this file.
 #
 # Usage (in consuming project's Makefile):
-#   infra := path/to/infra
-#   APPINFRA_DEV_PKG_NAME := myproject
-#   include $(infra)/scripts/make/Makefile.all
+#   APPINFRA_SCRIPTS ?= path/to/appinfra/scripts
+#   APPINFRA_DEV_PKG_NAME ?= myproject
+#   include $(APPINFRA_SCRIPTS)/make/Makefile.all
 #
 # For selective inclusion (preferred for submodule use):
-#   infra := path/to/infra
-#   APPINFRA_DEV_PKG_NAME := myproject
-#   include $(infra)/scripts/make/Makefile.config
-#   include $(infra)/scripts/make/Makefile.env
-#   include $(infra)/scripts/make/Makefile.help
-#   include $(infra)/scripts/make/Makefile.utils
-#   include $(infra)/scripts/make/Makefile.dev
-#   include $(infra)/scripts/make/Makefile.install  # Optional: only if building a package
-#   include $(infra)/scripts/make/Makefile.pytest
+#   APPINFRA_SCRIPTS ?= path/to/appinfra/scripts
+#   APPINFRA_DEV_PKG_NAME ?= myproject
+#   include $(APPINFRA_SCRIPTS)/make/Makefile.config
+#   include $(APPINFRA_SCRIPTS)/make/Makefile.env
+#   include $(APPINFRA_SCRIPTS)/make/Makefile.help
+#   include $(APPINFRA_SCRIPTS)/make/Makefile.utils
+#   include $(APPINFRA_SCRIPTS)/make/Makefile.dev
+#   include $(APPINFRA_SCRIPTS)/make/Makefile.install  # Optional: only if building a package
+#   include $(APPINFRA_SCRIPTS)/make/Makefile.pytest
 #   # Skip: Makefile.docs, Makefile.pg if not needed
-#   include $(infra)/scripts/make/Makefile.clean
+#   include $(APPINFRA_SCRIPTS)/make/Makefile.clean
 
 # Determine the directory containing this Makefile
-_infra_make_dir := $(dir $(lastword $(MAKEFILE_LIST)))
+_APPINFRA_MAKE_DIR := $(dir $(lastword $(MAKEFILE_LIST)))
 
 # Load configuration first
-include $(_infra_make_dir)Makefile.config
+include $(_APPINFRA_MAKE_DIR)Makefile.config
 
 # Include all modules
-include $(_infra_make_dir)Makefile.env
-include $(_infra_make_dir)Makefile.help
-include $(_infra_make_dir)Makefile.utils
-include $(_infra_make_dir)Makefile.dev
-include $(_infra_make_dir)Makefile.install
-include $(_infra_make_dir)Makefile.pytest
-include $(_infra_make_dir)Makefile.docs
-include $(_infra_make_dir)Makefile.pg
-include $(_infra_make_dir)Makefile.clean
+include $(_APPINFRA_MAKE_DIR)Makefile.env
+include $(_APPINFRA_MAKE_DIR)Makefile.help
+include $(_APPINFRA_MAKE_DIR)Makefile.utils
+include $(_APPINFRA_MAKE_DIR)Makefile.dev
+include $(_APPINFRA_MAKE_DIR)Makefile.install
+include $(_APPINFRA_MAKE_DIR)Makefile.pytest
+include $(_APPINFRA_MAKE_DIR)Makefile.docs
+include $(_APPINFRA_MAKE_DIR)Makefile.pg
+include $(_APPINFRA_MAKE_DIR)Makefile.clean

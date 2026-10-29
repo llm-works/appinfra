@@ -19,6 +19,7 @@ ENV PYTHONUNBUFFERED=1 \
 # - make: Required for Makefile targets
 # - jq: Required for YAML parsing scripts
 # - bc: Required for elapsed time calculations in check.sh
+# - procps: Required for ps, which check.sh uses to stop its process tree
 RUN apt-get update && apt-get install -y \
     gcc \
     libpq-dev \
@@ -26,6 +27,7 @@ RUN apt-get update && apt-get install -y \
     make \
     jq \
     bc \
+    procps \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /workspace

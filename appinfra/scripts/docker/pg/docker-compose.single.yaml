@@ -1,24 +1,24 @@
 # PostgreSQL Single Instance Mode
 # Configure postgres via pgserver.postgres_conf (curated whitelist).
 #
-# Makefile-orchestrated: NAME / IMAGE / PORT are required env vars; the PG_*
-# slots default to postgres's built-in values when unset. All are set by
-# Makefile.pg from the pgserver config. Not intended for direct
-# `docker compose -f ...` invocation.
+# pg.sh-orchestrated: reads the _APPINFRA_PG_* wire variables from the
+# environment. CONTAINER_NAME / IMAGE / PORT are required; the postgres_conf
+# slots default to postgres's built-in values when unset. Not intended for
+# direct `docker compose -f ...` invocation.
 services:
   postgres:
-    container_name: ${NAME:?}
-    image: ${IMAGE:?}
+    container_name: ${_APPINFRA_PG_CONTAINER_NAME:?}
+    image: ${_APPINFRA_PG_IMAGE:?}
     command:
       - postgres
       - -c
-      - ${PG_MAX_CONNECTIONS:-max_connections=128}
+      - ${_APPINFRA_PG_MAX_CONNECTIONS:-max_connections=128}
       - -c
-      - ${PG_SHARED_PRELOAD_LIBRARIES:-shared_preload_libraries=}
+      - ${_APPINFRA_PG_SHARED_PRELOAD_LIBRARIES:-shared_preload_libraries=}
       - -c
-      - ${PG_WORK_MEM:-work_mem=4MB}
+      - ${_APPINFRA_PG_WORK_MEM:-work_mem=4MB}
       - -c
-      - ${PG_AUTOVACUUM:-autovacuum=on}
+      - ${_APPINFRA_PG_AUTOVACUUM:-autovacuum=on}
     restart: always
     volumes:
       - "$PWD:$PWD"
@@ -27,10 +27,10 @@ services:
       - pgdata:/var/lib/postgresql
     working_dir: $PWD
     ports:
-      - ${PORT:?}:${PORT}
+      - ${_APPINFRA_PG_PORT:?}:${_APPINFRA_PG_PORT}
     environment:
       - POSTGRES_HOST_AUTH_METHOD=trust
-      - PGPORT=${PORT}
+      - PGPORT=${_APPINFRA_PG_PORT}
 
 volumes:
   pgdata:

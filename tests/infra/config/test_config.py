@@ -454,11 +454,13 @@ class TestEnvironmentOverrides:
         assert exc_info.value.path == ["new", "section", "new", "key"]
 
     def test_appinfra_control_vars_ignored(self, temp_yaml_file, clean_env):
-        """APPINFRA_* control variables never reach override matching."""
+        """APPINFRA_* / _APPINFRA_* control variables never reach override matching."""
         os.environ["APPINFRA_DEV_PKG_NAME"] = "appinfra"
-        os.environ["APPINFRA_CHECK_PYTEST_SUITE"] = "unit"
+        os.environ["APPINFRA_PYTEST_WORKERS"] = "4"
+        os.environ["_APPINFRA_CHECK_PYTEST_SUITE"] = "unit"
         config = Config(temp_yaml_file)
         assert not config.has("dev.pkg.name")
+        assert not config.has("pytest.workers")
         assert not config.has("check.pytest.suite")
 
     def test_former_control_name_raises_with_hint(self, temp_yaml_file, clean_env):

@@ -36,73 +36,63 @@
 #         - timescaledb
 
 # Flag to indicate Postgres Makefile is loaded
-PG_INCLUDED := true
+_APPINFRA_PG_INCLUDED := true
 
-# Container runtime (defensive defaults; Makefile.config sets these centrally
-# when included, but the ?= keeps this file usable in minimal include sets).
-APPINFRA_CONTAINER_CMD ?= docker
-APPINFRA_COMPOSE_CMD   ?= docker compose
+# Path to this Makefile's directory, taken before the include below changes
+# MAKEFILE_LIST
+_APPINFRA_PG_MAKE_DIR := $(dir $(realpath $(lastword $(MAKEFILE_LIST))))
 
-# Path to this Makefile's directory
-pg_local := $(dir $(realpath $(lastword $(MAKEFILE_LIST))))
+# Defaults (container runtime included) are declared in Makefile.config; load
+# it when the project has not
+ifndef _APPINFRA_CONFIG_LOADED
+include $(_APPINFRA_PG_MAKE_DIR)Makefile.config
+endif
 
 # Newline for $(subst) - must be exactly two newlines between define/endef
-define _pg_newline
+define _APPINFRA_NEWLINE
 
 
 endef
-# Extract all PG config values in one call (sets PG_CONTAINER_NAME, PG_VERSION, PG_PORT, PG_IMAGE, PG_REPLICA_ENABLED, PG_PORT_R, PG_MAX_CONNECTIONS, PG_SHARED_PRELOAD_LIBRARIES, PG_WORK_MEM, PG_AUTOVACUUM)
+# Set the _APPINFRA_PG_* wire vars read by pg.sh from the pgserver config in one
+# call (CONTAINER_NAME, VERSION, PORT, IMAGE, REPLICA_ENABLED, PORT_R,
+# MAX_CONNECTIONS, SHARED_PRELOAD_LIBRARIES, WORK_MEM, AUTOVACUUM).
 # pg-config.sh outputs pipe-separated values; $(subst) converts pipes to newlines for $(eval)
 # Args: config_file, config_key, etc_dir, default_config_file
 # Gated on PyYAML availability so `make setup` can run from a fresh venv (see Makefile.config).
-# When skipped, PG_* variables are left undefined — recipes that need them will fail at
+# When skipped, the vars are left undefined — recipes that need them will fail at
 # recipe time, but parse-time (and `make setup`) completes.
-ifdef _INFRA_PYYAML_OK
-$(eval $(subst |,$(_pg_newline),$(shell $(pg_local)/../pg-config.sh "$(APPINFRA_PG_CONFIG_FILE)" $(APPINFRA_PG_CONFIG_KEY) $(ETC_DIR) $(APPINFRA_DEFAULT_CONFIG_FILE))))
+ifdef _APPINFRA_PYYAML_OK
+$(eval $(subst |,$(_APPINFRA_NEWLINE),$(shell $(_APPINFRA_PG_MAKE_DIR)/../pg-config.sh "$(APPINFRA_PG_CONFIG_FILE)" $(APPINFRA_PG_CONFIG_KEY) $(APPINFRA_ETC_DIR) $(APPINFRA_DEFAULT_CONFIG_FILE))))
 endif
 
 # Validate replica config and hide replication targets from help when disabled
-ifeq ($(PG_REPLICA_ENABLED),true)
-ifeq ($(PG_PORT_R),)
+ifeq ($(_APPINFRA_PG_REPLICA_ENABLED),true)
+ifeq ($(_APPINFRA_PG_PORT_R),)
 $(error replica.enabled is true but replica.port is not defined in config file)
 endif
 else
 APPINFRA_DISABLE_TARGETS += pg.server.up.repl pg.standby
 endif
 
-PG_HOST := $(APPINFRA_PG_HOST)
-PG_USER := $(APPINFRA_PG_USER)
-
 # Resolved image: use explicit pgserver.image when set, else docker.io/postgres:<version>.
-# Pre-resolved here (rather than via ${IMAGE:-...} in the compose YAML) because
+# Pre-resolved here (rather than via a nested default in the compose YAML) because
 # podman-compose does not recursively expand nested shell-style defaults. The default
 # is fully qualified (docker.io/...) because podman does not assume docker.io for
 # unqualified image names — docker accepts the qualified form transparently.
-# When neither image nor version is configured, leaves IMAGE empty so the YAML's
-# ${IMAGE:?} produces a clean "IMAGE: required variable not set" error.
-# Must be defined BEFORE the _INFRA_PG_IMAGE export below (:= is immediate).
-PG_RESOLVED_IMAGE := $(if $(PG_IMAGE),$(PG_IMAGE),$(if $(PG_VERSION),docker.io/postgres:$(PG_VERSION)))
+# When neither image nor version is configured, leaves the image empty so the YAML's
+# ${_APPINFRA_PG_IMAGE:?} produces a clean "required variable not set" error.
+_APPINFRA_PG_IMAGE := $(if $(_APPINFRA_PG_IMAGE),$(_APPINFRA_PG_IMAGE),$(if $(_APPINFRA_PG_VERSION),docker.io/postgres:$(_APPINFRA_PG_VERSION)))
 
 # Wire vars exported to pg.sh (internal contract; underscore prefix marks it
 # as subject to change and distinct from the public APPINFRA_PG_* / INFRA_PGSERVER_*
 # configuration surface). APPINFRA_CONTAINER_CMD is exported in Makefile.config.
-_INFRA_PG_CONTAINER_NAME           := $(PG_CONTAINER_NAME)
-_INFRA_PG_VERSION                  := $(PG_VERSION)
-_INFRA_PG_PORT                     := $(PG_PORT)
-_INFRA_PG_PORT_R                   := $(PG_PORT_R)
-_INFRA_PG_REPLICA_ENABLED          := $(PG_REPLICA_ENABLED)
-_INFRA_PG_HOST                     := $(PG_HOST)
-_INFRA_PG_USER                     := $(PG_USER)
-_INFRA_PG_IMAGE                    := $(PG_RESOLVED_IMAGE)
-_INFRA_PG_MAX_CONNECTIONS          := $(PG_MAX_CONNECTIONS)
-_INFRA_PG_SHARED_PRELOAD_LIBRARIES := $(PG_SHARED_PRELOAD_LIBRARIES)
-_INFRA_PG_WORK_MEM                 := $(PG_WORK_MEM)
-_INFRA_PG_AUTOVACUUM               := $(PG_AUTOVACUUM)
-_INFRA_PG_DATABASES                := $(APPINFRA_PG_DATABASES)
-export _INFRA_PG_CONTAINER_NAME _INFRA_PG_VERSION _INFRA_PG_PORT _INFRA_PG_PORT_R
-export _INFRA_PG_REPLICA_ENABLED _INFRA_PG_HOST _INFRA_PG_USER
-export _INFRA_PG_IMAGE _INFRA_PG_MAX_CONNECTIONS _INFRA_PG_SHARED_PRELOAD_LIBRARIES
-export _INFRA_PG_WORK_MEM _INFRA_PG_AUTOVACUUM _INFRA_PG_DATABASES
+_APPINFRA_PG_HOST      := $(APPINFRA_PG_HOST)
+_APPINFRA_PG_USER      := $(APPINFRA_PG_USER)
+_APPINFRA_PG_DATABASES := $(APPINFRA_PG_DATABASES)
+export _APPINFRA_PG_CONTAINER_NAME _APPINFRA_PG_VERSION _APPINFRA_PG_PORT _APPINFRA_PG_PORT_R
+export _APPINFRA_PG_REPLICA_ENABLED _APPINFRA_PG_HOST _APPINFRA_PG_USER
+export _APPINFRA_PG_IMAGE _APPINFRA_PG_MAX_CONNECTIONS _APPINFRA_PG_SHARED_PRELOAD_LIBRARIES
+export _APPINFRA_PG_WORK_MEM _APPINFRA_PG_AUTOVACUUM _APPINFRA_PG_DATABASES
 export APPINFRA_COMPOSE_CMD APPINFRA_CONTAINER_CMD
 
 ##@ Postgres
@@ -112,27 +102,27 @@ export APPINFRA_COMPOSE_CMD APPINFRA_CONTAINER_CMD
 # =============================================================================
 
 pg.server.up: ## starts postgres server (single instance, waits for readiness)
-	@_INFRA_PG_MODE=single $(pg_local)/../pg.sh up
+	@_APPINFRA_PG_MODE=single $(_APPINFRA_PG_MAKE_DIR)/../pg.sh up
 .PHONY: pg.server.up
 
 pg.server.down: areyousure ## stops postgres server (auto-detects mode, verifies removal)
-	@$(pg_local)/../pg.sh down
+	@$(_APPINFRA_PG_MAKE_DIR)/../pg.sh down
 .PHONY: pg.server.down
 
 pg.server.wait.up: ## waits for postgres to accept connections (30s timeout, auto-detects mode)
-	@$(pg_local)/../pg.sh wait-up
+	@$(_APPINFRA_PG_MAKE_DIR)/../pg.sh wait-up
 .PHONY: pg.server.wait.up
 
 pg.server.wait.down: ## waits for postgres containers to be fully removed (30s timeout)
-	@$(pg_local)/../pg.sh wait-down
+	@$(_APPINFRA_PG_MAKE_DIR)/../pg.sh wait-down
 .PHONY: pg.server.wait.down
 
 pg.server.reboot: areyousure ## restarts postgres server (auto-detects mode, waits for readiness)
-	@$(pg_local)/../pg.sh reboot
+	@$(_APPINFRA_PG_MAKE_DIR)/../pg.sh reboot
 .PHONY: pg.server.reboot
 
 pg.server.logs: ## tails postgres server logs (auto-detects mode)
-	@$(pg_local)/../pg.sh logs
+	@$(_APPINFRA_PG_MAKE_DIR)/../pg.sh logs
 .PHONY: pg.server.logs
 
 pg.server.clean: areyousure ## removes all postgres containers, volumes, images, and networks (WARNING: deletes all data)
@@ -140,16 +130,16 @@ pg.server.clean: areyousure ## removes all postgres containers, volumes, images,
 .PHONY: pg.server.clean
 
 pg.server.clean.internal:: # Internal: cleanup without confirmation (used by clean.full)
-	@$(pg_local)/../pg.sh erase
+	@$(_APPINFRA_PG_MAKE_DIR)/../pg.sh erase
 .PHONY: pg.server.clean.internal
 
 # =============================================================================
 # Replication Mode (primary + standby) - only when replica_enabled: true
 # =============================================================================
 
-ifeq ($(PG_REPLICA_ENABLED),true)
+ifeq ($(_APPINFRA_PG_REPLICA_ENABLED),true)
 pg.server.up.repl: ## starts postgres replication (primary + standby, waits for readiness)
-	@_INFRA_PG_MODE=repl $(pg_local)/../pg.sh up
+	@_APPINFRA_PG_MODE=repl $(_APPINFRA_PG_MAKE_DIR)/../pg.sh up
 .PHONY: pg.server.up.repl
 endif
 
@@ -159,15 +149,15 @@ endif
 # =============================================================================
 
 pg.info: ## comprehensive server and database information
-	@$(pg_local)/../pg.sh info
+	@$(_APPINFRA_PG_MAKE_DIR)/../pg.sh info
 .PHONY: pg.info
 
 pg.info.short: ## short status summary
-	@$(pg_local)/../pg.sh info --short
+	@$(_APPINFRA_PG_MAKE_DIR)/../pg.sh info --short
 .PHONY: pg.info.short
 
 pg.clean.internal:: ## drops all configured databases (no confirmation; for downstream chaining)
-	@$(pg_local)/../pg.sh clean
+	@$(_APPINFRA_PG_MAKE_DIR)/../pg.sh clean
 .PHONY: pg.clean.internal
 
 pg.clean:: areyousure ## cleans all databases (with confirmation)
@@ -175,15 +165,15 @@ pg.clean:: areyousure ## cleans all databases (with confirmation)
 .PHONY: pg.clean
 
 pg: ## connects to postgres db (primary)
-	@$(pg_local)/../pg.sh psql
+	@$(_APPINFRA_PG_MAKE_DIR)/../pg.sh psql
 .PHONY: pg
 
-ifeq ($(PG_REPLICA_ENABLED),true)
+ifeq ($(_APPINFRA_PG_REPLICA_ENABLED),true)
 pg.standby: ## connects to standby postgres db (replication mode only)
-	@$(pg_local)/../pg.sh psql --target standby
+	@$(_APPINFRA_PG_MAKE_DIR)/../pg.sh psql --target standby
 .PHONY: pg.standby
 endif
 
 pg.top: ## pgtop for primary server
-	@$(pg_local)/../pg.sh top
+	@$(_APPINFRA_PG_MAKE_DIR)/../pg.sh top
 .PHONY: pg.top

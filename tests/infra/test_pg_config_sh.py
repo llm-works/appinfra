@@ -57,10 +57,10 @@ class TestPgConfigSh:
         vars_ = dict(
             entry.partition(":=")[::2] for entry in result.stdout.strip().split("|")
         )
-        assert vars_["PG_CONTAINER_NAME"] == ""
-        assert vars_["PG_REPLICA_ENABLED"] == "false"
-        assert vars_["PG_MAX_CONNECTIONS"] == ""
-        assert vars_["PG_AUTOVACUUM"] == ""
+        assert vars_["_APPINFRA_PG_CONTAINER_NAME"] == ""
+        assert vars_["_APPINFRA_PG_REPLICA_ENABLED"] == "false"
+        assert vars_["_APPINFRA_PG_MAX_CONNECTIONS"] == ""
+        assert vars_["_APPINFRA_PG_AUTOVACUUM"] == ""
 
     def test_identity_and_replica_fields(self, tmp_path: Path) -> None:
         vars_ = _run(
@@ -69,22 +69,22 @@ class TestPgConfigSh:
             "  image: pgvector/pgvector:pg18\n"
             "  replica:\n    enabled: true\n    port: 5433\n",
         )
-        assert vars_["PG_CONTAINER_NAME"] == "pg"
-        assert vars_["PG_VERSION"] == "18"
-        assert vars_["PG_PORT"] == "5432"
-        assert vars_["PG_IMAGE"] == "pgvector/pgvector:pg18"
-        assert vars_["PG_REPLICA_ENABLED"] == "true"
-        assert vars_["PG_PORT_R"] == "5433"
+        assert vars_["_APPINFRA_PG_CONTAINER_NAME"] == "pg"
+        assert vars_["_APPINFRA_PG_VERSION"] == "18"
+        assert vars_["_APPINFRA_PG_PORT"] == "5432"
+        assert vars_["_APPINFRA_PG_IMAGE"] == "pgvector/pgvector:pg18"
+        assert vars_["_APPINFRA_PG_REPLICA_ENABLED"] == "true"
+        assert vars_["_APPINFRA_PG_PORT_R"] == "5433"
 
     def test_empty_postgres_conf_emits_empty_knobs(self, tmp_path: Path) -> None:
         vars_ = _run(tmp_path, "pgserver:\n  name: pg\n  port: 5432\n")
-        # Empty knob values let the YAML's ${PG_X:-key=default} slot fall back
-        # to the postgres-default value at container start.
+        # Empty knob values let the YAML's ${_APPINFRA_PG_X:-key=default} slot
+        # fall back to the postgres-default value at container start.
         for name in (
-            "PG_MAX_CONNECTIONS",
-            "PG_SHARED_PRELOAD_LIBRARIES",
-            "PG_WORK_MEM",
-            "PG_AUTOVACUUM",
+            "_APPINFRA_PG_MAX_CONNECTIONS",
+            "_APPINFRA_PG_SHARED_PRELOAD_LIBRARIES",
+            "_APPINFRA_PG_WORK_MEM",
+            "_APPINFRA_PG_AUTOVACUUM",
         ):
             assert vars_[name] == ""
 
@@ -93,14 +93,14 @@ class TestPgConfigSh:
             tmp_path,
             "pgserver:\n  postgres_conf:\n    max_connections: 256\n",
         )
-        assert vars_["PG_MAX_CONNECTIONS"] == "max_connections=256"
+        assert vars_["_APPINFRA_PG_MAX_CONNECTIONS"] == "max_connections=256"
 
     def test_autovacuum_bool(self, tmp_path: Path) -> None:
         vars_ = _run(
             tmp_path,
             "pgserver:\n  postgres_conf:\n    autovacuum: false\n",
         )
-        assert vars_["PG_AUTOVACUUM"] == "autovacuum=off"
+        assert vars_["_APPINFRA_PG_AUTOVACUUM"] == "autovacuum=off"
 
     def test_shared_preload_libraries_list(self, tmp_path: Path) -> None:
         vars_ = _run(
@@ -109,7 +109,7 @@ class TestPgConfigSh:
             "      - pg_stat_statements\n      - timescaledb\n",
         )
         assert (
-            vars_["PG_SHARED_PRELOAD_LIBRARIES"]
+            vars_["_APPINFRA_PG_SHARED_PRELOAD_LIBRARIES"]
             == "shared_preload_libraries=pg_stat_statements,timescaledb"
         )
 
@@ -118,7 +118,7 @@ class TestPgConfigSh:
             tmp_path,
             'pgserver:\n  postgres_conf:\n    work_mem: "256MB"\n',
         )
-        assert vars_["PG_WORK_MEM"] == "work_mem=256MB"
+        assert vars_["_APPINFRA_PG_WORK_MEM"] == "work_mem=256MB"
 
     def test_unknown_key_errors_with_supported_list(self, tmp_path: Path) -> None:
         result = _run_expect_failure(

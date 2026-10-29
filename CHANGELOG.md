@@ -35,6 +35,8 @@ earlier: pre-release builds (0.13.1.devN) would not satisfy it. -->
   `cq dup` and `cq dead` when enabled; the "Running code quality checks..." banner is gone. A
   cq tool that fails to run only warns, unless that tool is set to strict.
 - A bare `make` shows the help screen instead of `make config`'s output.
+- **Breaking:** `make env` is removed. `make config` shows the interpreter and its source, and
+  every `APPINFRA_*` setting with its value and source, read from make's own variables.
 - `make setup` installs the tools `make check` runs (the new `check` extra: ruff, mypy, pytest,
   coverage, interrogate, pylint) in every project, not only those its own dependencies list.
 - The `check` extra requires ruff 0.16 or later, the first release whose `ruff format --check`
@@ -45,10 +47,35 @@ earlier: pre-release builds (0.13.1.devN) would not satisfy it. -->
   `appinfra.cli.tools.cq` (`tool`, `functions`, `spdx`).
 - **Breaking:** `GitRuntimeSource()` no longer takes `check_dirty`; the parameter had no effect.
 - **Breaking:** the framework's Make and tooling variables are renamed from `INFRA_*` to
-  `APPINFRA_*` (`APPINFRA_DEV_PKG_NAME`, `APPINFRA_ROOT`, ...); every `INFRA_*` variable is now a
-  config override. Make stops on the old name of any variable a project sets; exported, an old
-  name is read as a config override and fails on its undeclared yaml path. `Config` rejects an
-  `env_prefix` that overlaps `APPINFRA_`.
+  `APPINFRA_*` (`APPINFRA_DEV_PKG_NAME`, `APPINFRA_PYTEST_WORKERS`, ...); every `INFRA_*` variable
+  is now a config override. Old names are not read: set in a Makefile they are ignored;
+  exported, they fail the config load as undeclared overrides. `Config` rejects an `env_prefix`
+  that overlaps `APPINFRA_`.
+- **Breaking:** every other framework name moves into `APPINFRA_*` (settings) or `_APPINFRA_*`
+  (internal): `ETC_DIR` → `APPINFRA_ETC_DIR`, `PYTHON_ENVS` → `APPINFRA_PYTHON_ENVS`,
+  `run_pytest(_serial)` → `APPINFRA_RUN_PYTEST(_SERIAL)`, and the scaffold's `INFRA_ROOT` →
+  `APPINFRA_SCRIPTS` (the scripts directory). The Postgres module's `PG_*` variables (`PG_PORT`,
+  `PG_HOST`, `PG_INCLUDED`, ...) become internal `_APPINFRA_PG_*`. The interpreter is `PYTHON`
+  alone; `INFRA_ENV_PYTHON` is removed. Old names are ignored.
+- **Breaking:** without `PYTHON` set, make uses `python3` on `PATH` (an activated venv, conda or
+  pyenv), not `~/.venv/bin/python`. To keep that interpreter, set
+  `PYTHON := $(HOME)/.venv/bin/python` in `Makefile.local`.
+- **Breaking:** a make of one appinfra project run inside another's make (e.g. a submodule's
+  `test.all`) stops, since the inherited settings would replace its own; run it with a clean
+  environment: `env -i HOME="$$HOME" PATH="$$PATH" $(MAKE) -C <dir> <target>`.
+- **Breaking:** `INFRA_NO_CONFIRM` is removed; `APPINFRA_YES` answers every confirmation, the
+  `areyousure` prompt of destructive Make targets included.
+- **Breaking:** every on/off setting (`APPINFRA_DRY_RUN`, `APPINFRA_DEV_CQ_STRICT`, `APPINFRA_YES`,
+  ...) takes `true`, `1`, `y`, `yes` or `false`, `0`, `n`, `no`, in any case; any other value is
+  an error. Dry run used to take only `1`, the others only `true`.
+- **Breaking:** make checks every setting's value against its type (mode, percent, integer,
+  worker count), and an `APPINFRA_*` name that is not an appinfra setting stops make (from the
+  environment, it warns).
+- **Breaking:** settings follow one precedence: command line, environment, `Makefile.local`
+  (assigned with `:=`), project Makefile (with `?=`), defaults. An environment value now
+  outranks a `Makefile.local` assignment; a `:=` in the project Makefile pins its value.
+- **Breaking:** an `APPINFRA_*` or `PYTHON` that the environment or the command line sets empty
+  stops make; it used to run the setting empty, hiding `Makefile.local` and the default.
 - A `Ticker.stop()` while the ticker is not running is kept: the next `run()` returns at once,
   without calling the handler. A `stop()` right after starting the `run()` thread used to be lost.
 
@@ -67,6 +94,11 @@ earlier: pre-release builds (0.13.1.devN) would not satisfy it. -->
   `extra={"exception": e}` or sent through the multiprocess queue; the database handler used to
   drop a record with an exception in `extra`.
 - `INFRA_TEST_LOGGING_LEVEL` overrides `test.logging.level`; `Config` used to skip it.
+- A project from `appinfra scaffold` passes its own `make lint` and `make check`, and the
+  framework style finds an installed appinfra; it used to look in the wrong directory.
+- `make` no longer prints a docs config error on every call when the docs config is missing.
+- `make help`, and a bare `make`, work with the make 3.81 that macOS ships; they failed with an
+  awk syntax error.
 
 ## [0.13.0] - 2026-10-25
 

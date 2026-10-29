@@ -67,23 +67,27 @@ done
 
 # shellcheck source=./_ui.sh
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_ui.sh"
+# shellcheck source=./_settings.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_settings.sh"
+appinfra_trim_settings
 
 # Exit code for "warnings but ok" from cq tool (violations in non-strict mode)
 EXIT_CODE_WARNING=42
 
-PYTHON="${PYTHON:-~/.venv/bin/python}"
+PYTHON="${PYTHON:-$(command -v python3)}"
 PKG_NAME="${APPINFRA_DEV_PKG_NAME:-appinfra}"
-CQ_STRICT="${APPINFRA_DEV_CQ_STRICT:-false}"
-CHECK_EXAMPLES="${APPINFRA_DEV_CHECK_EXAMPLES:-false}"
+CQ_STRICT="$(appinfra_bool APPINFRA_DEV_CQ_STRICT false)" || exit 2
+CHECK_EXAMPLES="$(appinfra_bool APPINFRA_DEV_CHECK_EXAMPLES false)" || exit 2
+CQ_SPDX="$(appinfra_bool APPINFRA_DEV_CQ_SPDX false)" || exit 2
 # HOST:PORT for run_examples.py --pg; Makefile.dev derives it from Makefile.pg.
-EXAMPLES_PG="${_INFRA_DEV_EXAMPLES_PG:-}"
+EXAMPLES_PG="${_APPINFRA_DEV_EXAMPLES_PG:-}"
 COVERAGE_MARKERS="${APPINFRA_PYTEST_COVERAGE_MARKERS:-unit}"
 
 # Coverage threshold precedence: CLI arg > env var > default (80)
 # Set to 0 to disable coverage checking entirely
 DEFAULT_COVERAGE_TARGET="${APPINFRA_PYTEST_COVERAGE_THRESHOLD:-80}"
 COVERAGE_TARGET="${COVERAGE_TARGET:-$DEFAULT_COVERAGE_TARGET}"
-if ! echo "$COVERAGE_TARGET" | grep -qE '^[0-9]+\.?[0-9]*$'; then
+if ! echo "$COVERAGE_TARGET" | grep -qE '^[0-9]+(\.[0-9]+)?$'; then
     echo "Error: Invalid coverage target: $COVERAGE_TARGET" >&2
     exit 1
 fi
@@ -200,7 +204,6 @@ declare -a CHECKS=()
 # SPDX header check only if opted in (APPINFRA_DEV_CQ_SPDX=true).
 # Off by default so closed-source repos that reuse this framework don't
 # fail on files without SPDX-License-Identifier headers.
-CQ_SPDX="${APPINFRA_DEV_CQ_SPDX:-false}"
 if [ "$CQ_SPDX" = "true" ]; then
     CHECKS+=("SPDX header check|cq.spdx|${PYTHON} -m appinfra.cli.cli -l error cq spdx|")
 fi
@@ -241,9 +244,9 @@ fi
 CQ_LINT_SELECT="${APPINFRA_DEV_CQ_LINT_SELECT-C90,SIM,RET,PIE,PERF,FURB,C4}"
 
 # Duplicated code (pylint) and dead private code checks over the package. Each takes false (off),
-# warn (default: report the count, never fail) or strict (fail on findings).
-CQ_DUP="${APPINFRA_DEV_CQ_DUP:-warn}"
-CQ_DEAD="${APPINFRA_DEV_CQ_DEAD:-warn}"
+# warn (default: report the count, never fail) or strict (fail on findings); any case.
+CQ_DUP="$(printf '%s' "${APPINFRA_DEV_CQ_DUP:-warn}" | tr '[:upper:]' '[:lower:]')"
+CQ_DEAD="$(printf '%s' "${APPINFRA_DEV_CQ_DEAD:-warn}" | tr '[:upper:]' '[:lower:]')"
 for _cq_var in APPINFRA_DEV_CQ_DUP:"$CQ_DUP" APPINFRA_DEV_CQ_DEAD:"$CQ_DEAD"; do
     case "${_cq_var#*:}" in
         false|warn|strict) ;;
@@ -361,7 +364,7 @@ _pytest_cmd_for() {
     local suite="$1" marker="$2" flags="$3" path="${4:-tests/}"
     case " $_MARKERS_FOUND " in
         *" $marker "*)
-            echo "${PYTEST_HANG}APPINFRA_CHECK_PYTEST_SUITE=$suite ${PYTHON} -m pytest $path -m $marker ${PYTEST_HANG_FLAG} $flags"
+            echo "${PYTEST_HANG}_APPINFRA_CHECK_PYTEST_SUITE=$suite ${PYTHON} -m pytest $path -m $marker ${PYTEST_HANG_FLAG} $flags"
             ;;
         *)
             echo "(exit 5)"
@@ -369,7 +372,7 @@ _pytest_cmd_for() {
     esac
 }
 
-# APPINFRA_CHECK_PYTEST_SUITE prevents schema collisions when test suites run in parallel.
+# _APPINFRA_CHECK_PYTEST_SUITE prevents schema collisions when test suites run in parallel.
 # Each suite gets unique schema names: unit_gw0, integ_gw0, e2e_gw0, etc.
 #
 # Standalone suites are skipped when coverage subsumes their marker (see
@@ -390,8 +393,8 @@ declare -a TEST_SUBCHECKS_RAW=()
 # parallel group; leading the list keeps its running/completed state
 # obvious. Uses NPROC/2 workers (see PYTEST_PARALLEL_COVERAGE above).
 if awk "BEGIN {exit !($COVERAGE_TARGET > 0)}" 2>/dev/null; then
-    TEST_SUBCHECKS+=("${COVERAGE_LABEL}|test.coverage|${PYTEST_HANG}${COVERAGE_CORE_ENV}APPINFRA_CHECK_PYTEST_SUITE=cov ${PYTHON} -m pytest tests/ ${COVERAGE_MARKER_ARG} ${PYTEST_HANG_FLAG} --cov=${PKG_NAME} --cov-report=term -q -rEfs ${PYTEST_PARALLEL_COVERAGE}|${COVERAGE_TARGET}")
-    TEST_SUBCHECKS_RAW+=("${COVERAGE_LABEL}|test.coverage|${PYTEST_HANG}${COVERAGE_CORE_ENV}APPINFRA_CHECK_PYTEST_SUITE=cov ${PYTHON} -m pytest tests/ ${COVERAGE_MARKER_ARG} ${PYTEST_HANG_FLAG} --cov=${PKG_NAME} --cov-report=term-missing -rEfs ${PYTEST_PARALLEL_COVERAGE}|${COVERAGE_TARGET}")
+    TEST_SUBCHECKS+=("${COVERAGE_LABEL}|test.coverage|${PYTEST_HANG}${COVERAGE_CORE_ENV}_APPINFRA_CHECK_PYTEST_SUITE=cov ${PYTHON} -m pytest tests/ ${COVERAGE_MARKER_ARG} ${PYTEST_HANG_FLAG} --cov=${PKG_NAME} --cov-report=term -q -rEfs ${PYTEST_PARALLEL_COVERAGE}|${COVERAGE_TARGET}")
+    TEST_SUBCHECKS_RAW+=("${COVERAGE_LABEL}|test.coverage|${PYTEST_HANG}${COVERAGE_CORE_ENV}_APPINFRA_CHECK_PYTEST_SUITE=cov ${PYTHON} -m pytest tests/ ${COVERAGE_MARKER_ARG} ${PYTEST_HANG_FLAG} --cov=${PKG_NAME} --cov-report=term-missing -rEfs ${PYTEST_PARALLEL_COVERAGE}|${COVERAGE_TARGET}")
 fi
 
 _standalone_suite unit        "Unit tests"        test.unit        unit

@@ -132,7 +132,7 @@ rules and variable overrides.
 
 ```makefile
 # Your app's Makefile
-include path/to/infra/scripts/make/Makefile.clean
+include $(APPINFRA_SCRIPTS)/make/Makefile.clean
 
 # Add app-specific cleanup
 clean::
@@ -162,7 +162,7 @@ development. Two entry points are equivalent — pick by installation shape:
 - Wheel installers: `appinfra pg up` (reads the packaged base or a config
   named via `--config` / `--etc-dir`).
 
-Both project the same `_INFRA_PG_*` wire protocol into
+Both project the same `_APPINFRA_PG_*` wire protocol into
 `appinfra/scripts/pg.sh`, so container state is identical either way.
 
 ### Single Instance Mode (Default)

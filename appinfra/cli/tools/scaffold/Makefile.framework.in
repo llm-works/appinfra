@@ -1,45 +1,38 @@
 # {{PROJECT_NAME}} - Framework-based Makefile
 #
-# This Makefile includes modular components from the infra framework.
+# This Makefile includes modular components from the appinfra framework.
 # Generated with infra scaffold tool using --makefile-style=framework
 
 # Configuration
-APPINFRA_DEV_PKG_NAME := {{PROJECT_NAME}}
+APPINFRA_DEV_PKG_NAME ?= {{PROJECT_NAME}}
+# The scaffold keeps the config (etc/infra.yaml) inside the package
+APPINFRA_ETC_DIR ?= $(CURDIR)/$(APPINFRA_DEV_PKG_NAME)/etc
 
-# Auto-detect infra framework location (override by setting APPINFRA_ROOT env var or in Makefile)
-APPINFRA_ROOT ?=
-
-# Check common submodule location
-ifeq ($(APPINFRA_ROOT),)
-  ifneq (,$(wildcard ./submodules/infra/scripts/make/Makefile.env))
-    APPINFRA_ROOT := ./submodules/infra
-  endif
+# appinfra's scripts directory (what `appinfra scripts-path` prints), located
+# through the interpreter that has appinfra installed. Set APPINFRA_SCRIPTS
+# to use another copy, e.g. a submodule: submodules/appinfra/appinfra/scripts
+# Resolved once with := (not ?=): a recursive variable would run the lookup
+# again at every use, after Makefile.local may have changed the interpreter.
+ifeq ($(origin APPINFRA_SCRIPTS),undefined)
+APPINFRA_SCRIPTS := $(shell $(or $(PYTHON),python3) \
+    -c "from importlib.resources import files; print(files('appinfra') / 'scripts')" 2>/dev/null)
 endif
-
-# Auto-detect via Python import
-_BOOTSTRAP_PYTHON := $(or $(PYTHON),$(wildcard $(HOME)/.venv/bin/python),python3)
-
-ifeq ($(APPINFRA_ROOT),)
-  APPINFRA_ROOT := $(shell $(_BOOTSTRAP_PYTHON) -c "import appinfra; from pathlib import Path; print(Path(appinfra.__file__).parent.parent)" 2>/dev/null || echo "")
-endif
-
-ifeq ($(APPINFRA_ROOT),)
-  $(error Cannot locate infra. Set APPINFRA_ROOT=/path/to/infra at top of Makefile or install appinfra package)
+ifeq ($(APPINFRA_SCRIPTS),)
+  $(error Cannot locate appinfra. Install the appinfra package or set APPINFRA_SCRIPTS=/path/to/appinfra/scripts)
 endif
 
 # Include framework Makefiles (Makefile.config loads Makefile.local and the
-# defaults; Makefile.env handles Python detection)
-include $(APPINFRA_ROOT)/scripts/make/Makefile.config
-include $(APPINFRA_ROOT)/scripts/make/Makefile.env
-include $(APPINFRA_ROOT)/scripts/make/Makefile.help
-include $(APPINFRA_ROOT)/scripts/make/Makefile.utils
-include $(APPINFRA_ROOT)/scripts/make/Makefile.clean
-include $(APPINFRA_ROOT)/scripts/make/Makefile.dev
-include $(APPINFRA_ROOT)/scripts/make/Makefile.pytest
+# defaults; Makefile.env resolves the Python interpreter)
+include $(APPINFRA_SCRIPTS)/make/Makefile.config
+include $(APPINFRA_SCRIPTS)/make/Makefile.env
+include $(APPINFRA_SCRIPTS)/make/Makefile.help
+include $(APPINFRA_SCRIPTS)/make/Makefile.utils
+include $(APPINFRA_SCRIPTS)/make/Makefile.clean
+include $(APPINFRA_SCRIPTS)/make/Makefile.dev
+include $(APPINFRA_SCRIPTS)/make/Makefile.pytest
 # Uncomment if using PostgreSQL; the pg targets read the pgserver section of
-# $(ETC_DIR)/$(APPINFRA_DEFAULT_CONFIG_FILE), which the scaffold keeps inside the package:
-# ETC_DIR := $(CURDIR)/$(APPINFRA_DEV_PKG_NAME)/etc
-# include $(APPINFRA_ROOT)/scripts/make/Makefile.pg
+# $(APPINFRA_ETC_DIR)/$(APPINFRA_DEFAULT_CONFIG_FILE):
+# include $(APPINFRA_SCRIPTS)/make/Makefile.pg
 
 ##@ Application
 

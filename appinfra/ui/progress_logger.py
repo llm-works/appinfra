@@ -14,11 +14,11 @@ Only shows visual elements on TTY; falls back to plain logging otherwise.
 from __future__ import annotations
 
 import logging
-import os
 import sys
 from typing import TYPE_CHECKING, Any
 
 from ..log import Logger
+from ._env import env_flag
 
 if TYPE_CHECKING:
     from rich.console import Console as RichConsole
@@ -52,7 +52,7 @@ except ImportError:
 def _is_interactive() -> bool:
     """Check if we're in an interactive terminal."""
     # Respect APPINFRA_NON_INTERACTIVE environment variable
-    if os.environ.get("APPINFRA_NON_INTERACTIVE", "").lower() in ("1", "true", "yes"):
+    if env_flag("APPINFRA_NON_INTERACTIVE"):
         return False
     return sys.stdout.isatty() and sys.stderr.isatty()
 
