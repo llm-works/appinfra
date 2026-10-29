@@ -105,9 +105,8 @@ earlier: pre-release builds (0.13.1.devN) would not satisfy it. -->
 - `make` no longer prints a docs config error on every call when the docs config is missing.
 - `make help`, and a bare `make`, work with the make 3.81 that macOS ships; they failed with an
   awk syntax error.
-- `appinfra.net.tcp.Server` in single-process mode runs a `Ticker` handler in a background thread
-  and stops it with the server; it failed at startup, calling a `Ticker.start()` that does not
-  exist.
+- `TCPServer` in single-process mode refuses a `Ticker` handler at startup with a message pointing
+  to `ticker=`; it failed with an `AttributeError`, calling a `Ticker.start()` that does not exist.
 
 ## [0.13.0] - 2026-10-25
 

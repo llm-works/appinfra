@@ -14,7 +14,6 @@ Tests TCP server implementation including:
 """
 
 import socketserver
-import threading
 from unittest.mock import MagicMock, Mock, patch
 
 import pytest
@@ -30,9 +29,7 @@ from appinfra.net.tcp import (
     _cleanup_ticker_process,
     _run_http_server_with_cleanup,
     _Server,
-    _start_ticker_in_process,
     _start_ticker_process,
-    _stop_ticker_thread,
 )
 from appinfra.time.ticker import Ticker, TickerHandler
 
@@ -151,31 +148,6 @@ class TestHelperFunctions:
             mock_process.start.assert_called_once()
             mock_logger.debug.assert_called_with("ticker process started")
             assert proc == mock_process
-
-    def test_start_ticker_in_process_runs_and_stops_real_ticker(self, mock_logger):
-        """A real Ticker handler ticks in a background thread until stopped."""
-        ticked = threading.Event()
-        ticker = Ticker(mock_logger, ticked.set, secs=0.01)
-
-        thread = _start_ticker_in_process(ticker, mock_logger)
-
-        assert thread is not None
-        assert ticked.wait(timeout=5)
-        _stop_ticker_thread(ticker, thread, mock_logger)
-        assert not thread.is_alive()
-        mock_logger.warning.assert_not_called()
-        mock_logger.debug.assert_any_call("ticker started in single-process mode")
-
-    def test_start_ticker_in_process_without_ticker(self, mock_handler, mock_logger):
-        """Test starting ticker when handler is not a Ticker."""
-        # Should not raise, just do nothing
-        _start_ticker_in_process(mock_handler, mock_logger)
-        mock_logger.debug.assert_not_called()
-
-    def test_start_ticker_in_process_with_none_handler(self, mock_logger):
-        """Test starting ticker with None handler."""
-        # Should not raise
-        _start_ticker_in_process(None, mock_logger)
 
     def test_cleanup_ticker_process_terminates_running_process(self, mock_logger):
         """Test cleanup terminates running ticker process."""
@@ -363,15 +335,8 @@ class TestServerInitialization:
 class TestServerRunInProcess:
     """Test Server.run() in single-process mode."""
 
-    @patch("appinfra.net.tcp._start_ticker_in_process")
     @patch("appinfra.net.tcp._run_http_server_with_cleanup")
-    def test_run_in_process_mode(
-        self,
-        mock_run_http,
-        mock_start_ticker,
-        mock_logger,
-        mock_handler,
-    ):
+    def test_run_in_process_mode(self, mock_run_http, mock_logger, mock_handler):
         """Test running server in single-process mode."""
         server = Server(mock_logger, 8080, mock_handler)
 
@@ -381,27 +346,22 @@ class TestServerRunInProcess:
         mock_logger.debug.assert_any_call(
             "running server in process", extra={"port": 8080}
         )
-        mock_start_ticker.assert_called_once_with(mock_handler, mock_logger)
         mock_run_http.assert_called_once()
 
-    @patch("appinfra.net.tcp._start_ticker_in_process")
     @patch("appinfra.net.tcp._run_http_server_with_cleanup")
-    def test_run_handles_ticker_startup_error(
-        self, mock_run_http, mock_start_ticker, mock_logger, mock_handler
-    ):
-        """Test run handles ticker startup error."""
-        mock_start_ticker.side_effect = Exception("ticker error")
-        server = Server(mock_logger, 8080, mock_handler)
+    def test_run_refuses_ticker_handler(self, mock_run_http, mock_logger):
+        """A Ticker handler is refused before serving; it runs only as ticker=."""
+        ticker = Ticker(mock_logger, lambda: None, secs=1.0)
+        server = Server(mock_logger, 8080, ticker)
 
-        with pytest.raises(ServerStartupError, match="Ticker startup failed"):
+        with pytest.raises(ServerStartupError, match="pass it as ticker="):
             server.run()
 
-        mock_logger.error.assert_called()
+        mock_run_http.assert_not_called()
 
-    @patch("appinfra.net.tcp._start_ticker_in_process")
     @patch("appinfra.net.tcp._run_http_server_with_cleanup")
     def test_run_handles_http_server_startup_error(
-        self, mock_run_http, mock_start_ticker, mock_logger, mock_handler
+        self, mock_run_http, mock_logger, mock_handler
     ):
         """Test run handles HTTP server startup error."""
         mock_run_http.side_effect = Exception("http error")
@@ -411,19 +371,6 @@ class TestServerRunInProcess:
             server.run()
 
         mock_logger.error.assert_called()
-
-    def test_run_in_process_stops_real_ticker_when_server_returns(self, mock_logger):
-        """A Ticker handler ticks while the server serves and stops when it returns."""
-        ticked = threading.Event()
-        ticker = Ticker(mock_logger, ticked.set, secs=0.01)
-
-        def serve(*args, **kwargs):
-            assert ticked.wait(timeout=5)
-
-        with patch("appinfra.net.tcp._run_http_server_with_cleanup", side_effect=serve):
-            assert Server(mock_logger, 8080, ticker).run() == 0
-
-        assert not ticker.is_running()
 
 
 # =============================================================================
@@ -672,25 +619,6 @@ class TestRequestHandler:
 @pytest.mark.integration
 class TestIntegrationScenarios:
     """Test real-world server scenarios."""
-
-    @patch("appinfra.net.tcp._run_http_server_with_cleanup")
-    @patch("appinfra.net.tcp._start_ticker_in_process")
-    def test_server_with_handler_that_is_also_ticker(
-        self, mock_start_ticker, mock_run_http, mock_logger
-    ):
-        """Test server with handler that implements both handler and ticker."""
-        # Create handler that is both a request handler and ticker
-        handler = Mock(spec=Ticker)
-        handler.do_GET = Mock()
-
-        server = Server(mock_logger, 8080, handler)
-        result = server.run()
-
-        assert result == 0
-        # Ticker should be started
-        mock_start_ticker.assert_called_once_with(handler, mock_logger)
-        # HTTP server should run
-        mock_run_http.assert_called_once()
 
     def test_port_range_validation(self, mock_logger, mock_handler):
         """Test various port values."""

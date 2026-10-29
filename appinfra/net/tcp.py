@@ -55,7 +55,6 @@ Example Usage:
 
 import multiprocessing
 import socketserver
-import threading
 from typing import Any
 
 from ..log import Logger
@@ -131,32 +130,6 @@ def _start_ticker_process(
     proc.start()
     lg.debug("ticker process started")
     return proc
-
-
-def _start_ticker_in_process(handler: Any, lg: Any) -> threading.Thread | None:
-    """Run the handler's ticker in a background thread if the handler is a Ticker.
-
-    Ticker.run() blocks until stop(), so it runs beside the HTTP server's
-    serve_forever() in the same process.
-    """
-    if not isinstance(handler, Ticker):
-        return None
-    thread = threading.Thread(target=handler.run, name="ticker", daemon=True)
-    thread.start()
-    lg.debug("ticker started in single-process mode")
-    return thread
-
-
-def _stop_ticker_thread(
-    handler: Any, thread: threading.Thread | None, lg: Any, timeout: float = 5.0
-) -> None:
-    """Stop the in-process ticker and wait for its thread to end."""
-    if thread is None:
-        return
-    handler.stop()
-    thread.join(timeout=timeout)
-    if thread.is_alive():
-        lg.warning("ticker thread did not stop", extra={"timeout": timeout})
 
 
 def _run_http_server_with_cleanup(
@@ -340,26 +313,24 @@ class Server:
         """
         Run the server in single-process mode.
 
-        Runs the HTTP server in the current process, optionally starting
-        a ticker if the handler supports it.
+        Runs the HTTP server in the current process. A ticker runs only in
+        multiprocessing mode (the ticker argument); a Ticker handler is refused.
 
         Returns:
             int: Exit code (0 for success)
 
         Raises:
-            ServerStartupError: If server fails to start
+            ServerStartupError: If server fails to start, or the handler is a Ticker
             ServerShutdownError: If server fails to shutdown gracefully
         """
         self._lg.debug("running server in process", extra={"port": self._port})
+        if isinstance(self._handler, Ticker):
+            raise ServerStartupError(
+                "single-process mode does not run a Ticker handler; pass it as "
+                "ticker= to run it in its own process"
+            )
 
-        thread = None
         try:
-            try:
-                thread = _start_ticker_in_process(self._handler, self._lg)
-            except Exception as e:
-                self._lg.error("failed to start ticker", extra={"exception": e})
-                raise ServerStartupError(f"Ticker startup failed: {e}") from e
-
             try:
                 _run_http_server_with_cleanup(
                     self._lg, self._handler, "0.0.0.0", self._port, mode="in_process"
@@ -371,7 +342,5 @@ class Server:
         except Exception as e:
             self._lg.error("single-process server run failed", extra={"exception": e})
             raise ServerStartupError(f"Single-process server run failed: {e}") from e
-        finally:
-            _stop_ticker_thread(self._handler, thread, self._lg)
 
         return 0
