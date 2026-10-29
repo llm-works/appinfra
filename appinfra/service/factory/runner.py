@@ -9,7 +9,7 @@ from dataclasses import dataclass
 
 from ...log import Logger
 from ..base import Service
-from ..channel.sync import Channel
+from ..channel.sync import Channel, ProcessQueueTransport
 from ..runner import ProcessRunner, Runner, ThreadRunner
 from ..state import RestartPolicy
 from .channel import (
@@ -167,6 +167,10 @@ class RunnerFactory:
 
         IMPORTANT: Create this BEFORE starting the runner.
 
+        The service runs in a daemon process, which multiprocessing terminates when
+        this process exits: requests the service has not read by then are dropped
+        instead of blocking exit.
+
         Args:
             service: Service to run (must be picklable)
             policy: Restart policy (uses default if not provided)
@@ -178,6 +182,9 @@ class RunnerFactory:
         """
         runner = self.create_process_runner(service, policy, stop_timeout)
         pair = channel_pair or self._create_process_pair()
+        transport = getattr(pair.parent, "transport", None)
+        if isinstance(transport, ProcessQueueTransport):
+            transport.allow_exit_without_flush()
 
         return RunnerWithChannel(
             runner=runner,
