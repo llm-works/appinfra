@@ -482,12 +482,17 @@ class AsyncProcessQueueTransport(Generic[TRequest, TResponse]):
             raise
 
     async def close(self) -> None:
-        """Close both multiprocessing queues."""
+        """Close both multiprocessing queues.
+
+        Messages the feeder thread has not yet written to the pipe are dropped:
+        without cancel_join_thread(), interpreter exit joins the feeder, which
+        blocks forever when the pipe is full and the peer no longer reads.
+        """
         self._closed = True
-        with contextlib.suppress(Exception):
-            self._outbound.close()
-        with contextlib.suppress(Exception):
-            self._inbound.close()
+        for q in (self._outbound, self._inbound):
+            with contextlib.suppress(Exception):
+                q.cancel_join_thread()
+                q.close()
 
     @property
     def is_closed(self) -> bool:

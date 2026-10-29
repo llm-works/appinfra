@@ -109,6 +109,8 @@ earlier: pre-release builds (0.13.1.devN) would not satisfy it. -->
   to `ticker=`; it failed with an `AttributeError`, calling a `Ticker.start()` that does not exist.
 - A `Ticker` can be pickled, so `TCPServer(..., ticker=)` starts its ticker process under the spawn
   and forkserver start methods (macOS, Python 3.14 on Linux); it failed on the ticker's lock.
+- Closing a process channel (`ProcessQueueTransport`, `AsyncProcessQueueTransport`) no longer
+  blocks interpreter exit when the peer stopped reading; messages not yet written are dropped.
 
 ## [0.13.0] - 2026-10-25
 
