@@ -140,7 +140,6 @@ def test_stalled_reader_never_sees_a_partial_message(use_async: bool) -> None:
         target=_send_large_then_exit, args=(outbound, inbound, use_async)
     )
     proc.start()
-    proc.join(timeout=30)  # the sender is gone before anyone reads
     outcome: list[Any] = []
 
     def read() -> None:
@@ -149,12 +148,74 @@ def test_stalled_reader_never_sees_a_partial_message(use_async: bool) -> None:
         except queue.Empty:
             outcome.append("empty")
 
-    reader = threading.Thread(target=read, daemon=True)
-    reader.start()
-    reader.join(timeout=10)
     try:
+        proc.join(timeout=30)  # the sender is gone before anyone reads
+        assert proc.exitcode == 0, f"sender did not exit cleanly: {proc.exitcode}"
+        reader = threading.Thread(target=read, daemon=True)
+        reader.start()
+        reader.join(timeout=10)
         assert not reader.is_alive(), "reader blocked on a partial message"
         assert outcome in (["empty"], [len(_LARGE)])
     finally:
+        if proc.is_alive():
+            proc.terminate()
+            proc.join(timeout=5)
+        outbound.close()
+        inbound.close()
+
+
+# Far more than one drain pass per flush deadline: each over the pipe buffer
+_BACKLOG = 300
+_CHUNK = "x" * (128 * 1024)
+
+
+def _send_backlog_then_exit(outbound: Any, inbound: Any, use_async: bool) -> None:
+    """Queue _BACKLOG messages larger than the pipe buffer, close and return."""
+    if use_async:
+
+        async def main() -> None:
+            transport = AsyncProcessQueueTransport(outbound=outbound, inbound=inbound)
+            for _ in range(_BACKLOG):
+                outbound.put(_CHUNK)
+            await transport.close()
+
+        asyncio.run(main())
+    else:
+        transport = ProcessQueueTransport(outbound=outbound, inbound=inbound)
+        for _ in range(_BACKLOG):
+            transport.send(_CHUNK)
+        transport.close()
+
+
+@pytest.mark.parametrize("use_async", [False, True], ids=["sync", "async"])
+def test_backlog_drains_to_a_message_boundary(use_async: bool) -> None:
+    """A long unread backlog is drained whole: the sender exits, no reader hangs."""
+    ctx = multiprocessing.get_context("spawn")
+    outbound, inbound = ctx.Queue(), ctx.Queue()
+    proc = ctx.Process(
+        target=_send_backlog_then_exit, args=(outbound, inbound, use_async)
+    )
+    proc.start()
+    received: list[int] = []
+
+    def read() -> None:
+        try:
+            while True:
+                received.append(len(outbound.get(timeout=2)))
+        except queue.Empty:
+            pass
+
+    try:
+        proc.join(timeout=60)
+        assert proc.exitcode == 0, f"sender did not exit cleanly: {proc.exitcode}"
+        reader = threading.Thread(target=read, daemon=True)
+        reader.start()
+        reader.join(timeout=30)
+        assert not reader.is_alive(), "reader blocked on a partial message"
+        assert all(n == len(_CHUNK) for n in received)
+    finally:
+        if proc.is_alive():
+            proc.terminate()
+            proc.join(timeout=5)
         outbound.close()
         inbound.close()

@@ -19,6 +19,7 @@ import os
 import signal
 import socket
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -121,21 +122,36 @@ def _start_pending_request(port: int) -> tuple[threading.Thread, dict[str, Any]]
 
 
 def _pid_gone(pid: int) -> bool:
-    """True if the process no longer exists or is a zombie awaiting reaping.
-
-    ps, not /proc, so it also holds on macOS: there a missing /proc read as gone
-    while the server was still shutting down and holding its port.
-    """
+    """True if the process no longer exists or is a zombie awaiting reaping."""
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
         return True
-    ps = subprocess.run(
-        ["ps", "-o", "stat=", "-p", str(pid)], capture_output=True, text=True
-    )
-    # nonzero: reaped between the kill and ps; a zombie whose parent died is
+    # None: reaped between the kill and the lookup; a zombie whose parent died is
     # reaped by whatever adopted it, at any moment
-    return ps.returncode != 0 or ps.stdout.strip().startswith("Z")
+    return _proc_state(pid) in (None, "Z")
+
+
+def _proc_state(pid: int) -> str | None:
+    """The process's state letter (R, S, Z, ...), or None if it no longer exists.
+
+    /proc on Linux; macOS has none, so BSD ps there. A lookup that fails for any
+    other reason raises: reading it as gone let the port check race a server that
+    was still shutting down.
+    """
+    if sys.platform == "darwin":
+        ps = subprocess.run(
+            ["ps", "-o", "stat=", "-p", str(pid)], capture_output=True, text=True
+        )
+        if ps.returncode != 0 and not ps.stderr.strip():
+            return None  # no such process: exit 1 with no output
+        ps.check_returncode()
+        return ps.stdout.strip()[:1] or None
+    try:
+        with open(f"/proc/{pid}/stat") as f:
+            return f.read().rsplit(")", 1)[1].split()[0]
+    except (FileNotFoundError, ProcessLookupError):
+        return None
 
 
 def _port_bindable(port: int) -> bool:

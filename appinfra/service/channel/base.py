@@ -72,7 +72,7 @@ def send_slice(deadline: float | None) -> float:
 #: Longest close() lets an mp.Queue's feeder thread write sent messages to the pipe.
 QUEUE_FLUSH_TIMEOUT = 1.0
 
-#: Longest close() then reads back its own unread messages so the feeder can finish.
+#: Longest close() keeps draining its own unread messages without reading one.
 QUEUE_DRAIN_TIMEOUT = 1.0
 
 
@@ -84,19 +84,21 @@ def _feeder(q: Any) -> threading.Thread | None:
     return getattr(q, "_thread", None)
 
 
-def _drain_one(q: Any, timeout: float) -> None:
-    """Read and drop one whole message from q's pipe, if one arrives within timeout.
+def _drain_one(q: Any, timeout: float) -> bool:
+    """Read and drop one whole message from q's pipe; True if one arrived in time.
 
     Under q's cross-process read lock, as get() reads, so a peer reading at the same
     time still gets whole messages; get() itself refuses once close() has run. The
     feeder keeps the read end open until it exits.
     """
     if not q._rlock.acquire(True, timeout):
-        return
+        return False
     try:
         with contextlib.suppress(OSError, EOFError):  # the feeder exited and closed it
             if q._reader.poll(timeout):
                 q._reader.recv_bytes()
+                return True
+        return False
     finally:
         q._rlock.release()
 
@@ -107,9 +109,10 @@ def close_queue(q: Any) -> None:
     The feeder keeps writing after close(), and interpreter exit joins it. It gets
     QUEUE_FLUSH_TIMEOUT to write sent messages for a reader that is still reading. If
     the pipe stays full (no reader, or a stalled one), close() reads back and drops the
-    unread messages for up to QUEUE_DRAIN_TIMEOUT, so the feeder finishes on a message
-    boundary and exits. Cancelling the exit join instead would let the process exit
-    mid-message and leave a partial one that blocks the next reader forever: every
+    unread messages until the feeder exits, so it always stops on a message boundary.
+    Draining is what lets the feeder progress, so it only gives up when nothing has
+    arrived for QUEUE_DRAIN_TIMEOUT: a dead peer holding the read lock. Exiting mid-
+    message would leave a partial one that blocks the next reader forever: every
     process holding the queue holds its write end, so no EOF ever arrives.
     """
     q.close()
@@ -118,11 +121,12 @@ def close_queue(q: Any) -> None:
         if feeder is None:
             return
         feeder.join(QUEUE_FLUSH_TIMEOUT)
-        deadline = time.monotonic() + QUEUE_DRAIN_TIMEOUT
-        while feeder.is_alive() and time.monotonic() < deadline:
-            _drain_one(q, 0.05)
+        last_read = time.monotonic()
+        while feeder.is_alive() and time.monotonic() - last_read < QUEUE_DRAIN_TIMEOUT:
+            if _drain_one(q, 0.05):
+                last_read = time.monotonic()
     finally:
-        # Last resort, e.g. a dead peer holding the read lock: exit rather than hang
+        # Last resort, the read lock held by a dead peer: exit rather than hang
         if feeder is None or feeder.is_alive():
             q.cancel_join_thread()
 
@@ -130,16 +134,23 @@ def close_queue(q: Any) -> None:
 async def close_queue_async(q: Any) -> None:
     """close_queue() without blocking the event loop while the feeder writes.
 
-    A cancelled wait still cancels the exit join, so a stuck feeder cannot hang exit.
+    It yields after every drained message and sleeps only when none was waiting. A
+    cancelled wait still cancels the exit join, so a stuck feeder cannot hang exit.
     """
     q.close()
     feeder = _feeder(q)
     drain_at = time.monotonic() + QUEUE_FLUSH_TIMEOUT
-    deadline = drain_at + QUEUE_DRAIN_TIMEOUT
+    last_read = drain_at
     try:
-        while feeder is not None and feeder.is_alive() and time.monotonic() < deadline:
-            if time.monotonic() >= drain_at:
-                _drain_one(q, 0)
+        while feeder is not None and feeder.is_alive():
+            now = time.monotonic()
+            if now >= drain_at:
+                if _drain_one(q, 0):
+                    last_read = time.monotonic()
+                    await asyncio.sleep(0)
+                    continue
+                if now - last_read >= QUEUE_DRAIN_TIMEOUT:
+                    break
             await asyncio.sleep(0.01)
     finally:
         if feeder is None or feeder.is_alive():
