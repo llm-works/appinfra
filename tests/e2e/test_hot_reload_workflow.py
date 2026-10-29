@@ -15,16 +15,28 @@ Tests cover:
 - Config changes are detected and applied
 """
 
+import logging
 import os
 import sys
 import tempfile
 import time
+from collections.abc import Callable
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from appinfra.app.builder import AppBuilder
+
+
+def _wait_until(condition: Callable[[], bool], timeout: float = 5.0) -> bool:
+    """Poll until condition holds; the watcher applies a change on its own thread."""
+    deadline = time.monotonic() + timeout
+    while not condition():
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.02)
+    return True
 
 
 def _spec_app(etc_dir: Path, filename: str = "app.yaml") -> AppBuilder:
@@ -450,6 +462,8 @@ class TestHotReloadRealWatcher:
                     # Initial level should be info
                     initial_level = app.config.logging.level
                     assert initial_level == "info"
+                    logger = app.lifecycle.logger
+                    assert logger.level == logging.INFO
 
                     # Modify the config file
                     config_path.write_text(
@@ -460,12 +474,9 @@ class TestHotReloadRealWatcher:
                         "    debounce_ms: 50\n"
                     )
 
-                    # Wait for watcher to detect change (debounce + processing time)
-                    time.sleep(0.2)
-
-                    # Note: The actual log level change depends on how the watcher
-                    # callback is implemented. This test verifies the watcher runs
-                    # without error when a file change occurs.
+                    assert _wait_until(lambda: logger.level == logging.DEBUG), (
+                        f"Expected DEBUG after hot-reload, got {logger.level}"
+                    )
                 finally:
                     if app._config_watcher and app._config_watcher.is_running():
                         app._config_watcher.stop()
@@ -510,11 +521,7 @@ class TestHotReloadRealWatcher:
                         "    debounce_ms: 50\n"
                     )
 
-                    # Wait for watcher to detect and apply change
-                    time.sleep(0.3)
-
-                    # Verify location updated via hot-reload
-                    assert logger.location == 3, (
+                    assert _wait_until(lambda: logger.location == 3), (
                         f"Expected location=3 after hot-reload, got {logger.location}"
                     )
 
@@ -568,7 +575,9 @@ class TestHotReloadRealWatcher:
                         "    debounce_ms: 50\n"
                     )
 
-                    time.sleep(0.3)
+                    assert _wait_until(lambda: logger.location == 2), (
+                        "Location should have updated to 2"
+                    )
 
                     # Capture log output with location=2
                     output_after = io.StringIO()
@@ -583,8 +592,6 @@ class TestHotReloadRealWatcher:
                     # With location=0, no file path should be shown
                     # With location=2, file path(s) should be included
                     # The exact format depends on formatter, but location>0 adds path info
-                    assert logger.location == 2, "Location should have updated to 2"
-
                 finally:
                     if app._config_watcher and app._config_watcher.is_running():
                         app._config_watcher.stop()
