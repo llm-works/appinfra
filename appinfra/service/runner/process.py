@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import contextlib
 import multiprocessing as mp
+import sys
 import threading
 import time
 from multiprocessing.synchronize import Event as MPEvent
@@ -178,7 +179,15 @@ class ProcessRunner(Runner):
 
         # Stop monitor thread first
         self.stop_monitor()
+        self._stop_process(timeout)
 
+    def _stop_for_restart(self) -> None:
+        """Stop the failed process only: a restart runs on the monitor thread,
+        which keeps watching the restarted process."""
+        self._stop_process(None)
+
+    def _stop_process(self, timeout: float | None) -> None:
+        """Signal the subprocess to stop, escalating to terminate and kill."""
         self._transition(State.STOPPING)
         timeout = timeout or self.stop_timeout
 
@@ -232,8 +241,15 @@ class ProcessRunner(Runner):
             timeout: Seconds to wait for thread to stop.
         """
         self._stop_monitor_event.set()
-        if self._monitor_thread is not None and self._monitor_thread.is_alive():
-            self._monitor_thread.join(timeout=timeout)
+        thread = self._monitor_thread
+        # Called from the monitor thread itself (e.g. a state hook), there is
+        # nothing to join: the set event ends its loop
+        if (
+            thread is not None
+            and thread.is_alive()
+            and thread is not threading.current_thread()
+        ):
+            thread.join(timeout=timeout)
         self._monitor_thread = None
 
     def _monitor_loop(self, interval: float) -> None:
@@ -364,7 +380,11 @@ def _process_entry(
     Injects runtime dependencies into the service:
     - ``_lg``: Logger configured to forward to parent via queue
     - ``_shutdown_event``: Event signaled when parent requests shutdown
+
+    The process exits non-zero when the service failed, so the parent's monitor
+    restarts it; exit code 0 means a clean shutdown.
     """
+    exit_code = 0
     try:
         lg = Logger.from_queue_config(log_config, name=f"svc/{service.name}")
         # Inject runtime dependencies (services must have these attributes)
@@ -376,8 +396,26 @@ def _process_entry(
         _start_health_poller(service, shutdown_event, healthy_event)
         service.execute()
     except BaseException as e:
+        exit_code = _exit_code(e)
         with contextlib.suppress(Exception):
             error_queue.put(e)
     finally:
         with contextlib.suppress(Exception):
             service.teardown()
+    if exit_code:
+        sys.exit(exit_code)
+
+
+def _exit_code(exc: BaseException) -> int:
+    """Exit code for a service that ended with *exc*.
+
+    KeyboardInterrupt (Ctrl-C reaching the process group) is a shutdown and
+    SystemExit keeps its own code; any other exception is a failure.
+    """
+    if isinstance(exc, KeyboardInterrupt):
+        return 0
+    if isinstance(exc, SystemExit):
+        if exc.code is None:
+            return 0
+        return exc.code if isinstance(exc.code, int) else 1
+    return 1

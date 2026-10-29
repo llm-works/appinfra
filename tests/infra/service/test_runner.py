@@ -649,6 +649,9 @@ class TestRunnerRestart:
         """Restart stops after max_retries."""
 
         class AlwaysFails(Service):
+            def __init__(self) -> None:
+                self._lg = MagicMock()
+
             @property
             def name(self) -> str:
                 return "always-fails"
@@ -657,7 +660,8 @@ class TestRunnerRestart:
                 raise RuntimeError("always fails")
 
         policy = RestartPolicy(max_retries=2, backoff=0.01)
-        runner = ThreadRunner(AlwaysFails(), policy)
+        service = AlwaysFails()
+        runner = ThreadRunner(service, policy)
 
         runner.start()
         with pytest.raises(RunError):
@@ -674,6 +678,14 @@ class TestRunnerRestart:
         # Third attempt should not restart (max reached)
         result = runner.check()
         assert result is False
+
+        # Each failed restart is logged, not dropped
+        failures = [
+            c
+            for c in service._lg.warning.call_args_list
+            if c.args == ("restart failed",)
+        ]
+        assert len(failures) == 2
 
     def test_restart_disabled(self):
         """Restart can be disabled."""

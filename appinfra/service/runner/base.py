@@ -175,11 +175,15 @@ class Runner(ABC):
             return self._maybe_restart()
         return False
 
+    def _stop_for_restart(self) -> None:
+        """Clean up the failed execution before a restart."""
+        self.stop()
+
     def _maybe_restart(self) -> bool:
         """Attempt restart based on policy.
 
-        Performs cleanup via stop() before restarting to ensure no residual
-        state from the failed execution.
+        Cleans up via _stop_for_restart() before restarting to ensure no
+        residual state from the failed execution.
         """
         if not self.policy.restart_on_failure:
             return False
@@ -194,11 +198,15 @@ class Runner(ABC):
 
         try:
             # Ensure cleanup before restart (handles residual state)
-            self.stop()
+            self._stop_for_restart()
             self.start()
             self.wait_healthy()
             return True
-        except Exception:
+        except Exception as e:
+            self.service.lg.warning(
+                "restart failed",
+                extra={"exception": e, "service": self.name, "attempt": self._retries},
+            )
             return False
 
     def _calculate_backoff(self) -> float:
