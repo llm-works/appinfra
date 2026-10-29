@@ -61,6 +61,11 @@ earlier: pre-release builds (0.13.1.devN) would not satisfy it. -->
 - **Breaking:** every on/off setting (`APPINFRA_DRY_RUN`, `APPINFRA_DEV_CQ_STRICT`, `APPINFRA_YES`,
   ...) takes `true`, `1`, `y`, `yes` or `false`, `0`, `n`, `no`, in any case; any other value is
   an error. `APPINFRA_DRY_RUN=1` used to be the only on value, `true` for the others.
+- **Breaking:** make checks every setting's value against its type (mode, percent, integer,
+  worker count), and an `APPINFRA_*` name that is not an appinfra setting stops make.
+- **Breaking:** settings follow one precedence: command line, environment, `Makefile.local`
+  (assigned with `:=`), project Makefile (with `?=`), defaults. An environment value now
+  outranks a `Makefile.local` assignment; a `:=` in the project Makefile pins its value.
 - **Breaking:** an `APPINFRA_*` or `PYTHON` that the environment or the command line sets empty
   stops make; it used to run the setting empty, hiding `Makefile.local` and the default.
 - A `Ticker.stop()` while the ticker is not running is kept: the next `run()` returns at once,

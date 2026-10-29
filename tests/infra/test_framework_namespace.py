@@ -279,3 +279,31 @@ class TestPublicSettings:
             n for n in _declared() if not re.search(rf"\b{n}\b", docs)
         )
         assert undocumented == []
+
+    def test_registry_types_each_setting_once(self) -> None:
+        """Every declared setting has exactly one type in Makefile.config's registry."""
+        registry = _registry()
+        names = [name for names in registry.values() for name in names]
+        assert sorted(names) == sorted(set(names)), "a setting has more than one type"
+        assert sorted(names) == sorted(_declared())
+
+
+_REGISTRY_LISTS = [
+    "_APPINFRA_BOOLEANS",
+    "_APPINFRA_MODES",
+    "_APPINFRA_PERCENTS",
+    "_APPINFRA_INTEGERS",
+    "_APPINFRA_WORKERS",
+    "_APPINFRA_TEXTS",
+]
+
+
+def _registry() -> dict[str, list[str]]:
+    """The type lists of Makefile.config's setting registry, as make expands them."""
+    text = MAKEFILE_CONFIG.read_text()
+    registry = {}
+    for name in _REGISTRY_LISTS:
+        m = re.search(rf"^{name} := ((?:.*\\\n)*.*)$", text, re.MULTILINE)
+        assert m, f"{name} not found in Makefile.config"
+        registry[name] = m[1].replace("\\\n", " ").split()
+    return registry

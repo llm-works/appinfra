@@ -86,7 +86,7 @@ COVERAGE_MARKERS="${APPINFRA_PYTEST_COVERAGE_MARKERS:-unit}"
 # Set to 0 to disable coverage checking entirely
 DEFAULT_COVERAGE_TARGET="${APPINFRA_PYTEST_COVERAGE_THRESHOLD:-80}"
 COVERAGE_TARGET="${COVERAGE_TARGET:-$DEFAULT_COVERAGE_TARGET}"
-if ! echo "$COVERAGE_TARGET" | grep -qE '^[0-9]+\.?[0-9]*$'; then
+if ! echo "$COVERAGE_TARGET" | grep -qE '^[0-9]+(\.[0-9]+)?$'; then
     echo "Error: Invalid coverage target: $COVERAGE_TARGET" >&2
     exit 1
 fi

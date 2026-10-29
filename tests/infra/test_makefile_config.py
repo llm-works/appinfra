@@ -52,6 +52,115 @@ def _clean_env() -> dict[str, str]:
     return {**env, "APPINFRA_PYTHON": sys.executable}
 
 
+def _setting(
+    tmp_path: Path,
+    project: str,
+    local: str,
+    env: dict[str, str] | None = None,
+    *args: str,
+) -> str:
+    """APPINFRA_DEV_PKG_NAME's value, given the project Makefile and Makefile.local."""
+    (tmp_path / "Makefile.local").write_text(local)
+    (tmp_path / "Makefile").write_text(
+        f"{project}\ninclude {MAKEFILE_CONFIG}\nok:\n\t@echo $(APPINFRA_DEV_PKG_NAME)\n"
+    )
+    result = subprocess.run(
+        ["make", "--no-print-directory", "ok", *args],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        env={**_clean_env(), **(env or {})},
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    return result.stdout.strip()
+
+
+@pytest.mark.unit
+class TestPrecedence:
+    """command line > environment > Makefile.local := > project ?= > default."""
+
+    PROJECT = "APPINFRA_DEV_PKG_NAME ?= project"
+    LOCAL = "APPINFRA_DEV_PKG_NAME := local\n"
+    ENV = {"APPINFRA_DEV_PKG_NAME": "env"}
+
+    def test_default(self, tmp_path: Path) -> None:
+        assert _setting(tmp_path, "", "") == "appinfra"
+
+    def test_project_beats_default(self, tmp_path: Path) -> None:
+        assert _setting(tmp_path, self.PROJECT, "") == "project"
+
+    def test_makefile_local_beats_project(self, tmp_path: Path) -> None:
+        assert _setting(tmp_path, self.PROJECT, self.LOCAL) == "local"
+
+    def test_environment_beats_makefile_local(self, tmp_path: Path) -> None:
+        assert _setting(tmp_path, self.PROJECT, self.LOCAL, self.ENV) == "env"
+
+    def test_environment_beats_project(self, tmp_path: Path) -> None:
+        assert _setting(tmp_path, self.PROJECT, "", self.ENV) == "env"
+
+    def test_command_line_beats_environment(self, tmp_path: Path) -> None:
+        args = ("APPINFRA_DEV_PKG_NAME=cli",)
+        assert _setting(tmp_path, self.PROJECT, self.LOCAL, self.ENV, *args) == "cli"
+
+    def test_project_colon_assign_pins_against_environment(
+        self, tmp_path: Path
+    ) -> None:
+        pinned = "APPINFRA_DEV_PKG_NAME := pinned"
+        assert _setting(tmp_path, pinned, "", self.ENV) == "pinned"
+
+    def test_makefile_local_beats_pinned_project(self, tmp_path: Path) -> None:
+        pinned = "APPINFRA_DEV_PKG_NAME := pinned"
+        assert _setting(tmp_path, pinned, self.LOCAL) == "local"
+
+    def test_environment_value_is_validated(self, tmp_path: Path) -> None:
+        """An environment value reaches validation over a project ?= (the wrrn case)."""
+        (tmp_path / "Makefile").write_text(
+            f"APPINFRA_DEV_CQ_DUP ?= strict\ninclude {MAKEFILE_CONFIG}\nok:\n\t@echo ok\n"
+        )
+        result = subprocess.run(
+            ["make", "--no-print-directory", "ok"],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+            env={**_clean_env(), "APPINFRA_DEV_CQ_DUP": "wrrn"},
+            check=False,
+        )
+        assert result.returncode != 0
+        assert "APPINFRA_DEV_CQ_DUP=wrrn is not a mode" in result.stderr
+
+    def test_restored_environment_value_reaches_recipes(self, tmp_path: Path) -> None:
+        (tmp_path / "Makefile.local").write_text(self.LOCAL)
+        (tmp_path / "Makefile").write_text(
+            f"include {MAKEFILE_CONFIG}\nok:\n\t@echo $$APPINFRA_DEV_PKG_NAME\n"
+        )
+        result = subprocess.run(
+            ["make", "--no-print-directory", "ok"],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+            env={**_clean_env(), **self.ENV},
+            check=False,
+        )
+        assert result.stdout.strip() == "env", result.stderr
+
+    def test_interpreter_environment_beats_makefile_local(self, tmp_path: Path) -> None:
+        (tmp_path / "Makefile.local").write_text("PYTHON := /local/python\n")
+        (tmp_path / "Makefile").write_text(
+            f"include {MAKE_DIR / 'Makefile.env'}\nok:\n\t@echo $(PYTHON)\n"
+        )
+        env = {k: v for k, v in _clean_env().items() if k != "APPINFRA_PYTHON"}
+        result = subprocess.run(
+            ["make", "--no-print-directory", "ok"],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+            env={**env, "PYTHON": "/env/python"},
+            check=False,
+        )
+        assert result.stdout.strip() == "/env/python", result.stderr
+
+
 @pytest.mark.unit
 class TestConfigLoading:
     """Makefile.local loads in every layout; INFRA_* config overrides pass through."""
@@ -453,3 +562,95 @@ class TestMakeConfig:
         )
         assert result.returncode == 0, result.stderr
         assert "APPINFRA_RUN_PYTEST" not in result.stdout
+
+
+@pytest.mark.unit
+class TestUnknownSettings:
+    """An APPINFRA_* name the registry does not declare stops make, from any source."""
+
+    def test_environment(self, tmp_path: Path) -> None:
+        result = _make(tmp_path, "", env={"APPINFRA_DEV_CQ_STRCT": "true"})
+        assert result.returncode != 0
+        assert "APPINFRA_DEV_CQ_STRCT: not an appinfra setting" in result.stderr
+
+    def test_command_line(self, tmp_path: Path) -> None:
+        result = _make(tmp_path, "", "APPINFRA_TYPO=1")
+        assert "APPINFRA_TYPO: not an appinfra setting" in result.stderr
+
+    def test_makefile(self, tmp_path: Path) -> None:
+        result = _make(tmp_path, "APPINFRA_MY_OWN := x")
+        assert "APPINFRA_MY_OWN: not an appinfra setting" in result.stderr
+
+    def test_makefile_local(self, tmp_path: Path) -> None:
+        (tmp_path / "Makefile.local").write_text("APPINFRA_PG_PORT ?= 5433\n")
+        result = _make(tmp_path, "")
+        assert "APPINFRA_PG_PORT: not an appinfra setting" in result.stderr
+
+    def test_internal_names_pass(self, tmp_path: Path) -> None:
+        result = _make(tmp_path, "", env={"_APPINFRA_CHECK_PYTEST_SUITE": "unit"})
+        assert result.returncode == 0, result.stderr
+
+
+def _value(tmp_path: Path, name: str, value: str) -> subprocess.CompletedProcess[str]:
+    """Run make printing NAME, with NAME=value on the command line."""
+    (tmp_path / "Makefile").write_text(
+        f"include {MAKEFILE_CONFIG}\nok:\n\t@echo $({name})\n"
+    )
+    return subprocess.run(
+        ["make", "--no-print-directory", "ok", f"{name}={value}"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        env=_clean_env(),
+        check=False,
+    )
+
+
+@pytest.mark.unit
+class TestSettingTypes:
+    """Each typed setting accepts exactly its type's values."""
+
+    @pytest.mark.parametrize(
+        ("name", "value", "expected"),
+        [
+            ("APPINFRA_DEV_CQ_DUP", "warn", "warn"),
+            ("APPINFRA_DEV_CQ_DEAD", "Strict", "strict"),
+            ("APPINFRA_DEV_CQ_DUP", "FALSE", "false"),
+            ("APPINFRA_PYTEST_COVERAGE_THRESHOLD", "0", "0"),
+            ("APPINFRA_PYTEST_COVERAGE_THRESHOLD", "95.5", "95.5"),
+            ("APPINFRA_DEV_DOCSTRING_THRESHOLD", "100", "100"),
+            ("APPINFRA_DEV_DOCSTRING_THRESHOLD", "100.0", "100.0"),
+            ("APPINFRA_PYTEST_HANG_DUMP_SECONDS", "0", "0"),
+            ("APPINFRA_PYTEST_HANG_DUMP_SECONDS", "300", "300"),
+            ("APPINFRA_PYTEST_WORKERS", "auto", "auto"),
+            ("APPINFRA_PYTEST_WORKERS", "8", "8"),
+        ],
+    )
+    def test_valid(self, tmp_path: Path, name: str, value: str, expected: str) -> None:
+        result = _value(tmp_path, name, value)
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == expected
+
+    @pytest.mark.parametrize(
+        ("name", "value", "kind"),
+        [
+            ("APPINFRA_DEV_CQ_DUP", "strcit", "a mode: use false, warn or strict"),
+            ("APPINFRA_DEV_CQ_DEAD", "on", "a mode"),
+            ("APPINFRA_PYTEST_COVERAGE_THRESHOLD", "101", "a percent"),
+            ("APPINFRA_PYTEST_COVERAGE_THRESHOLD", "100.5", "a percent"),
+            ("APPINFRA_PYTEST_COVERAGE_THRESHOLD", "95.", "a percent"),
+            ("APPINFRA_PYTEST_COVERAGE_THRESHOLD", ".5", "a percent"),
+            ("APPINFRA_PYTEST_COVERAGE_THRESHOLD", "9.5.1", "a percent"),
+            ("APPINFRA_DEV_DOCSTRING_THRESHOLD", "007", "a percent"),
+            ("APPINFRA_DEV_DOCSTRING_THRESHOLD", "high", "a percent"),
+            ("APPINFRA_PYTEST_HANG_DUMP_SECONDS", "-1", "an integer"),
+            ("APPINFRA_PYTEST_HANG_DUMP_SECONDS", "2m", "an integer"),
+            ("APPINFRA_PYTEST_WORKERS", "0", "a worker count"),
+            ("APPINFRA_PYTEST_WORKERS", "04", "a worker count"),
+            ("APPINFRA_PYTEST_WORKERS", "many", "a worker count"),
+        ],
+    )
+    def test_invalid(self, tmp_path: Path, name: str, value: str, kind: str) -> None:
+        result = _value(tmp_path, name, value)
+        assert result.returncode != 0
+        assert f"{name}={value} is not {kind}" in result.stderr

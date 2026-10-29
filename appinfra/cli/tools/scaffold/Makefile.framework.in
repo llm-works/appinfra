@@ -4,9 +4,9 @@
 # Generated with infra scaffold tool using --makefile-style=framework
 
 # Configuration
-APPINFRA_DEV_PKG_NAME := {{PROJECT_NAME}}
+APPINFRA_DEV_PKG_NAME ?= {{PROJECT_NAME}}
 # The scaffold keeps the config (etc/infra.yaml) inside the package
-APPINFRA_ETC_DIR := $(CURDIR)/$(APPINFRA_DEV_PKG_NAME)/etc
+APPINFRA_ETC_DIR ?= $(CURDIR)/$(APPINFRA_DEV_PKG_NAME)/etc
 
 # appinfra's scripts directory (what `appinfra scripts-path` prints), located
 # through the interpreter that has appinfra installed. Set APPINFRA_SCRIPTS

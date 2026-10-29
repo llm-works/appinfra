@@ -7,13 +7,13 @@
 # Makefiles instead of this file.
 #
 # Usage (in consuming project's Makefile):
-#   APPINFRA_SCRIPTS := path/to/appinfra/scripts
-#   APPINFRA_DEV_PKG_NAME := myproject
+#   APPINFRA_SCRIPTS ?= path/to/appinfra/scripts
+#   APPINFRA_DEV_PKG_NAME ?= myproject
 #   include $(APPINFRA_SCRIPTS)/make/Makefile.all
 #
 # For selective inclusion (preferred for submodule use):
-#   APPINFRA_SCRIPTS := path/to/appinfra/scripts
-#   APPINFRA_DEV_PKG_NAME := myproject
+#   APPINFRA_SCRIPTS ?= path/to/appinfra/scripts
+#   APPINFRA_DEV_PKG_NAME ?= myproject
 #   include $(APPINFRA_SCRIPTS)/make/Makefile.config
 #   include $(APPINFRA_SCRIPTS)/make/Makefile.env
 #   include $(APPINFRA_SCRIPTS)/make/Makefile.help

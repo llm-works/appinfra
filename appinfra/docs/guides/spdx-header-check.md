@@ -99,7 +99,7 @@ works across them.
 project's top-level Makefile before including the framework:
 
 ```makefile
-APPINFRA_DEV_CQ_SPDX := true
+APPINFRA_DEV_CQ_SPDX ?= true
 
 include path/to/appinfra/Makefile
 ```

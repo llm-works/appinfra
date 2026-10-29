@@ -199,7 +199,7 @@ class TestScaffoldWorkflow:
     ):
         """Verify framework Makefile has expected content."""
         assert "Makefile.env" in makefile_content
-        assert f"APPINFRA_DEV_PKG_NAME := {project_name}" in makefile_content
+        assert f"APPINFRA_DEV_PKG_NAME ?= {project_name}" in makefile_content
         assert "APPINFRA_SCRIPTS" in makefile_content
         for makefile in [
             "Makefile.config",
@@ -324,7 +324,7 @@ class TestScaffoldWorkflow:
         # Verify Makefile has project name
         makefile_content = (project_path / "Makefile").read_text()
         assert f"# {project_name} - Framework-based Makefile" in makefile_content
-        assert f"APPINFRA_DEV_PKG_NAME := {project_name}" in makefile_content
+        assert f"APPINFRA_DEV_PKG_NAME ?= {project_name}" in makefile_content
         assert f"$(PYTHON) -m {project_name}" in makefile_content
         assert "{{PROJECT_NAME}}" not in makefile_content, (
             "Template variable should be replaced"

@@ -14,10 +14,10 @@ pip install appinfra
 
 ```makefile
 # Makefile - using pip-installed appinfra
-APPINFRA_SCRIPTS := $(shell appinfra scripts-path)
+APPINFRA_SCRIPTS ?= $(shell appinfra scripts-path)
 
 # Configure your project
-APPINFRA_DEV_PKG_NAME := myproject
+APPINFRA_DEV_PKG_NAME ?= myproject
 
 # Include framework
 include $(APPINFRA_SCRIPTS)/make/Makefile.all
@@ -39,9 +39,9 @@ git submodule add <repo-url> submodules/appinfra
 
 ```makefile
 # Makefile - using submodule
-APPINFRA_SCRIPTS := submodules/appinfra/appinfra/scripts
+APPINFRA_SCRIPTS ?= submodules/appinfra/appinfra/scripts
 
-APPINFRA_DEV_PKG_NAME := myproject
+APPINFRA_DEV_PKG_NAME ?= myproject
 include $(APPINFRA_SCRIPTS)/make/Makefile.all
 ```
 
@@ -51,10 +51,10 @@ Either way, `APPINFRA_SCRIPTS` is appinfra's scripts directory, so the includes 
 
 ```makefile
 # Recommended setup (pip install)
-APPINFRA_SCRIPTS := $(shell appinfra scripts-path)
+APPINFRA_SCRIPTS ?= $(shell appinfra scripts-path)
 
 # Configure your project
-APPINFRA_DEV_PKG_NAME := myproject
+APPINFRA_DEV_PKG_NAME ?= myproject
 
 # Include framework (config must be first)
 include $(APPINFRA_SCRIPTS)/make/Makefile.config
@@ -99,16 +99,20 @@ include $(APPINFRA_SCRIPTS)/make/Makefile.all
 
 Variables are resolved in this order (highest to lowest priority):
 
-1. **Environment variables** - `APPINFRA_DEV_PKG_NAME=foo make test`
-2. **Makefile variables before include** - `APPINFRA_DEV_PKG_NAME := foo`
-3. **Makefile.local** - Optional overrides file (not committed)
-4. **Framework defaults** - Defined in `Makefile.config`
+1. **Command line** - `make test APPINFRA_DEV_PKG_NAME=foo`
+2. **Environment variables** - `APPINFRA_DEV_PKG_NAME=foo make test`
+3. **Makefile.local** - Optional overrides file (not committed), `APPINFRA_DEV_PKG_NAME := foo`
+4. **Project Makefile, before the include** - `APPINFRA_DEV_PKG_NAME ?= foo`
+5. **Framework defaults** - Defined in `Makefile.config`
+
+A `:=` in the project Makefile pins the value against the environment; see
+[Configuration Precedence](makefile-customization.md#configuration-precedence).
 
 ### Example: Setting Package Name
 
 ```makefile
 # In Makefile (before include)
-APPINFRA_DEV_PKG_NAME := myproject
+APPINFRA_DEV_PKG_NAME ?= myproject
 include $(APPINFRA_SCRIPTS)/make/Makefile.all
 
 # Or via environment variable (for CI/testing)
@@ -121,8 +125,8 @@ include $(APPINFRA_SCRIPTS)/make/Makefile.all
 
 ```makefile
 # Makefile
-APPINFRA_SCRIPTS := $(shell appinfra scripts-path)
-APPINFRA_DEV_PKG_NAME := myproject
+APPINFRA_SCRIPTS ?= $(shell appinfra scripts-path)
+APPINFRA_DEV_PKG_NAME ?= myproject
 
 include $(APPINFRA_SCRIPTS)/make/Makefile.all
 ```
@@ -131,14 +135,14 @@ include $(APPINFRA_SCRIPTS)/make/Makefile.all
 
 ```makefile
 # Makefile
-APPINFRA_SCRIPTS := $(shell appinfra scripts-path)
-APPINFRA_DEV_PKG_NAME := myproject
-APPINFRA_DEV_CQ_STRICT := true
-APPINFRA_PYTEST_TESTS_DIR := tests
-APPINFRA_DOCS_CONFIG_FILE := mkdocs.yaml
+APPINFRA_SCRIPTS ?= $(shell appinfra scripts-path)
+APPINFRA_DEV_PKG_NAME ?= myproject
+APPINFRA_DEV_CQ_STRICT ?= true
+APPINFRA_PYTEST_TESTS_DIR ?= tests
+APPINFRA_DOCS_CONFIG_FILE ?= mkdocs.yaml
 
 # Hide unused features
-APPINFRA_DISABLE_GROUPS := pg.
+APPINFRA_DISABLE_GROUPS ?= pg.
 
 include $(APPINFRA_SCRIPTS)/make/Makefile.all
 ```
@@ -231,10 +235,10 @@ test categories implemented yet.
 ```makefile
 # Wrong - too late
 include $(APPINFRA_SCRIPTS)/make/Makefile.all
-APPINFRA_DEV_PKG_NAME := myproject
+APPINFRA_DEV_PKG_NAME ?= myproject
 
 # Correct - before include
-APPINFRA_DEV_PKG_NAME := myproject
+APPINFRA_DEV_PKG_NAME ?= myproject
 include $(APPINFRA_SCRIPTS)/make/Makefile.all
 ```
 
@@ -271,9 +275,9 @@ myproject/
 
 ```makefile
 # Makefile
-APPINFRA_SCRIPTS := $(shell appinfra scripts-path)
-APPINFRA_DEV_PKG_NAME := myproject
-APPINFRA_DISABLE_GROUPS := pg.
+APPINFRA_SCRIPTS ?= $(shell appinfra scripts-path)
+APPINFRA_DEV_PKG_NAME ?= myproject
+APPINFRA_DISABLE_GROUPS ?= pg.
 
 include $(APPINFRA_SCRIPTS)/make/Makefile.all
 
