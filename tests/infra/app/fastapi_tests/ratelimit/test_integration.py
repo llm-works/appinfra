@@ -119,11 +119,11 @@ class TestServerBuilderBuild:
 @pytest.mark.integration
 @pytest.mark.asyncio
 class TestHttpIntegration:
-    """Test rate limiting via HTTP requests using httpx."""
+    """Test rate limiting via HTTP requests using httpx2."""
 
     async def test_rate_limiting_end_to_end(self):
         """Test full request cycle with rate limiting."""
-        from httpx import ASGITransport, AsyncClient
+        from httpx2 import ASGITransport, AsyncClient
 
         lg = Mock()
         limiter = TokenBucketLimiter(rate=3, window=60.0)

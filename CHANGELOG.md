@@ -84,6 +84,8 @@ earlier: pre-release builds (0.13.1.devN) would not satisfy it. -->
 - The `check` extra requires mypy 2, whose stricter checks can report new errors in a project.
 - The `fastapi` extra caps fastapi below 0.163 and uvicorn below 0.55 (both were below 1.0): both
   break APIs in minor releases.
+- The `dev` extra installs `httpx2` in place of `httpx`, and Starlette 1.2 or later, whose test
+  client uses `httpx2`.
 
 ### Fixed
 - `password(confirm=True)` accepts a matching confirmation; with questionary installed it always
