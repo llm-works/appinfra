@@ -29,6 +29,9 @@ earlier: pre-release builds (0.13.1.devN) would not satisfy it. -->
 - `make check` names, in a row below its checklist, a test that left a non-daemon thread running
   at exit; the thread's stack goes to the kept log. Such a thread holds a pytest-xdist worker
   until it ends, for up to 10s.
+- `make check` shows the warnings of checks that passed in rows below its checklist: in tests, at
+  interpreter exit (any category, and exceptions finalizers raise), in examples, and tools' own
+  warning lines. With a bare `error` in the project's `filterwarnings` they fail the check.
 - `APPINFRA_PYTEST_PERF_DIR`: the directory `make check` and `make test.perf` collect
   performance tests from (default `tests`).
 - `PG.dispose()` closes the pooled connections of a `PG` and of its cached `ScopedPG`s.

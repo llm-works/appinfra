@@ -223,6 +223,40 @@ name and stack go to the kept log:
 [⚠] Unit & E2E & Coverage tests: tests/test_proc.py::test_stream thread left running
 ```
 
+A warning in a check that passed gets a row below the checklist, each distinct one once, with
+how often it repeated:
+
+```text
+[⚠] Unit & E2E & Coverage tests: DeprecationWarning: old api (src/pkg/api.py:12) in tests (4×)
+[⚠] Unit & E2E & Coverage tests: ResourceWarning: unclosed file tests/data/sample.csv at exit
+[⚠] Examples: client.py: DeprecationWarning: old api (src/pkg/api.py:12)
+[⚠] Linting: The top-level linter settings are deprecated in favour of `lint`.
+```
+
+- **In tests:** an entry of pytest's warnings summary.
+- **At exit:** a warning, or an exception a finalizer raised ("Exception ignored in: ..."),
+  printed when the interpreter exits, after pytest has removed its warning filters. Under
+  Python's default filters ResourceWarning and DeprecationWarning would not print at all; in a
+  test check every one does, from the main process and every pytest-xdist worker. A resource
+  still open at exit (a file, socket or database connection held by a module global or a cache)
+  shows up here.
+- **Examples:** a warning in a passing example's stderr; examples run with every warning shown.
+- **Tools:** a tool's own `warning:` line, about the tool or its configuration.
+
+When the project's pytest `filterwarnings` has a bare `error` entry, which makes every warning an
+error, a warning in a test check or an example fails it (`[✗]`); otherwise the check passes with
+a warning and its log is kept in `.build/check/`. A tool's warning line only ever warns. Rows show
+paths relative to the project and a file by its name; the kept log has the full message.
+`make check.raw` lists the same warnings under the check's passed or failed line. Warnings in
+interpreters a test starts belong to that test and are not collected.
+
+A warning at exit comes after the last test, so it names no test. Narrow it down with `-k` in a
+pytest run that loads the plugin (the `make test.*` targets do not), until the line is gone:
+
+```bash
+PYTHONPATH=<appinfra scripts>/check_pytest python -m pytest tests/ -p pytest_exit_warnings -k <expression>
+```
+
 Interrupting `make check` (Ctrl-C, `TERM`, a closed terminal), or a fail-fast stop, kills every
 process it started at once: pytest and its workers, the tools and the examples runner.
 

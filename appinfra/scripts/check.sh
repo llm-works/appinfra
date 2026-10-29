@@ -168,12 +168,25 @@ if ! [[ "$HANG_DUMP_SECONDS" =~ ^[0-9]+$ ]]; then
     exit 1
 fi
 export APPINFRA_PYTEST_HANG_DUMP_SECONDS="$HANG_DUMP_SECONDS"
-# Prefix for the pytest commands. The plugin is a file of its own next to this script, not part
-# of the appinfra package: -p imports a plugin before pytest-cov starts, and importing anything
-# under appinfra that early would leave the package's module-level lines unmeasured. Its
-# directory holds only the plugin, so nothing else becomes importable in the tests.
-PYTEST_HANG="PYTHONPATH=$(printf '%q' "${SCRIPT_DIR}/check_pytest${PYTHONPATH:+:${PYTHONPATH}}") "
-PYTEST_HANG_FLAG="-p pytest_hang"
+# Prefix and flags for the pytest commands: check_pytest/pytest_hang.py (above) and
+# check_pytest/pytest_exit_warnings.py, which makes warnings raised at interpreter exit print
+# (see check_warnings). The plugins are files of their own next to this script, not part of the
+# appinfra package: -p imports a plugin before pytest-cov starts, and importing anything under
+# appinfra that early would leave the package's module-level lines unmeasured. Their directory
+# holds only the plugins, so nothing else becomes importable in the tests.
+PYTEST_PLUGIN_PATH="PYTHONPATH=$(printf '%q' "${SCRIPT_DIR}/check_pytest${PYTHONPATH:+:${PYTHONPATH}}") "
+PYTEST_PLUGINS="-p pytest_hang -p pytest_exit_warnings"
+
+# How a warning in a passing test check or example ends: strict when the project's pytest
+# filterwarnings has a bare "error" (every warning an error), so the check fails; warn
+# otherwise, so the check passes with a warning. Asked once from pytest_exit_warnings, in a run
+# that only reads the configuration. A tool's own warning lines only ever warn.
+WARNINGS_MODE=warn
+if [ "$SKIP_TESTS" != true ]; then
+    WARNINGS_MODE=$({ cd "$PROJECT_ROOT" && eval "${PYTEST_PLUGIN_PATH}${PYTHON} -m pytest -p pytest_exit_warnings --collect-only -q --noconftest -p no:cacheprovider --ignore-glob='*'" 2>&1 || true; } \
+        | sed -nE 's/^=== exit warnings: (strict|warn) ===$/\1/p' | tail -1)
+    WARNINGS_MODE="${WARNINGS_MODE:-warn}"
+fi
 
 # Terminal width for fit_slow_row, read here because stdout is the terminal only at the top
 # level: inside $(...) it is a pipe. Empty without a terminal (CI), where rows are not cut.
@@ -364,7 +377,7 @@ _pytest_cmd_for() {
     local suite="$1" marker="$2" flags="$3" path="${4:-tests/}"
     case " $_MARKERS_FOUND " in
         *" $marker "*)
-            echo "${PYTEST_HANG}_APPINFRA_CHECK_PYTEST_SUITE=$suite ${PYTHON} -m pytest $path -m $marker ${PYTEST_HANG_FLAG} $flags"
+            echo "${PYTEST_PLUGIN_PATH}_APPINFRA_CHECK_PYTEST_SUITE=$suite ${PYTHON} -m pytest $path -m $marker ${PYTEST_PLUGINS} $flags"
             ;;
         *)
             echo "(exit 5)"
@@ -393,8 +406,8 @@ declare -a TEST_SUBCHECKS_RAW=()
 # parallel group; leading the list keeps its running/completed state
 # obvious. Uses NPROC/2 workers (see PYTEST_PARALLEL_COVERAGE above).
 if awk "BEGIN {exit !($COVERAGE_TARGET > 0)}" 2>/dev/null; then
-    TEST_SUBCHECKS+=("${COVERAGE_LABEL}|test.coverage|${PYTEST_HANG}${COVERAGE_CORE_ENV}_APPINFRA_CHECK_PYTEST_SUITE=cov ${PYTHON} -m pytest tests/ ${COVERAGE_MARKER_ARG} ${PYTEST_HANG_FLAG} --cov=${PKG_NAME} --cov-report=term -q -rEfs ${PYTEST_PARALLEL_COVERAGE}|${COVERAGE_TARGET}")
-    TEST_SUBCHECKS_RAW+=("${COVERAGE_LABEL}|test.coverage|${PYTEST_HANG}${COVERAGE_CORE_ENV}_APPINFRA_CHECK_PYTEST_SUITE=cov ${PYTHON} -m pytest tests/ ${COVERAGE_MARKER_ARG} ${PYTEST_HANG_FLAG} --cov=${PKG_NAME} --cov-report=term-missing -rEfs ${PYTEST_PARALLEL_COVERAGE}|${COVERAGE_TARGET}")
+    TEST_SUBCHECKS+=("${COVERAGE_LABEL}|test.coverage|${PYTEST_PLUGIN_PATH}${COVERAGE_CORE_ENV}_APPINFRA_CHECK_PYTEST_SUITE=cov ${PYTHON} -m pytest tests/ ${COVERAGE_MARKER_ARG} ${PYTEST_PLUGINS} --cov=${PKG_NAME} --cov-report=term -q -rEfs ${PYTEST_PARALLEL_COVERAGE}|${COVERAGE_TARGET}")
+    TEST_SUBCHECKS_RAW+=("${COVERAGE_LABEL}|test.coverage|${PYTEST_PLUGIN_PATH}${COVERAGE_CORE_ENV}_APPINFRA_CHECK_PYTEST_SUITE=cov ${PYTHON} -m pytest tests/ ${COVERAGE_MARKER_ARG} ${PYTEST_PLUGINS} --cov=${PKG_NAME} --cov-report=term-missing -rEfs ${PYTEST_PARALLEL_COVERAGE}|${COVERAGE_TARGET}")
 fi
 
 _standalone_suite unit        "Unit tests"        test.unit        unit
@@ -526,8 +539,10 @@ close_display() {
     } 200>"$DISPLAY_LOCK"
 }
 
+# The optional fifth argument separates the mark from the text: two spaces on the checklist
+# (the default), one on the report rows below it (add_display_row)
 update_line() {
-    local line_num=$1 status=$2 name=$3 extra=$4
+    local line_num=$1 status=$2 name=$3 extra=$4 sep=${5:-  }
     {
         lock_display
         if display_open; then
@@ -535,7 +550,7 @@ update_line() {
             added=$(cat "$DISPLAY_ROWS" 2>/dev/null) || added=0
             local lines_up=$((TOTAL_LINES + added - line_num))
             [ $lines_up -gt 0 ] && printf "\033[${lines_up}A"
-            printf "\r%b%s  %s%b\n" "$UI_CLEAR" "$status" "$name" "$extra"
+            printf "\r%b%s%s%s%b\n" "$UI_CLEAR" "$status" "$sep" "$name" "$extra"
             [ $lines_up -gt 1 ] && printf "\033[$((lines_up - 1))B"
             printf "\r"
         fi
@@ -544,7 +559,8 @@ update_line() {
 }
 
 # Add a row below the checklist, the first after a blank line that sets the rows apart, and set
-# ADDED_ROW to its line number for update_line (0 if the display is closed)
+# ADDED_ROW to its line number for update_line (0 if the display is closed). A report row has
+# one space after its mark, where the checklist has two.
 add_display_row() {
     local status=$1 text=$2 extra=$3
     ADDED_ROW=0
@@ -557,7 +573,7 @@ add_display_row() {
                 printf "\r%b\n" "$UI_CLEAR"
                 added=1
             fi
-            printf "\r%b%s  %s%b\n" "$UI_CLEAR" "$status" "$text" "$extra"
+            printf "\r%b%s %s%b\n" "$UI_CLEAR" "$status" "$text" "$extra"
             ADDED_ROW=$((TOTAL_LINES + added))
             echo "$((added + 1))" > "$DISPLAY_ROWS"
         fi
@@ -612,13 +628,37 @@ keep_log() {
 fit_slow_row() {
     local name="$1" test_id="$2" extra_len="$3"
     if [ -n "$DISPLAY_COLS" ]; then
-        # 5: "[⚠]  "; 2: ": "; 1: margin, so the row never touches the last column
-        local room=$((DISPLAY_COLS - 5 - ${#name} - 2 - extra_len - 1))
+        # 4: "[⚠] "; 2: ": "; 1: margin, so the row never touches the last column
+        local room=$((DISPLAY_COLS - 4 - ${#name} - 2 - extra_len - 1))
         if [ "${#test_id}" -gt "$room" ] && [ "$room" -gt 3 ]; then
             test_id="...${test_id: -$((room - 3))}"
         fi
     fi
     echo "${name}: ${test_id}"
+}
+
+# Fit a warning row to the terminal, like fit_slow_row, but the message loses its middle: its
+# start says what was raised, its end where (the source location, a connection's dbname). Without
+# a terminal (CI) the row is kept whole.
+fit_warning_row() {
+    local name="$1" message="$2" extra_len="$3"
+    if [ -n "$DISPLAY_COLS" ]; then
+        # 4: "[⚠] "; 2: ": "; 1: margin, so the row never touches the last column
+        local room=$((DISPLAY_COLS - 4 - ${#name} - 2 - extra_len - 1))
+        if [ "${#message}" -gt "$room" ] && [ "$room" -gt 3 ]; then
+            # The start up to the object's repr ("connection "), the rest of the room to the end
+            local head=$(((room - 3) / 2))
+            if [[ "$message" == *" <"* ]]; then
+                local lead="${message%% <*} "
+                if [ "${#lead}" -lt "$head" ]; then
+                    head=${#lead}
+                fi
+            fi
+            local tail=$((room - 3 - head))
+            message="${message:0:$head}...${message: -$tail}"
+        fi
+    fi
+    echo "${name}: ${message}"
 }
 
 # While a pytest check runs, turn the lines pytest_hang writes to its log into rows below the
@@ -655,7 +695,7 @@ watch_slow_tests() {
                 took="${BASH_REMATCH[1]}"
                 test_id="${BASH_REMATCH[2]}"
                 text=$(fit_slow_row "$name" "$test_id" 16)
-                update_line "${rows[$test_id]}" "${UI_MARK_WARN}" "$text" " ${UI_GRAY}took ${took}${UI_RESET}"
+                update_line "${rows[$test_id]}" "${UI_MARK_WARN}" "$text" " ${UI_GRAY}took ${took}${UI_RESET}" " "
             fi
         done
         # Copy on news, and once more at the end for the complete log; record the first copy
@@ -673,13 +713,13 @@ watch_slow_tests() {
     done
 }
 
-# Name the kept logs of the checks that had slow tests or threads left running; both are
-# marked on the display above
+# Name the kept logs of the checks that had slow tests, threads left running or leaks at exit;
+# all are marked on the display above. A line's third field says what the log holds.
 display_slow_logs() {
     [ -f "${STATUS_DIR}/slow" ] || return 0
-    local name kept
-    while IFS='|' read -r name kept; do
-        echo -e "→ ${name}: stacks in ${UI_YELLOW}${kept}${UI_RESET}"
+    local name kept what
+    while IFS='|' read -r name kept what; do
+        echo -e "→ ${name}: ${what:-stacks} in ${UI_YELLOW}${kept}${UI_RESET}"
     done < "${STATUS_DIR}/slow"
 }
 
@@ -809,6 +849,81 @@ display_skip_summary() {
     display_skips "${STATUS_DIR}/example_skips" "examples"
 }
 
+# The mode for a passing check's warnings: the project's (WARNINGS_MODE) for test and example
+# checks, whose warnings come from the project's code; warn for a tool, whose warning lines are
+# about the tool and its configuration
+warnings_mode_for() {
+    local name="$1" cmd="$2"
+    if [[ "$cmd" == *" -m pytest "* || "$name" == "Examples" ]]; then
+        echo "$WARNINGS_MODE"
+    else
+        echo warn
+    fi
+}
+
+# The distinct warnings check_warnings.py finds in a log, as "count<TAB>kind<TAB>message". Run
+# through eval like every check command: PYTHON may hold "~/..." or arguments. A scan that fails
+# is a warning of its own, never "no warnings".
+found_warnings() {
+    local out rc=0
+    out=$(eval "${PYTHON} $(printf '%q ' "${SCRIPT_DIR}/check_warnings.py" "$1" --root "$PROJECT_ROOT")" 2>&1) || rc=$?
+    if [ "$rc" -ne 0 ]; then
+        printf '1\ttool\tcheck_warnings.py failed (exit %s): %s\n' "$rc" "$(tail -1 <<< "$out")"
+        return 0
+    fi
+    [ -z "$out" ] || printf '%s\n' "$out"
+}
+
+# What a warning row says after its message: where the warning was raised (nothing for a tool's
+# own line), and how often when it repeats
+warning_note() {
+    local kind="$1" count="$2" note=""
+    case "$kind" in
+        session) note="in tests" ;;
+        exit) note="at exit" ;;
+    esac
+    if [ "$count" -gt 1 ]; then
+        note="${note:+${note} }(${count}×)"
+    fi
+    echo "$note"
+}
+
+# A passing check's warnings: a row below the checklist for each distinct one, like the
+# slow-test rows, and the check's own line left to the caller. Warn records a warning and keeps
+# the log for display_slow_logs. Strict returns 1 and sets warning_failure, a local of the
+# caller, to the reason, so the caller records one failure even when coverage fails the check too.
+check_warnings() {
+    local name="$1" make_target="$2" logfile="$3" mode="$4"
+    local found
+    found=$(found_warnings "$logfile")
+    [ -n "$found" ] || return 0
+    local mark="${UI_MARK_WARN}"
+    if [ "$mode" = strict ]; then
+        mark="${UI_MARK_FAIL}"
+    fi
+    local count kind message note total=0
+    while IFS=$'\t' read -r count kind message; do
+        note=$(warning_note "$kind" "$count")
+        add_display_row "$mark" "$(fit_warning_row "$name" "$message" "$((${#note} ? ${#note} + 1 : 0))")" \
+            "${note:+ ${UI_YELLOW}${note}${UI_RESET}}"
+        total=$((total + count))
+    done <<< "$found"
+    local text="${total} warning"
+    if [ "$total" -gt 1 ]; then
+        text="${text}s"
+    fi
+    if [ "$mode" = strict ]; then
+        warning_failure="${text}: filterwarnings makes every warning an error"
+        return 1
+    fi
+    record_warning "$name" "$text"
+    local kept
+    if kept=$(keep_log "$logfile" "$name"); then
+        echo "${name}|${kept}|warnings" >> "${STATUS_DIR}/slow"
+    fi
+    return 0
+}
+
 # The examples runner's summary ends with "N unmet (reason[, reason])" when
 # files declared a service (`# ci-requires:`) that was unreachable. Show that
 # count on the Examples line with a warning mark and record it for the
@@ -888,7 +1003,15 @@ run_check() {
                 record_skips "$name" "$tmpfile"
             fi
 
-            if [[ "$name" == "Examples" ]] && mark_examples_unmet "$line_num" "${prefix}${name}" "$tmpfile" "$timing_suffix"; then
+            # Warnings get rows below the checklist; in strict mode they also fail the check,
+            # whose line then shows its usual text with the failure mark
+            local warning_failure="" pass_mark="${UI_MARK_OK}"
+            if ! check_warnings "$name" "$make_target" "$tmpfile" "$(warnings_mode_for "$name" "$cmd")"; then
+                pass_mark="${UI_MARK_FAIL}"
+            fi
+
+            # A failed Examples check takes the failure line below, not the unmet warning line
+            if [[ "$name" == "Examples" ]] && [ -z "$warning_failure" ] && mark_examples_unmet "$line_num" "${prefix}${name}" "$tmpfile" "$timing_suffix"; then
                 :  # line carries the warning mark and skip count
             elif [ -n "$coverage_target" ]; then
                 # Use appropriate parser based on check type
@@ -901,14 +1024,18 @@ run_check() {
                 # Format target to 1 decimal for consistent display
                 local target_display=$(awk "BEGIN {printf \"%.1f\", int($coverage_target * 10) / 10}")
                 if check_coverage_threshold "$actual" "$coverage_target"; then
-                    update_line "$line_num" "${UI_MARK_OK}" "${prefix}${name}" " ${UI_GRAY}(${actual}% ≥ ${target_display}%)${UI_RESET}${timing_suffix}"
+                    update_line "$line_num" "$pass_mark" "${prefix}${name}" " ${UI_GRAY}(${actual}% ≥ ${target_display}%)${UI_RESET}${timing_suffix}"
                 else
                     update_line "$line_num" "${UI_MARK_FAIL}" "${prefix}${name}" " ${UI_GRAY}(${actual}% < ${target_display}%)${UI_RESET}${timing_suffix}"
-                    record_failure "$name" "$make_target" "" "$tmpfile" "Coverage: ${actual}% (target: ${target_display}%)"
+                    record_failure "$name" "$make_target" "" "$tmpfile" "Coverage: ${actual}% (target: ${target_display}%)${warning_failure:+; ${warning_failure}}"
                     return 1
                 fi
             else
-                update_line "$line_num" "${UI_MARK_OK}" "${prefix}${name}" "${timing_suffix}"
+                update_line "$line_num" "$pass_mark" "${prefix}${name}" "${timing_suffix}"
+            fi
+            if [ -n "$warning_failure" ]; then
+                record_failure "$name" "$make_target" "" "$tmpfile" "$warning_failure"
+                return 1
             fi
             rm -f "$tmpfile"
             ;;
@@ -1130,15 +1257,10 @@ run_raw() {
                 echo ""
 
                 local sub_exit_code=0
-                eval "$subcmd" || sub_exit_code=$?
-                # pytest exit 5 = no tests collected; treat as gray-skip to match
-                # run_check's classification (see case 5 in run_check above).
-                if [ $sub_exit_code -eq 0 ]; then
-                    echo "  ${UI_MARK_OK} $subname passed"
-                elif [ $sub_exit_code -eq 5 ]; then
-                    echo "  ${UI_GRAY}[ ]${UI_RESET} $subname ${UI_GRAY}(no tests)${UI_RESET}"
-                else
-                    echo "  ${UI_MARK_FAIL} $subname failed"
+                run_raw_subcheck "$subname" "$subcmd" || sub_exit_code=$?
+                if [ $sub_exit_code -eq "$EXIT_CODE_WARNING" ]; then
+                    has_warnings=true
+                elif [ $sub_exit_code -ne 0 ] && [ $sub_exit_code -ne 5 ]; then
                     failed=true
                     [ "$FAIL_FAST" = true ] && break 2
                 fi
@@ -1178,6 +1300,50 @@ run_raw() {
     else
         echo "${UI_MARK_OK} All checks passed ${UI_GRAY}in ${elapsed}s${UI_RESET}"
     fi
+}
+
+# Run one test subcheck in raw mode: its output streams to the terminal, and a copy goes to a
+# log for the warning scan (see check_warnings), whose findings follow the subcheck's line.
+# Returns 0 (passed), 5 (no tests collected, shown like run_check's case 5), EXIT_CODE_WARNING
+# (passed, with warnings) or a failing code.
+run_raw_subcheck() {
+    local subname="$1" subcmd="$2"
+    local log="${STATUS_DIR}/raw-subcheck.log"
+    # Through tee, pytest's stdout is a pipe: keep its colors when the terminal had them
+    local colors=""
+    [ -t 1 ] && colors="PY_COLORS=1 "
+    local rc
+    set +e
+    # -i: on Ctrl-C tee keeps passing output until the check closes the pipe, so what pytest
+    # prints on its way out still reaches the terminal; stop_children ends the rest
+    eval "${colors}${subcmd}" 2>&1 | tee -i "$log"
+    rc=${PIPESTATUS[0]}
+    set -e
+
+    local found="" note=""
+    if [ "$rc" -eq 0 ]; then
+        found=$(found_warnings "$log")
+    fi
+    if [ -n "$found" ]; then
+        note=" ($(awk -F'\t' '{ n += $1 } END { print n }' <<< "$found") warnings)"
+        if [ "$(warnings_mode_for "$subname" "$subcmd")" = strict ]; then
+            rc=1
+        else
+            rc=$EXIT_CODE_WARNING
+        fi
+    fi
+    case "$rc" in
+        0) echo "  ${UI_MARK_OK} $subname passed" ;;
+        5) echo "  ${UI_GRAY}[ ]${UI_RESET} $subname ${UI_GRAY}(no tests)${UI_RESET}" ;;
+        "$EXIT_CODE_WARNING") echo "  ${UI_MARK_WARN} $subname passed${note}" ;;
+        *) echo "  ${UI_MARK_FAIL} $subname failed${note}" ;;
+    esac
+    local count kind message
+    while IFS=$'\t' read -r count kind message; do
+        [ -n "$message" ] || continue
+        echo "    - ${message} $(warning_note "$kind" "$count")"
+    done <<< "$found"
+    return "$rc"
 }
 
 # === MAIN ===

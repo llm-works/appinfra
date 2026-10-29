@@ -146,6 +146,18 @@ class PGTestCaseHelper(unittest.TestCase):
         cls._test_database_connection()
 
     @classmethod
+    def tearDownClass(cls) -> None:
+        """Close the pooled connections of the PG this class created.
+
+        Left open, they are finalized at interpreter exit, each with a ResourceWarning. Only the
+        class's own PG: a subclass must not close the one a parent class still uses.
+        """
+        pg = cls.__dict__.get("pg")
+        if pg is not None:
+            pg.dispose()
+        super().tearDownClass()
+
+    @classmethod
     def _resolve_config_path(cls) -> Path | None:
         """
         Resolve configuration file path (custom or default).

@@ -108,3 +108,39 @@ def test_full_output_shows_a_timed_out_example(tmp_path: Path) -> None:
 
     assert "no exit within 1s" in out
     assert "waiting on a server that never answers" in out
+
+
+@pytest.mark.unit
+def test_passing_example_reports_its_warnings(tmp_path: Path) -> None:
+    """A warning a library raises in a passing example is printed, under Python's defaults
+    hidden: one line per distinct warning, in the form check.sh reads."""
+    examples_dir = tmp_path / "examples"
+    examples_dir.mkdir()
+    # stacklevel=1: the warning belongs to oldlib, not __main__, so the defaults ignore it
+    (examples_dir / "oldlib.py").write_text(
+        "# ci-skip: a module the example imports\n"
+        "import warnings\n\n"
+        "def call():\n"
+        "    warnings.warn('old api', DeprecationWarning, stacklevel=1)\n"
+    )
+    (examples_dir / "use_old.py").write_text(
+        "# ci-run: --twice\nimport oldlib\n\noldlib.call()\noldlib.call()\n"
+    )
+    env = {k: v for k, v in os.environ.items() if k != "PYTHONWARNINGS"}
+
+    result = subprocess.run(
+        [sys.executable, str(RUN_EXAMPLES_PY), str(examples_dir), "--jobs", "1"],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    warned = [
+        line for line in result.stdout.splitlines() if line.startswith("warning:")
+    ]
+    assert warned == [
+        "warning: use_old.py --twice: DeprecationWarning: old api (examples/oldlib.py:5)"
+    ]
