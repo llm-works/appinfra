@@ -47,7 +47,6 @@ def sqlite_db(mock_logger, memory_config):
     db.dispose()
 
 
-@pytest.mark.unit
 class TestSQLiteInit:
     """Test SQLite initialization."""
 
@@ -60,6 +59,7 @@ class TestSQLiteInit:
             # SQLAlchemy 2.1 renders the name escaped (sqlite:///%3Amemory%3A)
             assert sqlalchemy.make_url(db.url).database == ":memory:"
 
+    @pytest.mark.integration
     def test_init_with_file_url(self, mock_logger, tmp_path):
         """Test initialization with file-based database."""
         db_path = tmp_path / "test.db"
@@ -96,7 +96,6 @@ class TestSQLiteInit:
             SQLite(mock_logger, config)
 
 
-@pytest.mark.unit
 class TestSQLiteProperties:
     """Test SQLite properties."""
 
@@ -113,7 +112,6 @@ class TestSQLiteProperties:
         assert isinstance(sqlite_db.engine, sqlalchemy.engine.Engine)
 
 
-@pytest.mark.unit
 class TestSQLiteConnect:
     """Test SQLite connect method."""
 
@@ -131,7 +129,6 @@ class TestSQLiteConnect:
         conn.close()
 
 
-@pytest.mark.unit
 class TestSQLiteSession:
     """Test SQLite session method."""
 
@@ -177,7 +174,7 @@ def _sqlite_with_row(mock_logger, tmp_path, **cfg_fields):
     return db, Item
 
 
-@pytest.mark.unit
+@pytest.mark.integration
 class TestSQLiteReturnedObjects:
     """ORM objects returned out of session()."""
 
@@ -203,7 +200,6 @@ class TestSQLiteReturnedObjects:
             _ = item.name
 
 
-@pytest.mark.unit
 class TestSQLiteMigrate:
     """Test SQLite migrate method."""
 
@@ -229,7 +225,6 @@ class TestSQLiteMigrate:
         conn.close()
 
 
-@pytest.mark.unit
 class TestSQLiteDispose:
     """Test SQLite dispose method."""
 
@@ -243,7 +238,6 @@ class TestSQLiteDispose:
         sqlite_db.dispose()
 
 
-@pytest.mark.unit
 class TestSQLiteEngineKwargs:
     """Test SQLite engine configuration."""
 

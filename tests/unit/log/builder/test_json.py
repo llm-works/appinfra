@@ -82,7 +82,6 @@ def create_mock_record(
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestJSONFormatterInit:
     """Test JSONFormatter initialization and configuration."""
 
@@ -130,7 +129,6 @@ class TestJSONFormatterInit:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestShouldIncludeField:
     """Test field inclusion/exclusion logic."""
 
@@ -176,7 +174,6 @@ class TestShouldIncludeField:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestTimestampFormatting:
     """Test timestamp format options."""
 
@@ -222,7 +219,6 @@ class TestTimestampFormatting:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestSanitizeExtraFields:
     """Test extra field sanitization for JSON serialization."""
 
@@ -270,7 +266,6 @@ class TestSanitizeExtraFields:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestExtractLocation:
     """Test location extraction from log records."""
 
@@ -325,7 +320,6 @@ class TestExtractLocation:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestDictToJson:
     """Test dictionary to JSON string conversion."""
 
@@ -368,7 +362,6 @@ class TestDictToJson:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestFormat:
     """Test complete record formatting."""
 
@@ -450,7 +443,6 @@ class TestFormat:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestHelperFunctions:
     """Test helper functions for record conversion."""
 
@@ -611,7 +603,6 @@ class TestHelperFunctions:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestJSONLoggingBuilder:
     """Test JSONLoggingBuilder configuration."""
 
@@ -738,7 +729,6 @@ class TestJSONLoggingBuilder:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestJSONLoggingBuilderBuild:
     """Test JSONLoggingBuilder build method."""
 
@@ -757,6 +747,7 @@ class TestJSONLoggingBuilderBuild:
         # Should have a handler with JSONFormatter
         assert len(logger.handlers) > 0
 
+    @pytest.mark.integration
     def test_build_with_json_file(self):
         """Test building logger with JSON file handler."""
         with tempfile.NamedTemporaryFile(delete=False, suffix=".json") as f:
@@ -784,6 +775,7 @@ class TestJSONLoggingBuilderBuild:
             if os.path.exists(log_file):
                 os.unlink(log_file)
 
+    @pytest.mark.integration
     def test_build_creates_directory(self):
         """Test that build creates parent directories for file output."""
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -821,7 +813,6 @@ class TestJSONLoggingBuilderBuild:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestCreateJsonLogger:
     """Test create_json_logger factory function."""
 

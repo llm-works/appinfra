@@ -28,7 +28,6 @@ from appinfra.version.sources import (
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestVersionSourceABC:
     """Test VersionSource abstract base class."""
 
@@ -43,7 +42,6 @@ class TestVersionSourceABC:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestPEP610Source:
     """Test PEP610Source for pip git+ installs."""
 
@@ -152,7 +150,6 @@ class TestPEP610Source:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestBuildInfoSource:
     """Test BuildInfoSource for _build_info.py detection."""
 
@@ -233,7 +230,6 @@ class TestBuildInfoSource:
         assert result is None
 
 
-@pytest.mark.unit
 class TestBuildInfoSourceTopLevel:
     """Test BuildInfoSource._get_top_level_name()."""
 
@@ -258,7 +254,6 @@ class TestBuildInfoSourceTopLevel:
         assert result == "my_package"
 
 
-@pytest.mark.unit
 class TestBuildInfoSourceParseBuildTime:
     """Test BuildInfoSource._parse_build_time()."""
 
@@ -292,7 +287,6 @@ class TestBuildInfoSourceParseBuildTime:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestGitRuntimeSource:
     """Test GitRuntimeSource for editable installs."""
 
@@ -316,6 +310,7 @@ class TestGitRuntimeSource:
 
     @patch("subprocess.run")
     @patch("importlib.util.find_spec")
+    @pytest.mark.integration
     @patch("importlib.metadata.distribution")
     def test_returns_none_without_git_repo(
         self, mock_dist, mock_find_spec, mock_run, tmp_path
@@ -331,6 +326,7 @@ class TestGitRuntimeSource:
 
     @patch("subprocess.run")
     @patch("importlib.util.find_spec")
+    @pytest.mark.integration
     @patch("importlib.metadata.distribution")
     def test_successful_git_detection(
         self, mock_dist, mock_find_spec, mock_run, tmp_path
@@ -372,6 +368,7 @@ class TestGitRuntimeSource:
 
     @patch("subprocess.run")
     @patch("importlib.util.find_spec")
+    @pytest.mark.integration
     @patch("importlib.metadata.distribution")
     def test_handles_git_command_failure(
         self, mock_dist, mock_find_spec, mock_run, tmp_path
@@ -390,7 +387,7 @@ class TestGitRuntimeSource:
         assert result is None
 
 
-@pytest.mark.unit
+@pytest.mark.integration
 class TestGitRuntimeSourceFindPackagePath:
     """Test GitRuntimeSource._find_package_path()."""
 

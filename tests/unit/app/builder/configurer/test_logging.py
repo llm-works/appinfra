@@ -34,7 +34,6 @@ def _logging_section(builder: AppBuilder) -> dict:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestLoggingScopeIsABuilder:
     """LoggingScope inherits LoggingBuilder and is memoized per AppBuilder."""
 
@@ -74,7 +73,6 @@ class TestLoggingScopeIsABuilder:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestDoneFoldsIntoConfig:
     """Explicit options, handlers and extra reach builder._config.logging."""
 
@@ -120,6 +118,7 @@ class TestDoneFoldsIntoConfig:
 
         assert _logging_section(builder) == {"level": "debug"}
 
+    @pytest.mark.integration
     def test_handlers_serialize_to_handlers_section(self, tmp_path):
         """Handlers become logging.handlers entries in config form."""
         log_file = tmp_path / "app.log"
@@ -237,7 +236,6 @@ class TestHandlersReachRootLogger:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestTopicAndRuntimeMethods:
     """with_runtime_updates is scope-only; topic levels are inherited."""
 
@@ -271,7 +269,6 @@ class TestTopicAndRuntimeMethods:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestKeywordForm:
     """Calling the block sets fields, folds them, and returns the AppBuilder."""
 

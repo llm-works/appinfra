@@ -98,7 +98,6 @@ files:
 # =============================================================================
 
 
-@pytest.mark.unit
 @pytest.mark.usefixtures("clean_env")
 class TestConfigInitialization:
     """Test Config class initialization."""
@@ -157,7 +156,6 @@ class TestConfigInitialization:
 # =============================================================================
 
 
-@pytest.mark.unit
 @pytest.mark.usefixtures("clean_env")
 class TestVariableSubstitution:
     """Test ${variable} substitution in configuration values."""
@@ -221,7 +219,6 @@ values:
 # =============================================================================
 
 
-@pytest.mark.unit
 @pytest.mark.usefixtures("clean_env")
 class TestSecurity:
     """Test security fixes and protections."""
@@ -300,7 +297,6 @@ app:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestEnvironmentOverrides:
     """Test environment variable override functionality."""
 
@@ -685,7 +681,6 @@ class TestEnvironmentOverrides:
 # =============================================================================
 
 
-@pytest.mark.unit
 @pytest.mark.usefixtures("clean_env")
 class TestPathResolution:
     """Test path resolution via !path YAML tag."""
@@ -776,7 +771,6 @@ urls:
 # =============================================================================
 
 
-@pytest.mark.unit
 @pytest.mark.usefixtures("clean_env")
 class TestFileValidation:
     """Test file size validation and error handling."""
@@ -816,7 +810,6 @@ class TestFileValidation:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestTypeConversion:
     """Test environment variable type conversion."""
 
@@ -952,7 +945,6 @@ class TestHelperFunctions:
 # =============================================================================
 
 
-@pytest.mark.unit
 @pytest.mark.usefixtures("clean_env")
 class TestValidation:
     """Test configuration validation."""
@@ -983,7 +975,6 @@ class TestValidation:
 # =============================================================================
 
 
-@pytest.mark.unit
 @pytest.mark.usefixtures("clean_env")
 class TestSourceFileTracking:
     """Test get_source_files() functionality for config file tracking."""
@@ -1068,7 +1059,6 @@ class TestSourceFileTracking:
 # =============================================================================
 
 
-@pytest.mark.integration
 @pytest.mark.usefixtures("clean_env")
 class TestIntegrationScenarios:
     """Test real-world configuration scenarios."""
@@ -1199,7 +1189,6 @@ files:
 # =============================================================================
 
 
-@pytest.mark.unit
 @pytest.mark.usefixtures("clean_env")
 class TestEdgeCases:
     """Test edge cases and boundary conditions."""
@@ -1292,7 +1281,6 @@ no_value: no
         assert config.no_value is False
 
 
-@pytest.mark.unit
 @pytest.mark.usefixtures("clean_env")
 class TestConfigErrors:
     """Test configuration error handling."""
@@ -1338,7 +1326,6 @@ database:
 # =============================================================================
 
 
-@pytest.mark.unit
 @pytest.mark.usefixtures("clean_env")
 class TestConfigReload:
     """Test Config.reload() method."""
@@ -1368,6 +1355,7 @@ class TestConfigReload:
 
         assert result is config
 
+    @pytest.mark.unit
     def test_reload_raises_without_config_path(self):
         """Test reload() raises RuntimeError if config wasn't loaded from file."""
         from appinfra.dot_dict import DotDict
@@ -1418,7 +1406,6 @@ class TestConfigReload:
 # =============================================================================
 
 
-@pytest.mark.unit
 @pytest.mark.usefixtures("clean_env")
 class TestConfigDotDictIntegration:
     """Test Config compatibility with DotDict dict subclass changes."""
@@ -1527,7 +1514,6 @@ app:
         assert config.app.server.config.timeout == 30
 
 
-@pytest.mark.unit
 class TestEnvOverrideSubstitution:
     """Env overrides must reach `${var}` references inside strings.
 
@@ -1650,7 +1636,6 @@ class TestEnvOverrideSubstitution:
         assert config.dbs.unittest.url == "postgres://127.0.0.1/db"
 
 
-@pytest.mark.unit
 class TestConfigAllowedPaths:
     """Config-level integration for the allowed_paths per-path allowlist."""
 
@@ -1732,7 +1717,6 @@ class TestConfigAllowedPaths:
         assert cfg.overlay.v == 2
 
 
-@pytest.mark.unit
 class TestConfigOriginOverride:
     """Config-level integration for the origin override.
 
@@ -1891,7 +1875,6 @@ def _bundled(
     return base
 
 
-@pytest.mark.unit
 class TestConfigFromConfigFile:
     """``Config`` accepts a ``ConfigFile`` as its source.
 
@@ -2000,7 +1983,6 @@ class TestConfigFromConfigFile:
             Config(spec.resolve())
 
 
-@pytest.mark.unit
 @pytest.mark.usefixtures("clean_env")
 class TestConfigFactories:
     """`Config.from_path` loads one file; `Config.from_spec` resolves under the protocol."""

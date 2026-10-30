@@ -38,7 +38,6 @@ class MockSource(VersionSource):
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestPackageVersionTrackerInit:
     """Test PackageVersionTracker initialization."""
 
@@ -63,7 +62,6 @@ class TestPackageVersionTrackerInit:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestPackageTracking:
     """Test package tracking functionality."""
 
@@ -97,6 +95,7 @@ class TestPackageTracking:
         assert "lib1" in tracker
         assert "lib2" in tracker
 
+    @pytest.mark.integration
     def test_track_returns_self(self):
         """Test track() returns self for chaining."""
         source = MockSource({})
@@ -106,6 +105,7 @@ class TestPackageTracking:
 
         assert result is tracker
 
+    @pytest.mark.integration
     def test_track_ignores_unresolvable_packages(self):
         """Test tracking ignores packages that can't be resolved."""
         source = MockSource(
@@ -142,7 +142,6 @@ class TestPackageTracking:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestSourceChainResolution:
     """Test source chain resolution behavior."""
 
@@ -190,7 +189,6 @@ class TestSourceChainResolution:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestFormatForLog:
     """Test format_for_log() output."""
 
@@ -221,7 +219,6 @@ class TestFormatForLog:
         assert result == "alib=2.0.0@bbb zlib=1.0.0@aaa"
 
 
-@pytest.mark.unit
 class TestFormatForVersion:
     """Test format_for_version() output."""
 
@@ -275,7 +272,6 @@ class TestFormatForVersion:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestDunderMethods:
     """Test __len__ and __contains__ methods."""
 

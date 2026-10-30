@@ -8,8 +8,6 @@ from unittest.mock import patch
 
 import pytest
 
-pytestmark = pytest.mark.unit
-
 from appinfra.cli.tools.version_tool import VersionTool, _get_build_info
 
 
@@ -284,6 +282,7 @@ class TestVersionToolInitHook:
         assert "from setuptools import setup" in captured.out
         assert "class BuildPyWithBuildInfo" in captured.out
 
+    @pytest.mark.integration
     def test_init_hook_generates_setup_py_to_file(self, tool, capsys, tmp_path):
         """Test init-hook writes setup.py to file."""
         output_file = tmp_path / "setup.py"
@@ -299,6 +298,7 @@ class TestVersionToolInitHook:
         captured = capsys.readouterr()
         assert "Generated" in captured.err
 
+    @pytest.mark.integration
     def test_init_hook_with_stub_creates_build_info(self, tool, capsys, tmp_path):
         """Test init-hook with --with-stub creates _build_info.py."""
         # Create the package directory
@@ -321,6 +321,7 @@ class TestVersionToolInitHook:
         finally:
             os.chdir(original_cwd)
 
+    @pytest.mark.integration
     def test_init_hook_with_stub_warns_if_dir_missing(self, tool, capsys, tmp_path):
         """Test init-hook with --with-stub warns if package dir doesn't exist."""
         import os
