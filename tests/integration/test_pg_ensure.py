@@ -18,8 +18,8 @@ Run with:
 
 from __future__ import annotations
 
-import contextlib
 import threading
+import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -35,6 +35,22 @@ pytestmark = pytest.mark.require_pg
 def _random_suffix() -> str:
     """Return a unique suffix for a per-test object name."""
     return uuid.uuid4().hex[:12]
+
+
+_BLOCKED_BEHIND_THIS_SESSION = text(
+    "SELECT count(*) FROM pg_stat_activity"
+    " WHERE pg_backend_pid() = ANY(pg_blocking_pids(pid))"
+)
+
+
+def _wait_until_blocked_behind(session, count: int, timeout: float = 5.0) -> None:
+    """Wait until *count* other sessions block on a lock this session holds."""
+    deadline = time.monotonic() + timeout
+    while session.execute(_BLOCKED_BEHIND_THIS_SESSION).scalar_one() < count:
+        assert time.monotonic() < deadline, (
+            f"fewer than {count} sessions blocked on the lock within {timeout}s"
+        )
+        time.sleep(0.01)
 
 
 @pytest.fixture
@@ -225,10 +241,6 @@ class TestEnsureObjectConcurrent:
         key = f"ensure:public.{ephemeral_table_name}"
         n_workers = 8
         start_barrier = threading.Barrier(n_workers)
-        # Second barrier inside create_fn forces workers to overlap while the
-        # object is absent. Without it, one fast worker could finish before
-        # others even acquire the lock, causing a false pass.
-        create_barrier = threading.Barrier(n_workers, timeout=5)
         create_calls = 0
         create_lock = threading.Lock()
 
@@ -243,11 +255,11 @@ class TestEnsureObjectConcurrent:
 
                     def create_fn():
                         nonlocal create_calls
-                        # Wait for all workers to reach create_fn before any
-                        # proceeds — ensures contention on the advisory lock.
-                        # A broken barrier means other workers already proceeded; fine.
-                        with contextlib.suppress(threading.BrokenBarrierError):
-                            create_barrier.wait()
+                        # Only the lock holder gets here. It waits until every other
+                        # worker blocks on the advisory lock, so all of them overlap
+                        # while the object is absent; without this, one fast worker
+                        # could finish before the others reach the lock, a false pass.
+                        _wait_until_blocked_behind(session, n_workers - 1)
                         with create_lock:
                             create_calls += 1
                         session.execute(

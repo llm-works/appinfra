@@ -72,7 +72,7 @@ Comprehensive database test helper demonstration.
 **Run:**
 ```bash
 make pg.server.up
-~/.venv/bin/python examples/05_database/pg_test_helper.py
+~/.venv/bin/python examples/05_database/pg_test_helper_example.py
 ```
 
 **Key concepts:**

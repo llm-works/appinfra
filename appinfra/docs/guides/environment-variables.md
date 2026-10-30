@@ -432,7 +432,7 @@ print("Final configuration:", config.dict())
 
 ## Examples
 
-See `examples/environment_variable_overrides_example.py` for a comprehensive demonstration of the
+See `examples/04_configuration/env_overrides_example.py` for a comprehensive demonstration of the
 environment variable override functionality.
 
 ## See Also

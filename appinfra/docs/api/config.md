@@ -484,8 +484,8 @@ Resolution rules:
 
 See
 [`examples/04_configuration/etc_dir_only_example.py`](../../examples/04_configuration/etc_dir_only_example.py)
-for a runnable app that loads its own YAML files from `app.etc_dir` without
-declaring a spec.
+for a runnable app that loads its own YAML files from `app.etc_dir`: its spec
+locates the `etc/` directory beside the script, and `--etc-dir` overrides it.
 
 ## Constants
 

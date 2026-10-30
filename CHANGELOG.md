@@ -103,6 +103,8 @@ earlier: pre-release builds (0.13.1.devN) would not satisfy it. -->
   reported a mismatch and prompted again.
 - `JSONLoggingBuilder` and `DatabaseLoggingBuilder` apply the location color; a database handler
   that fails to build raises `LogConfigError`, as with the other builders.
+- The database log handler's critical flush fires on its trigger fields in a `Logger` call's
+  `extra`; such records used to wait in the batch, and only exceptions were written at once.
 - `StoreConformance`'s racing-prune test no longer stalls for seconds under load, and it races
   writers against prune in every run.
 - `Ticker.stop()` ends a scheduled `run()` right away; it used to return only when the current

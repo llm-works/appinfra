@@ -12,6 +12,7 @@ Requires: pip install appinfra[sql]
 
 import logging
 import signal
+import threading
 from datetime import datetime
 from typing import Any
 
@@ -68,6 +69,8 @@ class DatabaseHandler(logging.Handler):
         self.log_config = log_config
         self.batch: list[dict[str, Any]] = []
         self.last_flush = datetime.now()
+        # Set while emit() runs on a thread; see emit()
+        self._emitting = threading.local()
 
         # Cache INSERT statements per column set
         self._sql_cache: dict[tuple[str, ...], str] = {}
@@ -83,7 +86,16 @@ class DatabaseHandler(logging.Handler):
             lifecycle_manager.register_db_handler(self)
 
     def emit(self, record: logging.LogRecord) -> None:
-        """Emit a log record to the database."""
+        """Emit a log record to the database.
+
+        A record logged while this handler handles another on the same thread is
+        the handler's own error report, sent through the logger it is attached to.
+        Writing it would re-enter the write that just failed, so it is left to the
+        logger's other handlers.
+        """
+        if getattr(self._emitting, "active", False):
+            return
+        self._emitting.active = True
         try:
             # Map record to database row
             row_data = self.handler_config.data_mapper(record)
@@ -99,6 +111,8 @@ class DatabaseHandler(logging.Handler):
 
         except Exception:
             self.handleError(record)
+        finally:
+            self._emitting.active = False
 
     def _should_flush_batch(self) -> bool:
         """Check if the batch should be flushed based on size or time."""
@@ -117,10 +131,12 @@ class DatabaseHandler(logging.Handler):
         if hasattr(record, "exc_info") and record.exc_info:
             return True
 
-        # Check if 'extra' dict contains trigger fields
-        if hasattr(record, "extra") and record.extra:
+        # Check if the extra fields (stored by Logger, as the data mapper reads
+        # them) contain a trigger field
+        extra = getattr(record, "__infra__extra", None)
+        if extra:
             for field in self.handler_config.critical_trigger_fields:
-                if field in record.extra:
+                if field in extra:
                     return True
 
         return False

@@ -18,6 +18,21 @@ import pytest
 from appinfra.log.builder.database.config import DatabaseHandlerConfig
 from appinfra.log.builder.database.handler import DatabaseHandler
 from appinfra.log.config import LogConfig
+from appinfra.log.logger import Logger
+
+
+def _logged_record(extra: dict) -> logging.LogRecord:
+    """Return the record appinfra's Logger produces for an error with *extra*."""
+    records: list[logging.LogRecord] = []
+
+    class Capture(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            records.append(record)
+
+    lg = Logger(name="test")
+    lg.addHandler(Capture())
+    lg.error("Error", extra=extra)
+    return records[0]
 
 
 @pytest.fixture
@@ -244,18 +259,18 @@ class TestIsCriticalError:
         handler.handler_config.critical_flush_enabled = True
         handler.handler_config.critical_trigger_fields = ["fatal", "critical_error"]
 
-        record = logging.LogRecord(
-            name="test",
-            level=logging.ERROR,
-            pathname="test.py",
-            lineno=10,
-            msg="Error",
-            args=(),
-            exc_info=None,
-        )
-        record.extra = {"fatal": True, "user_id": 123}
+        record = _logged_record({"fatal": True, "user_id": 123})
 
         assert handler._is_critical_error(record) is True
+
+    def test_extra_without_trigger_fields_is_not_critical(self, handler):
+        """Test extra fields that name no trigger field leave the record batched."""
+        handler.handler_config.critical_flush_enabled = True
+        handler.handler_config.critical_trigger_fields = ["fatal", "critical_error"]
+
+        record = _logged_record({"user_id": 123})
+
+        assert handler._is_critical_error(record) is False
 
     def test_returns_false_for_normal_records(self, handler):
         """Test returns False for normal records without critical indicators."""
@@ -557,3 +572,58 @@ class TestPerformanceOptimizations:
 
         # Only one entry in cache
         assert len(handler._sql_cache) == 1
+
+
+def _logger_on_failing_db(
+    log_config: LogConfig, **handler_options
+) -> tuple[Logger, Mock, list[str]]:
+    """A Logger wired to a DatabaseHandler the way the builder wires it: the handler
+    reports its own errors through that same logger. Every database session fails.
+    Returns the logger, the database mock and the messages its other handler saw."""
+    db = Mock()
+    db.session.side_effect = Exception("database down")
+    config = DatabaseHandlerConfig(
+        table_name="logs", db_interface=db, **handler_options
+    )
+    lg = Logger(name="reentrancy")
+    lg.addHandler(DatabaseHandler(lg, config, log_config))
+    seen: list[str] = []
+
+    class Capture(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            seen.append(record.getMessage())
+
+    lg.addHandler(Capture())
+    return lg, db, seen
+
+
+class TestFailingDatabase:
+    """A failed write is reported once, not fed back into the failing handler."""
+
+    def test_failed_critical_write_is_not_retried_through_its_report(self, log_config):
+        """The fallback report of a failed critical write does not re-enter the handler."""
+        lg, db, seen = _logger_on_failing_db(
+            log_config,
+            batch_size=1,
+            critical_flush_enabled=True,
+            critical_trigger_fields=["exception"],
+        )
+
+        lg.error("boom", extra={"exception": ValueError("boom")})
+
+        assert db.session.call_count == 1
+        assert any("CRITICAL ERROR (DB flush failed)" in m for m in seen)
+
+    def test_failed_batch_write_is_not_retried_through_its_report(self, log_config):
+        """The error report of a failed batch write does not re-enter the handler."""
+        lg, db, seen = _logger_on_failing_db(
+            log_config,
+            batch_size=1,
+            critical_flush_enabled=True,
+            critical_trigger_fields=["exception"],
+        )
+
+        lg.info("normal record")
+
+        assert db.session.call_count == 1
+        assert "database logging error" in seen

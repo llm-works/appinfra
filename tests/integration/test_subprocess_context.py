@@ -46,17 +46,30 @@ def _worker_loop(
         # Wait for check signal, then report location
         while ctx.running and not done_event.is_set():
             if check_event.wait(timeout=0.1):
+                # Clear before answering: once the answer arrives, a new check
+                # set by the parent is not wiped out
+                check_event.clear()
                 # Report current location from the holder
                 holder = getattr(lg, "_holder", None)
                 location = holder.location if holder else -1
                 result_queue.put((worker_id, location))
-                check_event.clear()  # Reset for next check
 
             if done_event.is_set():
                 break
 
     # Cleanup
     lg.handlers.clear()
+
+
+def _report_locations(check_events: list, result_queue: mp.Queue) -> dict[int, int]:
+    """Ask every worker for its holder's location; return them by worker id."""
+    for event in check_events:
+        event.set()
+    locations = {}
+    for _ in check_events:
+        worker_id, location = result_queue.get(timeout=2.0)
+        locations[worker_id] = location
+    return locations
 
 
 @pytest.mark.usefixtures("clean_env")
@@ -106,15 +119,7 @@ class TestSubprocessContextHotReload:
                 # Give watchers time to start
                 time.sleep(0.3)
 
-                # Signal both workers to report location
-                for event in check_events:
-                    event.set()
-
-                # Collect initial locations
-                initial_locations = {}
-                for _ in range(2):
-                    worker_id, location = result_queue.get(timeout=2.0)
-                    initial_locations[worker_id] = location
+                initial_locations = _report_locations(check_events, result_queue)
 
                 # Both should have location=1
                 assert initial_locations[0] == 1, (
@@ -127,18 +132,13 @@ class TestSubprocessContextHotReload:
                 # Change config to location=3
                 config_path.write_text("logging:\n  level: debug\n  location: 3\n")
 
-                # Wait for watchers to detect and apply change
-                time.sleep(0.8)
-
-                # Signal both workers to report location again
-                for event in check_events:
-                    event.set()
-
-                # Collect updated locations
-                updated_locations = {}
-                for _ in range(2):
-                    worker_id, location = result_queue.get(timeout=2.0)
-                    updated_locations[worker_id] = location
+                # Ask both workers for their location until both report the
+                # change or the deadline passes
+                deadline = time.monotonic() + 5.0
+                updated_locations = _report_locations(check_events, result_queue)
+                while updated_locations != {0: 3, 1: 3} and time.monotonic() < deadline:
+                    time.sleep(0.05)
+                    updated_locations = _report_locations(check_events, result_queue)
 
                 # Both should now have location=3
                 assert updated_locations[0] == 3, (
@@ -269,6 +269,7 @@ class TestSubprocessContextHotReload:
         import io
         import logging
         import re
+        import threading
 
         from appinfra.app.core.logging_utils import setup_logging_from_config
         from appinfra.config import Config, ConfigWatcher
@@ -297,8 +298,15 @@ class TestSubprocessContextHotReload:
 
             # Set up hot-reload watcher
             reloader = LogConfigReloader(lg, section="logging")
+            reloaded = threading.Event()
+
+            def on_change(config_dict: dict) -> None:
+                reloader(config_dict)
+                if config_dict.get("logging", {}).get("location") == 1:
+                    reloaded.set()
+
             watcher = ConfigWatcher(lg=lg, etc_dir=str(etc_dir))
-            watcher.configure(config_file, on_change=reloader)
+            watcher.configure(config_file, on_change=on_change)
             watcher.start()
 
             try:
@@ -312,7 +320,7 @@ class TestSubprocessContextHotReload:
                 config_path.write_text("logging:\n  level: debug\n  location: 1\n")
 
                 # Wait for watcher to detect and apply change
-                time.sleep(0.8)
+                assert reloaded.wait(timeout=5.0), "watcher did not apply location=1"
 
                 # Log after config change - SHOULD have file:line
                 lg.info("after_reload_marker")

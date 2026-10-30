@@ -20,7 +20,7 @@ What This Example Demonstrates:
 Running the Example:
     # From the project root
     # From the infra project root
-    ~/.venv/bin/python examples/disabled_logging_example.py
+    ~/.venv/bin/python examples/03_logging/disabled_logging_example.py
 
 Expected Output:
     The console will show various ways to disable logging and demonstrate that

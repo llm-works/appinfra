@@ -41,7 +41,7 @@ import os
 import sys
 import tempfile
 
-# Add the project root to the path (examples/04_configuration/file.py -> project root is 2 levels up)
+# Allow running from a source checkout without installing the package.
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
