@@ -18,7 +18,7 @@ Key Features Demonstrated:
 - Fallback to console when database fails
 
 Usage:
-    python examples/critical_flush_demo.py
+    python examples/05_database/advanced_critical_flush.py
 
 Requirements:
     - PostgreSQL database running
@@ -30,7 +30,6 @@ Requirements:
 
 import logging
 import sys
-import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -41,7 +40,6 @@ import sqlalchemy
 # Allow running from a source checkout without installing the package.
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
-from appinfra.config import Config
 from appinfra.db.pg import PG
 from appinfra.log import Logger
 from appinfra.log.builder.database import DatabaseLoggingBuilder
@@ -60,7 +58,6 @@ class CriticalFlushDemo:
 
     def __init__(self) -> None:
         """Initialize the demo application."""
-        self.config = Config("etc/infra.yaml")
         self.db_interface: PG
         self.logger: Logger
         self.setup_database()
@@ -152,9 +149,11 @@ class CriticalFlushDemo:
 
         for i in range(8):
             self.logger.info(f"Normal log message {i + 1} - this will be batched")
-            time.sleep(0.5)  # Small delay to show batching
 
-        print("✅ Normal logging complete - check database for batched entries")
+        print(
+            "✅ Normal logging complete - messages 1-5 were written as one batch; "
+            "6-8 wait for the next full batch, the flush interval or close()"
+        )
 
     def demonstrate_critical_error_with_exception(self) -> None:
         """Demonstrate critical error logging with exception (immediate flush)."""
@@ -281,19 +280,10 @@ class CriticalFlushDemo:
         """Execute all demonstration scenarios."""
         # Demonstrate different types of logging
         self.demonstrate_normal_logging()
-        time.sleep(2)  # Wait for any pending flushes
-
         self.demonstrate_critical_error_with_exception()
-        time.sleep(1)
-
         self.demonstrate_critical_error_with_trigger_field()
-        time.sleep(1)
-
         self.demonstrate_fatal_error()
-        time.sleep(1)
-
         self.demonstrate_database_failure_fallback()
-        time.sleep(2)
 
         # Query the database to show results
         self.query_database_logs()
