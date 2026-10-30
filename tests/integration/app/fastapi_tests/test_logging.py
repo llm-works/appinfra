@@ -11,7 +11,6 @@ import pytest
 from appinfra.app.fastapi.runtime.logging import setup_subprocess_logging
 
 
-@pytest.mark.unit
 class TestSetupSubprocessLogging:
     """Tests for setup_subprocess_logging function."""
 
@@ -38,6 +37,7 @@ class TestSetupSubprocessLogging:
             logging.root.handlers = original_handlers
             logging.root.level = original_level
 
+    @pytest.mark.unit
     def test_returns_logger_without_log_file(self):
         """Test that function returns logger even without log file."""
         logger = setup_subprocess_logging(None, log_level="WARNING")

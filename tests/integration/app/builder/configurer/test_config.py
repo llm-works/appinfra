@@ -26,7 +26,6 @@ def base(tmp_path) -> Path:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestWithSpec:
     """`config.with_spec` declares the ConfigSpec the App resolves at setup."""
 
@@ -157,11 +156,11 @@ class TestOverrides:
 # =============================================================================
 
 
-@pytest.mark.unit
 @pytest.mark.usefixtures("clean_env")
 class TestWithHotReload:
     """Hot reload needs a declared source and writes logging.hot_reload."""
 
+    @pytest.mark.unit
     def test_requires_a_config_source(self):
         with pytest.raises(ValueError, match="requires a config source"):
             AppBuilder("test").config.with_hot_reload()
@@ -199,7 +198,6 @@ class TestWithHotReload:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestCall:
     """`builder.config(...)` sets the same state and returns the AppBuilder."""
 
@@ -209,6 +207,7 @@ class TestCall:
         assert result is builder
         assert builder._config_spec == ConfigSpec("myorg", "myapp", path=base)
 
+    @pytest.mark.unit
     def test_unknown_keyword_raises(self):
         """A misspelled key fails instead of being ignored."""
         with pytest.raises(TypeError, match="unknown config field\\(s\\): overides"):
@@ -224,6 +223,7 @@ class TestCall:
         )
         assert builder._config_spec.base_config == (tmp_path / "happy.yaml").resolve()
 
+    @pytest.mark.unit
     def test_namespace_and_name_required_together(self):
         with pytest.raises(ValueError, match="required together"):
             AppBuilder("test").config(name="myapp")
@@ -249,6 +249,7 @@ class TestCall:
                 namespace="ns", name="myapp", path=base, debounce_ms=1
             )
 
+    @pytest.mark.unit
     def test_overrides_alone(self):
         builder = AppBuilder("test").config(overrides={"a": 1})
         assert builder._config.a == 1

@@ -24,7 +24,6 @@ from appinfra.version.info import BuildInfo, PackageVersionInfo
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestBuildInfo:
     """Test BuildInfo dataclass."""
 
@@ -78,6 +77,7 @@ class TestBuildInfo:
         info = BuildInfo(commit="abc", commit_full="abc123")
         assert info.modified is None
 
+    @pytest.mark.integration
     def test_modified_returns_none_without_git_repo(self, tmp_path):
         """Test modified returns None when not in git repo."""
         info = BuildInfo(
@@ -85,6 +85,7 @@ class TestBuildInfo:
         )
         assert info.modified is None
 
+    @pytest.mark.integration
     @patch("subprocess.run")
     def test_modified_returns_true_when_dirty(self, mock_run, tmp_path):
         """Test modified returns True when repo has changes."""
@@ -99,6 +100,7 @@ class TestBuildInfo:
         )
         assert info.modified is True
 
+    @pytest.mark.integration
     @patch("subprocess.run")
     def test_modified_returns_false_when_clean(self, mock_run, tmp_path):
         """Test modified returns False when repo is clean."""
@@ -113,7 +115,7 @@ class TestBuildInfo:
         assert info.modified is False
 
 
-@pytest.mark.unit
+@pytest.mark.integration
 class TestBuildInfoFromPath:
     """Test BuildInfo.from_path() method."""
 
@@ -184,7 +186,7 @@ BUILD_TIME = "invalid-time"
         assert result.build_time is None
 
 
-@pytest.mark.unit
+@pytest.mark.integration
 class TestBuildInfoGitRuntime:
     """Test BuildInfo git runtime detection."""
 
@@ -225,7 +227,7 @@ class TestBuildInfoGitRuntime:
         assert result is None
 
 
-@pytest.mark.unit
+@pytest.mark.integration
 class TestBuildInfoFromPathException:
     """Test BuildInfo.from_path exception handling."""
 
@@ -244,7 +246,6 @@ class TestBuildInfoFromPathException:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestPackageVersionInfo:
     """Test PackageVersionInfo dataclass."""
 
@@ -343,6 +344,7 @@ class TestPackageVersionInfo:
         )
         assert info.modified is None
 
+    @pytest.mark.integration
     @patch("subprocess.run")
     def test_modified_detects_changes(self, mock_run, tmp_path):
         """Test modified detects uncommitted changes."""
@@ -360,7 +362,6 @@ class TestPackageVersionInfo:
         assert info.modified is True
 
 
-@pytest.mark.unit
 class TestPackageVersionInfoSourceTypes:
     """Test PackageVersionInfo source type constants."""
 
@@ -373,10 +374,10 @@ class TestPackageVersionInfoSourceTypes:
         assert PackageVersionInfo.SOURCE_UNKNOWN == "unknown"
 
 
-@pytest.mark.unit
 class TestPackageVersionInfoModifiedEdgeCases:
     """Test PackageVersionInfo modified detection edge cases."""
 
+    @pytest.mark.integration
     def test_modified_no_git_root(self, tmp_path):
         """Test modified returns None when no git root found."""
         info = PackageVersionInfo(

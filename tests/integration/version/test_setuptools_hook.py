@@ -116,7 +116,6 @@ class TestGetGitInfo:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestGenerateBuildInfo:
     """Test _generate_build_info function."""
 
@@ -170,7 +169,6 @@ class TestGenerateBuildInfo:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestFinalizeHook:
     """Test finalize_hook function."""
 

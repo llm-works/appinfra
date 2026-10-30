@@ -67,7 +67,6 @@ def _worker_loop(
     lg.handlers.clear()
 
 
-@pytest.mark.e2e
 @pytest.mark.usefixtures("clean_env")
 class TestSubprocessContextHotReload:
     """E2E tests for SubprocessContext hot-reload in multiple processes."""
@@ -171,6 +170,7 @@ class TestSubprocessContextHotReload:
                         p.terminate()
                         p.join()
 
+    @pytest.mark.unit
     def test_subprocess_context_handles_missing_config(self):
         """Test that SubprocessContext works without config_files (no watcher)."""
         from appinfra.log import LoggerFactory
@@ -203,6 +203,7 @@ class TestSubprocessContextHotReload:
 
         lg.handlers.clear()
 
+    @pytest.mark.unit
     def test_subprocess_context_signal_handling(self):
         """Test that SubprocessContext properly sets running=False on signal."""
         import signal
@@ -224,6 +225,7 @@ class TestSubprocessContextHotReload:
 
         lg.handlers.clear()
 
+    @pytest.mark.unit
     def test_subprocess_context_no_signal_handling(self):
         """Test that SubprocessContext skips signal handling when disabled."""
         import signal
@@ -246,6 +248,7 @@ class TestSubprocessContextHotReload:
 
         lg.handlers.clear()
 
+    @pytest.mark.unit
     def test_subprocess_context_lg_property(self):
         """Test that SubprocessContext exposes lg property."""
         from appinfra.log import LoggerFactory
@@ -353,10 +356,10 @@ class TestSubprocessContextHotReload:
                     del logging.root.manager.loggerDict["/"]
 
 
-@pytest.mark.unit
 class TestSubprocessContextUnit:
     """Unit tests for SubprocessContext that run in-process (for coverage)."""
 
+    @pytest.mark.unit
     def test_start_config_watcher_no_files(self):
         """Test _start_config_watcher returns early when no config files."""
         from appinfra.log import LoggerFactory

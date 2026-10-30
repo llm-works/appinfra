@@ -25,7 +25,6 @@ from appinfra.version.setup_hook import (
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestRunGit:
     """Test _run_git helper function."""
 
@@ -61,6 +60,7 @@ class TestRunGit:
         result = _run_git("status")
         assert result is None
 
+    @pytest.mark.integration
     @patch("subprocess.run")
     def test_passes_cwd_to_subprocess(self, mock_run, tmp_path):
         """Test passes cwd parameter to subprocess."""
@@ -77,7 +77,6 @@ class TestRunGit:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestGetGitInfo:
     """Test _get_git_info function."""
 
@@ -134,6 +133,7 @@ class TestGetGitInfo:
         _, _, _, modified = result
         assert modified is True
 
+    @pytest.mark.integration
     @patch("appinfra.version.setup_hook._run_git")
     def test_passes_cwd_to_run_git(self, mock_run_git, tmp_path):
         """Test passes cwd parameter through to _run_git."""
@@ -151,7 +151,7 @@ class TestGetGitInfo:
 # =============================================================================
 
 
-@pytest.mark.unit
+@pytest.mark.integration
 class TestGenerateBuildInfo:
     """Test _generate_build_info function."""
 
@@ -252,7 +252,6 @@ class TestGenerateBuildInfo:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestMakeBuildPyClass:
     """Test make_build_py_class factory function."""
 
@@ -271,6 +270,7 @@ class TestMakeBuildPyClass:
         assert "build_py" in cls.__doc__
         assert "_build_info.py" in cls.__doc__
 
+    @pytest.mark.integration
     @patch("appinfra.version.setup_hook._generate_build_info")
     def test_run_generates_build_info(self, mock_generate, tmp_path):
         """Test run() generates build info in build directory."""
@@ -289,6 +289,7 @@ class TestMakeBuildPyClass:
 
         mock_generate.assert_called_once_with(pkg_dir)
 
+    @pytest.mark.integration
     @patch("appinfra.version.setup_hook._generate_build_info")
     def test_run_skips_when_package_not_in_build(self, mock_generate, tmp_path):
         """Test run() skips when package directory doesn't exist in build."""
@@ -333,7 +334,6 @@ class TestMakeBuildPyClass:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestGetStubContent:
     """Test get_stub_content function."""
 
@@ -347,6 +347,7 @@ class TestGetStubContent:
         assert 'BUILD_TIME = ""' in content
         assert "MODIFIED = None" in content
 
+    @pytest.mark.integration
     def test_stub_is_valid_python(self, tmp_path):
         """Test stub content is valid Python that can be imported."""
         content = get_stub_content()
@@ -386,7 +387,6 @@ class TestGetStubContent:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestGenerateStandaloneSetup:
     """Test generate_standalone_setup function."""
 
@@ -411,6 +411,7 @@ class TestGenerateStandaloneSetup:
         # Ensure the template placeholder is gone
         assert "{package_name}" not in content
 
+    @pytest.mark.integration
     def test_generated_code_is_valid_python(self, tmp_path):
         """Test generated setup.py is valid Python syntax."""
         from appinfra.version.setup_hook import generate_standalone_setup

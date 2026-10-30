@@ -116,10 +116,10 @@ def _child_verify(adapter: FastAPIAdapter, result_q: mp.Queue[str]) -> None:
         result_q.put(f"fail: {type(e).__name__}: {e}")
 
 
-@pytest.mark.integration
 class TestForkserverPickleBoundary:
     """Regression for pm ticket #151."""
 
+    @pytest.mark.unit
     def test_nested_closure_handler_fails_pickle(self):
         """Baseline: nested closure inside a RouteDefinition cannot pickle.
 
@@ -134,6 +134,7 @@ class TestForkserverPickleBoundary:
         with pytest.raises((AttributeError, pickle.PicklingError)):
             pickle.dumps(adapter)
 
+    @pytest.mark.unit
     def test_lazy_handler_survives_pickle(self):
         """Lazy pickles as a plain dataclass; resolves to real callable after."""
         adapter = FastAPIAdapter(ApiConfig())
