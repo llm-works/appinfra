@@ -46,11 +46,13 @@ def _worker_loop(
         # Wait for check signal, then report location
         while ctx.running and not done_event.is_set():
             if check_event.wait(timeout=0.1):
+                # Clear before answering: once the answer arrives, a new check
+                # set by the parent is not wiped out
+                check_event.clear()
                 # Report current location from the holder
                 holder = getattr(lg, "_holder", None)
                 location = holder.location if holder else -1
                 result_queue.put((worker_id, location))
-                check_event.clear()  # Reset for next check
 
             if done_event.is_set():
                 break
