@@ -37,9 +37,11 @@ def _random_suffix() -> str:
     return uuid.uuid4().hex[:12]
 
 
+# pg_locks, not pg_stat_activity: the latter is snapshotted on first read in a
+# transaction, so a session that connects after the holder's first poll is never seen
 _BLOCKED_BEHIND_THIS_SESSION = text(
-    "SELECT count(*) FROM pg_stat_activity"
-    " WHERE pg_backend_pid() = ANY(pg_blocking_pids(pid))"
+    "SELECT count(DISTINCT pid) FROM pg_locks"
+    " WHERE NOT granted AND pg_backend_pid() = ANY(pg_blocking_pids(pid))"
 )
 
 
