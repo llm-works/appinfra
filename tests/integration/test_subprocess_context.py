@@ -63,18 +63,10 @@ def _worker_loop(
 class TestSubprocessContextHotReload:
     """Tests for SubprocessContext hot-reload in multiple processes."""
 
-    @pytest.fixture(autouse=True)
-    def check_watchdog_installed(self):
-        """Skip tests if watchdog is not installed."""
-        try:
-            import watchdog  # noqa: F401
-
-            return True
-        except ImportError:
-            pytest.skip("watchdog not installed - skipping subprocess context tests")
-
     def test_two_processes_see_config_change(self):
         """Test that both subprocess workers see config hot-reload changes."""
+        pytest.importorskip("watchdog")
+
         with tempfile.TemporaryDirectory() as tmpdir:
             config_path = Path(tmpdir) / "config.yaml"
             config_path.write_text("logging:\n  level: debug\n  location: 1\n")
@@ -272,6 +264,8 @@ class TestSubprocessContextHotReload:
         only checks that holder.location value changes - it doesn't verify
         that the formatter actually uses the new value.
         """
+        pytest.importorskip("watchdog")
+
         import io
         import logging
         import re
