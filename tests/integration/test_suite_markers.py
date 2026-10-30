@@ -1,9 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright 2026 The appinfra Authors
 
-"""tests/fixtures/suite_markers.py: a test under a suite directory runs in that suite; a test
-elsewhere names its suite; collection stops on a test that contradicts its directory or names
-no suite."""
+"""tests/fixtures/suite_markers.py: a test under a suite directory runs in that suite unless it
+names another; a test elsewhere names its suite; collection stops on a test that names none."""
 
 from pathlib import Path
 
@@ -63,13 +62,20 @@ def test_a_marker_matching_the_directory_is_accepted(
     assert _ids(result) == {"tests/unit/test_unit_marked.py::test_marked"}
 
 
-def test_a_marker_contradicting_the_directory_stops_collection(
-    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize(
+    ("suite", "expected"), [("integration", True), ("unit", False)]
+)
+def test_a_marker_naming_another_suite_overrides_the_directory(
+    pytester: pytest.Pytester,
+    monkeypatch: pytest.MonkeyPatch,
+    suite: str,
+    expected: bool,
 ) -> None:
-    layout = {"tests/unit/test_unit_contradicts.py": _marked("integration")}
-    result = _run(pytester, monkeypatch, layout)
-    assert result.ret == pytest.ExitCode.USAGE_ERROR
-    assert "tests/unit/test_unit_contradicts.py::test_marked" in result.stderr.str()
+    layout = {"tests/unit/test_unit_overridden.py": _marked("integration")}
+    result = _run(pytester, monkeypatch, layout, "-m", suite)
+    nodeid = "tests/unit/test_unit_overridden.py::test_marked"
+    assert result.ret != pytest.ExitCode.USAGE_ERROR
+    assert (nodeid in _ids(result)) is expected
 
 
 def test_a_test_outside_the_suite_directories_must_name_its_suite(
