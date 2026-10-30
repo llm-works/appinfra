@@ -34,7 +34,7 @@ def _get_real_fastapi():
 
     # Temporarily remove test paths that might shadow fastapi
     original_path = sys.path.copy()
-    sys.path = [p for p in sys.path if "tests/infra/app" not in p]
+    sys.path = [p for p in sys.path if "tests/unit/app" not in p]
     try:
         # Force reimport
         if "fastapi" in sys.modules:
