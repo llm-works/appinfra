@@ -37,6 +37,8 @@ earlier: pre-release builds (0.13.1.devN) would not satisfy it. -->
 - `PG.dispose()` closes the pooled connections of a `PG` and of its cached `ScopedPG`s.
 
 ### Changed
+- **Breaking:** `make check.summary` is now `make check.ci`: `make check`'s checks and warning
+  policy as plain text, with pytest running in parallel. `make check.raw` applies no warning policy.
 - `make check` runs the Performance group on one pytest-xdist worker instead of several.
 - `make check`: the "Function size check" row is now "Code quality check" and also runs
   `cq dup` and `cq dead` when enabled; the "Running code quality checks..." banner is gone. A

@@ -1257,7 +1257,12 @@ run_raw() {
                 echo ""
 
                 local sub_exit_code=0
-                run_raw_subcheck "$subname" "$subcmd" || sub_exit_code=$?
+                # check.ci (--summary) applies the warning policy; check.raw runs plain
+                local scan=plain
+                if [ "$SUMMARY" = true ]; then
+                    scan=scan
+                fi
+                run_raw_subcheck "$subname" "$subcmd" "$scan" || sub_exit_code=$?
                 if [ $sub_exit_code -eq "$EXIT_CODE_WARNING" ]; then
                     has_warnings=true
                 elif [ $sub_exit_code -ne 0 ] && [ $sub_exit_code -ne 5 ]; then
@@ -1302,36 +1307,28 @@ run_raw() {
     fi
 }
 
-# Run one test subcheck in raw mode: its output streams to the terminal, and a copy goes to a
-# log for the warning scan (see check_warnings), whose findings follow the subcheck's line.
-# Returns 0 (passed), 5 (no tests collected, shown like run_check's case 5), EXIT_CODE_WARNING
-# (passed, with warnings) or a failing code.
+# Run one test subcheck with its output streaming as is. With scan (check.ci), a copy goes to a
+# log for the warning scan (see check_warnings), whose findings follow the subcheck's line and,
+# in strict mode, fail it. Without (check.raw), the plain command runs: its outcome is the
+# tools' own, free of check.sh's warning policy. Returns 0 (passed), 5 (no tests collected,
+# shown like run_check's case 5), EXIT_CODE_WARNING (passed, with warnings) or a failing code.
 run_raw_subcheck() {
-    local subname="$1" subcmd="$2"
+    local subname="$1" subcmd="$2" scan="$3"
     local log="${STATUS_DIR}/raw-subcheck.log"
-    # Through tee, pytest's stdout is a pipe: keep its colors when the terminal had them, unless
-    # the user chose (PY_COLORS, NO_COLOR, FORCE_COLOR pass through). Exported inside the piped
-    # group (its own subshell), not prefixed: "PY_COLORS=1 (exit 5)", the command for a suite
-    # without tests, is a syntax error
-    local colors=false
-    if [ -t 1 ] && [ -z "${PY_COLORS:-}${NO_COLOR:-}${FORCE_COLOR:-}" ]; then
-        colors=true
+    local rc=0
+    if [ "$scan" = scan ]; then
+        set +e
+        # -i: on Ctrl-C tee keeps passing output until the check closes the pipe, so what pytest
+        # prints on its way out still reaches the terminal; stop_children ends the rest
+        eval "$subcmd" 2>&1 | tee -i "$log"
+        rc=${PIPESTATUS[0]}
+        set -e
+    else
+        eval "$subcmd" || rc=$?
     fi
-    local rc
-    set +e
-    # -i: on Ctrl-C tee keeps passing output until the check closes the pipe, so what pytest
-    # prints on its way out still reaches the terminal; stop_children ends the rest
-    {
-        if [ "$colors" = true ]; then
-            export PY_COLORS=1
-        fi
-        eval "$subcmd"
-    } 2>&1 | tee -i "$log"
-    rc=${PIPESTATUS[0]}
-    set -e
 
     local found="" note=""
-    if [ "$rc" -eq 0 ]; then
+    if [ "$scan" = scan ] && [ "$rc" -eq 0 ]; then
         found=$(found_warnings "$log")
     fi
     if [ -n "$found" ]; then

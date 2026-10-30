@@ -183,13 +183,21 @@ The `check.sh` script is designed to be run via Make, not directly:
 
 ```bash
 # Correct - uses exported variables from Makefile
-make check
-make check.raw      # For CI logs
-make check.summary  # Summaries only
+make check      # Interactive: live checklist, rows below it
+make check.ci   # The same checks and warning policy as plain text, for logs and CI
+make check.raw  # Every tool's output as is, every test listed: the reference without check.sh's policy
 
 # Incorrect - will use fallback defaults (APPINFRA_DEV_PKG_NAME=appinfra)
 ./scripts/check.sh
 ```
+
+`make check.ci` runs what `make check` runs, fail-fast, and applies the same warning policy, but
+prints plain text without cursor movement: use it wherever output goes to a file or CI log. Its
+checks run one after another, so their output stays in order, with pytest on its xdist workers
+within each; that makes it slower than `make check`, which also runs the checks alongside each
+other. `make check.raw` runs every tool with its output untouched and pytest in one
+process with every test listed; it applies no warning policy, so comparing it with `make check`
+shows whether `check.sh` itself changed an outcome.
 
 With fail-fast (`make check`), the summary of a failed run shows only the failed test ids and
 their first `E` lines; `make check.all` shows only which checks failed. The full output of each
@@ -247,8 +255,10 @@ When the project's pytest `filterwarnings` has a bare `error` entry, which makes
 error, a warning in a test check or an example fails it (`[✗]`); otherwise the check passes with
 a warning and its log is kept in `.build/check/`. A tool's warning line only ever warns. Rows show
 paths relative to the project and a file by its name; the kept log has the full message.
-`make check.raw` lists the same warnings under the check's passed or failed line. Warnings in
-interpreters a test starts belong to that test and are not collected.
+`make check.ci` lists the warnings of its test checks and examples under each one's passed or
+failed line, with the same policy; `make check.raw` collects none and fails on none, and shows
+them only as the tools print them. Warnings in interpreters a test starts belong to that test and
+are not collected.
 
 A warning at exit comes after the last test, so it names no test. Narrow it down with `-k` in a
 pytest run that loads the plugin (the `make test.*` targets do not), until the line is gone:

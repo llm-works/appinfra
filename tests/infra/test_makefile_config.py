@@ -275,6 +275,45 @@ class TestModuleIncludedAlone:
         assert result.returncode == 0, result.stderr
         assert "check.sh --fail-fast" in result.stdout
 
+    @pytest.mark.parametrize(
+        ("target", "flags"),
+        [
+            (
+                "check.ci",
+                "--raw-parallel --summary",
+            ),  # make check as plain text, in parallel
+            ("check.raw", "--raw"),  # every tool's output as is
+        ],
+    )
+    def test_plain_text_check_targets(
+        self, tmp_path: Path, target: str, flags: str
+    ) -> None:
+        (tmp_path / "Makefile").write_text(f"include {MAKE_DIR / 'Makefile.dev'}\n")
+        result = subprocess.run(
+            ["make", "--no-print-directory", "-n", target],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+            env=_clean_env(),
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.rstrip().endswith(f"check.sh {flags}")
+
+    def test_check_summary_is_gone(self, tmp_path: Path) -> None:
+        """Renamed to check.ci."""
+        (tmp_path / "Makefile").write_text(f"include {MAKE_DIR / 'Makefile.dev'}\n")
+        result = subprocess.run(
+            ["make", "--no-print-directory", "-n", "check.summary"],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+            env=_clean_env(),
+            check=False,
+        )
+        assert result.returncode != 0
+        assert "No rule to make target 'check.summary'" in result.stderr
+
 
 @pytest.mark.integration
 class TestConfigLoading:

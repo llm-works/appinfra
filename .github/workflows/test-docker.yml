@@ -366,8 +366,8 @@ jobs:
           python -m pip install --upgrade pip
           make setup
 
-      - name: Run make check (no postgres, no docker, no podman)
-        run: make check
+      - name: Run make check.ci (no postgres, no docker, no podman)
+        run: make check.ci
 
   # Install verification: run `make install` against a clean ubuntu runner and
   # confirm the wheel is published to $prefix/share/$pkg/wheels/ with the mode
@@ -490,8 +490,8 @@ jobs:
           python -m pip install --upgrade pip
           make setup
 
-      - name: Run make check (raw-parallel for readable logs)
-        run: APPINFRA_DEV_PROJECT_ROOT=$(pwd) bash appinfra/scripts/check.sh --raw-parallel
+      - name: Run make check.ci
+        run: make check.ci
 
       - name: Stop postgres
         if: always()
