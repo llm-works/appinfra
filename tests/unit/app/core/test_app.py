@@ -429,6 +429,7 @@ class TestMain:
         mock_run.assert_called_once()
         assert result == 0
 
+    @pytest.mark.integration
     def test_main_handles_keyboard_interrupt(self):
         """Test main handles KeyboardInterrupt."""
         import time as std_time
@@ -453,6 +454,7 @@ class TestMain:
 
         assert result == 130
 
+    @pytest.mark.integration
     def test_main_handles_exception(self):
         """Test main handles exceptions."""
         import time as std_time
@@ -482,6 +484,7 @@ class TestMain:
 
         assert app.lifecycle.logger is None
 
+    @pytest.mark.integration
     def test_bare_run_without_tools_reaches_run_no_tool(self):
         """A bare run of an app with no tools ends in run_no_tool, not a crash.
 
@@ -498,6 +501,7 @@ class TestMain:
 
         assert result == 1
 
+    @pytest.mark.integration
     def test_bare_run_without_tools_uses_run_no_tool_override(self):
         """run_no_tool is the override hook for an app that registers no tools."""
 
@@ -690,6 +694,7 @@ class TestLgProperty:
 class TestAppIntegration:
     """Test App integration scenarios."""
 
+    @pytest.mark.integration
     def test_full_app_lifecycle(self):
         """Test complete app lifecycle with tool execution."""
         app = App()

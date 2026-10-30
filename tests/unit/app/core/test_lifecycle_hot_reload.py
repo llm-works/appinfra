@@ -271,6 +271,7 @@ class TestHotReloadYamlOnlyIntegration:
         monkeypatch.setenv("XDG_CONFIG_DIRS", str(tmp_path / "no-xdg-sys"))
         monkeypatch.chdir(tmp_path)
 
+    @pytest.mark.integration
     def test_yaml_only_hot_reload_detects_config(self, tmp_path):
         """
         Hot-reload should work with YAML configuration alone.
@@ -332,6 +333,7 @@ logging:
             configure_args = mock_watcher.configure.call_args
             assert "config.yaml" in str(configure_args)
 
+    @pytest.mark.integration
     def test_programmatic_only_hot_reload(self, tmp_path):
         """
         Test programmatic-only hot-reload (no hot_reload in YAML).
@@ -432,6 +434,7 @@ logging:
             "hot_reload.debounce_ms should be 1000"
         )
 
+    @pytest.mark.integration
     def test_yaml_only_with_etc_dir_hot_reload(self, tmp_path):
         """Test YAML-only hot-reload with the file selected via --etc-dir."""
         from appinfra.app.builder import AppBuilder

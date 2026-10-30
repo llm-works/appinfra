@@ -63,6 +63,7 @@ class TestAddRoute:
         assert "POST" in manager._routes["/api/users"]
         assert "PUT" in manager._routes["/api/users"]
 
+    @pytest.mark.integration
     def test_add_pattern_route_with_wildcard(self):
         """Test adding pattern route with wildcard (lines 27-31)."""
         manager = RouteManager()
@@ -74,6 +75,7 @@ class TestAddRoute:
         pattern, route_info = manager._patterns[0]
         assert "GET" in route_info
 
+    @pytest.mark.integration
     def test_add_pattern_route_with_param(self):
         """Test adding pattern route with parameter (line 27)."""
         manager = RouteManager()
@@ -83,6 +85,7 @@ class TestAddRoute:
 
         assert len(manager._patterns) == 1
 
+    @pytest.mark.integration
     def test_add_pattern_route_with_regex(self):
         """Test adding pattern route with regex (line 27)."""
         manager = RouteManager()
@@ -141,6 +144,7 @@ class TestGetHandler:
 
         assert result is None
 
+    @pytest.mark.integration
     def test_get_handler_pattern_route(self):
         """Test getting handler for pattern route (lines 55-57)."""
         manager = RouteManager()
@@ -151,6 +155,7 @@ class TestGetHandler:
 
         assert result is handler
 
+    @pytest.mark.integration
     def test_simple_route_takes_precedence(self):
         """Test simple route checked before patterns (line 51)."""
         manager = RouteManager()
@@ -263,6 +268,7 @@ class TestListRoutes:
         assert "/api/items" in result
         assert result["/api/items"] == ["GET"]
 
+    @pytest.mark.integration
     def test_list_pattern_routes(self):
         """Test listing pattern routes (lines 100-101)."""
         manager = RouteManager()
@@ -274,6 +280,7 @@ class TestListRoutes:
         pattern_key = [k for k in result if k.startswith("PATTERN:")][0]
         assert "GET" in result[pattern_key]
 
+    @pytest.mark.integration
     def test_list_mixed_routes(self):
         """Test listing both simple and pattern routes."""
         manager = RouteManager()
@@ -292,6 +299,7 @@ class TestListRoutes:
 # =============================================================================
 
 
+@pytest.mark.integration
 class TestRouteManagerIntegration:
     """Test RouteManager integration scenarios."""
 

@@ -1012,6 +1012,7 @@ def _run_select_with_keys(keys: str) -> tuple[str | None, list[BaseException]]:
 
 
 @pytest.mark.skipif(not prompts.INQUIRER_AVAILABLE, reason="InquirerPy not installed")
+@pytest.mark.integration
 class TestInquirerSelectKeys:
     """Key handling of a real InquirerPy select prompt.
 

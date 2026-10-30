@@ -11,6 +11,8 @@ against ReDoS (Regular Expression Denial of Service) attacks.
 import re
 import unittest
 
+import pytest
+
 from appinfra.regex_utils import (
     MAX_PATTERN_LENGTH,
     RegexComplexityError,
@@ -24,18 +26,21 @@ from appinfra.regex_utils import (
 class TestPatternComplexityValidation(unittest.TestCase):
     """Test pattern complexity validation."""
 
+    @pytest.mark.integration
     def test_simple_pattern_accepted(self):
         """Simple patterns should be accepted."""
         pattern = safe_compile(r"^[a-z]+$")
         self.assertIsNotNone(pattern)
         self.assertEqual(pattern.match("hello").group(), "hello")
 
+    @pytest.mark.integration
     def test_bounded_quantifiers_accepted(self):
         """Patterns with bounded quantifiers should be accepted."""
         pattern = safe_compile(r"^\d{1,5}$")
         self.assertIsNotNone(pattern)
         self.assertEqual(pattern.match("12345").group(), "12345")
 
+    @pytest.mark.integration
     def test_character_classes_accepted(self):
         """Character classes should be accepted."""
         pattern = safe_compile(r"^[A-Za-z0-9_-]+$")
@@ -64,17 +69,20 @@ class TestPatternComplexityValidation(unittest.TestCase):
 class TestSafeCompile(unittest.TestCase):
     """Test safe_compile function."""
 
+    @pytest.mark.integration
     def test_compile_simple_pattern(self):
         """Should compile simple patterns successfully."""
         pattern = safe_compile(r"^\w+$")
         self.assertIsInstance(pattern, re.Pattern)
 
+    @pytest.mark.integration
     def test_compile_with_flags(self):
         """Should support regex flags."""
         pattern = safe_compile(r"^hello$", flags=re.IGNORECASE)
         self.assertTrue(pattern.match("HELLO"))
         self.assertTrue(pattern.match("hello"))
 
+    @pytest.mark.integration
     def test_invalid_pattern_raises_error(self):
         """Should raise error for invalid regex syntax."""
         with self.assertRaises(re.error):
@@ -89,12 +97,14 @@ class TestSafeCompile(unittest.TestCase):
 class TestSafeMatch(unittest.TestCase):
     """Test safe_match function."""
 
+    @pytest.mark.integration
     def test_match_with_string_pattern(self):
         """Should match using string pattern."""
         match = safe_match(r"^hello", "hello world")
         self.assertIsNotNone(match)
         self.assertEqual(match.group(), "hello")
 
+    @pytest.mark.integration
     def test_match_with_compiled_pattern(self):
         """Should match using compiled pattern."""
         pattern = safe_compile(r"^test")
@@ -102,11 +112,13 @@ class TestSafeMatch(unittest.TestCase):
         self.assertIsNotNone(match)
         self.assertEqual(match.group(), "test")
 
+    @pytest.mark.integration
     def test_no_match_returns_none(self):
         """Should return None when no match."""
         match = safe_match(r"^hello", "goodbye")
         self.assertIsNone(match)
 
+    @pytest.mark.integration
     def test_match_with_flags(self):
         """Should support flags with string pattern."""
         match = safe_match(r"^HELLO", "hello", flags=re.IGNORECASE)
@@ -122,18 +134,21 @@ class TestSafeMatch(unittest.TestCase):
 class TestSafeSearch(unittest.TestCase):
     """Test safe_search function."""
 
+    @pytest.mark.integration
     def test_search_finds_pattern(self):
         """Should find pattern anywhere in string."""
         match = safe_search(r"world", "hello world")
         self.assertIsNotNone(match)
         self.assertEqual(match.group(), "world")
 
+    @pytest.mark.integration
     def test_search_with_compiled_pattern(self):
         """Should work with compiled pattern."""
         pattern = safe_compile(r"\d+")
         match = safe_search(pattern, "test 123 end")
         self.assertEqual(match.group(), "123")
 
+    @pytest.mark.integration
     def test_search_no_match_returns_none(self):
         """Should return None when pattern not found."""
         match = safe_search(r"xyz", "hello world")
@@ -149,22 +164,26 @@ class TestSafeSearch(unittest.TestCase):
 class TestSafeFindall(unittest.TestCase):
     """Test safe_findall function."""
 
+    @pytest.mark.integration
     def test_findall_returns_all_matches(self):
         """Should return list of all matches."""
         matches = safe_findall(r"\d+", "a1b2c3")
         self.assertEqual(matches, ["1", "2", "3"])
 
+    @pytest.mark.integration
     def test_findall_with_compiled_pattern(self):
         """Should work with compiled pattern."""
         pattern = safe_compile(r"[a-z]+")
         matches = safe_findall(pattern, "test123hello456world")
         self.assertEqual(matches, ["test", "hello", "world"])
 
+    @pytest.mark.integration
     def test_findall_no_matches_returns_empty_list(self):
         """Should return empty list when no matches."""
         matches = safe_findall(r"\d+", "no numbers here")
         self.assertEqual(matches, [])
 
+    @pytest.mark.integration
     def test_findall_with_groups(self):
         """Should handle capturing groups."""
         matches = safe_findall(r"(\d+)([a-z]+)", "1test2hello3world")
@@ -176,6 +195,7 @@ class TestSafeFindall(unittest.TestCase):
         self.assertEqual(matches, ["1", "2", "3"])
 
 
+@pytest.mark.integration
 class TestReDoSProtectionIntegration(unittest.TestCase):
     """Integration tests for ReDoS protection."""
 
@@ -216,6 +236,7 @@ class TestReDoSProtectionIntegration(unittest.TestCase):
         self.assertEqual(result, "multiple spaces")
 
 
+@pytest.mark.integration
 class TestEdgeCases(unittest.TestCase):
     """Test edge cases and error conditions."""
 

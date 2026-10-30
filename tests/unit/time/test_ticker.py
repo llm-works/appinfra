@@ -961,6 +961,7 @@ class TestEdgeCases:
 class TestTickerIterator:
     """Test Ticker iterator functionality."""
 
+    @pytest.mark.integration
     def test_yields_tick_count(self, mock_logger):
         """Verify ticker yields incrementing tick numbers."""
         ticks = []
@@ -971,6 +972,7 @@ class TestTickerIterator:
                     t.stop()
         assert ticks == [0, 1, 2]
 
+    @pytest.mark.integration
     def test_initial_false_skips_first_tick(self, mock_logger):
         """Verify initial=False waits before first tick."""
         ticks = []
@@ -985,6 +987,7 @@ class TestTickerIterator:
         assert ticks[0][0] == 0
         assert ticks[0][1] >= 0.04  # Allow some tolerance
 
+    @pytest.mark.integration
     def test_initial_true_fires_immediately(self, mock_logger):
         """Verify initial=True (default) fires tick immediately."""
         ticks = []
@@ -1025,6 +1028,7 @@ class TestTickerIterator:
         assert ticks == []
 
 
+@pytest.mark.integration
 class TestTickerContextManager:
     """Test Ticker context manager functionality."""
 
@@ -1102,6 +1106,7 @@ class TestTickerContextManager:
 class TestTickerIteratorIntegration:
     """Integration tests for Ticker iterator with SubprocessContext pattern."""
 
+    @pytest.mark.integration
     def test_multiple_ticks_with_timing(self, mock_logger):
         """Test ticker yields correct tick values in order."""
         ticks = []

@@ -78,6 +78,7 @@ class TestLifecycleManagerInit:
 # =============================================================================
 
 
+@pytest.mark.integration
 class TestInitialize:
     """Test initialize method (lines 24-59)."""
 
@@ -189,6 +190,7 @@ class TestSetupTool:
         with pytest.raises(LifecycleError, match="not initialized"):
             manager.setup_tool(tool)
 
+    @pytest.mark.integration
     def test_setup_tool_calls_tool_setup(self):
         """Test setup_tool calls tool.setup (lines 66-74)."""
         app = Mock()
@@ -203,6 +205,7 @@ class TestSetupTool:
 
         tool.setup.assert_called_once()
 
+    @pytest.mark.integration
     def test_setup_tool_passes_kwargs(self):
         """Test setup_tool passes kwargs to tool.setup."""
         app = Mock()
@@ -217,6 +220,7 @@ class TestSetupTool:
 
         tool.setup.assert_called_once_with(start=123.45, extra="value")
 
+    @pytest.mark.integration
     def test_setup_tool_handles_exception(self):
         """Test setup_tool handles exception (lines 75-84)."""
         app = Mock()
@@ -248,6 +252,7 @@ class TestExecuteTool:
         with pytest.raises(LifecycleError, match="not initialized"):
             manager.execute_tool(tool)
 
+    @pytest.mark.integration
     def test_execute_tool_calls_tool_run(self):
         """Test execute_tool calls tool.run (lines 91-100)."""
         app = Mock()
@@ -263,6 +268,7 @@ class TestExecuteTool:
         tool.run.assert_called_once()
         assert result == 42
 
+    @pytest.mark.integration
     def test_execute_tool_passes_args(self):
         """Test execute_tool passes args to tool (lines 98-99)."""
         import argparse
@@ -280,6 +286,7 @@ class TestExecuteTool:
 
         assert tool._parsed_args is mock_args
 
+    @pytest.mark.integration
     def test_execute_tool_handles_exception(self):
         """Test execute_tool handles exception (lines 101-106)."""
         app = Mock()
@@ -310,6 +317,7 @@ class TestFinalize:
         # Should not raise
         manager.finalize(0)
 
+    @pytest.mark.integration
     def test_finalize_logs_completion(self):
         """Test finalize completes without error.
 
@@ -324,6 +332,7 @@ class TestFinalize:
         # Should complete without error (finalize is now empty)
         manager.finalize(0)
 
+    @pytest.mark.integration
     def test_finalize_with_error_code(self):
         """Test finalize with non-zero return code.
 
@@ -344,6 +353,7 @@ class TestFinalize:
 # =============================================================================
 
 
+@pytest.mark.integration
 class TestLifecycleIntegration:
     """Test full lifecycle scenarios."""
 
@@ -473,6 +483,7 @@ class TestShutdown:
         result = manager.shutdown(0)
         assert result == 0
 
+    @pytest.mark.integration
     def test_shutdown_logs_initiation(self):
         """Test shutdown logs initiation message."""
         app = Mock()
@@ -489,6 +500,7 @@ class TestShutdown:
         ]
         assert any("shutting down" in str(call) for call in info_calls)
 
+    @pytest.mark.integration
     def test_shutdown_calls_finalize(self):
         """Test shutdown calls finalize at the end."""
         app = Mock()
@@ -501,6 +513,7 @@ class TestShutdown:
 
         manager.finalize.assert_called_once_with(42)
 
+    @pytest.mark.integration
     def test_shutdown_returns_return_code(self):
         """Test shutdown returns the provided return code."""
         app = Mock()
@@ -512,6 +525,7 @@ class TestShutdown:
 
         assert result == 42
 
+    @pytest.mark.integration
     def test_shutdown_releases_the_root_logger(self):
         """After shutdown the root name is free, and a second shutdown does nothing."""
         config = DotDict(logging=DotDict(level="info", location=0, micros=False))
@@ -526,6 +540,7 @@ class TestShutdown:
         next_manager.initialize(config)  # creates "/" again without a conflict
         next_manager.shutdown(0)
 
+    @pytest.mark.integration
     def test_shutdown_restores_the_signal_handlers(self):
         """The handlers initialize() installed do not outlive the lifecycle."""
         before = signal.getsignal(signal.SIGTERM)
@@ -541,6 +556,7 @@ class TestShutdown:
         finally:
             signal.signal(signal.SIGTERM, before)
 
+    @pytest.mark.integration
     def test_shutdown_raises_a_handler_close_error_once(self):
         """The root logger is still released, and a second shutdown does nothing."""
         config = DotDict(logging=DotDict(level="info", location=0, micros=False))
@@ -555,6 +571,7 @@ class TestShutdown:
         assert manager.shutdown(3) == 3
 
 
+@pytest.mark.integration
 class TestShutdownPhases:
     """Test individual shutdown phases."""
 
@@ -721,6 +738,7 @@ class TestShutdownPhases:
         manager._lifecycle_logger.error.assert_called()
 
 
+@pytest.mark.integration
 class TestExecutePhase:
     """Test _execute_phase with timeout protection."""
 
@@ -785,6 +803,7 @@ class TestExecutePhase:
         assert manager._shutdown_timeouts["test_phase"] == 15.0
 
 
+@pytest.mark.integration
 class TestShutdownIntegration:
     """Test full shutdown flow integration."""
 
