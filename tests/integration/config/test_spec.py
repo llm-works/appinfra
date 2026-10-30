@@ -53,7 +53,6 @@ def _module_with_base(tmp_path, module: str, filename: str) -> Path:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestAutoOrigin:
     """With ``origin`` left AUTO, the base is found in the named module or the caller."""
 
@@ -128,7 +127,6 @@ class TestAutoOrigin:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestExplicitParts:
     """``origin``, ``etc_dir``, ``filename`` and ``path``; no probing."""
 
@@ -214,6 +212,7 @@ class TestExplicitParts:
         with pytest.raises(TypeError, match="not None"):
             ConfigSpec("ns", "pkg", origin=tmp_path, filename=None)  # type: ignore[arg-type]
 
+    @pytest.mark.unit
     def test_auto_is_the_default_and_reprs_as_such(self):
         assert repr(AUTO) == "AUTO"
 
@@ -223,7 +222,6 @@ class TestExplicitParts:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestRelativeOrigin:
     """A relative ``origin`` anchors to the direct caller's ``__file__``.
 
@@ -307,18 +305,21 @@ class TestRelativeOrigin:
         # wrapper.parent = project/libs/helper; "../.." = project
         assert result.base_config == (project / "cfg" / "x.yaml").resolve()
 
+    @pytest.mark.unit
     def test_no_caller_file_raises(self):
         """A frame with no ``__file__`` (REPL, some exec forms) gets a clear error."""
         ns = {"ConfigSpec": ConfigSpec}  # no __file__
         with pytest.raises(ValueError, match="relative origin requires"):
             exec("ConfigSpec('ns', 'demo', origin='..')", ns)
 
+    @pytest.mark.unit
     def test_empty_identity_rejected(self):
         with pytest.raises(ValueError, match="non-empty"):
             ConfigSpec("", "pkg", path="/x.yaml")
         with pytest.raises(ValueError, match="non-empty"):
             ConfigSpec("ns", "", path="/x.yaml")
 
+    @pytest.mark.unit
     def test_is_frozen_and_hashable(self):
         spec = _spec()
         with pytest.raises(dataclasses.FrozenInstanceError):
@@ -486,7 +487,6 @@ class TestXdgCandidatesInterpolation:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestResolveEtcDirXdgBase:
     """``resolve`` walks the rule-6 precedence chain."""
 
@@ -589,7 +589,6 @@ class TestResolveEtcDirXdgBase:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestResolveConfigFile:
     """``config_file``: direct path or bare filename, always bypasses XDG."""
 
@@ -715,7 +714,6 @@ class TestResolveConfigFile:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestExplicitOriginBoundary:
     """An explicit ``origin`` is the include boundary; AUTO and ``path`` keep the base's dir."""
 
@@ -808,7 +806,6 @@ class TestExplicitOriginBoundary:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestProjectLocal:
     """Rule 4: walk up from cwd for ``<etc_dir>/<filename>``."""
 
@@ -954,6 +951,7 @@ class TestProjectLocal:
         cf = ConfigSpec("llm-works", "appinfra", path=bundled).resolve()
         assert cf.path == local
 
+    @pytest.mark.unit
     def test_returns_none_when_cwd_raises_oserror(self, monkeypatch):
         spec = _spec()
 

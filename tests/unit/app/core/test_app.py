@@ -45,7 +45,6 @@ def create_test_tool(name: str, aliases: list = None):
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestAppInit:
     """Test App initialization (lines 46-55)."""
 
@@ -83,7 +82,6 @@ class TestAppInit:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestAddTool:
     """Test add_tool method (lines 65-68)."""
 
@@ -124,7 +122,6 @@ class TestAddTool:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestSetMainTool:
     """Test set_main_tool method."""
 
@@ -156,7 +153,6 @@ class TestSetMainTool:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestCreateTools:
     """Test create_tools method (line 85)."""
 
@@ -171,7 +167,6 @@ class TestCreateTools:
         assert len(app.registry.list_tools()) == 0
 
 
-@pytest.mark.unit
 class TestCreateArgs:
     """Test create_args method (lines 93-94)."""
 
@@ -185,7 +180,6 @@ class TestCreateArgs:
         assert app.parser.parser is not None
 
 
-@pytest.mark.unit
 class TestAddArgs:
     """Test add_args method (line 98)."""
 
@@ -199,7 +193,6 @@ class TestAddArgs:
             mock_add_default.assert_called_once()
 
 
-@pytest.mark.unit
 class TestAddDefaultArgs:
     """Test add_default_args method (line 102)."""
 
@@ -213,7 +206,6 @@ class TestAddDefaultArgs:
             mock_log_args.assert_called_once()
 
 
-@pytest.mark.unit
 class TestAddLogDefaultArgs:
     """Test add_log_default_args method (lines 106-122)."""
 
@@ -281,7 +273,6 @@ class TestAddLogDefaultArgs:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestConfigure:
     """Test configure method (line 197)."""
 
@@ -298,7 +289,6 @@ class TestConfigure:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestSetup:
     """Test setup method (lines 201-228)."""
 
@@ -403,7 +393,6 @@ class TestSetup:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestRunNoTool:
     """Test run_no_tool method (lines 239-240)."""
 
@@ -423,7 +412,6 @@ class TestRunNoTool:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestMain:
     """Test main method (lines 252-271)."""
 
@@ -533,7 +521,6 @@ class TestMain:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestRun:
     """Test run method (lines 275-277)."""
 
@@ -557,7 +544,6 @@ class TestRun:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestInternalRun:
     """Test _run method (lines 282-300)."""
 
@@ -626,7 +612,6 @@ class TestInternalRun:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestToolDecorator:
     """Test tool decorator (line 324)."""
 
@@ -650,7 +635,6 @@ class TestToolDecorator:
         assert "my_tool" in app.registry.list_tools()
 
 
-@pytest.mark.unit
 class TestArgumentDecorator:
     """Test argument decorator (line 343)."""
 
@@ -668,7 +652,6 @@ class TestArgumentDecorator:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestArgsProperty:
     """Test args property (line 348)."""
 
@@ -687,7 +670,6 @@ class TestArgsProperty:
         assert app.args is None
 
 
-@pytest.mark.unit
 class TestLgProperty:
     """Test lg property (line 353)."""
 
@@ -705,7 +687,6 @@ class TestLgProperty:
 # =============================================================================
 
 
-@pytest.mark.integration
 class TestAppIntegration:
     """Test App integration scenarios."""
 
@@ -791,7 +772,6 @@ class TestAppIntegration:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestEtcDirArgument:
     """Test --etc-dir command-line argument parsing and handling."""
 
@@ -836,7 +816,6 @@ class TestEtcDirArgument:
         assert app.config.etc_dir == "/custom/etc"
 
 
-@pytest.mark.unit
 class TestConfigWatcherProperty:
     """Test App.config_watcher property."""
 
@@ -856,7 +835,6 @@ class TestConfigWatcherProperty:
         assert app.config_watcher is mock_watcher
 
 
-@pytest.mark.unit
 class TestAddArgumentAfterParser:
     """Test App.add_argument when parser already exists."""
 
@@ -898,7 +876,6 @@ class TestAddArgumentAfterParser:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestDeepMerge:
     """Test yaml.deep_merge() utility function (consolidated from App and yaml modules)."""
 
@@ -1006,7 +983,6 @@ class TestDeepMerge:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestSubprocessContextMethod:
     """Test App.subprocess_context() helper method."""
 
@@ -1047,6 +1023,7 @@ class TestSubprocessContextMethod:
         ):
             assert ctx._config_files == ["/etc/myapp/config.yaml"]
 
+    @pytest.mark.integration
     def test_subprocess_context_forwards_origin(self, tmp_path):
         """Test that subprocess_context() forwards the resolved include root."""
         from appinfra.config import ConfigFile
@@ -1127,7 +1104,7 @@ def _pool_task(i: int) -> int:
     return i
 
 
-@pytest.mark.unit
+@pytest.mark.integration
 @pytest.mark.skipif(
     "fork" not in __import__("multiprocessing").get_all_start_methods(),
     reason="needs the fork start method",
@@ -1154,7 +1131,6 @@ def test_subprocess_context_in_a_reused_pool_worker():
     assert logging.root.manager.loggerDict["/"] is parent_root
 
 
-@pytest.mark.unit
 class TestCreateConfigWatcherMethod:
     """Test App.create_config_watcher() helper method."""
 
@@ -1169,6 +1145,7 @@ class TestCreateConfigWatcherMethod:
         app._origin = path.parent
         return path
 
+    @pytest.mark.integration
     def test_create_config_watcher_returns_watcher_when_configured(self, tmp_path):
         """Test that create_config_watcher() watches the resolved file."""
         from appinfra.config import ConfigWatcher
@@ -1192,6 +1169,7 @@ class TestCreateConfigWatcherMethod:
 
         assert watcher is None
 
+    @pytest.mark.integration
     def test_create_config_watcher_uses_app_logger(self, tmp_path):
         """Test that create_config_watcher() uses the app's logger."""
         app = App()
@@ -1204,7 +1182,6 @@ class TestCreateConfigWatcherMethod:
         assert watcher._lg is mock_logger
 
 
-@pytest.mark.unit
 class TestAppEtcDirProperty:
     """Test App.etc_dir property exposes the resolved etc directory."""
 
@@ -1239,11 +1216,11 @@ class TestAppEtcDirProperty:
         assert app.etc_dir == "/cached/etc"
 
 
-@pytest.mark.unit
 class TestEtcDirResolutionOnOptIn:
     """Verify _resolve_etc_dir_if_opted_in populates _etc_dir from an explicit
     --etc-dir when the standard arg is enabled on an app without a spec."""
 
+    @pytest.mark.integration
     def test_explicit_etc_dir_resolves_and_sets(self, tmp_path):
         custom = tmp_path / "myetc"
         custom.mkdir()
@@ -1264,6 +1241,7 @@ class TestEtcDirResolutionOnOptIn:
         with pytest.raises(FileNotFoundError):
             app._resolve_etc_dir_if_opted_in()
 
+    @pytest.mark.integration
     def test_explicit_etc_dir_file_raises(self, tmp_path):
         """A path that exists but is not a directory is rejected too."""
         not_a_dir = tmp_path / "file.yaml"
@@ -1276,6 +1254,7 @@ class TestEtcDirResolutionOnOptIn:
         with pytest.raises(FileNotFoundError):
             app._resolve_etc_dir_if_opted_in()
 
+    @pytest.mark.integration
     def test_flag_omitted_leaves_none(self, monkeypatch, tmp_path):
         """Without --etc-dir there is no default: _etc_dir stays unset even
         when a ./etc directory exists beside the cwd."""
@@ -1290,6 +1269,7 @@ class TestEtcDirResolutionOnOptIn:
 
         assert app.etc_dir is None
 
+    @pytest.mark.integration
     def test_not_opted_in_is_noop(self, tmp_path):
         app = App()
         app._standard_args = {"etc_dir": False}
@@ -1311,7 +1291,6 @@ class TestEtcDirResolutionOnOptIn:
         assert app.etc_dir == "/loaded/by/config/file"
 
 
-@pytest.mark.unit
 class TestConfigSpecLoading:
     """`_load_config_spec` runs the v1 protocol precedence chain in App.setup."""
 
@@ -1333,6 +1312,7 @@ class TestConfigSpecLoading:
 
         return ConfigSpec("myorg", "myapp", path=self._make_bundled_base(tmp_path))
 
+    @pytest.mark.integration
     def test_custom_etc_dir_loads_from_user_path(self, monkeypatch, tmp_path):
         custom = tmp_path / "user_etc"
         custom.mkdir()
@@ -1361,6 +1341,7 @@ class TestConfigSpecLoading:
         assert app.config_spec is None
         assert app.config_path is None
 
+    @pytest.mark.integration
     def test_xdg_overlay_loads_when_no_custom(self, monkeypatch, tmp_path):
         xdg_home = tmp_path / "xdg"
         (xdg_home / "myorg").mkdir(parents=True)
@@ -1380,6 +1361,7 @@ class TestConfigSpecLoading:
         assert app._config_file == "myapp.yaml"
         assert app._origin == spec.base_config.parent.resolve()
 
+    @pytest.mark.integration
     def test_bundled_base_when_no_custom_and_no_overlay(self, monkeypatch, tmp_path):
         monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "nonexistent"))
         monkeypatch.setenv("XDG_CONFIG_DIRS", str(tmp_path / "nonexistent-sys"))
@@ -1394,6 +1376,7 @@ class TestConfigSpecLoading:
         assert app.config.origin == "bundled"
         assert app._origin == spec.base_config.parent.resolve()
 
+    @pytest.mark.integration
     def test_custom_wins_over_xdg_overlay(self, monkeypatch, tmp_path):
         """Explicit --etc-dir must not be shadowed by an existing overlay."""
         xdg_home = tmp_path / "xdg"
@@ -1414,6 +1397,7 @@ class TestConfigSpecLoading:
 
         assert app.config.origin == "user"
 
+    @pytest.mark.integration
     def test_custom_config_absolute_path_wins_over_spec(self, monkeypatch, tmp_path):
         """--config /abs.yaml loads directly, bypasses spec (XDG + base)."""
         xdg_home = tmp_path / "xdg"
@@ -1436,6 +1420,7 @@ class TestConfigSpecLoading:
         assert app.config.api.port == 55555
         assert app._origin == target.parent.resolve()
 
+    @pytest.mark.integration
     def test_custom_config_bare_filename_composes_with_etc_dir(
         self, monkeypatch, tmp_path
     ):
@@ -1456,6 +1441,7 @@ class TestConfigSpecLoading:
         assert app.config.origin == "user-alt"
         assert app.config.api.port == 33333
 
+    @pytest.mark.integration
     def test_custom_config_absolute_ignores_etc_dir(self, monkeypatch, tmp_path):
         """--config /abs.yaml with --etc-dir also set → --etc-dir ignored."""
         etc = tmp_path / "user_etc"
@@ -1474,6 +1460,7 @@ class TestConfigSpecLoading:
         assert app.config.origin == "cli-absolute"
         assert app._origin == target.parent.resolve()
 
+    @pytest.mark.integration
     def test_load_and_merge_config_uses_spec(self, monkeypatch, tmp_path):
         """With a spec set, _load_and_merge_config loads the resolved file
         and layers CLI args over it."""
@@ -1494,6 +1481,7 @@ class TestConfigSpecLoading:
         assert app.config.logging.level == "debug"
         assert app.config_path == spec.base_config
 
+    @pytest.mark.integration
     def test_load_and_merge_config_without_spec_loads_nothing(self, tmp_path):
         """An app without a spec ignores --config and --etc-dir for loading."""
         etc = tmp_path / "etc"

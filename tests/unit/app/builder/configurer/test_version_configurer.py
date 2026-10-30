@@ -9,8 +9,6 @@ from unittest.mock import MagicMock, Mock
 
 import pytest
 
-pytestmark = pytest.mark.unit
-
 from appinfra.app.builder.app import AppBuilder
 from appinfra.app.builder.configurer.version import (
     VersionConfigurer,
@@ -248,6 +246,7 @@ class TestVersionConfigurer:
         assert result is configurer
         assert app_builder._version_startup_log is False
 
+    @pytest.mark.integration
     def test_with_build_info_default_path(self, app_builder, tmp_path, monkeypatch):
         """Test with_build_info uses cwd by default."""
         # Create a fake _build_info.py
@@ -262,6 +261,7 @@ class TestVersionConfigurer:
         assert result is configurer
         assert app_builder._build_info is not None
 
+    @pytest.mark.integration
     def test_with_build_info_string_path(self, app_builder, tmp_path):
         """Test with_build_info with string path."""
         build_info_file = tmp_path / "_build_info.py"
@@ -273,6 +273,7 @@ class TestVersionConfigurer:
         assert result is configurer
         assert app_builder._build_info is not None
 
+    @pytest.mark.integration
     def test_with_build_info_path_object(self, app_builder, tmp_path):
         """Test with_build_info with Path object."""
         build_info_file = tmp_path / "_build_info.py"
@@ -318,6 +319,7 @@ class TestVersionConfigurer:
         assert set(app_builder._version_tracker.get_all()) >= {"pytest", "packaging"}
         assert len(_startup_hooks(app_builder)) == 1
 
+    @pytest.mark.integration
     def test_done_sets_build_info(self, app_builder, tmp_path):
         """Test done() sets build info on app builder."""
         build_info_file = tmp_path / "_build_info.py"
@@ -329,6 +331,7 @@ class TestVersionConfigurer:
 
         assert app_builder._build_info is not None
 
+    @pytest.mark.integration
     def test_build_registers_startup_hook(self, app_builder, tmp_path):
         """build() registers one startup hook at priority 90 when logging enabled."""
         build_info_file = tmp_path / "_build_info.py"
@@ -340,6 +343,7 @@ class TestVersionConfigurer:
         assert len(_startup_hooks(app_builder)) == 1
         assert app_builder._hooks._hook_metadata["startup"][0]["priority"] == 90
 
+    @pytest.mark.integration
     def test_build_no_hook_when_logging_disabled(self, app_builder, tmp_path):
         """without_startup_log suppresses the hook."""
         build_info_file = tmp_path / "_build_info.py"
@@ -373,6 +377,7 @@ class TestVersionConfigurer:
         with pytest.raises(TypeError, match="unknown version field\\(s\\): semvr"):
             app_builder.version(semvr="1.0.0")
 
+    @pytest.mark.integration
     def test_call_keyword_form(self, app_builder, tmp_path):
         """__call__ maps keywords onto the chained methods and returns the builder."""
         build_info_file = tmp_path / "_build_info.py"
@@ -442,6 +447,7 @@ class TestVersionFlag:
         with pytest.raises(ValueError, match="with_semver"):
             builder.build()
 
+    @pytest.mark.integration
     def test_version_argument_includes_build_info(self, tmp_path):
         """build_info set on the version block reaches the argument."""
         build_info_file = tmp_path / "_build_info.py"
@@ -491,6 +497,7 @@ class TestVersionFlag:
 class TestStartupHookBehavior:
     """Tests for the startup hook callback behavior."""
 
+    @pytest.mark.integration
     def test_startup_hook_logs_build_info(self, tmp_path):
         """Test startup hook actually logs build info when invoked."""
         build_info_file = tmp_path / "_build_info.py"
