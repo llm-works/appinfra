@@ -7,6 +7,8 @@ import pytest
 
 from appinfra.testing import EXPECTED_SKIP_PREFIX, _prefix_skip_reason
 
+pytestmark = pytest.mark.unit
+
 
 class TestExpectedSkipPrefix:
     """Tests for the expected skip reason prefix constant."""

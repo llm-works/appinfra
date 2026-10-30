@@ -10,7 +10,6 @@ from hypothesis import strategies as st
 from appinfra.time.delta import InvalidDurationError, delta_str, delta_to_secs
 
 
-@pytest.mark.property
 @pytest.mark.unit
 class TestDeltaProperties:
     """Property-based tests for delta.py functions."""

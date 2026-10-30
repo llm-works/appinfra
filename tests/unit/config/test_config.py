@@ -1418,6 +1418,7 @@ class TestConfigReload:
 # =============================================================================
 
 
+@pytest.mark.unit
 @pytest.mark.usefixtures("clean_env")
 class TestConfigDotDictIntegration:
     """Test Config compatibility with DotDict dict subclass changes."""
@@ -1649,6 +1650,7 @@ class TestEnvOverrideSubstitution:
         assert config.dbs.unittest.url == "postgres://127.0.0.1/db"
 
 
+@pytest.mark.unit
 class TestConfigAllowedPaths:
     """Config-level integration for the allowed_paths per-path allowlist."""
 

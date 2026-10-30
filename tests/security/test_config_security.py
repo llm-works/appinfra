@@ -18,7 +18,6 @@ from tests.security.payloads.traversal import (
 
 
 @pytest.mark.security
-@pytest.mark.integration
 def test_config_file_size_limit(secure_temp_project: Path):
     """
     Verify MAX_CONFIG_SIZE_BYTES enforcement prevents DoS attacks.
@@ -69,7 +68,6 @@ def test_config_file_size_limit(secure_temp_project: Path):
 
 
 @pytest.mark.security
-@pytest.mark.integration
 @pytest.mark.parametrize("payload", ENV_VAR_INJECTION[:3])  # Test first 3 payloads
 def test_variable_substitution_injection(payload: str, secure_temp_project: Path):
     """
@@ -105,7 +103,6 @@ malicious: "{payload}"
 
 
 @pytest.mark.security
-@pytest.mark.integration
 def test_variable_substitution_recursion(secure_temp_project: Path):
     """
     Verify circular variable references don't cause infinite loops.
@@ -138,7 +135,6 @@ var_b: "${var_a}"
 
 
 @pytest.mark.security
-@pytest.mark.integration
 @pytest.mark.parametrize("payload", ENV_VAR_INJECTION)
 def test_environment_variable_injection(
     payload: str, secure_temp_project: Path, clean_env
@@ -198,7 +194,6 @@ app:
 
 
 @pytest.mark.security
-@pytest.mark.unit
 @pytest.mark.parametrize(
     "env_value,expected_type,expected_value",
     [
@@ -267,7 +262,6 @@ test:
 
 
 @pytest.mark.security
-@pytest.mark.integration
 @pytest.mark.expected_skip  # Skips non-relative paths (absolute, Windows, etc.)
 @pytest.mark.parametrize("traversal_path", CLASSIC_TRAVERSAL + ABSOLUTE_PATH_ESCAPE)
 def test_config_path_resolution_traversal(
@@ -314,7 +308,6 @@ paths:
 
 
 @pytest.mark.security
-@pytest.mark.integration
 @pytest.mark.expected_skip  # Skips on Windows (no /etc/passwd)
 def test_config_path_symlink_attack(secure_temp_project: Path):
     """
@@ -366,7 +359,6 @@ paths:
 
 
 @pytest.mark.security
-@pytest.mark.unit
 @pytest.mark.parametrize(
     "null_byte_key", ["key\x00name", "section\x00field", "data\x00"]
 )
@@ -420,7 +412,6 @@ normal_key: "normal_value"
 
 # Positive test: Verify legitimate config operations work
 @pytest.mark.security
-@pytest.mark.integration
 def test_legitimate_config_operations(secure_temp_project: Path, clean_env):
     """
     Verify legitimate config operations are not blocked by security measures.

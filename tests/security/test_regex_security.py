@@ -22,7 +22,6 @@ from tests.security.payloads.redos import (
 
 
 @pytest.mark.security
-@pytest.mark.unit
 @pytest.mark.parametrize("pattern", NESTED_QUANTIFIERS)
 def test_nested_quantifier_detection(pattern: str):
     """
@@ -45,7 +44,6 @@ def test_nested_quantifier_detection(pattern: str):
 
 
 @pytest.mark.security
-@pytest.mark.unit
 @pytest.mark.expected_skip  # Skips on Windows (no SIGALRM for timeout)
 def test_alternation_explosion_detection():
     """
@@ -85,7 +83,6 @@ def test_alternation_explosion_detection():
 
 
 @pytest.mark.security
-@pytest.mark.unit
 def test_pattern_length_limit():
     """
     Verify MAX_PATTERN_LENGTH enforcement prevents extremely long patterns.
@@ -158,7 +155,6 @@ def test_regex_timeout_enforcement_unix(pattern: str, evil_input: str):
 
 
 @pytest.mark.security
-@pytest.mark.integration
 @pytest.mark.expected_skip  # Windows-only test, skips on Unix
 @pytest.mark.skipif(
     sys.platform != "win32",
@@ -201,7 +197,6 @@ def test_regex_timeout_degradation_windows():
 
 # Positive test: Verify legitimate patterns still work
 @pytest.mark.security
-@pytest.mark.unit
 def test_legitimate_patterns_allowed():
     """
     Verify legitimate regex patterns are not blocked by security measures.

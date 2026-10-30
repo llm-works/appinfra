@@ -28,7 +28,6 @@ class PerfTestHandler(TickerHandler):
 
 
 @pytest.mark.performance
-@pytest.mark.slow
 class TestTickerAccuracy:
     def test_interval_timing_accuracy(self):
         """Measure ticker interval deviation from expected interval.

@@ -16,7 +16,6 @@ from tests.security.payloads.injection import SQL_INJECTION
 
 
 @pytest.mark.security
-@pytest.mark.integration
 @pytest.mark.parametrize("payload", SQL_INJECTION)
 def test_sql_injection_prevention(payload: str):
     """
@@ -119,7 +118,6 @@ def test_sql_injection_prevention(payload: str):
 
 
 @pytest.mark.security
-@pytest.mark.integration
 def test_readonly_mode_enforcement():
     """
     Verify readonly mode prevents write operations (INSERT/UPDATE/DELETE).
@@ -198,7 +196,6 @@ def test_readonly_mode_enforcement():
 
 
 @pytest.mark.security
-@pytest.mark.unit
 def test_connection_string_credential_exposure():
     """
     Verify database connection string credentials are not exposed in logs.
@@ -310,7 +307,6 @@ def test_connection_string_credential_exposure():
 
 # Positive test: Verify legitimate operations still work
 @pytest.mark.security
-@pytest.mark.integration
 def test_legitimate_parameterized_queries_allowed():
     """
     Verify legitimate parameterized queries work correctly.

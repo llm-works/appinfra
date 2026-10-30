@@ -1508,6 +1508,7 @@ value: !env? ":default"
         assert "Empty environment variable name" in str(exc_info.value)
 
 
+@pytest.mark.unit
 class TestPathTag:
     """Test !path tag functionality for path resolution."""
 
@@ -2273,6 +2274,7 @@ outer:
         assert source_map is not None
 
 
+@pytest.mark.unit
 class TestYAMLMergeKeys:
     """Test YAML merge key (<<) support with anchors and aliases."""
 
@@ -3643,6 +3645,7 @@ class TestDeepIncludeChainSyntax:
         assert data["db"] == {"host": "only-me"}
 
 
+@pytest.mark.unit
 class TestAllowedPaths:
     """Tests for the allowed_paths per-path allowlist on !include*.
 

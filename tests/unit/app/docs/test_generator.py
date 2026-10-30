@@ -5,7 +5,11 @@
 
 import argparse
 
+import pytest
+
 from appinfra.app.docs.generator import DocsGenerator
+
+pytestmark = pytest.mark.unit
 
 
 class TestDocsGenerator:

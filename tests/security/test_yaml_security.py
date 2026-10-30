@@ -23,7 +23,6 @@ from tests.security.payloads.traversal import (
 
 
 @pytest.mark.security
-@pytest.mark.unit
 @pytest.mark.parametrize("payload", YAML_CODE_EXECUTION)
 def test_yaml_code_execution_blocked(payload: str):
     """
@@ -50,7 +49,6 @@ def test_yaml_code_execution_blocked(payload: str):
 
 
 @pytest.mark.security
-@pytest.mark.integration
 @pytest.mark.parametrize("traversal_path", CLASSIC_TRAVERSAL + ABSOLUTE_PATH_ESCAPE)
 def test_yaml_include_path_traversal(
     traversal_path: str, secure_temp_project: Path, write_yaml_files
@@ -99,7 +97,6 @@ def test_yaml_include_path_traversal(
 
 
 @pytest.mark.security
-@pytest.mark.integration
 @pytest.mark.expected_skip  # Skips on Windows (no /etc/passwd)
 def test_yaml_include_symlink_attack(secure_temp_project: Path):
     """
@@ -144,7 +141,6 @@ def test_yaml_include_symlink_attack(secure_temp_project: Path):
 
 
 @pytest.mark.security
-@pytest.mark.integration
 def test_yaml_include_depth_bomb(secure_temp_project: Path):
     """
     Verify max_include_depth limit prevents stack exhaustion.
@@ -178,7 +174,6 @@ def test_yaml_include_depth_bomb(secure_temp_project: Path):
 
 
 @pytest.mark.security
-@pytest.mark.integration
 def test_yaml_billion_laughs_attack(secure_temp_project: Path):
     """
     Verify SafeLoader prevents YAML bomb (billion laughs) attacks.
@@ -209,7 +204,6 @@ def test_yaml_billion_laughs_attack(secure_temp_project: Path):
 
 
 @pytest.mark.security
-@pytest.mark.integration
 def test_yaml_circular_include_detection(secure_temp_project: Path):
     """
     Verify circular include detection prevents infinite loops.
@@ -243,7 +237,6 @@ def test_yaml_circular_include_detection(secure_temp_project: Path):
 
 
 @pytest.mark.security
-@pytest.mark.unit
 @pytest.mark.parametrize("payload", NULL_BYTE_BYPASS)
 def test_yaml_null_byte_in_include_path(payload: str, secure_temp_project: Path):
     """
@@ -280,7 +273,6 @@ def test_yaml_null_byte_in_include_path(payload: str, secure_temp_project: Path)
 
 
 @pytest.mark.security
-@pytest.mark.integration
 def test_allowed_paths_does_not_broaden_beyond_listed_entries(
     secure_temp_project: Path, tmp_path: Path
 ):
@@ -318,7 +310,6 @@ def test_allowed_paths_does_not_broaden_beyond_listed_entries(
 
 
 @pytest.mark.security
-@pytest.mark.integration
 def test_config_outside_project_marker_bounds_to_config_parent(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
@@ -349,7 +340,6 @@ def test_config_outside_project_marker_bounds_to_config_parent(
 
 
 @pytest.mark.security
-@pytest.mark.integration
 def test_load_file_no_origin_denies_unlisted_absolute(tmp_path: Path):
     """
     load_file(origin=None, allowed_paths=[...]) treats the allowlist
@@ -379,7 +369,6 @@ def test_load_file_no_origin_denies_unlisted_absolute(tmp_path: Path):
 
 
 @pytest.mark.security
-@pytest.mark.integration
 def test_relative_include_permitted_without_origin(tmp_path: Path):
     """
     Relative includes are permitted when origin is not set — the
@@ -397,7 +386,6 @@ def test_relative_include_permitted_without_origin(tmp_path: Path):
 
 
 @pytest.mark.security
-@pytest.mark.integration
 def test_relative_include_bounded_by_origin_when_set(tmp_path: Path):
     """
     Regression guard: when origin is set, a relative include using
@@ -419,7 +407,6 @@ def test_relative_include_bounded_by_origin_when_set(tmp_path: Path):
 
 
 @pytest.mark.security
-@pytest.mark.integration
 def test_absolute_inside_origin_with_allowed_paths_set(tmp_path: Path):
     """
     Regression guard: an absolute include that resolves inside origin
