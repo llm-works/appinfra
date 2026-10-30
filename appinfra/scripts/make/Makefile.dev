@@ -256,13 +256,13 @@ check.all:: ## Full checks (run all checks even if some fail)
 	@bash $(APPINFRA_DEV_CHECK_SCRIPT)
 .PHONY: check.all
 
-check.raw:: ## Full checks with raw output (no cursor positioning, fail-fast, for logs/CI)
+check.ci:: ## Full checks as make check, as plain text for logs and CI (one after another, fail-fast)
+	@bash $(APPINFRA_DEV_CHECK_SCRIPT) --raw-parallel --summary
+.PHONY: check.ci
+
+check.raw:: ## Full checks with every tool's output as is, no warning policy (for ruling out check.sh)
 	@bash $(APPINFRA_DEV_CHECK_SCRIPT) --raw
 .PHONY: check.raw
-
-check.summary:: ## Full checks with summary output (no cursor, summaries + failures only)
-	@bash $(APPINFRA_DEV_CHECK_SCRIPT) --raw --summary
-.PHONY: check.summary
 
 check.nt:: ## Code quality checks only (no tests)
 	@bash $(APPINFRA_DEV_CHECK_SCRIPT) --fail-fast --skip-tests

@@ -34,11 +34,11 @@ jobs:
           python-version: '3.12'
           cache: 'pip'
 
-      - name: Install dependencies
+      - name: Install dependencies via make setup
         run: |
           python -m pip install --upgrade pip
-          # all extras: mypy checks the optional modules against their libraries' types
-          python -m pip install -e ".[all]"
+          # every extra: mypy checks the optional modules against their libraries' types
+          make setup
           python -m pip install zizmor==1.31.1 actionlint-py==1.7.12.25
 
       - name: Lint workflows
@@ -79,14 +79,6 @@ jobs:
         uses: actions/checkout@v7
         with:
           persist-credentials: false
-
-      - name: Set up Docker layer caching
-        uses: actions/cache@v6
-        with:
-          path: /tmp/.buildx-cache
-          key: docker-${{ runner.os }}-py${{ matrix.python-version }}-${{ hashFiles('pyproject.toml', 'appinfra/scripts/cicd/Dockerfile') }}
-          restore-keys: |
-            docker-${{ runner.os }}-py${{ matrix.python-version }}-
 
       - name: Build Docker image
         working-directory: appinfra/scripts/cicd
@@ -233,14 +225,6 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Set up Docker layer caching
-        uses: actions/cache@v6
-        with:
-          path: /tmp/.buildx-cache
-          key: docker-${{ runner.os }}-py3.12-${{ hashFiles('pyproject.toml', 'appinfra/scripts/cicd/Dockerfile') }}
-          restore-keys: |
-            docker-${{ runner.os }}-py3.12-
-
       - name: Build Docker image
         working-directory: appinfra/scripts/cicd
         run: |
@@ -309,13 +293,13 @@ jobs:
           python-version: '3.12'
           cache: 'pip'
 
-      - name: Install dependencies
+      - name: Install dependencies via make setup
         run: |
           python -m pip install --upgrade pip
-          # [all] matches the Dockerfile-based test matrix: includes sql,
-          # fastapi, validation, etc. that integration tests import via
-          # tests/conftest.py and tests/helpers/pg.
-          python -m pip install -e ".[all]"
+          # every extra, as in the Dockerfile-based test matrix: integration
+          # tests import sql, fastapi, validation etc. via tests/conftest.py
+          # and tests/helpers/pg
+          make setup
           sudo apt-get update
           sudo apt-get install -y podman-compose postgresql-client
 
@@ -382,8 +366,8 @@ jobs:
           python -m pip install --upgrade pip
           make setup
 
-      - name: Run make check (no postgres, no docker, no podman)
-        run: make check
+      - name: Run make check.ci (no postgres, no docker, no podman)
+        run: make check.ci
 
   # Install verification: run `make install` against a clean ubuntu runner and
   # confirm the wheel is published to $prefix/share/$pkg/wheels/ with the mode
@@ -506,8 +490,8 @@ jobs:
           python -m pip install --upgrade pip
           make setup
 
-      - name: Run make check (raw-parallel for readable logs)
-        run: APPINFRA_DEV_PROJECT_ROOT=$(pwd) bash appinfra/scripts/check.sh --raw-parallel
+      - name: Run make check.ci
+        run: make check.ci
 
       - name: Stop postgres
         if: always()

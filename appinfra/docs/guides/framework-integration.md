@@ -183,13 +183,21 @@ The `check.sh` script is designed to be run via Make, not directly:
 
 ```bash
 # Correct - uses exported variables from Makefile
-make check
-make check.raw      # For CI logs
-make check.summary  # Summaries only
+make check      # Interactive: live checklist, rows below it
+make check.ci   # The same checks and warning policy as plain text, for logs and CI
+make check.raw  # Every tool's output as is, every test listed: the reference without check.sh's policy
 
 # Incorrect - will use fallback defaults (APPINFRA_DEV_PKG_NAME=appinfra)
 ./scripts/check.sh
 ```
+
+`make check.ci` runs what `make check` runs, fail-fast, and applies the same warning policy, but
+prints plain text without cursor movement: use it wherever output goes to a file or CI log. Its
+checks run one after another, so their output stays in order, with pytest on its xdist workers
+within each; that makes it slower than `make check`, which also runs the checks alongside each
+other. `make check.raw` runs every tool with its output untouched and pytest in one
+process with every test listed; it applies no warning policy, so comparing it with `make check`
+shows whether `check.sh` itself changed an outcome.
 
 With fail-fast (`make check`), the summary of a failed run shows only the failed test ids and
 their first `E` lines; `make check.all` shows only which checks failed. The full output of each
@@ -221,6 +229,42 @@ name and stack go to the kept log:
 
 ```text
 [⚠] Unit & E2E & Coverage tests: tests/test_proc.py::test_stream thread left running
+```
+
+A warning in a check that passed gets a row below the checklist, each distinct one once, with
+how often it repeated:
+
+```text
+[⚠] Unit & E2E & Coverage tests: DeprecationWarning: old api (src/pkg/api.py:12) in tests (4×)
+[⚠] Unit & E2E & Coverage tests: ResourceWarning: unclosed file tests/data/sample.csv at exit
+[⚠] Examples: client.py: DeprecationWarning: old api (src/pkg/api.py:12)
+[⚠] Linting: The top-level linter settings are deprecated in favour of `lint`.
+```
+
+- **In tests:** an entry of pytest's warnings summary.
+- **At exit:** a warning, or an exception a finalizer raised ("Exception ignored in: ..."),
+  printed when the interpreter exits, after pytest has removed its warning filters. Under
+  Python's default filters ResourceWarning and DeprecationWarning would not print at all; in a
+  test check they do, from the main process and every pytest-xdist worker. A resource still
+  open at exit (a file, socket or database connection held by a module global or a cache) shows
+  up here. Python 3.14 drops a warning that a finalizer raises late in shutdown.
+- **Examples:** a warning in a passing example's stderr; examples run with every warning shown.
+- **Tools:** a tool's own `warning:` line, about the tool or its configuration.
+
+When the project's pytest `filterwarnings` has a bare `error` entry, which makes every warning an
+error, a warning fails the check that printed it (`[✗]`), a tool's own line included; otherwise
+the check passes with a warning and its log is kept in `.build/check/`. A check a tool itself
+fails (an unformatted file, a type error) fails in either mode. Rows show paths relative to the
+project and a file by its name; the kept log has the full message. `make check.ci` lists each
+check's warnings under its passed or failed line, with the same policy; `make check.raw` collects
+none and fails on none, and shows them only as the tools print them. Warnings in interpreters a
+test starts belong to that test and are not collected.
+
+A warning at exit comes after the last test, so it names no test. Narrow it down with `-k` in a
+pytest run that loads the plugin (the `make test.*` targets do not), until the line is gone:
+
+```bash
+PYTHONPATH=<appinfra scripts>/check_pytest python -m pytest tests/ -p pytest_exit_warnings -k <expression>
 ```
 
 Interrupting `make check` (Ctrl-C, `TERM`, a closed terminal), or a fail-fast stop, kills every

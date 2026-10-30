@@ -288,7 +288,16 @@ class ProcessRunner(Runner):
                     break
 
             # check() handles failure detection and restart
-            self.check()
+            restarted = self.check()
+            # A dead process the policy won't restart again: nothing left to watch. Still
+            # RUNNING means it died after check() looked; the next pass records how it ended.
+            if (
+                not restarted
+                and not self.is_alive()
+                and not self.restart_pending
+                and self._state != State.RUNNING
+            ):
+                break
 
             # Wait for interval or stop signal
             self._stop_monitor_event.wait(timeout=interval)
