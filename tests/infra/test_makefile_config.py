@@ -312,7 +312,9 @@ class TestModuleIncludedAlone:
             check=False,
         )
         assert result.returncode != 0
-        assert "No rule to make target 'check.summary'" in result.stderr
+        # GNU make 4 quotes the name 'like this', make 3.81 (macOS) `like this'
+        assert "No rule to make target" in result.stderr
+        assert "check.summary" in result.stderr
 
 
 @pytest.mark.integration
