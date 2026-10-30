@@ -16,8 +16,6 @@ from pathlib import Path
 
 import pytest
 
-from tests.helpers.fork import forks_in_xdist_worker
-
 
 def _worker_loop(
     config_path: str,
@@ -33,15 +31,9 @@ def _worker_loop(
     Creates its own logger and reports its holder's location value
     to the result queue when signaled.
     """
-    import logging
-
     from appinfra.log import LoggerFactory
     from appinfra.log.config import LogConfig
     from appinfra.subprocess import SubprocessContext
-
-    # Clear any forked logger from parent process (fork inherits loggerDict)
-    if "/" in logging.root.manager.loggerDict:
-        del logging.root.manager.loggerDict["/"]
 
     # Create a fresh logger for this subprocess
     config = LogConfig.from_params(level="debug", location=1)
@@ -81,23 +73,26 @@ class TestSubprocessContextHotReload:
         except ImportError:
             pytest.skip("watchdog not installed - skipping subprocess context tests")
 
-    @forks_in_xdist_worker
     def test_two_processes_see_config_change(self):
         """Test that both subprocess workers see config hot-reload changes."""
         with tempfile.TemporaryDirectory() as tmpdir:
             config_path = Path(tmpdir) / "config.yaml"
             config_path.write_text("logging:\n  level: debug\n  location: 1\n")
 
+            # spawn: the workers start with the environment clean_env left, not
+            # one a forkserver captured before this test ran
+            ctx = mp.get_context("spawn")
+
             # Create shared communication primitives
-            result_queue: mp.Queue = mp.Queue()
-            ready_events = [mp.Event(), mp.Event()]
-            check_events = [mp.Event(), mp.Event()]
-            done_event = mp.Event()
+            result_queue: mp.Queue = ctx.Queue()
+            ready_events = [ctx.Event(), ctx.Event()]
+            check_events = [ctx.Event(), ctx.Event()]
+            done_event = ctx.Event()
 
             # Start two worker processes
             workers = []
             for i in range(2):
-                p = mp.Process(
+                p = ctx.Process(
                     target=_worker_loop,
                     args=(
                         str(config_path),
