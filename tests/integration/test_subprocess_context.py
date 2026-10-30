@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: Copyright 2026 The appinfra Authors
 
 """
-E2E test for SubprocessContext hot-reload across multiple processes.
+Tests for SubprocessContext hot-reload across multiple processes.
 
 This test validates that config hot-reload works correctly in child processes
 using SubprocessContext. It spawns multiple processes and verifies that config
@@ -69,7 +69,7 @@ def _worker_loop(
 
 @pytest.mark.usefixtures("clean_env")
 class TestSubprocessContextHotReload:
-    """E2E tests for SubprocessContext hot-reload in multiple processes."""
+    """Tests for SubprocessContext hot-reload in multiple processes."""
 
     @pytest.fixture(autouse=True)
     def check_watchdog_installed(self):

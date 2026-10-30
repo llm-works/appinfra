@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: Copyright 2026 The appinfra Authors
 
 """
-E2E test for hot-reload configuration workflow.
+Tests for hot-reload configuration workflow.
 
 This test validates the complete workflow for hot-reload configuration,
 ensuring both YAML-only and programmatic configurations work correctly.
@@ -55,7 +55,7 @@ def _spec_app(etc_dir: Path, filename: str = "app.yaml") -> AppBuilder:
 
 @pytest.mark.usefixtures("clean_env")
 class TestHotReloadWorkflow:
-    """E2E tests for hot-reload configuration workflow."""
+    """Tests for hot-reload configuration workflow."""
 
     def test_yaml_only_hot_reload_starts_watcher(self):
         """Test that hot-reload configured only in YAML starts the watcher."""
@@ -388,7 +388,7 @@ class TestHotReloadWorkflow:
 
 @pytest.mark.usefixtures("clean_env")
 class TestHotReloadRealWatcher:
-    """E2E tests using real ConfigWatcher (requires watchdog)."""
+    """Tests using real ConfigWatcher (requires watchdog)."""
 
     @pytest.fixture(autouse=True)
     def reset_registry(self):

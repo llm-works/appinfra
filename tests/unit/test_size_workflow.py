@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: Copyright 2026 The appinfra Authors
 
 """
-E2E tests for size formatting workflow.
+Tests for size formatting workflow.
 
 Tests realistic use cases for size_str and size_to_bytes in application contexts.
 """
@@ -11,7 +11,7 @@ from appinfra.size import size_str, size_to_bytes
 
 
 class TestSizeFormattingWorkflow:
-    """E2E tests for size formatting in real use cases."""
+    """Tests for size formatting in real use cases."""
 
     def test_file_size_logging(self):
         """Test formatting file sizes for log output."""

@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: Copyright 2026 The appinfra Authors
 
 """
-E2E tests for the tools.with_main() workflow.
+Tests for the tools.with_main() workflow.
 
 Tests the complete workflow for single-tool apps where the main tool
 runs without requiring a subcommand.
@@ -43,7 +43,7 @@ class ProxyTool(Tool):
 
 
 class TestMainToolWorkflow:
-    """E2E tests for the tools.with_main() feature."""
+    """Tests for the tools.with_main() feature."""
 
     def test_main_tool_runs_without_subcommand(self):
         """Test that main tool runs when no subcommand is specified."""
@@ -235,7 +235,7 @@ class TestMainToolWorkflow:
 
 class TestMainToolPositionalArgsConflict:
     """
-    E2E tests for positional argument conflict resolution.
+    Tests for positional argument conflict resolution.
 
     When main tool and subcommands both have positional arguments,
     subcommand positional args should not be consumed by the main tool's
@@ -412,7 +412,7 @@ class TestMainToolPositionalArgsConflict:
 
 
 class TestMainToolWithDecorators:
-    """E2E tests for tools.with_main() with @app.tool decorator post-build."""
+    """Tests for tools.with_main() with @app.tool decorator post-build."""
 
     def test_decorated_tool_as_main_tool(self):
         """Test that @app.tool decorator works with tools.with_main() post-build.

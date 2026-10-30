@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: Copyright 2026 The appinfra Authors
 
 """
-E2E test for PostgreSQL readonly mode workflow.
+Tests for PostgreSQL readonly mode workflow.
 
 This test validates readonly database connections by testing a complete workflow
 from configuration loading through query execution and proper cleanup.
@@ -18,10 +18,10 @@ from appinfra.log import LoggingBuilder
 
 @pytest.mark.require_pg
 class TestPGReadOnlyWorkflow:
-    """E2E tests for PostgreSQL readonly mode complete workflow."""
+    """Tests for PostgreSQL readonly mode complete workflow."""
 
     def setup_method(self):
-        """Set up E2E test environment."""
+        """Set up the test environment."""
         # Create logger
         self.logger = LoggingBuilder("e2e_readonly").with_level("info").build()
 

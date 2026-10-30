@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: Copyright 2026 The appinfra Authors
 
 """
-E2E test for config file loading workflow.
+Tests for config file loading workflow.
 
 This test validates the complete workflow from a spec declared on the
 AppBuilder config block through to actual logging output, ensuring logging
@@ -50,7 +50,7 @@ def _load(app, etc_dir: Path, *extra_argv: str) -> None:
 
 @pytest.mark.usefixtures("clean_env")
 class TestConfigFileWorkflow:
-    """E2E tests for config file loading workflow."""
+    """Tests for config file loading workflow."""
 
     def test_yaml_logging_level_applied(self):
         """Test that logging level from YAML config is applied to the app."""
@@ -280,7 +280,7 @@ class TestConfigFileWorkflow:
 
 @pytest.mark.usefixtures("clean_env")
 class TestConfigSectionIncludeWorkflow:
-    """E2E tests for section includes with variable resolution."""
+    """Tests for section includes with variable resolution."""
 
     def test_section_include_resolves_sibling_variables(self):
         """Test that !include with section resolves ${sibling.key} variables.
@@ -392,7 +392,7 @@ class TestConfigSectionIncludeWorkflow:
 
 @pytest.mark.usefixtures("clean_env")
 class TestConfigIncludeErrorWorkflow:
-    """E2E tests for config file include error handling workflow."""
+    """Tests for config file include error handling workflow."""
 
     def test_include_error_raises(self):
         """Test that !include errors raise immediately.
@@ -447,7 +447,7 @@ name: test-app
 
 @pytest.mark.usefixtures("clean_env")
 class TestLogOutputCliOverrides:
-    """E2E tests for --log-json and --no-log-colors CLI overrides."""
+    """Tests for --log-json and --no-log-colors CLI overrides."""
 
     def test_log_json_overrides_yaml_text_format(self):
         """Test that --log-json CLI arg overrides YAML text format to JSON."""

@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: Copyright 2026 The appinfra Authors
 
 """
-E2E test for PostgreSQL session context managers.
+Tests for PostgreSQL session context managers.
 
 Tests the session() context manager workflow with transactional and autocommit modes.
 """
@@ -23,10 +23,10 @@ _CONFIG_PATH = Path(__file__).resolve().parent.parent.parent / "etc" / "infra.ya
 
 @pytest.mark.require_pg
 class TestPGSessionWorkflow:
-    """E2E tests for PG session context managers."""
+    """Tests for PG session context managers."""
 
     def setup_method(self):
-        """Set up E2E test environment."""
+        """Set up the test environment."""
         self.logger = LoggingBuilder("e2e_session").with_level("info").build()
         self.cfg = Config(str(_CONFIG_PATH))
         self.pg = PG(self.logger, self.cfg.dbs.unittest)

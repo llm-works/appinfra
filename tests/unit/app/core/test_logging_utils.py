@@ -410,7 +410,7 @@ class TestEdgeCases:
 
 
 # =============================================================================
-# Test location_color flows from config file to formatter (E2E)
+# Test location_color flows from config file to formatter
 # =============================================================================
 
 
@@ -566,7 +566,7 @@ logging:
 @pytest.mark.integration
 @pytest.mark.usefixtures("clean_env")
 class TestAppBuilderLoggingConfigE2E:
-    """E2E tests for AppBuilder logging config propagation.
+    """Tests for AppBuilder logging config propagation.
 
     These tests verify that programmatic logging config from AppBuilder
     does not override config file values unless explicitly set.
