@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright 2026 The appinfra Authors
 
-# _settings.sh — setting helpers for appinfra's scripts (sourced, not run)
+# _settings.sh — helpers for appinfra's scripts (sourced, not run)
 #
 # One rule for every on/off setting, the same as Makefile.config's and
 # appinfra/ui/_env.py's: true, 1, y, yes turn it on; false, 0, n, no turn it
@@ -38,4 +38,20 @@ appinfra_bool() {
             return 2
             ;;
     esac
+}
+
+# appinfra_suite_markers [DIR...]: prints the markers named in the test files
+# under tests/ and each DIR, and the name of each directory under tests/, one
+# per line. A suite directory (tests/<suite>/) gives its tests the suite's
+# marker without naming it. Markers applied otherwise by a
+# pytest_collection_modifyitems hook are missed.
+appinfra_suite_markers() {
+    {
+        grep -rhoE 'pytest\.mark\.[a-z_][a-z0-9_]*' tests/ "$@" --include='*.py' 2>/dev/null \
+            | cut -d. -f3
+        local dir
+        for dir in tests/*/; do
+            [ -d "$dir" ] && basename "$dir"
+        done
+    } | sort -u || true
 }
