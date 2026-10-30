@@ -1381,12 +1381,12 @@ class TestNonBlockingAPI:
         fake_clock.sleep(0.25)
         assert ticker.try_tick(now=fake_clock.monotonic()) is True
 
-    def test_shared_timestamp_pattern(self, mock_logger):
+    def test_shared_timestamp_pattern(self, mock_logger, fake_clock):
         """Test pattern of sharing timestamp between methods."""
         ticker = Ticker(mock_logger, secs=0.5)
 
         # Capture time once
-        now = time.monotonic()
+        now = fake_clock.monotonic()
 
         # First tick using shared timestamp
         remaining = ticker.time_until_next_tick(now=now)
