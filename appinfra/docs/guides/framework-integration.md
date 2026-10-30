@@ -237,9 +237,9 @@ how often it repeated:
 - **At exit:** a warning, or an exception a finalizer raised ("Exception ignored in: ..."),
   printed when the interpreter exits, after pytest has removed its warning filters. Under
   Python's default filters ResourceWarning and DeprecationWarning would not print at all; in a
-  test check every one does, from the main process and every pytest-xdist worker. A resource
-  still open at exit (a file, socket or database connection held by a module global or a cache)
-  shows up here.
+  test check they do, from the main process and every pytest-xdist worker. A resource still
+  open at exit (a file, socket or database connection held by a module global or a cache) shows
+  up here. Python 3.14 drops a warning that a finalizer raises late in shutdown.
 - **Examples:** a warning in a passing example's stderr; examples run with every warning shown.
 - **Tools:** a tool's own `warning:` line, about the tool or its configuration.
 

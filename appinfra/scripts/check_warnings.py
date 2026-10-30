@@ -28,17 +28,21 @@ import re
 from collections.abc import Iterator
 from pathlib import Path
 
-# "path.py:24: DeprecationWarning: message", or "sys:1: ..." for a warning without a source
-# line; a worker's line can follow pytest's progress dots ("[100%]sys:1: ...")
+# "path.py:24: DeprecationWarning: message", or "sys:1: ..." ("<sys>:0: ..." from Python 3.14)
+# for a warning without a source line; a worker's line can follow pytest's progress dots
+# ("[100%]sys:1: ...")
 _PY_WARNING = re.compile(
-    r"(?P<loc>sys:\d+|[^\s\]]+:\d+): (?P<category>\w*Warning): (?P<message>.*)$"
+    r"(?P<loc><?sys>?:\d+|[^\s\]]+:\d+): (?P<category>\w*Warning): (?P<message>.*)$"
 )
+_NO_LOCATION = re.compile(r"^<?sys>?:\d+$")
 _IGNORED = re.compile(r"Exception ignored (?P<what>.*)$")
 _TOOL_WARNING = re.compile(r"^(?:(?P<source>\S+): )?[Ww]arning: (?P<message>.+)$")
 _SUMMARY_START = re.compile(r"^=+ warnings summary =+$")
 _SUMMARY_END = re.compile(r"^(-- Docs: |=+ )")
 _FUNCTION = re.compile(r"<function (?P<name>\S+) at 0x[0-9a-fA-F]+>")
 _FRAME = re.compile(r'^\s+File "(?P<path>[^"]+)", line (?P<line>\d+)')
+# Color codes: pytest in a terminal (check.sh's raw mode) colors its section headers
+_ANSI = re.compile(r"\x1b\[[0-9;]*m")
 
 Found = tuple[str, str, int]  # kind, message, count
 
@@ -46,7 +50,7 @@ Found = tuple[str, str, int]  # kind, message, count
 def distinct_warnings(log: str, root: str) -> list[tuple[int, str, str]]:
     """The log's warnings as (count, kind, message), each distinct one once."""
     counts: dict[tuple[str, str], int] = {}
-    for kind, message, count in _scan(log.splitlines()):
+    for kind, message, count in _scan(_ANSI.sub("", log).splitlines()):
         key = (kind, _compact(message, root))
         counts[key] = counts.get(key, 0) + count
     return [(count, kind, message) for (kind, message), count in counts.items()]
@@ -126,7 +130,7 @@ def _with_location(warning: re.Match[str]) -> str:
     """'Category: message (path:line)', without the location of a warning that has none."""
     text = f"{warning.group('category')}: {warning.group('message')}"
     location = warning.group("loc")
-    return text if location.startswith("sys:") else f"{text} ({location})"
+    return text if _NO_LOCATION.match(location) else f"{text} ({location})"
 
 
 def _compact(message: str, root: str) -> str:

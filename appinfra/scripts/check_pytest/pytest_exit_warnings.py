@@ -4,17 +4,20 @@
 """
 Show the warnings raised at interpreter exit, which pytest's warning filters never see.
 
-pytest applies its filterwarnings only while it runs. An object still alive when the
-interpreter exits (an unclosed file, socket or database connection held by a module global or a
-cache, an object whose finalizer calls a deprecated API) is finalized after pytest is done,
-under Python's default filters, which ignore ResourceWarning and DeprecationWarning, so its
-warning goes nowhere. At exit, in the main process and in every pytest-xdist worker, this
-plugin makes every warning print once per location, so it reaches stderr:
+pytest applies its filterwarnings only while it runs. What happens after it is done (an exit
+handler calling a deprecated API, an unclosed file, socket or database connection held by a
+module global or a cache being finalized) runs under Python's default filters, which ignore
+ResourceWarning and DeprecationWarning, so its warning goes nowhere. At exit, in the main
+process and in every pytest-xdist worker, this plugin makes every warning print once per
+location, so it reaches stderr:
 
     sys:1: ResourceWarning: unclosed file <_io.TextIOWrapper name='...' ...>
     .../pool.py:42: DeprecationWarning: ...
 
 An exception a finalizer raises at exit ("Exception ignored in: ...") prints without help.
+Late in shutdown the interpreter decides on its own: Python 3.14 reports an unclosed file
+whatever the filters ("Exception ignored while finalizing file ...") and drops a warning a
+Python finalizer raises there.
 
 The main process also writes one line saying whether the project's filterwarnings has a bare
 "error", which makes every warning an error:

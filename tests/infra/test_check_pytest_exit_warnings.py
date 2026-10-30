@@ -18,26 +18,25 @@ PLUGIN_DIR = (
     Path(__file__).resolve().parents[2] / "appinfra" / "scripts" / "check_pytest"
 )
 
-# Objects kept in a module global past the test are finalized at interpreter exit, after pytest
-# has removed its warning filters: an open file (ResourceWarning) and one whose finalizer warns
-# with another category
+# After pytest has removed its warning filters: an exit handler calls a deprecated API, and a
+# file kept open in a module global is finalized. A Python finalizer's own warning would not
+# do as the second case: late in shutdown, Python 3.14 drops it.
 _EXIT_WARNING_TEST = """
+import atexit
 import warnings
 
-class _WarnsAtExit:
-    def __del__(self):
-        warnings.warn("old api used at exit", DeprecationWarning, stacklevel=1)
+def _close_old_api():
+    warnings.warn("old api used at exit", DeprecationWarning, stacklevel=1)
 
 _KEEP = []
 
-def test_leaves_objects_for_exit():
-    _KEEP.extend([open(__file__), _WarnsAtExit()])
+def test_leaves_work_for_exit():
+    _KEEP.append(open(__file__))
+    atexit.register(_close_old_api)
 """
 
-_AT_EXIT = (
-    "ResourceWarning: unclosed file",
-    "DeprecationWarning: old api used at exit",
-)
+_DEPRECATION = "DeprecationWarning: old api used at exit"
+_AT_EXIT = ("ResourceWarning: unclosed file", _DEPRECATION)
 
 
 @pytest.fixture
@@ -75,14 +74,14 @@ def test_every_warning_at_exit_is_printed(
 
 
 @pytest.mark.unit
-def test_exit_warnings_are_silent_without_the_plugin(run_inner) -> None:
-    """Under an error filter, Python's default filters apply at exit: the plugin shows them."""
+def test_exit_deprecation_is_silent_without_the_plugin(run_inner) -> None:
+    """At exit Python's default filters apply, which ignore a DeprecationWarning outside
+    __main__: the plugin is what shows it. (An unclosed file is no control: Python 3.14 reports
+    it whatever the filters.)"""
     result = run_inner("error")
 
     result.assert_outcomes(passed=1)
-    err = result.stderr.str()
-    for warning in _AT_EXIT:
-        assert warning not in err
+    assert _DEPRECATION not in result.stderr.str()
 
 
 @pytest.mark.unit

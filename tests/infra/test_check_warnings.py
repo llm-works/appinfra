@@ -68,6 +68,28 @@ def test_session_warnings_from_pytest_summary() -> None:
     ]
 
 
+@pytest.mark.unit
+def test_colored_pytest_output() -> None:
+    """pytest in color (a terminal, PY_COLORS=1) wraps its section headers in ANSI codes."""
+    log = (
+        "\x1b[33m=============================== warnings summary "
+        "===============================\x1b[0m\n"
+        "tests/test_a.py::test_one\n"
+        f"  {ROOT}/tests/test_a.py:24: DeprecationWarning: old api used in a test\n"
+        "\n"
+        "-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n"
+        "\x1b[33m\x1b[32m1 passed\x1b[0m, \x1b[33m\x1b[1m1 warning\x1b[0m\x1b[33m in 0.05s\x1b[0m\n"
+    )
+
+    assert _found(log) == [
+        (
+            1,
+            "session",
+            "DeprecationWarning: old api used in a test (tests/test_a.py:24)",
+        )
+    ]
+
+
 _EXIT = f"""\
 .                                                                        [100%]sys:1: ResourceWarning: unclosed file <_io.TextIOWrapper name='{ROOT}/tests/data.csv' mode='r' encoding='UTF-8'>
 Exception ignored in: <function _Pool.__del__ at 0x7f61b1663380>
@@ -113,6 +135,22 @@ def test_warning_raised_as_an_error_keeps_its_location() -> None:
 
     assert _found(log) == [
         (1, "exit", "DeprecationWarning: old api used at exit (src/pkg/api.py:12)")
+    ]
+
+
+@pytest.mark.unit
+def test_python_3_14_exit_formats() -> None:
+    """3.14 writes '<sys>:0:' for a warning without a source line, and reports an unclosed
+    file as an exception ignored 'while finalizing' it."""
+    log = (
+        f"<sys>:0: ResourceWarning: unclosed file <_io.TextIOWrapper name='{ROOT}/a.txt'>\n"
+        f"Exception ignored while finalizing file <_io.FileIO name='{ROOT}/b.txt' mode='rb'>:\n"
+        f"ResourceWarning: unclosed file <_io.TextIOWrapper name='{ROOT}/b.txt' mode='r'>\n"
+    )
+
+    assert _found(log) == [
+        (1, "exit", "ResourceWarning: unclosed file a.txt"),
+        (1, "exit", "ResourceWarning: unclosed file b.txt"),
     ]
 
 

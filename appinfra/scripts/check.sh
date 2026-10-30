@@ -1309,14 +1309,24 @@ run_raw() {
 run_raw_subcheck() {
     local subname="$1" subcmd="$2"
     local log="${STATUS_DIR}/raw-subcheck.log"
-    # Through tee, pytest's stdout is a pipe: keep its colors when the terminal had them
-    local colors=""
-    [ -t 1 ] && colors="PY_COLORS=1 "
+    # Through tee, pytest's stdout is a pipe: keep its colors when the terminal had them, unless
+    # the user chose (PY_COLORS, NO_COLOR, FORCE_COLOR pass through). Exported inside the piped
+    # group (its own subshell), not prefixed: "PY_COLORS=1 (exit 5)", the command for a suite
+    # without tests, is a syntax error
+    local colors=false
+    if [ -t 1 ] && [ -z "${PY_COLORS:-}${NO_COLOR:-}${FORCE_COLOR:-}" ]; then
+        colors=true
+    fi
     local rc
     set +e
     # -i: on Ctrl-C tee keeps passing output until the check closes the pipe, so what pytest
     # prints on its way out still reaches the terminal; stop_children ends the rest
-    eval "${colors}${subcmd}" 2>&1 | tee -i "$log"
+    {
+        if [ "$colors" = true ]; then
+            export PY_COLORS=1
+        fi
+        eval "$subcmd"
+    } 2>&1 | tee -i "$log"
     rc=${PIPESTATUS[0]}
     set -e
 

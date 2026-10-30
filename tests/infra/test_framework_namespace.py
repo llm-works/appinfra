@@ -46,6 +46,8 @@ STANDARD = {
     "MAKEFLAGS",
     "NO_COLOR",
     "FORCE_COLOR",
+    # pytest's color switch: check.sh's raw mode sets it only when unset, so a user's own passes
+    "PY_COLORS",
     "XDG_CONFIG_HOME",
     "XDG_CONFIG_DIRS",
     # libpq, set for psql
