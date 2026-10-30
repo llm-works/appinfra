@@ -41,7 +41,6 @@ def temp_log_dir():
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestLoggingBuilderBasic:
     """Test LoggingBuilder basic methods."""
 
@@ -117,7 +116,6 @@ class TestLoggingBuilderBasic:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestMissingCoverage:
     """Tests targeting specific uncovered lines."""
 
@@ -205,7 +203,6 @@ class TestMissingCoverage:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestExceptionHandling:
     """Test exception handling in builder."""
 
@@ -257,7 +254,6 @@ class TestExceptionHandling:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestCreateLoggerFunction:
     """Test create_logger convenience function."""
 
@@ -297,7 +293,6 @@ class TestCreateLoggerFunction:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestWithOptions:
     """Test with_options method."""
 
@@ -370,7 +365,6 @@ class TestWithOptions:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestExplicitTracking:
     """Options set through the API are recorded by name in ``_explicit``."""
 
@@ -419,7 +413,6 @@ class TestExplicitTracking:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestTopicLevels:
     """with_topic_level / with_topic_levels register API-priority rules."""
 
@@ -452,7 +445,6 @@ class TestTopicLevels:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestHandlerMethods:
     """Test handler configuration methods."""
 
@@ -475,6 +467,7 @@ class TestHandlerMethods:
         assert result is builder
         assert len(builder._handlers) == 1
 
+    @pytest.mark.integration
     def test_with_file_handler(self, temp_log_dir):
         """Test with_file_handler."""
         log_file = temp_log_dir / "test.log"
@@ -484,6 +477,7 @@ class TestHandlerMethods:
         assert result is builder
         assert len(builder._handlers) == 1
 
+    @pytest.mark.integration
     def test_with_rotating_file_handler(self, temp_log_dir):
         """Test with_rotating_file_handler."""
         log_file = temp_log_dir / "test.log"
@@ -495,6 +489,7 @@ class TestHandlerMethods:
         assert result is builder
         assert len(builder._handlers) == 1
 
+    @pytest.mark.integration
     def test_with_timed_rotating_file_handler(self, temp_log_dir):
         """Test with_timed_rotating_file_handler."""
         log_file = temp_log_dir / "test.log"
@@ -512,10 +507,10 @@ class TestHandlerMethods:
 # =============================================================================
 
 
-@pytest.mark.integration
 class TestIntegrationScenarios:
     """Test real-world builder usage scenarios."""
 
+    @pytest.mark.integration
     def test_full_builder_chain(self, temp_log_dir):
         """Test complete builder configuration chain."""
         log_file = temp_log_dir / "app.log"
@@ -536,6 +531,7 @@ class TestIntegrationScenarios:
         assert builder._extra == {"service": "test", "version": "1.0"}
         assert len(builder._handlers) == 1
 
+    @pytest.mark.integration
     def test_build_logger_with_file_handler(self, temp_log_dir):
         """Test building complete logger with file handler."""
         log_file = temp_log_dir / "app.log"
@@ -572,6 +568,7 @@ class TestIntegrationScenarios:
             handler.close()
             logger.removeHandler(handler)
 
+    @pytest.mark.integration
     def test_multiple_handlers(self, temp_log_dir):
         """Test builder with multiple handlers."""
         log_file = temp_log_dir / "multi.log"

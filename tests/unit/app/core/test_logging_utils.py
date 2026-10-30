@@ -23,7 +23,6 @@ from appinfra.dot_dict import DotDict
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestSetupLoggingBasic:
     """Test setup_logging_from_config basic functionality."""
 
@@ -67,7 +66,6 @@ class TestSetupLoggingBasic:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestArgsHandling:
     """Test different ways of passing args."""
 
@@ -92,7 +90,6 @@ class TestArgsHandling:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestConfigOverrides:
     """Test configuration overrides."""
 
@@ -167,7 +164,6 @@ class TestConfigOverrides:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestHandlerCreationErrors:
     """Test handler creation error handling."""
 
@@ -193,7 +189,6 @@ class TestHandlerCreationErrors:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestDefaultHandlerCreation:
     """Test default handler creation when no handlers configured."""
 
@@ -229,7 +224,6 @@ class TestDefaultHandlerCreation:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestFrameInspection:
     """Test frame inspection for self.args (lines 59-70)."""
 
@@ -264,7 +258,6 @@ class TestFrameInspection:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestLoggingUtilsIntegration:
     """Test logging utils integration scenarios."""
 
@@ -312,7 +305,6 @@ class TestLoggingUtilsIntegration:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestEdgeCases:
     """Test edge cases to improve coverage."""
 
@@ -422,7 +414,7 @@ class TestEdgeCases:
 # =============================================================================
 
 
-@pytest.mark.e2e
+@pytest.mark.integration
 @pytest.mark.usefixtures("clean_env")
 class TestLocationColorE2E:
     """End-to-end tests for location_color config propagation.
@@ -571,7 +563,7 @@ logging:
             pytest.fail("No handler with _location_renderer found")
 
 
-@pytest.mark.e2e
+@pytest.mark.integration
 @pytest.mark.usefixtures("clean_env")
 class TestAppBuilderLoggingConfigE2E:
     """E2E tests for AppBuilder logging config propagation.
@@ -708,7 +700,6 @@ logging:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestResolveLogLevel:
     """Test _resolve_log_level edge cases."""
 
@@ -738,7 +729,6 @@ class TestResolveLogLevel:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestLogColorsArg:
     """Test --no-log-colors CLI argument handling."""
 
@@ -776,7 +766,6 @@ class TestLogColorsArg:
         assert overrides["colors"] is True
 
 
-@pytest.mark.unit
 class TestLogJsonArg:
     """Test --log-json CLI argument handling."""
 

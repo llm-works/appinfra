@@ -56,10 +56,10 @@ def log_config_with_string_level():
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestFileHandlerConfig:
     """Test FileHandlerConfig class."""
 
+    @pytest.mark.unit
     def test_init_basic(self):
         """Test basic initialization."""
         config = FileHandlerConfig("test.log")
@@ -69,6 +69,7 @@ class TestFileHandlerConfig:
         assert config.delay is False
         assert config.level is None
 
+    @pytest.mark.unit
     def test_init_all_params(self):
         """Test initialization with all parameters."""
         config = FileHandlerConfig(
@@ -137,10 +138,10 @@ class TestFileHandlerConfig:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestRotatingFileHandlerConfig:
     """Test RotatingFileHandlerConfig class."""
 
+    @pytest.mark.unit
     def test_init_basic(self):
         """Test basic initialization."""
         config = RotatingFileHandlerConfig("test.log")
@@ -151,6 +152,7 @@ class TestRotatingFileHandlerConfig:
         assert config.delay is False
         assert config.level is None
 
+    @pytest.mark.unit
     def test_init_all_params(self):
         """Test initialization with all parameters."""
         config = RotatingFileHandlerConfig(
@@ -218,10 +220,10 @@ class TestRotatingFileHandlerConfig:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestTimedRotatingFileHandlerConfig:
     """Test TimedRotatingFileHandlerConfig class."""
 
+    @pytest.mark.unit
     def test_init_basic(self):
         """Test basic initialization."""
         config = TimedRotatingFileHandlerConfig("test.log")
@@ -232,6 +234,7 @@ class TestTimedRotatingFileHandlerConfig:
         assert config.utc is False
         assert config.level is None
 
+    @pytest.mark.unit
     def test_init_all_params(self):
         """Test initialization with all parameters."""
         config = TimedRotatingFileHandlerConfig(
@@ -305,7 +308,6 @@ class TestTimedRotatingFileHandlerConfig:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestFileLoggingBuilder:
     """Test FileLoggingBuilder class."""
 
@@ -418,7 +420,6 @@ class TestFileLoggingBuilder:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestCreateFileLogger:
     """Test create_file_logger convenience function."""
 
@@ -453,7 +454,6 @@ class TestCreateFileLogger:
 # =============================================================================
 
 
-@pytest.mark.integration
 class TestIntegrationScenarios:
     """Test real-world file logging scenarios."""
 
