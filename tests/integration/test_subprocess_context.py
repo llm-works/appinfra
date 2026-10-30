@@ -61,6 +61,20 @@ def _worker_loop(
     lg.handlers.clear()
 
 
+def _reused_worker(tasks: mp.Queue, done: mp.Queue) -> None:
+    """Pool-style worker: runs each task in a SubprocessContext, then waits for the
+    next one; None ends it."""
+    from appinfra.log import LoggerFactory
+    from appinfra.log.config import LogConfig
+    from appinfra.subprocess import SubprocessContext
+
+    lg = LoggerFactory.create_root(LogConfig.from_params(level="info", location=0))
+    for _ in iter(tasks.get, None):
+        with SubprocessContext(lg=lg):
+            pass
+        done.put("finished")
+
+
 def _report_locations(check_events: list, result_queue: mp.Queue) -> dict[int, int]:
     """Ask every worker for its holder's location; return them by worker id."""
     for event in check_events:
@@ -234,6 +248,105 @@ class TestSubprocessContextHotReload:
             assert ctx.running is True
 
         lg.handlers.clear()
+
+    def test_subprocess_context_restores_signal_handlers(self):
+        """The SIGTERM and SIGINT handlers after the block are those before it."""
+        import signal
+
+        from appinfra.log import LoggerFactory
+        from appinfra.log.config import LogConfig
+        from appinfra.subprocess import SubprocessContext
+
+        lg = LoggerFactory.create_root(LogConfig.from_params(level="info", location=0))
+        signals = (signal.SIGTERM, signal.SIGINT)
+        before = {s: signal.getsignal(s) for s in signals}
+        try:
+            with SubprocessContext(lg=lg) as ctx:
+                assert signal.getsignal(signal.SIGTERM) == ctx._handle_stop_signal
+
+            assert {s: signal.getsignal(s) for s in signals} == before
+        finally:
+            for signum, handler in before.items():
+                signal.signal(signum, handler)
+            lg.handlers.clear()
+
+    def test_subprocess_context_restores_signal_handlers_when_block_raises(self):
+        """A block that raises still gets the previous handlers back."""
+        import signal
+
+        from appinfra.log import LoggerFactory
+        from appinfra.log.config import LogConfig
+        from appinfra.subprocess import SubprocessContext
+
+        lg = LoggerFactory.create_root(LogConfig.from_params(level="info", location=0))
+        signals = (signal.SIGTERM, signal.SIGINT)
+        before = {s: signal.getsignal(s) for s in signals}
+        try:
+            with pytest.raises(RuntimeError), SubprocessContext(lg=lg):
+                raise RuntimeError("task failed")
+
+            assert {s: signal.getsignal(s) for s in signals} == before
+        finally:
+            for signum, handler in before.items():
+                signal.signal(signum, handler)
+            lg.handlers.clear()
+
+    def test_subprocess_context_restores_default_for_handler_not_from_python(self):
+        """A previous handler installed from C (reported as None) cannot be put back;
+        the default action is restored instead, so SIGTERM still ends the process."""
+        import signal
+        from unittest.mock import patch
+
+        from appinfra.log import LoggerFactory
+        from appinfra.log.config import LogConfig
+        from appinfra.subprocess import SubprocessContext
+
+        lg = LoggerFactory.create_root(LogConfig.from_params(level="info", location=0))
+        signals = (signal.SIGTERM, signal.SIGINT)
+        before = {s: signal.getsignal(s) for s in signals}
+        real_signal = signal.signal
+
+        def reports_c_handler(signum, handler):
+            """Install the handler; report no previous one, as for a C handler."""
+            real_signal(signum, handler)
+
+        try:
+            with (
+                patch.object(signal, "signal", side_effect=reports_c_handler),
+                SubprocessContext(lg=lg),
+            ):
+                pass
+
+            assert {s: signal.getsignal(s) for s in signals} == dict.fromkeys(
+                signals, signal.SIG_DFL
+            )
+        finally:
+            for signum, handler in before.items():
+                signal.signal(signum, handler)
+            lg.handlers.clear()
+
+    def test_reused_worker_ends_on_sigterm_after_a_task(self):
+        """A worker that ran a task in a SubprocessContext still dies on SIGTERM
+        while it waits for the next task."""
+        import os
+        import signal
+
+        ctx = mp.get_context("spawn")
+        tasks, done = ctx.Queue(), ctx.Queue()
+        worker = ctx.Process(target=_reused_worker, args=(tasks, done))
+        worker.start()
+        try:
+            tasks.put("task")
+            assert done.get(timeout=10) == "finished"
+
+            os.kill(worker.pid, signal.SIGTERM)
+            worker.join(timeout=10)
+
+            assert worker.exitcode == -signal.SIGTERM
+        finally:
+            if worker.is_alive():
+                worker.kill()
+                worker.join()
 
     @pytest.mark.unit
     def test_subprocess_context_lg_property(self):

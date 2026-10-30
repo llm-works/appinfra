@@ -8,8 +8,8 @@ Tests batching, critical flush, SQL caching, error handling, and performance opt
 """
 
 import logging
-import signal
 import time
+from contextlib import nullcontext
 from datetime import datetime
 from unittest.mock import Mock, patch
 
@@ -19,6 +19,8 @@ from appinfra.log.builder.database.config import DatabaseHandlerConfig
 from appinfra.log.builder.database.handler import DatabaseHandler
 from appinfra.log.config import LogConfig
 from appinfra.log.logger import Logger
+
+_ALARM_TIMEOUT = "appinfra.log.builder.database.handler.alarm_timeout"
 
 
 def _logged_record(extra: dict) -> logging.LogRecord:
@@ -437,24 +439,15 @@ class TestClose:
 class TestCriticalFlush:
     """Test critical error immediate flush."""
 
-    @pytest.mark.skipif(
-        not hasattr(signal, "SIGALRM"), reason="Requires SIGALRM (Unix only)"
-    )
-    def test_critical_flush_with_timeout(self, handler, mock_db_interface):
-        """Test critical flush uses signal timeout."""
-        import signal
+    def test_critical_flush_runs_under_its_timeout(self, handler, mock_db_interface):
+        """The write runs inside alarm_timeout with the configured timeout."""
+        handler.handler_config.critical_flush_timeout = 0.5
 
-        row_data = {"timestamp": datetime.now(), "message": "CRITICAL ERROR"}
+        with patch(_ALARM_TIMEOUT, return_value=nullcontext()) as timeout:
+            handler._critical_flush({"timestamp": datetime.now(), "message": "X"})
 
-        with patch.object(signal, "alarm") as mock_alarm:
-            handler._critical_flush(row_data)
-
-            # Verify alarm was set and cleared
-            assert mock_alarm.call_count == 2
-            mock_alarm.assert_any_call(
-                int(handler.handler_config.critical_flush_timeout)
-            )
-            mock_alarm.assert_any_call(0)  # Cleared
+        assert timeout.call_args.args[0] == 0.5
+        mock_db_interface.session.return_value.execute.assert_called_once()
 
     def test_critical_flush_fallback_to_console(
         self, handler, mock_logger, mock_db_interface
@@ -548,7 +541,7 @@ class TestIntegration:
             exc_info=exc_info,
         )
 
-        with patch("signal.signal"), patch("signal.alarm"):
+        with patch(_ALARM_TIMEOUT, return_value=nullcontext()):
             handler.emit(record)
 
         # Batch should still be empty (critical flush bypassed it)

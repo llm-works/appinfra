@@ -34,10 +34,11 @@ Example Usage:
 """
 
 import re
-import signal
-from contextlib import contextmanager
+from contextlib import AbstractContextManager
 from re import Match, Pattern
 from typing import Any
+
+from .alarm import alarm_timeout
 
 
 class RegexTimeoutError(TimeoutError):
@@ -88,31 +89,27 @@ def _validate_pattern_complexity(pattern: str) -> None:
             )
 
 
-@contextmanager
-def _timeout_context(timeout_seconds: float) -> Any:
+def _timeout_context(
+    timeout_seconds: float | None,
+) -> AbstractContextManager[None]:
     """
-    Context manager for timing out operations (Unix-only).
+    Context manager for timing out operations.
+
+    The timeout applies on the main thread of a Unix process only; elsewhere the
+    operation runs without one (see alarm_timeout).
 
     Args:
-        timeout_seconds: Maximum time to allow
+        timeout_seconds: Maximum time to allow; None or 0 for no timeout
 
     Raises:
         RegexTimeoutError: If operation exceeds timeout
     """
-
-    def timeout_handler(signum: int, frame: Any) -> None:
-        raise RegexTimeoutError(f"Regex operation exceeded {timeout_seconds}s timeout")
-
-    # Note: signal.alarm only works on Unix systems
-    # On Windows, this is a no-op and timeout protection is disabled
-    try:
-        old_handler = signal.signal(signal.SIGALRM, timeout_handler)
-        signal.alarm(int(timeout_seconds) if timeout_seconds >= 1 else 1)
-        yield
-    finally:
-        signal.alarm(0)
-        if old_handler:
-            signal.signal(signal.SIGALRM, old_handler)
+    return alarm_timeout(
+        timeout_seconds or 0,
+        lambda: RegexTimeoutError(
+            f"Regex operation exceeded {timeout_seconds}s timeout"
+        ),
+    )
 
 
 def safe_compile(
@@ -127,7 +124,7 @@ def safe_compile(
     Args:
         pattern: Regex pattern string to compile
         flags: Regex flags (re.IGNORECASE, etc.)
-        timeout: Maximum compilation time in seconds (None to disable)
+        timeout: Maximum compilation time in seconds (None or 0 to disable)
 
     Returns:
         Compiled regex pattern
@@ -145,12 +142,7 @@ def safe_compile(
     # Validate pattern complexity
     _validate_pattern_complexity(pattern)
 
-    # Compile with optional timeout protection
-    if timeout is not None and hasattr(signal, "SIGALRM"):
-        with _timeout_context(timeout):
-            return re.compile(pattern, flags)
-    else:
-        # No timeout protection (Windows or timeout disabled)
+    with _timeout_context(timeout):
         return re.compile(pattern, flags)
 
 
@@ -167,7 +159,7 @@ def safe_match(
         pattern: Regex pattern (string or compiled)
         string: String to match against
         flags: Regex flags (only used if pattern is a string)
-        timeout: Maximum matching time in seconds (None to disable)
+        timeout: Maximum matching time in seconds (None or 0 to disable)
 
     Returns:
         Match object or None
@@ -185,11 +177,7 @@ def safe_match(
     else:
         compiled = pattern
 
-    # Match with optional timeout protection
-    if timeout is not None and hasattr(signal, "SIGALRM"):
-        with _timeout_context(timeout):
-            return compiled.match(string)
-    else:
+    with _timeout_context(timeout):
         return compiled.match(string)
 
 
@@ -206,7 +194,7 @@ def safe_search(
         pattern: Regex pattern (string or compiled)
         string: String to search
         flags: Regex flags (only used if pattern is a string)
-        timeout: Maximum search time in seconds (None to disable)
+        timeout: Maximum search time in seconds (None or 0 to disable)
 
     Returns:
         Match object or None
@@ -220,11 +208,7 @@ def safe_search(
     else:
         compiled = pattern
 
-    # Search with optional timeout protection
-    if timeout is not None and hasattr(signal, "SIGALRM"):
-        with _timeout_context(timeout):
-            return compiled.search(string)
-    else:
+    with _timeout_context(timeout):
         return compiled.search(string)
 
 
@@ -241,7 +225,7 @@ def safe_findall(
         pattern: Regex pattern (string or compiled)
         string: String to search
         flags: Regex flags (only used if pattern is a string)
-        timeout: Maximum search time in seconds (None to disable)
+        timeout: Maximum search time in seconds (None or 0 to disable)
 
     Returns:
         List of matches
@@ -255,9 +239,5 @@ def safe_findall(
     else:
         compiled = pattern
 
-    # Search with optional timeout protection
-    if timeout is not None and hasattr(signal, "SIGALRM"):
-        with _timeout_context(timeout):
-            return compiled.findall(string)
-    else:
+    with _timeout_context(timeout):
         return compiled.findall(string)

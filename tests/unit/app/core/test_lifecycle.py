@@ -13,6 +13,7 @@ Tests key functionality including:
 import logging
 import signal
 import time as std_time
+from contextlib import nullcontext
 from unittest.mock import Mock, patch
 
 import pytest
@@ -752,24 +753,23 @@ class TestExecutePhase:
         # Error should be logged
         manager._lifecycle_logger.error.assert_called()
 
-    @patch("signal.signal")
-    @patch("signal.alarm")
-    def test_execute_phase_sets_timeout(self, mock_alarm, mock_signal):
-        """Test _execute_phase sets and clears alarm timeout."""
-        app = Mock()
-        manager = LifecycleManager(app)
-        config = DotDict(logging=DotDict(level="info", location=0, micros=False))
+    def test_execute_phase_runs_under_its_timeout(self):
+        """The phase runs inside alarm_timeout with the phase's timeout."""
+        manager = LifecycleManager(Mock())
+        config = DotDict(
+            logging=DotDict(level="info", location=0, micros=False),
+            shutdown_timeouts={"test": 0.5},
+        )
         manager.initialize(config)
-
         phase_func = Mock()
 
-        manager._execute_phase("test", phase_func)
+        with patch(
+            "appinfra.app.core.lifecycle.alarm_timeout", return_value=nullcontext()
+        ) as timeout:
+            manager._execute_phase("test", phase_func)
 
-        # Should set alarm before and clear after
-        assert mock_alarm.call_count >= 2
-        calls = [call[0][0] for call in mock_alarm.call_args_list]
-        assert any(c > 0 for c in calls)  # Set to timeout value
-        assert 0 in calls  # Cleared
+        assert timeout.call_args.args[0] == 0.5
+        phase_func.assert_called_once()
 
     def test_execute_phase_uses_configured_timeout(self):
         """Test _execute_phase uses configured timeout from config."""

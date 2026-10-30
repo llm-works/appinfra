@@ -203,7 +203,7 @@ asyncio_default_fixture_loop_scope = "function"
 # beside the mark (tests/helpers/fork.py), never here for the whole suite.
 filterwarnings = ["error"]
 markers = [
-    "unit: stays in one process: no files (tmp_path included), subprocesses, sockets, databases or watchers; default under tests/unit/",
+    "unit: stays in one process: no files (tmp_path included), subprocesses, sockets, databases, watchers, signal handlers or timers; default under tests/unit/",
     "integration: one machine: processes, localhost services, databases, files; default under tests/integration/",
     "performance: Performance/benchmark tests",
     "security: Security-focused tests (injection, validation, etc.)",

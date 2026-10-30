@@ -11,11 +11,11 @@ Requires: pip install appinfra[sql]
 """
 
 import logging
-import signal
 import threading
 from datetime import datetime
 from typing import Any
 
+from ....alarm import alarm_timeout
 from ....errors import DependencyError
 from ...config import LogConfig
 from .config import DatabaseHandlerConfig
@@ -142,26 +142,21 @@ class DatabaseHandler(logging.Handler):
         return False
 
     def _critical_flush(self, row_data: dict[str, Any]) -> None:
-        """Immediately flush critical error to database."""
+        """Immediately flush critical error to database.
+
+        The timeout keeps a hung write from stalling a crashing app. It applies on
+        the main thread only; elsewhere the database driver's own timeouts apply.
+        """
         try:
-            # Use a timeout to prevent hanging during app crash
-
-            def timeout_handler(signum: int, frame: Any) -> None:
-                raise TimeoutError("Critical flush timeout")
-
-            # Set timeout
-            old_handler = signal.signal(signal.SIGALRM, timeout_handler)
-            signal.alarm(int(self.handler_config.critical_flush_timeout))
-
-            try:
-                # Immediate database write (session auto-commits on success)
-                with self.handler_config.db_interface.session() as session:
-                    self._insert_single_record(session, row_data)
-
-            finally:
-                # Restore signal handler
-                signal.alarm(0)
-                signal.signal(signal.SIGALRM, old_handler)
+            # Immediate database write (session auto-commits on success)
+            with (
+                alarm_timeout(
+                    self.handler_config.critical_flush_timeout,
+                    lambda: TimeoutError("Critical flush timeout"),
+                ),
+                self.handler_config.db_interface.session() as session,
+            ):
+                self._insert_single_record(session, row_data)
 
         except Exception:
             # Fallback to console if database flush fails
