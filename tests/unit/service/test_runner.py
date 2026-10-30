@@ -754,6 +754,7 @@ class TestScheduledService:
     def test_tick_called_repeatedly(self):
         """tick() is called repeatedly."""
         tick_count = 0
+        two_ticks = threading.Event()
 
         class CountingService(ScheduledService):
             interval = 0.2
@@ -765,6 +766,8 @@ class TestScheduledService:
             def tick(self) -> None:
                 nonlocal tick_count
                 tick_count += 1
+                if tick_count == 2:
+                    two_ticks.set()
 
             def is_healthy(self) -> bool:
                 return tick_count > 0
@@ -774,7 +777,7 @@ class TestScheduledService:
 
         runner.start()
         runner.wait_healthy(timeout=5.0)
-        time.sleep(1.0)
+        assert two_ticks.wait(timeout=5.0)
         runner.stop()
 
         assert tick_count >= 2
