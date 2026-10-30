@@ -78,6 +78,19 @@ def test_a_marker_naming_another_suite_overrides_the_directory(
     assert (nodeid in _ids(result)) is expected
 
 
+def test_a_test_with_two_suite_markers_stops_collection(
+    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = (
+        "import pytest\n\n\n@pytest.mark.unit\nclass TestBoth:\n"
+        "    @pytest.mark.integration\n    def test_both(self):\n        pass\n"
+    )
+    layout = {"tests/unit/test_unit_both.py": source}
+    result = _run(pytester, monkeypatch, layout)
+    assert result.ret == pytest.ExitCode.USAGE_ERROR
+    assert "tests/unit/test_unit_both.py::TestBoth::test_both" in result.stderr.str()
+
+
 def test_a_test_outside_the_suite_directories_must_name_its_suite(
     pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
 ) -> None:
