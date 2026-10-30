@@ -28,7 +28,6 @@ Requirements:
 # ci-timeout: 20
 # ci-requires: pg
 
-import logging
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -110,36 +109,29 @@ class CriticalFlushDemo:
             session.execute(sqlalchemy.text("DROP TABLE IF EXISTS error_logs"))
             session.commit()
 
-    def _add_console_handler(self) -> None:
-        """Add console handler to logger for immediate feedback."""
-        console_handler = logging.StreamHandler()
-        console_handler.setLevel(logging.INFO)
-        console_formatter = logging.Formatter(
-            "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-        )
-        console_handler.setFormatter(console_formatter)
-        self.logger.addHandler(console_handler)
-
     def setup_logging(self) -> None:
-        """Set up logging with database handler and critical flush."""
+        """Set up logging with database handler, critical flush and console output."""
         print("🔧 Setting up logging with critical flush...")
 
-        builder = DatabaseLoggingBuilder("critical_flush_demo")
-        builder.with_database_table(
-            table_name="error_logs",
-            db_interface=self.db_interface,
-            level=logging.DEBUG,
-            batch_size=5,
-            flush_interval=10.0,
-        ).with_critical_error_flush(
-            enabled=True,
-            trigger_fields=["exception", "critical", "fatal"],
-            timeout=5.0,
-            fallback_to_console=True,
+        self.logger = (
+            DatabaseLoggingBuilder("critical_flush_demo")
+            .with_database_table(
+                table_name="error_logs",
+                db_interface=self.db_interface,
+                level="debug",
+                batch_size=5,
+                flush_interval=10.0,
+            )
+            .with_critical_error_flush(
+                enabled=True,
+                trigger_fields=["exception", "critical", "fatal"],
+                timeout=5.0,
+                fallback_to_console=True,
+            )
+            # Console output for immediate feedback
+            .with_console_handler(level="info")
+            .build()
         )
-
-        self.logger = builder.build()
-        self._add_console_handler()
 
         print("✅ Logging setup complete")
 
@@ -152,7 +144,8 @@ class CriticalFlushDemo:
 
         print(
             "✅ Normal logging complete - messages 1-5 were written as one batch; "
-            "6-8 wait for the next full batch, the flush interval or close()"
+            "6-8 wait until the batch fills or the handler closes (the flush "
+            "interval is checked only when another record arrives)"
         )
 
     def demonstrate_critical_error_with_exception(self) -> None:
