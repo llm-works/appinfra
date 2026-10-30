@@ -3,6 +3,7 @@
 
 """Tests for Runner classes."""
 
+import itertools
 import threading
 import time
 from collections.abc import Iterator
@@ -627,6 +628,27 @@ class TestProcessRunner:
         svc = MPSimpleService(lg)
         runner = ProcessRunner(svc)
         assert runner.exit_code is None
+
+    @pytest.mark.parametrize(
+        ("exitcode", "state"), [(3, State.FAILED), (0, State.DONE)]
+    )
+    def test_monitor_records_an_exit_right_after_check(self, lg, exitcode, state):
+        """A process that dies after check() saw it healthy ends the monitor in its
+        end state, not RUNNING, when no restart can follow."""
+        runner = ProcessRunner(
+            MPSimpleService(lg), RestartPolicy(restart_on_failure=False)
+        )
+        runner._state = State.RUNNING
+        runner._process = MagicMock(exitcode=exitcode)
+        # Alive for the clean-exit test and inside check(), dead from then on
+        alive = itertools.chain([True, True], itertools.repeat(False))
+        with (
+            patch.object(runner, "is_alive", side_effect=lambda: next(alive)),
+            patch.object(runner, "is_healthy", return_value=True),
+        ):
+            runner._monitor_loop(interval=0)
+
+        assert runner.state == state
 
 
 @pytest.mark.unit
