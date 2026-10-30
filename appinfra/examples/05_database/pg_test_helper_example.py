@@ -21,7 +21,7 @@ What This Example Demonstrates:
 Running the Example:
     # From the project root
     # From the infra project root
-    ~/.venv/bin/python examples/pg_test_helper_example.py
+    ~/.venv/bin/python examples/05_database/pg_test_helper_example.py
 
 Example Tests:
 

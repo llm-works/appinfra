@@ -40,7 +40,7 @@ Disabling logging completely (useful for tests).
 
 **Run:**
 ```bash
-~/.venv/bin/python examples/03_logging/disabled_logging.py
+~/.venv/bin/python examples/03_logging/disabled_logging_example.py
 ```
 
 **Use cases:**

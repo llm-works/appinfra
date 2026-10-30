@@ -11,7 +11,7 @@ It demonstrates the key difference between normal logging (batched) and
 critical error logging (immediate flush).
 
 Usage:
-    python examples/basic_critical_flush_example.py
+    python examples/05_database/basic_critical_flush_example.py
 """
 
 import logging

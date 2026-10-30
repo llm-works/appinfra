@@ -43,7 +43,7 @@ Example Files:
     You can inspect these files to see the actual !include syntax and structure.
 """
 
-# Add the project root to the path (examples/04_configuration/file.py -> project root is 2 levels up)
+# Allow running from a source checkout without installing the package.
 import pathlib
 import sys
 from pathlib import Path
