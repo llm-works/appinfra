@@ -41,6 +41,7 @@ pytest_plugins = [
     "tests.fixtures.sqlite_integration",
     "tests.fixtures.logging",
     "tests.fixtures.suite_markers",
+    "tests.fixtures.yaml_files",
 ]
 
 
