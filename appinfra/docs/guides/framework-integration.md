@@ -252,13 +252,13 @@ how often it repeated:
 - **Tools:** a tool's own `warning:` line, about the tool or its configuration.
 
 When the project's pytest `filterwarnings` has a bare `error` entry, which makes every warning an
-error, a warning in a test check or an example fails it (`[✗]`); otherwise the check passes with
-a warning and its log is kept in `.build/check/`. A tool's warning line only ever warns. Rows show
-paths relative to the project and a file by its name; the kept log has the full message.
-`make check.ci` lists the warnings of its test checks and examples under each one's passed or
-failed line, with the same policy; `make check.raw` collects none and fails on none, and shows
-them only as the tools print them. Warnings in interpreters a test starts belong to that test and
-are not collected.
+error, a warning fails the check that printed it (`[✗]`), a tool's own line included; otherwise
+the check passes with a warning and its log is kept in `.build/check/`. A check a tool itself
+fails (an unformatted file, a type error) fails in either mode. Rows show paths relative to the
+project and a file by its name; the kept log has the full message. `make check.ci` lists each
+check's warnings under its passed or failed line, with the same policy; `make check.raw` collects
+none and fails on none, and shows them only as the tools print them. Warnings in interpreters a
+test starts belong to that test and are not collected.
 
 A warning at exit comes after the last test, so it names no test. Narrow it down with `-k` in a
 pytest run that loads the plugin (the `make test.*` targets do not), until the line is gone:

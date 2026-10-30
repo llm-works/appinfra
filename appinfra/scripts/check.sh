@@ -177,10 +177,10 @@ export APPINFRA_PYTEST_HANG_DUMP_SECONDS="$HANG_DUMP_SECONDS"
 PYTEST_PLUGIN_PATH="PYTHONPATH=$(printf '%q' "${SCRIPT_DIR}/check_pytest${PYTHONPATH:+:${PYTHONPATH}}") "
 PYTEST_PLUGINS="-p pytest_hang -p pytest_exit_warnings"
 
-# How a warning in a passing test check or example ends: strict when the project's pytest
-# filterwarnings has a bare "error" (every warning an error), so the check fails; warn
-# otherwise, so the check passes with a warning. Asked once from pytest_exit_warnings, in a run
-# that only reads the configuration. A tool's own warning lines only ever warn.
+# How a warning in a passing check ends, whichever check printed it (tests, examples, a tool's
+# own "warning:" line): strict when the project's pytest filterwarnings has a bare "error" (every
+# warning an error), so the check fails; warn otherwise, so the check passes with a warning.
+# Asked once from pytest_exit_warnings, in a run that only reads the configuration.
 WARNINGS_MODE=warn
 if [ "$SKIP_TESTS" != true ]; then
     WARNINGS_MODE=$({ cd "$PROJECT_ROOT" && eval "${PYTEST_PLUGIN_PATH}${PYTHON} -m pytest -p pytest_exit_warnings --collect-only -q --noconftest -p no:cacheprovider --ignore-glob='*'" 2>&1 || true; } \
@@ -405,8 +405,14 @@ declare -a TEST_SUBCHECKS_RAW=()
 # suite (see FOLDED_MARKERS above) and stays alive longest in the
 # parallel group; leading the list keeps its running/completed state
 # obvious. Uses NPROC/2 workers (see PYTEST_PARALLEL_COVERAGE above).
+# make check compares the coverage with the target in run_check; check.ci (--raw --summary)
+# runs the suite through run_raw, so pytest-cov applies the target there
+COVERAGE_FAIL_UNDER=""
+if [ "$RAW" = true ] && [ "$SUMMARY" = true ]; then
+    COVERAGE_FAIL_UNDER=" --cov-fail-under=${COVERAGE_TARGET}"
+fi
 if awk "BEGIN {exit !($COVERAGE_TARGET > 0)}" 2>/dev/null; then
-    TEST_SUBCHECKS+=("${COVERAGE_LABEL}|test.coverage|${PYTEST_PLUGIN_PATH}${COVERAGE_CORE_ENV}_APPINFRA_CHECK_PYTEST_SUITE=cov ${PYTHON} -m pytest tests/ ${COVERAGE_MARKER_ARG} ${PYTEST_PLUGINS} --cov=${PKG_NAME} --cov-report=term -q -rEfs ${PYTEST_PARALLEL_COVERAGE}|${COVERAGE_TARGET}")
+    TEST_SUBCHECKS+=("${COVERAGE_LABEL}|test.coverage|${PYTEST_PLUGIN_PATH}${COVERAGE_CORE_ENV}_APPINFRA_CHECK_PYTEST_SUITE=cov ${PYTHON} -m pytest tests/ ${COVERAGE_MARKER_ARG} ${PYTEST_PLUGINS} --cov=${PKG_NAME} --cov-report=term${COVERAGE_FAIL_UNDER} -q -rEfs ${PYTEST_PARALLEL_COVERAGE}|${COVERAGE_TARGET}")
     TEST_SUBCHECKS_RAW+=("${COVERAGE_LABEL}|test.coverage|${PYTEST_PLUGIN_PATH}${COVERAGE_CORE_ENV}_APPINFRA_CHECK_PYTEST_SUITE=cov ${PYTHON} -m pytest tests/ ${COVERAGE_MARKER_ARG} ${PYTEST_PLUGINS} --cov=${PKG_NAME} --cov-report=term-missing -rEfs ${PYTEST_PARALLEL_COVERAGE}|${COVERAGE_TARGET}")
 fi
 
@@ -849,18 +855,6 @@ display_skip_summary() {
     display_skips "${STATUS_DIR}/example_skips" "examples"
 }
 
-# The mode for a passing check's warnings: the project's (WARNINGS_MODE) for test and example
-# checks, whose warnings come from the project's code; warn for a tool, whose warning lines are
-# about the tool and its configuration
-warnings_mode_for() {
-    local name="$1" cmd="$2"
-    if [[ "$cmd" == *" -m pytest "* || "$name" == "Examples" ]]; then
-        echo "$WARNINGS_MODE"
-    else
-        echo warn
-    fi
-}
-
 # The distinct warnings check_warnings.py finds in a log, as "count<TAB>kind<TAB>message". Run
 # through eval like every check command: PYTHON may hold "~/..." or arguments. A scan that fails
 # is a warning of its own, never "no warnings".
@@ -1006,7 +1000,7 @@ run_check() {
             # Warnings get rows below the checklist; in strict mode they also fail the check,
             # whose line then shows its usual text with the failure mark
             local warning_failure="" pass_mark="${UI_MARK_OK}"
-            if ! check_warnings "$name" "$make_target" "$tmpfile" "$(warnings_mode_for "$name" "$cmd")"; then
+            if ! check_warnings "$name" "$make_target" "$tmpfile" "$WARNINGS_MODE"; then
                 pass_mark="${UI_MARK_FAIL}"
             fi
 
@@ -1243,6 +1237,13 @@ run_raw() {
     local subchecks=()
     [ "$SUMMARY" = true ] && subchecks=("${TEST_SUBCHECKS[@]}") || subchecks=("${TEST_SUBCHECKS_RAW[@]}")
 
+    # check.ci (--summary) applies make check's warning policy and coverage threshold;
+    # check.raw runs every command plain
+    local scan=plain
+    if [ "$SUMMARY" = true ]; then
+        scan=scan
+    fi
+
     for check_def in "${CHECKS[@]}"; do
         IFS='|' read -r name make_target cmd fix_target <<< "$check_def"
 
@@ -1257,12 +1258,7 @@ run_raw() {
                 echo ""
 
                 local sub_exit_code=0
-                # check.ci (--summary) applies the warning policy; check.raw runs plain
-                local scan=plain
-                if [ "$SUMMARY" = true ]; then
-                    scan=scan
-                fi
-                run_raw_subcheck "$subname" "$subcmd" "$scan" || sub_exit_code=$?
+                run_raw_check "$subname" "$subcmd" "$scan" "  " "" "" || sub_exit_code=$?
                 if [ $sub_exit_code -eq "$EXIT_CODE_WARNING" ]; then
                     has_warnings=true
                 elif [ $sub_exit_code -ne 0 ] && [ $sub_exit_code -ne 5 ]; then
@@ -1277,17 +1273,10 @@ run_raw() {
             local actual_fix_target="${parsed#*|}"
 
             local cmd_exit_code=0
-            eval "$cmd" || cmd_exit_code=$?
-
-            if [ $cmd_exit_code -eq 0 ]; then
-                echo "${UI_MARK_OK} $name passed"
-            elif [ $cmd_exit_code -eq 42 ]; then  # EXIT_CODE_WARNING
-                echo "${UI_MARK_WARN} $name (warnings, run make ${make_target})"
+            run_raw_check "$name" "$cmd" "$scan" "" "$make_target" "$actual_fix_target" || cmd_exit_code=$?
+            if [ $cmd_exit_code -eq "$EXIT_CODE_WARNING" ]; then
                 has_warnings=true
-                # Don't fail on warnings in non-strict mode
-            else
-                echo "${UI_MARK_FAIL} $name failed"
-                [ -n "$actual_fix_target" ] && echo "  To fix: make $actual_fix_target"
+            elif [ $cmd_exit_code -ne 0 ]; then
                 failed=true
                 [ "$FAIL_FAST" = true ] && break
             fi
@@ -1307,24 +1296,25 @@ run_raw() {
     fi
 }
 
-# Run one test subcheck with its output streaming as is. With scan (check.ci), a copy goes to a
-# log for the warning scan (see check_warnings), whose findings follow the subcheck's line and,
-# in strict mode, fail it. Without (check.raw), the plain command runs: its outcome is the
-# tools' own, free of check.sh's warning policy. Returns 0 (passed), 5 (no tests collected,
-# shown like run_check's case 5), EXIT_CODE_WARNING (passed, with warnings) or a failing code.
-run_raw_subcheck() {
-    local subname="$1" subcmd="$2" scan="$3"
-    local log="${STATUS_DIR}/raw-subcheck.log"
+# Run one check for run_raw and print its result: a check (indent "") or a test subcheck (indent
+# "  "). With scan (check.ci), a copy of its output goes to a log; its warnings (see
+# check_warnings) follow the result and, in strict mode (WARNINGS_MODE), fail the check. Without
+# (check.raw), the plain command runs, so the outcome is the tools' own. Returns 0, 5 (a subcheck
+# with no tests collected), EXIT_CODE_WARNING (passed with warnings, or a tool's own warning
+# exit) or a failing code.
+run_raw_check() {
+    local name="$1" cmd="$2" scan="$3" indent="$4" make_target="$5" fix_target="$6"
+    local log="${STATUS_DIR}/raw-check.log"
     local rc=0
     if [ "$scan" = scan ]; then
         set +e
         # -i: on Ctrl-C tee keeps passing output until the check closes the pipe, so what pytest
         # prints on its way out still reaches the terminal; stop_children ends the rest
-        eval "$subcmd" 2>&1 | tee -i "$log"
+        eval "$cmd" 2>&1 | tee -i "$log"
         rc=${PIPESTATUS[0]}
         set -e
     else
-        eval "$subcmd" || rc=$?
+        eval "$cmd" || rc=$?
     fi
 
     local found="" note=""
@@ -1333,22 +1323,31 @@ run_raw_subcheck() {
     fi
     if [ -n "$found" ]; then
         note=" ($(awk -F'\t' '{ n += $1 } END { print n }' <<< "$found") warnings)"
-        if [ "$(warnings_mode_for "$subname" "$subcmd")" = strict ]; then
+        rc=$EXIT_CODE_WARNING
+        if [ "$WARNINGS_MODE" = strict ]; then
             rc=1
-        else
-            rc=$EXIT_CODE_WARNING
         fi
     fi
-    case "$rc" in
-        0) echo "  ${UI_MARK_OK} $subname passed" ;;
-        5) echo "  ${UI_GRAY}[ ]${UI_RESET} $subname ${UI_GRAY}(no tests)${UI_RESET}" ;;
-        "$EXIT_CODE_WARNING") echo "  ${UI_MARK_WARN} $subname passed${note}" ;;
-        *) echo "  ${UI_MARK_FAIL} $subname failed${note}" ;;
-    esac
-    local count kind message
+    if [ "$rc" -eq 5 ] && [ -n "$indent" ]; then
+        echo "${indent}${UI_GRAY}[ ]${UI_RESET} $name ${UI_GRAY}(no tests)${UI_RESET}"
+    elif [ "$rc" -eq 0 ]; then
+        echo "${indent}${UI_MARK_OK} $name passed"
+    elif [ "$rc" -eq "$EXIT_CODE_WARNING" ] && [ -z "$found" ]; then
+        # A tool's own warning exit (cq in warn mode)
+        echo "${indent}${UI_MARK_WARN} $name (warnings, run make ${make_target})"
+    elif [ "$rc" -eq "$EXIT_CODE_WARNING" ]; then
+        echo "${indent}${UI_MARK_WARN} $name passed${note}"
+    else
+        echo "${indent}${UI_MARK_FAIL} $name failed${note}"
+        if [ -n "$fix_target" ]; then
+            echo "${indent}  To fix: make $fix_target"
+        fi
+    fi
+    local count kind message line_note
     while IFS=$'\t' read -r count kind message; do
         [ -n "$message" ] || continue
-        echo "    - ${message} $(warning_note "$kind" "$count")"
+        line_note=$(warning_note "$kind" "$count")
+        echo "${indent}  - ${message}${line_note:+ ${line_note}}"
     done <<< "$found"
     return "$rc"
 }

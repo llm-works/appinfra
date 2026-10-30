@@ -154,6 +154,35 @@ def test_python_3_14_exit_formats() -> None:
     ]
 
 
+_SPACED_ROOT = "/Users/me/My Projects/app"
+
+
+@pytest.mark.unit
+def test_session_warning_under_a_path_with_spaces() -> None:
+    log = (
+        "=============================== warnings summary ===============================\n"
+        "tests/test_a.py::test_one\n"
+        f"  {_SPACED_ROOT}/tests/test_a.py:12: DeprecationWarning: old api\n"
+        "\n"
+        "-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n"
+    )
+
+    assert check_warnings.distinct_warnings(log, _SPACED_ROOT) == [
+        (1, "session", "DeprecationWarning: old api (tests/test_a.py:12)")
+    ]
+
+
+@pytest.mark.unit
+def test_exit_warning_under_a_path_with_spaces() -> None:
+    log = (
+        f"{_SPACED_ROOT}/src/pkg/api.py:10: DeprecationWarning: old api used at exit\n"
+    )
+
+    assert check_warnings.distinct_warnings(log, _SPACED_ROOT) == [
+        (1, "exit", "DeprecationWarning: old api used at exit (src/pkg/api.py:10)")
+    ]
+
+
 @pytest.mark.unit
 def test_addresses_are_masked_so_repeats_count_together() -> None:
     log = (

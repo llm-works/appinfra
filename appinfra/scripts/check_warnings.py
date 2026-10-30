@@ -30,9 +30,10 @@ from pathlib import Path
 
 # "path.py:24: DeprecationWarning: message", or "sys:1: ..." ("<sys>:0: ..." from Python 3.14)
 # for a warning without a source line; a worker's line can follow pytest's progress dots
-# ("[100%]sys:1: ...")
+# ("[100%]sys:1: ..."). A path may contain spaces ("/Users/me/My Projects/..."): the location
+# runs to the first ":<line>: <Category>Warning:", and holds no "]", which ends the dots.
 _PY_WARNING = re.compile(
-    r"(?P<loc><?sys>?:\d+|[^\s\]]+:\d+): (?P<category>\w*Warning): (?P<message>.*)$"
+    r"(?P<loc><?sys>?:\d+|[^\s\]][^\]]*?:\d+): (?P<category>\w*Warning): (?P<message>.*)$"
 )
 _NO_LOCATION = re.compile(r"^<?sys>?:\d+$")
 _IGNORED = re.compile(r"Exception ignored (?P<what>.*)$")
