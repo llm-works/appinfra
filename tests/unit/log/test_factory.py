@@ -65,7 +65,6 @@ def cleanup_loggers():
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestCreateRoot:
     """Test create_root method."""
 
@@ -103,7 +102,6 @@ class TestCreateRoot:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestLoggerExists:
     """create() never touches an existing logger."""
 
@@ -142,7 +140,6 @@ def _library_logger(name: str, cls: type[logging.Logger]) -> logging.Logger:
     return lg
 
 
-@pytest.mark.unit
 class TestTakeOver:
     """create() takes over a library's logger in place; the library keeps its reference."""
 
@@ -289,7 +286,6 @@ class TestTakeOver:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestReconfigure:
     """reconfigure() changes a live logger in place."""
 
@@ -352,7 +348,6 @@ class TestReconfigure:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestDestroy:
     """destroy() frees a name, with every logger derived from it."""
 
@@ -424,7 +419,6 @@ class TestDestroy:
         assert LoggerFactory.destroy_if_exists(unique_logger_name) is False
 
 
-@pytest.mark.unit
 class TestNames:
     """names() lists what create() refuses and destroy() accepts in this process."""
 
@@ -482,7 +476,6 @@ class _FailingCloseHandler(_RecordingHandler):
         raise OSError("disk full")
 
 
-@pytest.mark.unit
 class TestCreateOrReplace:
     """create_or_replace() is destroy() then create()."""
 
@@ -528,7 +521,7 @@ def _create_root_in_child(conn) -> None:
         conn.close()
 
 
-@pytest.mark.unit
+@pytest.mark.integration
 @pytest.mark.skipif(
     "fork" not in __import__("multiprocessing").get_all_start_methods(),
     reason="needs the fork start method",
@@ -564,7 +557,6 @@ def test_forked_child_may_create_an_inherited_name(log_config):
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestCreateChild:
     """Test create_child method."""
 
@@ -613,7 +605,6 @@ class TestCreateChild:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestDerive:
     """Test derive method."""
 
@@ -673,7 +664,6 @@ class TestDerive:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestFactoryIntegration:
     """Test factory integration scenarios."""
 
@@ -730,7 +720,6 @@ class TestFactoryIntegration:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestLoggerHolderHotReload:
     """Test that logger location is hot-reloadable via registry.
 

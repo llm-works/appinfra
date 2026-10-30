@@ -55,7 +55,6 @@ tests/test_b.py::test_three
 """
 
 
-@pytest.mark.unit
 def test_session_warnings_from_pytest_summary() -> None:
     """Each summary entry counts once per test listed above it; paths become relative."""
     assert _found(_SESSION) == [
@@ -68,7 +67,6 @@ def test_session_warnings_from_pytest_summary() -> None:
     ]
 
 
-@pytest.mark.unit
 def test_colored_pytest_output() -> None:
     """pytest in color (a terminal, PY_COLORS=1) wraps its section headers in ANSI codes."""
     log = (
@@ -102,7 +100,6 @@ sys:1: ResourceWarning: unclosed file <_io.TextIOWrapper name='{ROOT}/tests/data
 """
 
 
-@pytest.mark.unit
 def test_exit_warnings_and_ignored_exceptions() -> None:
     """A worker's line may follow the progress dots; a file shows as its name; repeats count."""
     assert _found(_EXIT) == [
@@ -112,7 +109,6 @@ def test_exit_warnings_and_ignored_exceptions() -> None:
     ]
 
 
-@pytest.mark.unit
 def test_warning_raised_as_an_error_at_exit() -> None:
     """With an error filter, a warning at exit is an ignored exception: the warning is the error."""
     log = (
@@ -123,7 +119,6 @@ def test_warning_raised_as_an_error_at_exit() -> None:
     assert _found(log) == [(1, "exit", "ResourceWarning: unclosed file /tmp/x.txt")]
 
 
-@pytest.mark.unit
 def test_warning_raised_as_an_error_keeps_its_location() -> None:
     """The traceback's last frame is where the warning was raised, as for a printed warning."""
     log = (
@@ -138,7 +133,6 @@ def test_warning_raised_as_an_error_keeps_its_location() -> None:
     ]
 
 
-@pytest.mark.unit
 def test_python_3_14_exit_formats() -> None:
     """3.14 writes '<sys>:0:' for a warning without a source line, and reports an unclosed
     file as an exception ignored 'while finalizing' it."""
@@ -157,7 +151,6 @@ def test_python_3_14_exit_formats() -> None:
 _SPACED_ROOT = "/Users/me/My Projects/app"
 
 
-@pytest.mark.unit
 def test_session_warning_under_a_path_with_spaces() -> None:
     log = (
         "=============================== warnings summary ===============================\n"
@@ -172,7 +165,6 @@ def test_session_warning_under_a_path_with_spaces() -> None:
     ]
 
 
-@pytest.mark.unit
 def test_exit_warning_under_a_path_with_spaces() -> None:
     log = (
         f"{_SPACED_ROOT}/src/pkg/api.py:10: DeprecationWarning: old api used at exit\n"
@@ -183,7 +175,6 @@ def test_exit_warning_under_a_path_with_spaces() -> None:
     ]
 
 
-@pytest.mark.unit
 def test_addresses_are_masked_so_repeats_count_together() -> None:
     log = (
         "Exception ignored in: <function C.__del__ at 0x7f0001>\n"
@@ -195,7 +186,6 @@ def test_addresses_are_masked_so_repeats_count_together() -> None:
     assert _found(log) == [(2, "exit", "ValueError: boom (in C.__del__)")]
 
 
-@pytest.mark.unit
 def test_tool_warning_lines() -> None:
     log = (
         "warning: The top-level linter settings are deprecated in favour of `lint`.\n"
@@ -213,7 +203,6 @@ def test_tool_warning_lines() -> None:
     ]
 
 
-@pytest.mark.unit
 @pytest.mark.parametrize(
     "line",
     [
@@ -227,7 +216,7 @@ def test_lines_that_are_not_warnings(line: str) -> None:
     assert _found(line + "\n") == []
 
 
-@pytest.mark.unit
+@pytest.mark.integration
 def test_command_line_prints_count_kind_message(tmp_path: Path) -> None:
     log = tmp_path / "check.log"
     log.write_text(_EXIT)

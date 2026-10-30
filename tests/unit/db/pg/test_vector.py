@@ -14,7 +14,6 @@ import pytest
 from appinfra.db.pg.vector import create_vector_index, enable_pgvector
 
 
-@pytest.mark.unit
 class TestEnablePgvector:
     """Test enable_pgvector function."""
 
@@ -24,7 +23,6 @@ class TestEnablePgvector:
         assert sql == "CREATE EXTENSION IF NOT EXISTS vector"
 
 
-@pytest.mark.unit
 class TestCreateVectorIndex:
     """Test create_vector_index function."""
 
@@ -98,7 +96,6 @@ class TestCreateVectorIndex:
         assert "ef_construction = 64" in sql
 
 
-@pytest.mark.unit
 class TestVectorImport:
     """Test Vector type import."""
 
@@ -118,7 +115,6 @@ class TestVectorImport:
         assert VectorFromPg is VectorFromModule
 
 
-@pytest.mark.unit
 class TestDeferredPgvectorImport:
     """Regression: importing appinfra.db must not pull pgvector or numpy.
 
@@ -174,6 +170,7 @@ class TestDeferredPgvectorImport:
             f"Importing appinfra.db.pg.vector leaked heavy modules: {sorted(leaked)}"
         )
 
+    @pytest.mark.integration
     def test_vector_attribute_access_loads_pgvector(self):
         """Accessing `Vector` explicitly IS allowed to load pgvector."""
         script = textwrap.dedent(

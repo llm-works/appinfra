@@ -53,7 +53,6 @@ def _spec_app(etc_dir: Path, filename: str = "app.yaml") -> AppBuilder:
     )
 
 
-@pytest.mark.e2e
 @pytest.mark.usefixtures("clean_env")
 class TestHotReloadWorkflow:
     """E2E tests for hot-reload configuration workflow."""
@@ -231,6 +230,7 @@ class TestHotReloadWorkflow:
                         if app.lifecycle.logger:
                             app.lifecycle.logger.handlers.clear()
 
+    @pytest.mark.unit
     def test_hot_reload_without_config_source_raises(self):
         """Hot reload needs a declared config source on the builder."""
         with pytest.raises(ValueError, match="requires a config source"):
@@ -386,7 +386,6 @@ class TestHotReloadWorkflow:
             assert app.config.logging.micros is True
 
 
-@pytest.mark.e2e
 @pytest.mark.usefixtures("clean_env")
 class TestHotReloadRealWatcher:
     """E2E tests using real ConfigWatcher (requires watchdog)."""

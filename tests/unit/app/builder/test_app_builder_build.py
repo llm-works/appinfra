@@ -18,7 +18,6 @@ from appinfra.version.actions import VersionWithTrackerAction
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestVersionFlag:
     """The cli flag exposes the argument; the version block supplies its text."""
 
@@ -47,6 +46,7 @@ class TestVersionFlag:
         with pytest.raises(ValueError, match=r"requires \.version\.with_semver"):
             AppBuilder("test").cli(version=True).build()
 
+    @pytest.mark.integration
     def test_tracker_and_build_info_are_passed(self):
         """The action gets what the version block collected."""
         builder = AppBuilder("test").version(semver="1.0.0", package="appinfra")
@@ -81,7 +81,6 @@ class TestVersionFlag:
             builder.build()
 
 
-@pytest.mark.integration
 class TestVersionFlagReachesParser:
     """The argument is real once the App creates its parser."""
 
@@ -103,7 +102,6 @@ class TestVersionFlagReachesParser:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestTopLevelSurface:
     """Identity stays on the builder; everything else is a block."""
 

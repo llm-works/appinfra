@@ -9,8 +9,6 @@ import pytest
 
 from appinfra.app.docs.generator import DocsGenerator
 
-pytestmark = pytest.mark.unit
-
 
 class TestDocsGenerator:
     """Tests for DocsGenerator class."""
@@ -442,6 +440,7 @@ class TestDocsGenerator:
         assert "**Subcommands:**" in result
         assert "sub" in result
 
+    @pytest.mark.integration
     def test_generate_to_file(self, tmp_path):
         """Test generating docs to file."""
         generator = DocsGenerator()

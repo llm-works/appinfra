@@ -43,7 +43,6 @@ def install_deps() -> ModuleType:
     return module
 
 
-@pytest.mark.unit
 @pytest.mark.parametrize(
     ("requirement", "expected"),
     [
@@ -61,13 +60,11 @@ def test_requirement_name(
     assert install_deps.requirement_name(requirement) == expected
 
 
-@pytest.mark.unit
 def test_collect_deps_drops_self_references(install_deps: ModuleType) -> None:
     project: dict[str, Any] = tomllib.loads(PYPROJECT)["project"]
     assert install_deps.collect_deps(project) == EXPECTED_DEPS
 
 
-@pytest.mark.unit
 def test_appinfra_itself_gets_no_framework_tools(install_deps: ModuleType) -> None:
     """appinfra installs its own extras directly; appinfra[check] would hit the index."""
     project = {
@@ -81,7 +78,7 @@ def test_appinfra_itself_gets_no_framework_tools(install_deps: ModuleType) -> No
     assert install_deps.collect_deps(project) == ["PyYAML", "ruff", "httpx"]
 
 
-@pytest.mark.unit
+@pytest.mark.integration
 def test_main_passes_filtered_deps_to_pip(
     install_deps: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

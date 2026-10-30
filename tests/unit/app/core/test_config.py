@@ -20,7 +20,6 @@ from appinfra.dot_dict import DotDict
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestEnsureNestedSection:
     """Test ConfigLoader._ensure_nested_section method (lines 39-44)."""
 
@@ -64,7 +63,6 @@ class TestEnsureNestedSection:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestGetArg:
     """Test ConfigLoader._get_arg method (line 59)."""
 
@@ -92,7 +90,6 @@ class TestGetArg:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestSetIfPresent:
     """Test ConfigLoader._set_if_present method (lines 74-88)."""
 
@@ -159,7 +156,6 @@ class TestSetIfPresent:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestFromArgs:
     """Test ConfigLoader.from_args method (lines 106-130)."""
 
@@ -240,7 +236,6 @@ class TestFromArgs:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestDefault:
     """Test ConfigLoader.default method (line 135)."""
 
@@ -259,11 +254,11 @@ class TestDefault:
 # =============================================================================
 
 
-@pytest.mark.integration
 @pytest.mark.usefixtures("clean_env")
 class TestConfigIntegration:
     """Test configuration integration scenarios."""
 
+    @pytest.mark.integration
     def test_full_config_workflow(self, tmp_path):
         """Test complete configuration workflow."""
         from appinfra.config import Config

@@ -245,7 +245,6 @@ def _make_defines() -> list[tuple[str, str]]:
     ]
 
 
-@pytest.mark.unit
 class TestFrameworkNamespace:
     def test_make_variables(self) -> None:
         assert _violations(_make_defined_names(), {"PYTHON"}) == []
@@ -260,7 +259,6 @@ class TestFrameworkNamespace:
         assert _violations(_compose_names(), {"PWD"}) == []
 
 
-@pytest.mark.unit
 class TestPublicSettings:
     def test_every_setting_declared_in_makefile_config(self) -> None:
         declared = _declared()
@@ -305,6 +303,7 @@ class TestPublicSettings:
         assert sorted(names) == sorted(set(names)), "a setting has more than one type"
         assert sorted(names) == sorted(_declared())
 
+    @pytest.mark.integration
     def test_type_table_matches_registry(self) -> None:
         """The docs type table names exactly the settings of each registry list."""
         text = DOCS[0].read_text()
