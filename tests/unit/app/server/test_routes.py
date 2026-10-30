@@ -298,7 +298,7 @@ class TestListRoutes:
 # =============================================================================
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 class TestRouteManagerIntegration:
     """Test RouteManager integration scenarios."""
 

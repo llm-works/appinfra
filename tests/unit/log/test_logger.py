@@ -807,7 +807,7 @@ class TestLoggerFindCaller:
 # =============================================================================
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 class TestIntegrationScenarios:
     """Test real-world logger usage scenarios."""
 

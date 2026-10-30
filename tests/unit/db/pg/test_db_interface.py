@@ -335,7 +335,7 @@ class TestIncompleteImplementation:
 # =============================================================================
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 class TestInterfaceIntegration:
     """Test Interface integration with real implementations."""
 

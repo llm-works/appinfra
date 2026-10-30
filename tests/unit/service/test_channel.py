@@ -20,6 +20,8 @@ from appinfra.service import (
 )
 from appinfra.service.channel.base import RedeliveryBuffer, validate_response
 
+pytestmark = pytest.mark.unit
+
 
 @dataclass
 class Request:

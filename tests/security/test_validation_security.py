@@ -36,7 +36,6 @@ class MockTool(Tool):
 
 
 @pytest.mark.security
-@pytest.mark.unit
 @pytest.mark.parametrize("payload", SHELL_INJECTION)
 def test_tool_name_shell_injection(payload: str):
     """
@@ -70,7 +69,6 @@ def test_tool_name_shell_injection(payload: str):
 
 
 @pytest.mark.security
-@pytest.mark.unit
 @pytest.mark.parametrize(
     "invalid_name,reason",
     [
@@ -116,7 +114,6 @@ def test_tool_name_format_validation(invalid_name: str, reason: str):
 
 
 @pytest.mark.security
-@pytest.mark.unit
 def test_tool_name_empty_string():
     """
     Verify empty tool name is rejected.
@@ -145,7 +142,6 @@ def test_tool_name_empty_string():
 
 
 @pytest.mark.security
-@pytest.mark.unit
 def test_tool_name_length_limit():
     """
     Verify MAX_TOOL_NAME_LENGTH enforcement prevents excessively long names.
@@ -190,7 +186,6 @@ def test_tool_name_length_limit():
 
 
 @pytest.mark.security
-@pytest.mark.unit
 @pytest.mark.parametrize("payload", SHELL_INJECTION)
 def test_tool_alias_injection(payload: str):
     """
@@ -231,7 +226,6 @@ def test_tool_alias_injection(payload: str):
 
 
 @pytest.mark.security
-@pytest.mark.unit
 def test_tool_count_limit():
     """
     Verify MAX_TOOL_COUNT enforcement prevents DoS via registry exhaustion.
@@ -278,7 +272,6 @@ def test_tool_count_limit():
 
 
 @pytest.mark.security
-@pytest.mark.unit
 def test_duplicate_tool_name_rejected():
     """
     Verify duplicate tool names are rejected to prevent shadowing attacks.
@@ -308,7 +301,6 @@ def test_duplicate_tool_name_rejected():
 
 
 @pytest.mark.security
-@pytest.mark.unit
 def test_duplicate_alias_rejected():
     """
     Verify duplicate aliases across tools are rejected.
@@ -337,7 +329,6 @@ def test_duplicate_alias_rejected():
 
 
 @pytest.mark.security
-@pytest.mark.unit
 def test_alias_count_limit():
     """
     Verify MAX_ALIAS_COUNT enforcement prevents excessive aliases per tool.

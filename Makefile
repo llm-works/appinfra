@@ -24,8 +24,9 @@ APPINFRA_DEV_CQ_DEAD ?= strict
 # Run every example script as a test subcheck of `make check`
 APPINFRA_DEV_CHECK_EXAMPLES ?= true
 
-# Include all tests in coverage (not just unit tests)
-APPINFRA_PYTEST_COVERAGE_MARKERS ?= unit or e2e
+# Coverage counts unit and integration tests: code that touches the filesystem, processes or
+# sockets is covered by integration tests
+APPINFRA_PYTEST_COVERAGE_MARKERS ?= unit or integration
 
 # Performance tests all live here; collecting only this directory skips importing the rest
 APPINFRA_PYTEST_PERF_DIR ?= tests/performance

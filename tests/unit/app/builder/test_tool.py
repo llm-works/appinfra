@@ -549,7 +549,7 @@ class TestCreateFunctionTool:
 # =============================================================================
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 class TestToolBuilderIntegration:
     """Test ToolBuilder integration scenarios."""
 

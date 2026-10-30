@@ -36,7 +36,6 @@ valid_key = st.text(
 )
 
 
-@pytest.mark.property
 @pytest.mark.unit
 class TestDotDictProperties:
     """Property-based tests for DotDict."""

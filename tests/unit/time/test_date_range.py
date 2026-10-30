@@ -250,7 +250,7 @@ class TestDatesFromLists:
 # =============================================================================
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 class TestIntegrationScenarios:
     """Test real-world date range scenarios."""
 

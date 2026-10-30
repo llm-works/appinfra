@@ -15,7 +15,6 @@ from tests.security.payloads.traversal import ABSOLUTE_PATH_ESCAPE, CLASSIC_TRAV
 
 
 @pytest.mark.security
-@pytest.mark.unit
 @pytest.mark.parametrize("traversal_path", CLASSIC_TRAVERSAL + ABSOLUTE_PATH_ESCAPE)
 def test_log_file_path_traversal(traversal_path: str):
     """
@@ -89,7 +88,6 @@ def test_log_file_path_traversal(traversal_path: str):
 
 
 @pytest.mark.security
-@pytest.mark.unit
 @pytest.mark.parametrize("payload", LOG_INJECTION)
 def test_log_injection_attack(payload: str, secure_temp_project: Path):
     """
@@ -155,7 +153,6 @@ def test_log_injection_attack(payload: str, secure_temp_project: Path):
 
 # Positive test: Verify legitimate log messages work correctly
 @pytest.mark.security
-@pytest.mark.unit
 def test_legitimate_log_messages_allowed(secure_temp_project: Path):
     """
     Verify legitimate log messages are logged correctly.

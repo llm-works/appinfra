@@ -357,7 +357,7 @@ class TestLoggerWithQueue:
         assert record.msg == "test message"
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 class TestMPQueueHandlerIntegration:
     """Integration tests for MPQueueHandler."""
 

@@ -522,7 +522,7 @@ class TestGetServerRoutes:
 # =============================================================================
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 class TestServerIntegration:
     """Test Server integration scenarios."""
 

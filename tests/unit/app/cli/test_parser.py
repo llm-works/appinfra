@@ -353,7 +353,7 @@ class TestError:
 # =============================================================================
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 class TestCLIParserIntegration:
     """Integration tests for CLIParser."""
 

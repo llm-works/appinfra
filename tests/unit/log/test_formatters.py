@@ -494,7 +494,7 @@ class TestLogFormatter:
 # =============================================================================
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 class TestIntegrationScenarios:
     """Test real-world formatter scenarios."""
 

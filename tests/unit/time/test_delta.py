@@ -539,7 +539,7 @@ class TestEdgeCases:
         assert delta_str(3600) == delta_str(3600.0)
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 class TestDeltaIntegration:
     """Integration tests for duration utilities."""
 

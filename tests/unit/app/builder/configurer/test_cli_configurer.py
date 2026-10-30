@@ -400,7 +400,7 @@ def _action_for(app, dest: str):
     return next(a for a in app.parser.parser._actions if a.dest == dest)
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 class TestFlagsIntegration:
     """Flags declared on the block decide what the App's parser gets."""
 
@@ -459,7 +459,7 @@ class TestFlagsIntegration:
         assert "flag" in _dests(app)
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 class TestPresentationIntegration:
     """with_flag overrides reach the parser's actions."""
 

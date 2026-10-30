@@ -798,7 +798,7 @@ class TestServerBuilderLifecycleCallbacks:
 _DOCS_PATHS = ["/docs", "/docs/oauth2-redirect", "/redoc", "/openapi.json"]
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 class TestDocsRoutes:
     """Docs and schema routes served by a real FastAPI app."""
 

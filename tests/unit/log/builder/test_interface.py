@@ -282,7 +282,7 @@ class TestAbstractMethodCoverage:
 # =============================================================================
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 class TestInterfaceIntegration:
     """Test interface integration with real builder implementations."""
 

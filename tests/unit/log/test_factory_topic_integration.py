@@ -13,6 +13,8 @@ import pytest
 
 from appinfra.log import LogConfig, LoggerFactory, LogLevelManager
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture(autouse=True)
 def reset_manager():

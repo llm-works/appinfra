@@ -644,7 +644,7 @@ class TestHandlerRegistryLoadFromConfig:
 # =============================================================================
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 class TestHandlerFactoryIntegration:
     """Integration tests for handler factory."""
 

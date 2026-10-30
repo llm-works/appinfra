@@ -256,7 +256,7 @@ class TestLogQueueListenerErrorHandling:
             listener.stop()
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 class TestLogQueueListenerIntegration:
     """Integration tests for LogQueueListener."""
 

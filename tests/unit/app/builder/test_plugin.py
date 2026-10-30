@@ -569,7 +569,7 @@ class TestConfigureAll:
 # =============================================================================
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 class TestPluginSystemIntegration:
     """Integration tests for the plugin system."""
 

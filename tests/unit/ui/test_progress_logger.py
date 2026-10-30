@@ -20,6 +20,7 @@ def mock_logger():
     return MagicMock()
 
 
+@pytest.mark.unit
 class TestIsInteractive:
     """Tests for _is_interactive function."""
 
@@ -56,6 +57,7 @@ class TestIsInteractive:
             assert _is_interactive() is False
 
 
+@pytest.mark.unit
 class TestProgressLoggerInit:
     """Tests for ProgressLogger initialization."""
 
@@ -84,6 +86,7 @@ class TestProgressLoggerInit:
         assert pl._spinner == "arc"
 
 
+@pytest.mark.unit
 class TestProgressLoggerNonInteractive:
     """Tests for ProgressLogger in non-interactive mode."""
 
@@ -159,6 +162,7 @@ class TestProgressLoggerNonInteractive:
             assert pl._total == 50
 
 
+@pytest.mark.unit
 class TestProgressLoggerProperties:
     """Tests for ProgressLogger properties."""
 
@@ -183,6 +187,7 @@ class TestProgressLoggerProperties:
             assert pl.completed == 5
 
 
+@pytest.mark.unit
 class TestProgressLoggerContextManager:
     """Tests for ProgressLogger context manager behavior."""
 
@@ -205,6 +210,7 @@ class TestProgressLoggerContextManager:
             assert pl._progress is None
 
 
+@pytest.mark.unit
 class TestProgressLoggerWithMockedRich:
     """Tests for ProgressLogger with mocked Rich components."""
 
@@ -389,6 +395,7 @@ class TestProgressLoggerWithMockedRich:
                 )
 
 
+@pytest.mark.unit
 class TestProgressLoggerRichNotAvailable:
     """Tests for ProgressLogger when Rich is not available."""
 

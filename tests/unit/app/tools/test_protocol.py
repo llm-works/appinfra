@@ -284,7 +284,7 @@ class _CompleteTool(ToolProtocol):
         return 0
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 class TestToolProtocolIntegration:
     """Integration tests for ToolProtocol."""
 

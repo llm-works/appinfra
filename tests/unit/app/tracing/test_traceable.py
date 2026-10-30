@@ -371,7 +371,7 @@ class TestGetAttrOrDefault:
 # =============================================================================
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 class TestTraceableIntegration:
     """Integration tests for Traceable."""
 

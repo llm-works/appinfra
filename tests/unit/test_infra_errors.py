@@ -275,7 +275,7 @@ class TestObservabilityError:
 # =============================================================================
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 class TestExceptionHierarchy:
     """Test exception hierarchy and catching."""
 
