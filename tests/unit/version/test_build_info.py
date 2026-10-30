@@ -19,7 +19,6 @@ from appinfra.version.build_info import _run_git, generate, get_git_commit, main
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestRunGit:
     """Test _run_git helper function."""
 
@@ -61,7 +60,6 @@ class TestRunGit:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestGetGitCommit:
     """Test get_git_commit function."""
 
@@ -144,7 +142,7 @@ class TestGetGitCommit:
 # =============================================================================
 
 
-@pytest.mark.unit
+@pytest.mark.integration
 class TestGenerate:
     """Test generate function."""
 
@@ -214,7 +212,6 @@ class TestGenerate:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestMain:
     """Test main CLI entry point."""
 

@@ -82,7 +82,6 @@ def simple_handler():
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestTickerHandler:
     """Test TickerHandler interface."""
 
@@ -126,7 +125,6 @@ class TestTickerHandler:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestTickerInitialization:
     """Test Ticker initialization."""
 
@@ -216,7 +214,6 @@ class TestTickerInitialization:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestScheduledMode:
     """Test scheduled execution mode."""
 
@@ -349,7 +346,6 @@ class TestScheduledMode:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestContinuousMode:
     """Test continuous execution mode."""
 
@@ -463,7 +459,6 @@ class TestContinuousMode:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestTickerControl:
     """Test ticker control methods."""
 
@@ -737,7 +732,6 @@ class TestTickerControl:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestIntegrationScenarios:
     """Test real-world ticker scenarios."""
 
@@ -787,7 +781,6 @@ class TestIntegrationScenarios:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestCallableWrapper:
     """Test automatic wrapping of plain callables."""
 
@@ -873,7 +866,6 @@ class TestCallableWrapper:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestEdgeCases:
     """Test edge cases and boundary conditions."""
 
@@ -966,7 +958,6 @@ class TestEdgeCases:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestTickerIterator:
     """Test Ticker iterator functionality."""
 
@@ -1034,7 +1025,6 @@ class TestTickerIterator:
         assert ticks == []
 
 
-@pytest.mark.unit
 class TestTickerContextManager:
     """Test Ticker context manager functionality."""
 
@@ -1109,7 +1099,6 @@ class TestTickerContextManager:
         assert sig.getsignal(sig.SIGTERM) == original_sigterm
 
 
-@pytest.mark.unit
 class TestTickerIteratorIntegration:
     """Integration tests for Ticker iterator with SubprocessContext pattern."""
 
@@ -1155,7 +1144,6 @@ class TestTickerIteratorIntegration:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestNonBlockingAPI:
     """Test non-blocking API for manual tick control."""
 
@@ -1695,7 +1683,6 @@ class TestNonBlockingAPI:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestBlockingAPITimingModes:
     """Test that blocking API (run()) respects timing modes."""
 
@@ -1763,7 +1750,6 @@ class TestBlockingAPITimingModes:
         assert gaps == [0.25, 0.25, 0.25]
 
 
-@pytest.mark.unit
 class TestPickling:
     """A ticker crosses a spawn/forkserver process boundary by pickling."""
 

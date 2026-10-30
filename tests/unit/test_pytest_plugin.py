@@ -7,8 +7,6 @@ import pytest
 
 from appinfra.testing import EXPECTED_SKIP_PREFIX, _prefix_skip_reason
 
-pytestmark = pytest.mark.unit
-
 
 class TestExpectedSkipPrefix:
     """Tests for the expected skip reason prefix constant."""
@@ -116,6 +114,7 @@ def test_second():
 _INNER_ARGS = ("-p", "no:xdist", "-p", "no:asyncio")
 
 
+@pytest.mark.integration
 class TestDestroyTestLoggers:
     """The plugin destroys loggers a test leaves, so later tests can reuse the name."""
 

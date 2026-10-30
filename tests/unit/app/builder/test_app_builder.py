@@ -44,7 +44,6 @@ from appinfra.yaml import deep_merge
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestCreateBaseApp:
     """Test _create_base_app helper function."""
 
@@ -73,7 +72,6 @@ class TestCreateBaseApp:
         assert result is custom_instance
 
 
-@pytest.mark.unit
 class TestSetAppMetadata:
     """Test _set_app_metadata helper function."""
 
@@ -97,7 +95,6 @@ class TestSetAppMetadata:
         # (Mock would have recorded the attribute assignment)
 
 
-@pytest.mark.unit
 class TestRegisterToolsAndCommands:
     """Test _register_tools_and_commands helper function."""
 
@@ -128,7 +125,6 @@ class TestRegisterToolsAndCommands:
             app.add_tool.assert_called_once_with(mock_tool)
 
 
-@pytest.mark.unit
 class TestConfigureArguments:
     """Test _configure_arguments helper function."""
 
@@ -155,7 +151,6 @@ class TestConfigureArguments:
         app.add_argument.assert_not_called()
 
 
-@pytest.mark.unit
 class TestConfigureHooks:
     """Test _configure_hooks helper function."""
 
@@ -182,7 +177,6 @@ class TestConfigureHooks:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestCommand:
     """Test Command dataclass."""
 
@@ -222,7 +216,6 @@ class TestCommand:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestCommandTool:
     """Test CommandTool class."""
 
@@ -305,7 +298,6 @@ class TestCommandTool:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestLoggingBlockFold:
     """The logging block writes explicit options under ``logging`` in the config."""
 
@@ -386,7 +378,6 @@ class TestLoggingBlockFold:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestCreateAppBuilder:
     """Test create_app_builder factory function."""
 
@@ -413,7 +404,6 @@ class TestCreateAppBuilder:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestAppBuilderInit:
     """Test AppBuilder initialization."""
 
@@ -455,7 +445,6 @@ class TestAppBuilderInit:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestAppBuilderFluentMethods:
     """Test AppBuilder fluent builder methods."""
 
@@ -574,7 +563,7 @@ class TestAppBuilderFluentMethods:
 # =============================================================================
 
 
-@pytest.mark.unit
+@pytest.mark.integration
 class TestAppBuilderConfigBlock:
     """The config block's spec is handed to the built App."""
 
@@ -601,7 +590,6 @@ class TestAppBuilderConfigBlock:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestAppBuilderNoDecoratorAPI:
     """Test that AppBuilder does not expose decorator methods."""
 
@@ -621,7 +609,6 @@ class TestAppBuilderNoDecoratorAPI:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestAppBuilderBlocks:
     """Each block property returns its configurer bound to the builder."""
 
@@ -681,7 +668,7 @@ class TestAppBuilderBlocks:
 # =============================================================================
 
 
-@pytest.mark.unit
+@pytest.mark.integration
 class TestBuildIsDeclarationOnly:
     """Declaring every block and building runs nothing from the run phase.
 
@@ -736,7 +723,6 @@ class TestBuildIsDeclarationOnly:
         assert app.lifecycle.logger is None
 
 
-@pytest.mark.unit
 class TestAppBuilderBuild:
     """Test AppBuilder.build method."""
 
@@ -808,7 +794,6 @@ class TestAppBuilderBuild:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestAppBuilderIntegration:
     """Integration tests for AppBuilder."""
 
@@ -861,7 +846,6 @@ class TestAppBuilderIntegration:
         assert builder._version == "1.0.0"
 
 
-@pytest.mark.unit
 class TestPluginContributedTools:
     """Tools a plugin adds in configure() must reach the tool registry."""
 

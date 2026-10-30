@@ -84,7 +84,6 @@ def _factory_returns_rate_limiter():
     return limiter
 
 
-@pytest.mark.unit
 class TestRouteDefinition:
     """Tests for RouteDefinition dataclass."""
 
@@ -118,7 +117,6 @@ class TestRouteDefinition:
         assert route.kwargs == {"summary": "Test endpoint"}
 
 
-@pytest.mark.unit
 class TestRouterDefinition:
     """Tests for RouterDefinition dataclass."""
 
@@ -140,7 +138,6 @@ class TestRouterDefinition:
         assert router_def.tags == ["v1"]
 
 
-@pytest.mark.unit
 class TestMiddlewareDefinition:
     """Tests for MiddlewareDefinition dataclass."""
 
@@ -168,7 +165,6 @@ class TestMiddlewareDefinition:
         assert mw_def.options == {"timeout": 30}
 
 
-@pytest.mark.unit
 class TestCORSDefinition:
     """Tests for CORSDefinition dataclass."""
 
@@ -196,7 +192,6 @@ class TestCORSDefinition:
         assert cors.allow_headers == ["Authorization"]
 
 
-@pytest.mark.unit
 class TestExceptionHandlerDefinition:
     """Tests for ExceptionHandlerDefinition dataclass."""
 
@@ -212,7 +207,6 @@ class TestExceptionHandlerDefinition:
         assert exc_def.handler is handler
 
 
-@pytest.mark.unit
 class TestFastAPIAdapter:
     """Tests for FastAPIAdapter."""
 
@@ -415,7 +409,6 @@ class TestFastAPIAdapter:
         assert len(health_call) == 1
 
 
-@pytest.mark.unit
 class TestLifecycleCallbackDefinition:
     """Tests for LifecycleCallbackDefinition dataclass."""
 
@@ -441,7 +434,6 @@ class TestLifecycleCallbackDefinition:
         assert cb_def.name == "init_db"
 
 
-@pytest.mark.unit
 class TestLifespanDefinition:
     """Tests for LifespanDefinition dataclass."""
 
@@ -458,7 +450,6 @@ class TestLifespanDefinition:
         assert lifespan_def.lifespan is lifespan
 
 
-@pytest.mark.unit
 class TestRequestCallbackDefinition:
     """Tests for RequestCallbackDefinition dataclass."""
 
@@ -474,7 +465,6 @@ class TestRequestCallbackDefinition:
         assert cb_def.name is None
 
 
-@pytest.mark.unit
 class TestResponseCallbackDefinition:
     """Tests for ResponseCallbackDefinition dataclass."""
 
@@ -490,7 +480,6 @@ class TestResponseCallbackDefinition:
         assert cb_def.name is None
 
 
-@pytest.mark.unit
 class TestExceptionCallbackDefinition:
     """Tests for ExceptionCallbackDefinition dataclass."""
 
@@ -506,7 +495,6 @@ class TestExceptionCallbackDefinition:
         assert cb_def.name is None
 
 
-@pytest.mark.unit
 class TestFastAPIAdapterLifecycleCallbacks:
     """Tests for FastAPIAdapter lifecycle callback methods."""
 
@@ -677,7 +665,6 @@ class TestFastAPIAdapterLifecycleCallbacks:
         mock_fastapi["app"].add_middleware.assert_called()
 
 
-@pytest.mark.unit
 class TestLifecycleCallbackExecution:
     """Tests for lifecycle callback execution."""
 
@@ -1180,7 +1167,6 @@ class TestLifecycleCallbackExecution:
             await middleware.dispatch(mock_request, mock_call_next)
 
 
-@pytest.mark.unit
 class TestSubprocessLoggerInjection:
     """Tests for subprocess logger injection."""
 
@@ -1279,7 +1265,6 @@ class TestSubprocessLoggerMiddlewareOrdering:
                 assert middleware_observations["request_state_lg"] is None
 
 
-@pytest.mark.unit
 class TestIPCLifespanIntegration:
     """Tests for IPC lifecycle integration with lifespan."""
 
@@ -1473,7 +1458,6 @@ class TestIPCLifespanIntegration:
             mock_ipc_channel.stop_polling.assert_called_once()
 
 
-@pytest.mark.unit
 class TestLazy:
     """Tests for the Lazy factory wrapper."""
 
@@ -1524,7 +1508,6 @@ class TestLazy:
         assert restored is UNSET
 
 
-@pytest.mark.unit
 class TestResolveLazy:
     """Tests for FastAPIAdapter._resolve_lazy — the walker over every
     callable-carrying definition list."""

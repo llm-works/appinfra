@@ -42,7 +42,6 @@ def mock_config_without_hot_reload():
     return DotDict(logging=DotDict(level="info"))
 
 
-@pytest.mark.unit
 class TestGetHotReloadConfig:
     """Tests for _get_hot_reload_config method."""
 
@@ -83,7 +82,6 @@ class TestGetHotReloadConfig:
         assert result.debounce_ms == 500
 
 
-@pytest.mark.unit
 class TestResolveHotReloadConfig:
     """Tests for _resolve_hot_reload_config method."""
 
@@ -106,7 +104,6 @@ class TestResolveHotReloadConfig:
         assert result is None
 
 
-@pytest.mark.unit
 class TestStartHotReloadWatcher:
     """Tests for _start_hot_reload_watcher method."""
 
@@ -213,7 +210,6 @@ class TestStartHotReloadWatcher:
         assert kwargs["origin"] is None
 
 
-@pytest.mark.unit
 class TestStopHotReloadWatcher:
     """Tests for _stop_hot_reload_watcher method."""
 
