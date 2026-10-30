@@ -203,11 +203,11 @@ asyncio_default_fixture_loop_scope = "function"
 # beside the mark (tests/helpers/fork.py), never here for the whole suite.
 filterwarnings = ["error"]
 markers = [
-    "unit: Unit tests (fast, isolated, no external dependencies)",
-    "integration: Integration tests (may use DB, network, filesystem)",
+    "unit: stays in one process: no files (tmp_path included), subprocesses, sockets, databases or watchers; default under tests/unit/",
+    "integration: one machine: processes, localhost services, databases, files; default under tests/integration/",
     "performance: Performance/benchmark tests",
     "security: Security-focused tests (injection, validation, etc.)",
-    "e2e: End-to-end tests (full system integration)",
+    "e2e: runs an entry point as its own process; default under tests/e2e/",
     "require_pg: Test requires a running PostgreSQL server (skipped with a single banner if unavailable)",
 ]
 
