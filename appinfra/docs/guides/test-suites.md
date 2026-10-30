@@ -16,15 +16,27 @@ integration test.
 
 ### Unit
 
-A unit test stays in one process and can neither be disturbed by nor disturb any other test. It
-must not:
+A unit test stays in one process and, in principle, could run at the same time as any other unit
+test in that process. The rules below follow from that: a test that does I/O, blocks, or touches
+process-wide state depends on something outside its control or changes what another test sees. A
+unit test must not:
 
 - **perform I/O**: files (`tmp_path` included), sockets, subprocesses, databases, file watchers;
 - **block**: sleep, wait on real time, or wait on another thread or process;
 - **use or change process-wide state that outlives the test**: signal handlers, interval timers
   (`setitimer`, `alarm`).
 
-Code under test that does any of these is mocked at the call site, for example by patching
+The criterion enforced is narrower than the principle: a unit test neither depends on
+process-wide state nor leaves it changed. Test-scoped patching (`unittest.mock.patch`,
+`monkeypatch`) and output capture (`capsys`, `caplog`) replace process-wide objects for the length
+of one test and are allowed: pytest restores them, and pytest-xdist runs one test at a time in
+each worker process. The allowance is for a limitation of these tools, not an exception to the
+principle: they replace module attributes, `sys.stdout` or `os.environ`, which every thread in the
+process shares, so tests that use them can run in parallel across processes but not in one. New
+code favours injecting a dependency over patching a module attribute,
+which keeps its tests parallel-safe in the strict sense too.
+
+Code under test that does any of the above is mocked at the call site, for example by patching
 `alarm_timeout` where the module under test imports it.
 
 The test runner's own bookkeeping does not count. pytest-asyncio runs each coroutine test in an
@@ -92,3 +104,6 @@ global state stays fast and order-independent.
   Testing Overview, O'Reilly, 2020: <https://abseil.io/resources/swe-book/html/ch11.html>
 - Test Sizes, Google Testing Blog, 2010: <https://testing.googleblog.com/2010/12/test-sizes.html>
 - Martin Fowler, UnitTest: <https://martinfowler.com/bliki/UnitTest.html>
+- pytest-run-parallel, runs each test in several threads to find tests that are not parallel-safe:
+  <https://pypi.org/project/pytest-run-parallel>, thread-unsafe fixtures discussed in
+  <https://github.com/pytest-dev/pytest/issues/13768>
