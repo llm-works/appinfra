@@ -50,7 +50,6 @@ class _FailingCloseHandler(logging.Handler):
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestLifecycleManagerInit:
     """Test LifecycleManager initialization."""
 
@@ -78,7 +77,6 @@ class TestLifecycleManagerInit:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestInitialize:
     """Test initialize method (lines 24-59)."""
 
@@ -178,7 +176,6 @@ class TestInitialize:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestSetupTool:
     """Test setup_tool method (lines 61-84)."""
 
@@ -238,7 +235,6 @@ class TestSetupTool:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestExecuteTool:
     """Test execute_tool method (lines 86-106)."""
 
@@ -302,7 +298,6 @@ class TestExecuteTool:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestFinalize:
     """Test finalize method (lines 108-115)."""
 
@@ -348,7 +343,6 @@ class TestFinalize:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestLifecycleIntegration:
     """Test full lifecycle scenarios."""
 
@@ -403,7 +397,6 @@ class TestLifecycleIntegration:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestComponentRegistration:
     """Test component registration methods."""
 
@@ -467,7 +460,6 @@ class TestComponentRegistration:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestShutdown:
     """Test shutdown method."""
 
@@ -562,7 +554,6 @@ class TestShutdown:
         assert manager.shutdown(3) == 3
 
 
-@pytest.mark.unit
 class TestShutdownPhases:
     """Test individual shutdown phases."""
 
@@ -729,7 +720,6 @@ class TestShutdownPhases:
         manager._lifecycle_logger.error.assert_called()
 
 
-@pytest.mark.unit
 class TestExecutePhase:
     """Test _execute_phase with timeout protection."""
 
@@ -795,7 +785,6 @@ class TestExecutePhase:
         assert manager._shutdown_timeouts["test_phase"] == 15.0
 
 
-@pytest.mark.unit
 class TestShutdownIntegration:
     """Test full shutdown flow integration."""
 

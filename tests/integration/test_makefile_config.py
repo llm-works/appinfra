@@ -79,7 +79,6 @@ def _setting(
     return result.stdout.strip()
 
 
-@pytest.mark.integration
 class TestPrecedence:
     """command line > environment > Makefile.local := > project ?= > default."""
 
@@ -188,7 +187,6 @@ def _nested(
     )
 
 
-@pytest.mark.integration
 class TestNestedProjects:
     """A make of one appinfra project inside another's make must not take its settings."""
 
@@ -213,7 +211,6 @@ class TestNestedProjects:
         assert "self=parentpkg" in result.stdout
 
 
-@pytest.mark.integration
 class TestScriptsLocation:
     """APPINFRA_SCRIPTS must name the framework copy make loaded."""
 
@@ -238,7 +235,6 @@ class TestScriptsLocation:
 MODULES = ["dev", "docs", "install", "help", "clean", "pg", "pytest", "utils", "env"]
 
 
-@pytest.mark.integration
 class TestModuleIncludedAlone:
     """Each framework module loads Makefile.config itself, so its defaults apply."""
 
@@ -317,7 +313,6 @@ class TestModuleIncludedAlone:
         assert "check.summary" in result.stderr
 
 
-@pytest.mark.integration
 class TestConfigLoading:
     """Makefile.local loads in every layout; INFRA_* config overrides pass through."""
 
@@ -387,7 +382,6 @@ def path_python(tmp_path: Path) -> dict[str, str]:
     return {"PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}"}
 
 
-@pytest.mark.integration
 class TestInterpreterSelection:
     """PYTHON follows the settings' precedence, then python3 on PATH."""
 
@@ -434,7 +428,6 @@ class TestInterpreterSelection:
         assert "APPINFRA_PYTHON: not an appinfra setting" in result.stderr
 
 
-@pytest.mark.integration
 class TestEmptyValues:
     """An APPINFRA_* or PYTHON the environment or command line sets empty stops make."""
 
@@ -500,7 +493,6 @@ def _areyousure(
     )
 
 
-@pytest.mark.integration
 class TestAreYouSure:
     """APPINFRA_YES=true|1|y|yes (any case) skips the prompt; otherwise it asks."""
 
@@ -558,7 +550,6 @@ def _bool_value(
     )
 
 
-@pytest.mark.integration
 class TestBooleanSettings:
     """Every on/off setting takes the same values; it is exported as written."""
 
@@ -614,7 +605,6 @@ def _bool_sh(
     )
 
 
-@pytest.mark.integration
 class TestSettingsSh:
     """scripts/_settings.sh applies the same rule for scripts run outside make."""
 
@@ -657,7 +647,6 @@ class TestSettingsSh:
         assert "X=" in result.stderr and "is not a boolean" in result.stderr
 
 
-@pytest.mark.integration
 class TestMakeConfig:
     """`make config` names each setting's source and the interpreter's."""
 
@@ -731,7 +720,6 @@ class TestMakeConfig:
         assert "APPINFRA_RUN_PYTEST" not in result.stdout
 
 
-@pytest.mark.integration
 class TestUnknownSettings:
     """An APPINFRA_* name the registry does not declare stops make; from the environment it warns."""
 
@@ -793,7 +781,6 @@ def _value(tmp_path: Path, name: str, value: str) -> subprocess.CompletedProcess
     )
 
 
-@pytest.mark.integration
 class TestSettingTypes:
     """Each typed setting accepts exactly its type's values."""
 
@@ -859,7 +846,6 @@ def _late(tmp_path: Path, assign: str, recipe: str) -> subprocess.CompletedProce
     )
 
 
-@pytest.mark.integration
 class TestLateAssignment:
     """A setting assigned after the include takes effect, as it did before the registry."""
 

@@ -22,7 +22,6 @@ from appinfra.time.delta import (
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestDeltaStrBasic:
     """Test basic delta_str formatting."""
 
@@ -62,7 +61,6 @@ class TestDeltaStrBasic:
         assert delta_str(259200) == "3d0h0m0s"
 
 
-@pytest.mark.unit
 class TestDeltaStrCombined:
     """Test combined unit formatting."""
 
@@ -91,7 +89,6 @@ class TestDeltaStrCombined:
         assert delta_str(86405) == "1d0h0m5s"
 
 
-@pytest.mark.unit
 class TestDeltaStrFractional:
     """Test fractional seconds formatting."""
 
@@ -121,7 +118,6 @@ class TestDeltaStrFractional:
         assert delta_str(90061.5) == "1d1h1m1s"
 
 
-@pytest.mark.unit
 class TestDeltaStrMilliseconds:
     """Test millisecond formatting."""
 
@@ -141,7 +137,6 @@ class TestDeltaStrMilliseconds:
         assert delta_str(0.0015) == "1.5ms"
 
 
-@pytest.mark.unit
 class TestDeltaStrMicroseconds:
     """Test microsecond precision formatting."""
 
@@ -169,7 +164,6 @@ class TestDeltaStrMicroseconds:
         assert delta_str(0.00001) == "10μs"
 
 
-@pytest.mark.unit
 class TestDeltaStrBoundaries:
     """Test boundary values and edge cases."""
 
@@ -194,7 +188,6 @@ class TestDeltaStrBoundaries:
         assert delta_str(0.0001, precise=True) == "100μs"
 
 
-@pytest.mark.unit
 class TestDeltaStrErrors:
     """Test error handling in delta_str."""
 
@@ -230,7 +223,6 @@ class TestDeltaStrErrors:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestDeltaToSecsSimple:
     """Test simple unit parsing."""
 
@@ -258,7 +250,6 @@ class TestDeltaToSecsSimple:
         assert delta_to_secs("2d") == 172800.0
 
 
-@pytest.mark.unit
 class TestDeltaToSecsFractional:
     """Test fractional value parsing."""
 
@@ -279,7 +270,6 @@ class TestDeltaToSecsFractional:
         assert delta_to_secs("0.5h") == 1800.0
 
 
-@pytest.mark.unit
 class TestDeltaToSecsMilliseconds:
     """Test millisecond and microsecond parsing."""
 
@@ -301,7 +291,6 @@ class TestDeltaToSecsMilliseconds:
         assert delta_to_secs("1h01m01.123,456s") == 3661.123456
 
 
-@pytest.mark.unit
 class TestDeltaToCombined:
     """Test parsing combined units."""
 
@@ -320,7 +309,6 @@ class TestDeltaToCombined:
         assert delta_to_secs("1s1m1h1d") == 90061.0
 
 
-@pytest.mark.unit
 class TestDeltaToSecsErrors:
     """Test error handling in delta_to_secs."""
 
@@ -353,7 +341,6 @@ class TestDeltaToSecsErrors:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestRoundTrip:
     """Test round-trip conversion (seconds → string → seconds)."""
 
@@ -430,7 +417,6 @@ class TestRoundTrip:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestValidateDuration:
     """Test duration validation."""
 
@@ -500,7 +486,6 @@ class TestValidateDuration:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestEdgeCases:
     """Test edge cases and special scenarios."""
 
@@ -539,7 +524,6 @@ class TestEdgeCases:
         assert delta_str(3600) == delta_str(3600.0)
 
 
-@pytest.mark.unit
 class TestDeltaIntegration:
     """Integration tests for duration utilities."""
 
@@ -608,7 +592,6 @@ class TestDeltaIntegration:
         assert abs(parsed - short_duration) < 0.000001
 
 
-@pytest.mark.unit
 class TestEdgeCaseCoverage:
     """Test edge cases to achieve 100% coverage."""
 
@@ -649,7 +632,6 @@ class TestEdgeCaseCoverage:
         assert "Invalid characters" in str(exc_info.value)
 
 
-@pytest.mark.unit
 class TestInvalidDurationError:
     """Test InvalidDurationError exception."""
 

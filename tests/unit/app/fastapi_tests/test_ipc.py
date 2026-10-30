@@ -52,7 +52,6 @@ def queues():
     response_q.join_thread()
 
 
-@pytest.mark.unit
 class TestIPCChannel:
     """Tests for IPCChannel initialization and properties."""
 
@@ -84,7 +83,6 @@ class TestIPCChannel:
         assert status["is_healthy"] is True
 
 
-@pytest.mark.unit
 class TestIPCChannelSubmit:
     """Tests for IPCChannel submit method."""
 
@@ -187,7 +185,6 @@ class TestIPCChannelSubmit:
             await channel.submit({"no_id": True})
 
 
-@pytest.mark.unit
 class TestIPCChannelStreaming:
     """Tests for streaming functionality."""
 
@@ -241,7 +238,6 @@ class TestIPCChannelStreaming:
                 pass
 
 
-@pytest.mark.unit
 class TestIPCChannelLifecycle:
     """Tests for lifecycle methods."""
 

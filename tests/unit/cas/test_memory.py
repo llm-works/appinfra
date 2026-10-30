@@ -11,8 +11,6 @@ from appinfra.cas import Blob, MemoryStore
 from appinfra.cas.conformance import Age, StoreConformance
 from appinfra.log import Logger
 
-pytestmark = pytest.mark.unit
-
 LG = Logger("test-cas")
 
 

@@ -37,7 +37,6 @@ from appinfra.time.time import (
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestTimingFunctions:
     """Test timing utility functions."""
 
@@ -89,7 +88,6 @@ class TestTimingFunctions:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestDateConversionFunctions:
     """Test date conversion utility functions."""
 
@@ -138,7 +136,6 @@ class TestDateConversionFunctions:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestDateTimeCombination:
     """Test date and time combination functions."""
 
@@ -184,7 +181,6 @@ class TestDateTimeCombination:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestTimestampConversion:
     """Test timestamp conversion functions."""
 
@@ -230,7 +226,6 @@ class TestTimestampConversion:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestYesterday:
     """Test yesterday utility function."""
 
@@ -254,7 +249,6 @@ class TestYesterday:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestTimeItContextManager:
     """Test time_it context manager."""
 
@@ -297,7 +291,6 @@ class TestTimeItContextManager:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestTimeItLgContextManager:
     """Test time_it_lg context manager."""
 
@@ -354,7 +347,6 @@ class TestTimeItLgContextManager:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestIntegrationScenarios:
     """Test real-world usage scenarios."""
 

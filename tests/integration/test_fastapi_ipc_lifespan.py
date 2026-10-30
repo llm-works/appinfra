@@ -161,7 +161,6 @@ async def _ipc_echo_handler(data: str, request: Request):
     return {"result": response.result}
 
 
-@pytest.mark.integration
 @forks_in_xdist_worker
 class TestFastAPIIPCWithLifecycleCallbacks:
     """Integration tests for IPC + lifecycle callback interaction."""

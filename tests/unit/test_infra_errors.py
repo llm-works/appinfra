@@ -30,7 +30,6 @@ from appinfra.errors import (
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestInfraError:
     """Test InfraError base class."""
 
@@ -76,7 +75,6 @@ class TestInfraError:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestConfigError:
     """Test ConfigError class."""
 
@@ -113,7 +111,6 @@ class TestConfigError:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestDatabaseError:
     """Test DatabaseError class."""
 
@@ -140,7 +137,6 @@ class TestDatabaseError:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestLoggingError:
     """Test LoggingError class."""
 
@@ -167,7 +163,6 @@ class TestLoggingError:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestValidationError:
     """Test ValidationError class."""
 
@@ -194,7 +189,6 @@ class TestValidationError:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestToolError:
     """Test ToolError class."""
 
@@ -221,7 +215,6 @@ class TestToolError:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestServerError:
     """Test ServerError class."""
 
@@ -248,7 +241,6 @@ class TestServerError:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestObservabilityError:
     """Test ObservabilityError class."""
 
@@ -275,7 +267,6 @@ class TestObservabilityError:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestExceptionHierarchy:
     """Test exception hierarchy and catching."""
 
@@ -318,7 +309,6 @@ class TestExceptionHierarchy:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestDependencyError:
     """Test DependencyError class."""
 

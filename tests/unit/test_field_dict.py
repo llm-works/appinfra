@@ -22,7 +22,6 @@ class SimpleResult(FieldDict):
     method: str = "sft"  # optional with default
 
 
-@pytest.mark.unit
 class TestBasicFields:
     """Test basic field declaration and access."""
 
@@ -72,7 +71,6 @@ class ResultWithLists(FieldDict):
     metadata: dict = field(default_factory=dict)
 
 
-@pytest.mark.unit
 class TestMutableDefaults:
     """Test mutable defaults with field(default_factory=...)."""
 
@@ -135,7 +133,6 @@ class RunResult(FieldDict):
         self.duration_seconds = (self.completed_at - self.started_at).total_seconds()
 
 
-@pytest.mark.unit
 class TestPostInit:
     """Test __post_init__ hook."""
 
@@ -181,7 +178,6 @@ class FlexibleConfig(FieldDict):
     host: str
 
 
-@pytest.mark.unit
 class TestStrictMode:
     """Test strict mode behavior."""
 
@@ -209,7 +205,6 @@ class TestStrictMode:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestDictBehavior:
     """Test that FieldDict is still a dict."""
 
@@ -274,7 +269,6 @@ class TestDictBehavior:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestRepr:
     """Test __repr__ shows class name."""
 
@@ -303,7 +297,6 @@ class ExtendedResult(BaseResult):
     details: str = ""
 
 
-@pytest.mark.unit
 class TestInheritance:
     """Test FieldDict inheritance."""
 
@@ -376,7 +369,6 @@ class TestInheritance:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestEdgeCases:
     """Test edge cases and special scenarios."""
 

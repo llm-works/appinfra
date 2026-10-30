@@ -12,8 +12,6 @@ import threading
 
 import pytest
 
-pytestmark = pytest.mark.unit
-
 from appinfra.log.level_manager import LogLevelManager
 
 

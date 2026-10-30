@@ -88,7 +88,6 @@ def _http_scope(path: str = "/test", client_ip: str = "127.0.0.1") -> dict:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestSend429:
     """Test 429 response generation."""
 
@@ -120,7 +119,6 @@ class TestSend429:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestMakeHeaderInjector:
     """Test header injection wrapper."""
 
@@ -174,7 +172,6 @@ class TestMakeHeaderInjector:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestRateLimitMiddleware:
     """Test the full ASGI middleware."""
 

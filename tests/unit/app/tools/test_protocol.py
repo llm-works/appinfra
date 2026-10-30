@@ -23,7 +23,6 @@ from appinfra.app.tools.protocol import ToolProtocol
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestToolProtocolAbstract:
     """Test ToolProtocol is properly abstract."""
 
@@ -82,7 +81,6 @@ class ConcreteToolProtocol(ToolProtocol):
         return 0
 
 
-@pytest.mark.unit
 class TestConcreteToolProtocol:
     """Test concrete implementation of ToolProtocol."""
 
@@ -178,7 +176,6 @@ class MinimalToolProtocol(ToolProtocol):
         return self.arg_prs
 
 
-@pytest.mark.unit
 class TestToolProtocolDefaultProperties:
     """Test ToolProtocol default property implementations."""
 
@@ -284,7 +281,6 @@ class _CompleteTool(ToolProtocol):
         return 0
 
 
-@pytest.mark.unit
 class TestToolProtocolIntegration:
     """Integration tests for ToolProtocol."""
 

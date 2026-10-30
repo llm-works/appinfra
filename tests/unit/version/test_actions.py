@@ -19,7 +19,6 @@ from appinfra.version.actions import VersionWithTrackerAction
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestVersionWithTrackerAction:
     """Test VersionWithTrackerAction argparse action."""
 

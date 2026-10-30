@@ -5,10 +5,7 @@
 
 from unittest.mock import patch
 
-import pytest
 
-
-@pytest.mark.unit
 class TestDisableUrllibWarnings:
     """Test disable_urllib_warnings function."""
 

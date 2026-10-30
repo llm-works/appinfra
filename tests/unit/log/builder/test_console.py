@@ -15,8 +15,6 @@ import logging
 import sys
 from io import StringIO
 
-import pytest
-
 from appinfra.log.builder.console import (
     ConsoleHandlerConfig,
     ConsoleLoggingBuilder,
@@ -31,7 +29,6 @@ from appinfra.log.logger import Logger
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestConsoleHandlerConfig:
     """Test ConsoleHandlerConfig initialization and handler creation."""
 
@@ -161,7 +158,6 @@ class TestConsoleHandlerConfig:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestConsoleLoggingBuilder:
     """Test ConsoleLoggingBuilder configuration and building."""
 
@@ -252,7 +248,6 @@ class TestConsoleLoggingBuilder:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestCreateConsoleLogger:
     """Test create_console_logger factory function."""
 
@@ -280,7 +275,6 @@ class TestCreateConsoleLogger:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestConsoleLoggingIntegration:
     """Integration tests for console logging."""
 

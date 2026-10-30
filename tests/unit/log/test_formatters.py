@@ -85,7 +85,6 @@ def _make_record(extra: dict) -> logging.LogRecord:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestHelperFunctions:
     """Test module-level helper functions."""
 
@@ -224,7 +223,6 @@ class TestHelperFunctions:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestPreFormatter:
     """Test PreFormatter class."""
 
@@ -263,7 +261,6 @@ class TestPreFormatter:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestFieldFormatter:
     """Test FieldFormatter class."""
 
@@ -302,7 +299,6 @@ class TestFieldFormatter:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestLocationRenderer:
     """Test LocationRenderer class.
 
@@ -415,7 +411,6 @@ class TestLocationRenderer:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestLogFormatter:
     """Test LogFormatter class."""
 
@@ -494,7 +489,6 @@ class TestLogFormatter:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestIntegrationScenarios:
     """Test real-world formatter scenarios."""
 
@@ -552,7 +546,6 @@ class TestIntegrationScenarios:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestEdgeCases:
     """Test edge cases and boundary conditions."""
 
@@ -610,7 +603,6 @@ class TestEdgeCases:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestMissingCoverage:
     """Tests targeting specific uncovered lines."""
 

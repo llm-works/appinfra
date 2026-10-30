@@ -29,7 +29,6 @@ from appinfra.app.tools.registry import (
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestValidateToolName:
     """Test _validate_tool_name helper function."""
 
@@ -99,7 +98,6 @@ class TestValidateToolName:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestCheckToolCountLimit:
     """Test _check_tool_count_limit helper function."""
 
@@ -130,7 +128,6 @@ class TestCheckToolCountLimit:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestValidateAndRegisterAliases:
     """Test _validate_and_register_aliases helper function."""
 
@@ -203,7 +200,6 @@ class TestValidateAndRegisterAliases:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestToolRegistryInit:
     """Test ToolRegistry initialization."""
 
@@ -225,7 +221,6 @@ class TestToolRegistryInit:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestToolRegistryRegister:
     """Test ToolRegistry.register method."""
 
@@ -274,7 +269,6 @@ class TestToolRegistryRegister:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestToolRegistryGetTool:
     """Test ToolRegistry.get_tool method."""
 
@@ -316,7 +310,6 @@ class TestToolRegistryGetTool:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestToolRegistryListTools:
     """Test ToolRegistry.list_tools method."""
 
@@ -347,7 +340,6 @@ class TestToolRegistryListTools:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestToolRegistryListAliases:
     """Test ToolRegistry.list_aliases method."""
 
@@ -380,7 +372,6 @@ class TestToolRegistryListAliases:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestToolRegistryClear:
     """Test ToolRegistry.clear method."""
 
@@ -414,7 +405,6 @@ class TestToolRegistryClear:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestToolRegistryIsRegistered:
     """Test ToolRegistry.is_registered method."""
 
@@ -450,7 +440,6 @@ class TestToolRegistryIsRegistered:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestToolRegistryIntegration:
     """Integration tests for ToolRegistry."""
 

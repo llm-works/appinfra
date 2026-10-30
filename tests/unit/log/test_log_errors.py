@@ -15,7 +15,6 @@ from appinfra.log.errors import (
 )
 
 
-@pytest.mark.unit
 @pytest.mark.parametrize(
     ("error", "attr", "value", "message"),
     [

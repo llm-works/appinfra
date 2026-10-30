@@ -16,8 +16,6 @@ import pytest
 from appinfra.log import Logger
 from appinfra.service import ProcessRunner, RestartPolicy, Service, State
 
-pytestmark = pytest.mark.integration
-
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
 

@@ -67,7 +67,6 @@ def mock_logger():
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestPeriodEnum:
     """Test Period enum."""
 
@@ -90,7 +89,6 @@ class TestPeriodEnum:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestExceptionClasses:
     """Test exception hierarchy."""
 
@@ -120,7 +118,6 @@ class TestExceptionClasses:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestHelperFunctions:
     """Test module-level helper functions."""
 
@@ -230,7 +227,6 @@ class TestHelperFunctions:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestSchedInitialization:
     """Test Sched initialization."""
 
@@ -281,7 +277,6 @@ class TestSchedInitialization:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestSchedProperties:
     """Test Sched properties."""
 
@@ -317,7 +312,6 @@ class TestSchedProperties:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestSchedSetup:
     """Test Sched setup methods."""
 
@@ -404,7 +398,6 @@ class TestSchedSetup:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestSchedSync:
     """Test Sched sync method."""
 
@@ -447,7 +440,6 @@ class TestSchedSync:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestSchedScheduleNext:
     """Test _schedule_next method."""
 
@@ -481,7 +473,6 @@ class TestSchedScheduleNext:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestSchedRun:
     """Test Sched run method."""
 
@@ -525,7 +516,6 @@ class TestSchedRun:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestSchedControl:
     """Test Sched control methods."""
 
@@ -567,7 +557,6 @@ class TestSchedControl:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestContextManager:
     """Test Sched context manager."""
 
@@ -593,7 +582,6 @@ class TestContextManager:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestRepr:
     """Test Sched __repr__."""
 
@@ -612,7 +600,6 @@ class TestRepr:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestIntegrationScenarios:
     """Test real-world scheduler scenarios."""
 
@@ -652,7 +639,6 @@ class TestIntegrationScenarios:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestEdgeCases:
     """Test edge cases and boundary conditions."""
 
@@ -686,7 +672,6 @@ class TestEdgeCases:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestWeeklyScheduling:
     """Test weekly scheduling functionality."""
 
@@ -710,7 +695,6 @@ class TestWeeklyScheduling:
             assert sched._minute == 0
 
 
-@pytest.mark.unit
 class TestMonthlyScheduling:
     """Test monthly scheduling functionality."""
 
@@ -730,7 +714,6 @@ class TestMonthlyScheduling:
         assert sched._minute == 0
 
 
-@pytest.mark.unit
 class TestCoverageImprovements:
     """Additional tests to improve coverage."""
 

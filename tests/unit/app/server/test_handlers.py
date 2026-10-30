@@ -27,7 +27,6 @@ from appinfra.app.server.handlers import (
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestMiddlewareBase:
     """Test Middleware abstract base class."""
 
@@ -47,7 +46,6 @@ class ConcreteMiddleware(Middleware):
         return response
 
 
-@pytest.mark.unit
 class TestConcreteMiddleware:
     """Test concrete Middleware implementation."""
 
@@ -77,7 +75,6 @@ class TestConcreteMiddleware:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestRequestHandlerInit:
     """Test RequestHandler initialization."""
 
@@ -95,7 +92,6 @@ class TestRequestHandlerInit:
         assert handler.server is server
 
 
-@pytest.mark.unit
 class TestRequestHandlerHandle:
     """Test RequestHandler.handle method."""
 
@@ -133,7 +129,6 @@ class TestRequestHandlerHandle:
         handler.handle_get.assert_called_once()
 
 
-@pytest.mark.unit
 class TestRequestHandlerHandleDefault:
     """Test RequestHandler.handle_default method."""
 
@@ -149,7 +144,6 @@ class TestRequestHandlerHandleDefault:
         assert "Not Allowed" in result["message"]
 
 
-@pytest.mark.unit
 class TestRequestHandlerMethodHandlers:
     """Test RequestHandler method-specific handlers."""
 
@@ -199,7 +193,6 @@ class TestRequestHandlerMethodHandlers:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestLoggingMiddlewareInit:
     """Test LoggingMiddleware initialization."""
 
@@ -211,7 +204,6 @@ class TestLoggingMiddlewareInit:
         assert middleware.logger is logger
 
 
-@pytest.mark.unit
 class TestLoggingMiddlewareProcessRequest:
     """Test LoggingMiddleware.process_request method."""
 
@@ -247,7 +239,6 @@ class TestLoggingMiddlewareProcessRequest:
         assert extra["path"] == "/"  # Default path
 
 
-@pytest.mark.unit
 class TestLoggingMiddlewareProcessResponse:
     """Test LoggingMiddleware.process_response method."""
 
@@ -283,7 +274,6 @@ class TestLoggingMiddlewareProcessResponse:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestAuthMiddlewareInit:
     """Test AuthMiddleware initialization."""
 
@@ -295,7 +285,6 @@ class TestAuthMiddlewareInit:
         assert middleware.auth_checker is checker
 
 
-@pytest.mark.unit
 class TestAuthMiddlewareProcessRequest:
     """Test AuthMiddleware.process_request method."""
 
@@ -325,7 +314,6 @@ class TestAuthMiddlewareProcessRequest:
         assert "Unauthorized" in result["message"]
 
 
-@pytest.mark.unit
 class TestAuthMiddlewareProcessResponse:
     """Test AuthMiddleware.process_response method."""
 
@@ -341,7 +329,6 @@ class TestAuthMiddlewareProcessResponse:
         assert result is response
 
 
-@pytest.mark.unit
 class TestAuthMiddlewareCreateUnauthorizedResponse:
     """Test AuthMiddleware._create_unauthorized_response method."""
 
@@ -361,7 +348,6 @@ class TestAuthMiddlewareCreateUnauthorizedResponse:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestMiddlewareIntegration:
     """Integration tests for middleware."""
 
@@ -385,7 +371,6 @@ class TestMiddlewareIntegration:
         assert auth_checker.called
 
 
-@pytest.mark.unit
 class TestRequestHandlerIntegration:
     """Integration tests for RequestHandler."""
 

@@ -20,7 +20,6 @@ from appinfra.size import InvalidSizeError, size_str, size_to_bytes, validate_si
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestSizeStrBasic:
     """Test basic size_str formatting."""
 
@@ -71,7 +70,6 @@ class TestSizeStrBasic:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestSizeStrOptions:
     """Test size_str options."""
 
@@ -104,7 +102,6 @@ class TestSizeStrOptions:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestSizeStrValidation:
     """Test size_str input validation."""
 
@@ -134,7 +131,6 @@ class TestSizeStrValidation:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestSizeToBytes:
     """Test size_to_bytes parsing."""
 
@@ -187,7 +183,6 @@ class TestSizeToBytes:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestSizeToBytesValidation:
     """Test size_to_bytes input validation."""
 
@@ -222,7 +217,6 @@ class TestSizeToBytesValidation:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestRoundTrip:
     """Test round-trip conversion (size_str -> size_to_bytes)."""
 
@@ -250,7 +244,6 @@ class TestRoundTrip:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestValidateSize:
     """Test validate_size function."""
 

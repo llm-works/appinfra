@@ -22,7 +22,6 @@ from appinfra.app.server.routes import RouteManager
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestRouteManagerInit:
     """Test RouteManager initialization."""
 
@@ -39,7 +38,6 @@ class TestRouteManagerInit:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestAddRoute:
     """Test add_route method (lines 18-37)."""
 
@@ -112,7 +110,6 @@ class TestAddRoute:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestGetHandler:
     """Test get_handler method (lines 39-59)."""
 
@@ -173,7 +170,6 @@ class TestGetHandler:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestHandleRequest:
     """Test handle_request method (lines 61-79)."""
 
@@ -225,7 +221,6 @@ class TestHandleRequest:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestCreate404Response:
     """Test _create_404_response method (lines 81-84)."""
 
@@ -244,7 +239,6 @@ class TestCreate404Response:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestListRoutes:
     """Test list_routes method (lines 86-103)."""
 
@@ -298,7 +292,6 @@ class TestListRoutes:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestRouteManagerIntegration:
     """Test RouteManager integration scenarios."""
 

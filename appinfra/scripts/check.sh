@@ -357,14 +357,10 @@ fi
 #
 # Recognizes ``pytest.mark.<name>`` — the substring shared by decorator
 # usage (`@pytest.mark.X`) and module-level `pytestmark = pytest.mark.X`
-# (including lists). Dynamic markers applied by
-# ``pytest_collection_modifyitems`` hooks are missed; standard patterns
-# are not.
+# (including lists) — and suite directories (tests/<suite>/), whose tests
+# take the suite's marker without naming it (_settings.sh).
 PERF_DIR="${APPINFRA_PYTEST_PERF_DIR:-tests}"
-_MARKERS_FOUND=$(
-    grep -rhoE 'pytest\.mark\.[a-z_][a-z0-9_]*' tests/ "$PERF_DIR" --include='*.py' 2>/dev/null \
-        | cut -d. -f3 | sort -u | tr '\n' ' ' || true
-)
+_MARKERS_FOUND=$(appinfra_suite_markers "$PERF_DIR" | tr '\n' ' ')
 
 # Emit the pytest command for a marker if any test uses it; otherwise a
 # fast `(exit 5)` subshell that hits run_check's "no tests" branch

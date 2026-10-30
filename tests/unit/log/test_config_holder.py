@@ -6,13 +6,10 @@
 import threading
 import time
 
-import pytest
-
 from appinfra.log.config import LogConfig
 from appinfra.log.config_holder import LogConfigHolder
 
 
-@pytest.mark.unit
 class TestLogConfigHolder:
     """Unit tests for LogConfigHolder."""
 

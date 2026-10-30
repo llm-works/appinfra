@@ -29,7 +29,6 @@ from appinfra.app.builder.middleware import (
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestMiddlewareBuilderInit:
     """Test MiddlewareBuilder initialization (lines 16-28)."""
 
@@ -50,7 +49,6 @@ class TestMiddlewareBuilderInit:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestMiddlewareBuilderMethods:
     """Test MiddlewareBuilder builder methods."""
 
@@ -119,7 +117,6 @@ class TestMiddlewareBuilderMethods:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestMiddlewareBuilderBuild:
     """Test MiddlewareBuilder build method (lines 84-93)."""
 
@@ -162,7 +159,6 @@ class TestMiddlewareBuilderBuild:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestBuiltMiddlewareInit:
     """Test BuiltMiddleware initialization (lines 99-125)."""
 
@@ -205,7 +201,6 @@ class TestBuiltMiddlewareInit:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestBuiltMiddlewareProcessRequest:
     """Test BuiltMiddleware process_request method (lines 127-142)."""
 
@@ -277,7 +272,6 @@ class TestBuiltMiddlewareProcessRequest:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestBuiltMiddlewareProcessResponse:
     """Test BuiltMiddleware process_response method (lines 144-155)."""
 
@@ -324,7 +318,6 @@ class TestBuiltMiddlewareProcessResponse:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestBuiltMiddlewareShouldRun:
     """Test BuiltMiddleware _should_run method (lines 157-170)."""
 
@@ -377,7 +370,6 @@ class TestBuiltMiddlewareShouldRun:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestBuiltMiddlewareLt:
     """Test BuiltMiddleware __lt__ method (lines 172-174)."""
 
@@ -406,7 +398,6 @@ class TestBuiltMiddlewareLt:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestLoggingMiddleware:
     """Test LoggingMiddleware class (lines 177-208)."""
 
@@ -482,7 +473,6 @@ class TestLoggingMiddleware:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestCORSMiddleware:
     """Test CORSMiddleware class (lines 211-245)."""
 
@@ -554,7 +544,6 @@ class TestCORSMiddleware:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestFactoryFunctions:
     """Test middleware factory functions."""
 
@@ -583,7 +572,6 @@ class TestFactoryFunctions:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestMiddlewareIntegration:
     """Test middleware integration scenarios."""
 

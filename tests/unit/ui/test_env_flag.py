@@ -16,7 +16,6 @@ TRUE = ["true", "1", "y", "yes", "TRUE", "Y", "Yes"]
 FALSE = ["false", "0", "n", "no", "FALSE", "No"]
 
 
-@pytest.mark.unit
 class TestEnvFlag:
     @pytest.mark.parametrize("value", TRUE)
     def test_true_values(self, value: str) -> None:

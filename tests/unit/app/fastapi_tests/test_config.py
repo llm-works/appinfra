@@ -3,14 +3,11 @@
 
 """Tests for FastAPI config dataclasses."""
 
-import pytest
-
 from appinfra.app.fastapi.config.api import ApiConfig
 from appinfra.app.fastapi.config.ipc import IPCConfig
 from appinfra.app.fastapi.config.uvicorn import UvicornConfig
 
 
-@pytest.mark.unit
 class TestUvicornConfig:
     """Tests for UvicornConfig dataclass."""
 
@@ -88,7 +85,6 @@ class TestUvicornConfig:
         assert kwargs["ssl_certfile"] == "/cert.pem"
 
 
-@pytest.mark.unit
 class TestIPCConfig:
     """Tests for IPCConfig dataclass."""
 
@@ -114,7 +110,6 @@ class TestIPCConfig:
         assert config.enable_health_reporting is False
 
 
-@pytest.mark.unit
 class TestApiConfig:
     """Tests for ApiConfig dataclass."""
 

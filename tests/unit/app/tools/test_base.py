@@ -32,7 +32,6 @@ from appinfra.app.tools.base import Tool, ToolConfig
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestToolConfig:
     """Test ToolConfig dataclass."""
 
@@ -81,7 +80,6 @@ class ConfiglessTool(Tool):
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestToolInit:
     """Test Tool initialization."""
 
@@ -113,7 +111,6 @@ class TestToolInit:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestToolNameProperty:
     """Test Tool.name property."""
 
@@ -138,7 +135,6 @@ class TestToolNameProperty:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestToolCmdProperty:
     """Test Tool.cmd property."""
 
@@ -165,7 +161,6 @@ class TestToolCmdProperty:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestToolGroupProperty:
     """Test Tool.group property."""
 
@@ -190,7 +185,6 @@ class TestToolGroupProperty:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestToolLgProperty:
     """Test Tool.lg property."""
 
@@ -218,7 +212,6 @@ class TestToolLgProperty:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestToolArgsProperty:
     """Test Tool.args property."""
 
@@ -259,7 +252,6 @@ class TestToolArgsProperty:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestToolKwargsProperty:
     """Test Tool.kwargs property."""
 
@@ -282,7 +274,6 @@ class TestToolKwargsProperty:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestToolInitializedProperty:
     """Test Tool.initialized property."""
 
@@ -305,7 +296,6 @@ class TestToolInitializedProperty:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestToolArgPrsProperty:
     """Test Tool.arg_prs property."""
 
@@ -329,7 +319,6 @@ class TestToolArgPrsProperty:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestPositionalFilteringParser:
     """Test _PositionalFilteringParser wrapper."""
 
@@ -417,7 +406,6 @@ class TestPositionalFilteringParser:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestPositionalFilteringGroup:
     """Test _PositionalFilteringGroup wrapper."""
 
@@ -495,7 +483,6 @@ class TestPositionalFilteringGroup:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestToolSetArgs:
     """Test Tool.set_args method."""
 
@@ -582,7 +569,6 @@ class TestToolSetArgs:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestToolAddGroupArgs:
     """Test Tool.add_group_args method."""
 
@@ -612,7 +598,6 @@ class TestToolAddGroupArgs:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestToolSetup:
     """Test Tool.setup method."""
 
@@ -680,7 +665,6 @@ class TestToolSetup:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestToolSetupLg:
     """Test Tool.setup_lg method."""
 
@@ -738,7 +722,6 @@ class TestToolSetupLg:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestToolCreateGroup:
     """Test Tool.create_group method."""
 
@@ -771,7 +754,6 @@ class TestToolCreateGroup:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestToolAddTool:
     """Test Tool.add_tool method."""
 
@@ -809,7 +791,6 @@ class TestToolAddTool:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestToolAddCmd:
     """Test Tool.add_cmd method."""
 
@@ -859,7 +840,6 @@ class TestToolAddCmd:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestToolRun:
     """Test Tool.run method."""
 
@@ -888,7 +868,6 @@ class TestToolRun:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestToolIntegration:
     """Integration tests for Tool class."""
 

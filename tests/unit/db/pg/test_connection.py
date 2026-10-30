@@ -49,7 +49,6 @@ def conn_mgr(mock_engine, mock_logger, mock_cfg):
     return ConnectionManager(mock_engine, mock_logger, mock_cfg, readonly=False)
 
 
-@pytest.mark.unit
 class TestConnectionManagerInit:
     """Test ConnectionManager initialization."""
 
@@ -69,7 +68,6 @@ class TestConnectionManagerInit:
         assert mgr._readonly is True
 
 
-@pytest.mark.unit
 class TestConnect:
     """Test connect method."""
 
@@ -127,7 +125,6 @@ class TestConnect:
         assert "Database connection failed" in str(exc_info.value)
 
 
-@pytest.mark.unit
 class TestHealthCheck:
     """Test health_check method."""
 
@@ -158,7 +155,6 @@ class TestHealthCheck:
         mock_logger.error.assert_called()
 
 
-@pytest.mark.unit
 class TestGetPoolStatus:
     """Test get_pool_status method."""
 
@@ -196,7 +192,6 @@ class TestGetPoolStatus:
         assert status["invalid"] == 0  # Default value
 
 
-@pytest.mark.unit
 class TestSetLoggingContext:
     """Test set_logging_context method."""
 

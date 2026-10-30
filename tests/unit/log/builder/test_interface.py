@@ -133,7 +133,6 @@ class ConcreteBuilderFixture(LoggingBuilderInterface):
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestHandlerConfig:
     """Test HandlerConfig abstract base class."""
 
@@ -172,7 +171,6 @@ class TestHandlerConfig:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestLoggingBuilderInterface:
     """Test LoggingBuilderInterface abstract base class."""
 
@@ -203,7 +201,6 @@ class TestLoggingBuilderInterface:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestMethodChaining:
     """Test method chaining behavior of interface."""
 
@@ -227,7 +224,6 @@ class TestMethodChaining:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestInterfaceContracts:
     """Test interface contract enforcement."""
 
@@ -250,7 +246,6 @@ class TestInterfaceContracts:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestAbstractMethodCoverage:
     """Test individual abstract methods for full coverage."""
 
@@ -282,7 +277,6 @@ class TestAbstractMethodCoverage:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestInterfaceIntegration:
     """Test interface integration with real builder implementations."""
 

@@ -13,8 +13,6 @@ Tests key functionality including:
 
 from unittest.mock import Mock
 
-import pytest
-
 from appinfra.app.builder.tool import (
     BuiltTool,
     FunctionTool,
@@ -28,7 +26,6 @@ from appinfra.app.tools.base import ToolConfig
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestToolBuilderInit:
     """Test ToolBuilder initialization (lines 17-33)."""
 
@@ -53,7 +50,6 @@ class TestToolBuilderInit:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestToolBuilderMethods:
     """Test ToolBuilder fluent methods."""
 
@@ -159,7 +155,6 @@ class TestToolBuilderMethods:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestToolBuilderBuild:
     """Test ToolBuilder build method (lines 85-113)."""
 
@@ -221,7 +216,6 @@ class TestToolBuilderBuild:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestBuiltToolInit:
     """Test BuiltTool initialization (lines 119-142)."""
 
@@ -262,7 +256,6 @@ class TestBuiltToolInit:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestBuiltToolName:
     """Test BuiltTool name property (lines 144-147)."""
 
@@ -287,7 +280,6 @@ class TestBuiltToolName:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestBuiltToolAddArgument:
     """Test BuiltTool add_argument method (lines 149-151)."""
 
@@ -307,7 +299,6 @@ class TestBuiltToolAddArgument:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestBuiltToolAddTool:
     """Test BuiltTool add_tool method (lines 153-158)."""
 
@@ -340,7 +331,6 @@ class TestBuiltToolAddTool:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestBuiltToolAddArgs:
     """Test BuiltTool add_args method (lines 160-163)."""
 
@@ -364,7 +354,6 @@ class TestBuiltToolAddArgs:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestBuiltToolSetup:
     """Test BuiltTool setup method (lines 165-175)."""
 
@@ -395,7 +384,6 @@ class TestBuiltToolSetup:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestBuiltToolRun:
     """Test BuiltTool run method (lines 177-186)."""
 
@@ -442,7 +430,6 @@ class TestBuiltToolRun:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestFunctionTool:
     """Test FunctionTool class (lines 189-223)."""
 
@@ -488,7 +475,6 @@ class TestFunctionTool:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestCreateFunctionTool:
     """Test create_function_tool function (lines 226-248)."""
 
@@ -549,7 +535,6 @@ class TestCreateFunctionTool:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestToolBuilderIntegration:
     """Test ToolBuilder integration scenarios."""
 

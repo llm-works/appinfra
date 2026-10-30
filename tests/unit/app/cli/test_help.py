@@ -13,8 +13,6 @@ Tests key functionality including:
 
 from unittest.mock import Mock
 
-import pytest
-
 from appinfra.app.cli.help import HelpGenerator
 
 # =============================================================================
@@ -22,7 +20,6 @@ from appinfra.app.cli.help import HelpGenerator
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestHelpGeneratorInit:
     """Test HelpGenerator initialization."""
 
@@ -39,7 +36,6 @@ class TestHelpGeneratorInit:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestGenerateToolHelp:
     """Test generate_tool_help method (lines 23-43)."""
 
@@ -86,7 +82,6 @@ class TestGenerateToolHelp:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestGenerateToolsList:
     """Test generate_tools_list method (lines 45-71)."""
 
@@ -176,7 +171,6 @@ class TestGenerateToolsList:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestGenerateUsageExamples:
     """Test generate_usage_examples method (lines 73-94)."""
 
@@ -252,7 +246,6 @@ class TestGenerateUsageExamples:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestHelpGeneratorIntegration:
     """Test HelpGenerator integration scenarios."""
 

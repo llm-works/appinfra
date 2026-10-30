@@ -32,7 +32,6 @@ def reset_logging():
         logger.setLevel(logging.NOTSET)
 
 
-@pytest.mark.unit
 class TestCaptureAllLoggers:
     """Tests for capture_all_loggers function."""
 
@@ -194,7 +193,6 @@ class TestCaptureAllLoggers:
             assert len(logger.handlers) == 0
 
 
-@pytest.mark.unit
 class TestCaptureLogger:
     """Tests for capture_logger function."""
 

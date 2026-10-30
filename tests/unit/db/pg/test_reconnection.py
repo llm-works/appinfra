@@ -45,7 +45,6 @@ def strategy(mock_engine, mock_logger):
     )
 
 
-@pytest.mark.unit
 class TestReconnectionStrategyInit:
     """Test ReconnectionStrategy initialization."""
 
@@ -69,7 +68,6 @@ class TestReconnectionStrategyInit:
         assert strategy._retry_delay == 1.0
 
 
-@pytest.mark.unit
 class TestCheckConnection:
     """Test check_connection method."""
 
@@ -114,7 +112,6 @@ class TestCheckConnection:
         assert call_args is not None
 
 
-@pytest.mark.unit
 class TestAttemptReconnect:
     """Test attempt_reconnect method."""
 
@@ -142,7 +139,6 @@ class TestAttemptReconnect:
         mock_logger.warning.assert_called()
 
 
-@pytest.mark.unit
 class TestReconnectWithBackoff:
     """Test reconnect_with_backoff method."""
 
@@ -199,7 +195,6 @@ class TestReconnectWithBackoff:
             mock_logger.error.assert_called()
 
 
-@pytest.mark.unit
 class TestReconnect:
     """Test reconnect public method."""
 
@@ -247,7 +242,6 @@ class TestReconnect:
             )
 
 
-@pytest.mark.unit
 class TestSetLoggingContext:
     """Test set_logging_context method."""
 
@@ -260,7 +254,6 @@ class TestSetLoggingContext:
         assert strategy._lg_extra == context
 
 
-@pytest.mark.unit
 class TestIsHealthy:
     """Test is_healthy method."""
 

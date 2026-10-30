@@ -13,7 +13,6 @@ from appinfra.app.fastapi.config.api import ApiConfig
 from appinfra.app.fastapi.config.ipc import IPCConfig
 
 
-@pytest.mark.unit
 class TestServer:
     """Tests for Server class."""
 
@@ -146,7 +145,6 @@ class TestServer:
         assert app1 is app2
 
 
-@pytest.mark.unit
 class TestServerSubprocessMode:
     """Tests for Server subprocess mode."""
 
@@ -375,7 +373,6 @@ class TestServerSubprocessMode:
         server.stop()
 
 
-@pytest.mark.unit
 class TestServerValidation:
     """Tests for Server validation methods."""
 
@@ -439,7 +436,6 @@ class TestServerValidation:
         server._validate_subprocess_mode()
 
 
-@pytest.mark.unit
 class TestBuildUvicornLogConfig:
     """Tests for _build_uvicorn_log_config function."""
 
@@ -475,7 +471,6 @@ class TestBuildUvicornLogConfig:
         assert log_config["loggers"]["uvicorn.access"]["level"] == "INFO"
 
 
-@pytest.mark.unit
 class TestServerStart:
     """Tests for server start methods."""
 
@@ -639,7 +634,6 @@ class TestServerStart:
             assert call_args[1]["port"] == 9000
 
 
-@pytest.mark.unit
 class TestUvicornServiceSetup:
     """Tests for UvicornService.setup() validation."""
 

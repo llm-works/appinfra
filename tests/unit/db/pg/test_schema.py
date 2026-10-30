@@ -18,7 +18,6 @@ from appinfra.db.pg.schema import (
 )
 
 
-@pytest.mark.unit
 class TestValidateSchemaName:
     """Test validate_schema_name function."""
 
@@ -75,7 +74,6 @@ class TestValidateSchemaName:
         assert validate_schema_name("_test") is False
 
 
-@pytest.mark.unit
 class TestSchemaManagerInit:
     """Test SchemaManager initialization."""
 
@@ -116,7 +114,6 @@ class TestSchemaManagerInit:
             SchemaManager(engine, "", logger)
 
 
-@pytest.mark.unit
 class TestSchemaManagerListeners:
     """Test SchemaManager event listener management."""
 
@@ -220,7 +217,6 @@ class TestSchemaManagerListeners:
         mock_dbapi_conn.commit.assert_called_once()
 
 
-@pytest.mark.unit
 class TestSchemaManagerDDL:
     """Test SchemaManager DDL operations (create, drop, reset)."""
 
@@ -291,7 +287,6 @@ class TestSchemaManagerDDL:
         assert any("CREATE SCHEMA" in c for c in calls)
 
 
-@pytest.mark.unit
 class TestCreateAllInSchema:
     """Test create_all_in_schema function."""
 

@@ -6,12 +6,9 @@
 import argparse
 from unittest.mock import Mock
 
-import pytest
-
 from appinfra.app.testing import MockApp
 
 
-@pytest.mark.unit
 class TestMockApp:
     """Test MockApp class."""
 

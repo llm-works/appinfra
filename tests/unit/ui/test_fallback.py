@@ -3,11 +3,7 @@
 
 """Tests for appinfra.ui.fallback module."""
 
-import pytest
-
 from appinfra.ui.fallback import Panel, Progress, Table
-
-pytestmark = pytest.mark.unit
 
 
 class TestTable:

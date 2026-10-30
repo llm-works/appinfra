@@ -30,7 +30,6 @@ class ConcretePlugin(Plugin):
         """Configure implementation for tests."""
 
 
-@pytest.mark.unit
 class TestPluginInit:
     """Test Plugin initialization."""
 
@@ -61,7 +60,6 @@ class TestPluginInit:
         assert plugin._conflicts == []
 
 
-@pytest.mark.unit
 class TestPluginEnabledProperty:
     """Test Plugin.enabled property."""
 
@@ -75,7 +73,6 @@ class TestPluginEnabledProperty:
         assert plugin.enabled is False
 
 
-@pytest.mark.unit
 class TestPluginEnable:
     """Test Plugin.enable method."""
 
@@ -89,7 +86,6 @@ class TestPluginEnable:
         assert plugin._enabled is True
 
 
-@pytest.mark.unit
 class TestPluginDisable:
     """Test Plugin.disable method."""
 
@@ -102,7 +98,6 @@ class TestPluginDisable:
         assert plugin._enabled is False
 
 
-@pytest.mark.unit
 class TestPluginAddDependency:
     """Test Plugin.add_dependency method."""
 
@@ -134,7 +129,6 @@ class TestPluginAddDependency:
         assert len(plugin._dependencies) == 3
 
 
-@pytest.mark.unit
 class TestPluginAddConflict:
     """Test Plugin.add_conflict method."""
 
@@ -156,7 +150,6 @@ class TestPluginAddConflict:
         assert plugin._conflicts.count("IncompatiblePlugin") == 1
 
 
-@pytest.mark.unit
 class TestPluginInitialize:
     """Test Plugin.initialize method."""
 
@@ -169,7 +162,6 @@ class TestPluginInitialize:
         plugin.initialize(app)
 
 
-@pytest.mark.unit
 class TestPluginCleanup:
     """Test Plugin.cleanup method."""
 
@@ -187,7 +179,6 @@ class TestPluginCleanup:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestPluginManagerInit:
     """Test PluginManager initialization."""
 
@@ -200,7 +191,6 @@ class TestPluginManagerInit:
         assert manager._plugin_order == []
 
 
-@pytest.mark.unit
 class TestPluginManagerRegister:
     """Test PluginManager.register_plugin method."""
 
@@ -240,7 +230,6 @@ class TestPluginManagerRegister:
         assert "already registered" in str(exc_info.value)
 
 
-@pytest.mark.unit
 class TestPluginManagerUnregister:
     """Test PluginManager.unregister_plugin method."""
 
@@ -274,7 +263,6 @@ class TestPluginManagerUnregister:
         manager.unregister_plugin("NonexistentPlugin")
 
 
-@pytest.mark.unit
 class TestPluginManagerEnablePlugin:
     """Test PluginManager.enable_plugin method."""
 
@@ -308,7 +296,6 @@ class TestPluginManagerEnablePlugin:
         manager.enable_plugin("NonexistentPlugin")
 
 
-@pytest.mark.unit
 class TestPluginManagerDisablePlugin:
     """Test PluginManager.disable_plugin method."""
 
@@ -331,7 +318,6 @@ class TestPluginManagerDisablePlugin:
         manager.disable_plugin("NonexistentPlugin")
 
 
-@pytest.mark.unit
 class TestPluginManagerGetPlugin:
     """Test PluginManager.get_plugin method."""
 
@@ -354,7 +340,6 @@ class TestPluginManagerGetPlugin:
         assert result is None
 
 
-@pytest.mark.unit
 class TestPluginManagerListPlugins:
     """Test PluginManager.list_plugins method."""
 
@@ -378,7 +363,6 @@ class TestPluginManagerListPlugins:
         assert result == []
 
 
-@pytest.mark.unit
 class TestPluginManagerListEnabledPlugins:
     """Test PluginManager.list_enabled_plugins method."""
 
@@ -413,7 +397,6 @@ class TestPluginManagerListEnabledPlugins:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestResolveDependencies:
     """Test PluginManager._resolve_dependencies method."""
 
@@ -512,7 +495,6 @@ class TestResolveDependencies:
         assert "conflicts" in str(exc_info.value)
 
 
-@pytest.mark.unit
 class TestConfigureAll:
     """Test PluginManager.configure_all method."""
 
@@ -569,7 +551,6 @@ class TestConfigureAll:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestPluginSystemIntegration:
     """Integration tests for the plugin system."""
 
@@ -709,7 +690,6 @@ class TestPluginSystemIntegration:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestPluginManagerCleanup:
     """Test plugin cleanup_all method."""
 

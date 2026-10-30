@@ -167,7 +167,6 @@ class FailOnFirstExecute(Service):
         return self._healthy
 
 
-@pytest.mark.unit
 class TestThreadRunner:
     """Test ThreadRunner class."""
 
@@ -356,7 +355,6 @@ class TestThreadRunner:
         assert runner.state == State.FAILED
 
 
-@pytest.mark.unit
 class TestProcessRunner:
     """Unit tests for ProcessRunner with mocks."""
 
@@ -651,7 +649,6 @@ class TestProcessRunner:
         assert runner.state == state
 
 
-@pytest.mark.unit
 class TestRunnerRestart:
     """Test restart functionality."""
 
@@ -751,7 +748,6 @@ class TestRunnerRestart:
         assert result is False
 
 
-@pytest.mark.unit
 class TestScheduledService:
     """Test ScheduledService with ThreadRunner."""
 

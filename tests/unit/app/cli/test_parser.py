@@ -26,7 +26,6 @@ from appinfra.app.cli.parser import CLIParser
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestCLIParserInit:
     """Test CLIParser initialization."""
 
@@ -64,7 +63,6 @@ class TestCLIParserInit:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestCreateParser:
     """Test CLIParser.create_parser method."""
 
@@ -112,7 +110,6 @@ class TestCreateParser:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestAddArgument:
     """Test CLIParser.add_argument method."""
 
@@ -171,7 +168,6 @@ class TestAddArgument:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestAddSubparsers:
     """Test CLIParser.add_subparsers method."""
 
@@ -211,7 +207,6 @@ class TestAddSubparsers:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestParseArgs:
     """Test CLIParser.parse_args method."""
 
@@ -251,7 +246,6 @@ class TestParseArgs:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestPrintHelp:
     """Test CLIParser.print_help method."""
 
@@ -293,7 +287,6 @@ class TestPrintHelp:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestPrintUsage:
     """Test CLIParser.print_usage method."""
 
@@ -325,7 +318,6 @@ class TestPrintUsage:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestError:
     """Test CLIParser.error method."""
 
@@ -353,7 +345,6 @@ class TestError:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestCLIParserIntegration:
     """Integration tests for CLIParser."""
 

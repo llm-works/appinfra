@@ -7,12 +7,9 @@ from __future__ import annotations
 
 import asyncio
 import os
+from unittest.mock import MagicMock, patch
 
 import pytest
-
-pytestmark = pytest.mark.unit
-
-from unittest.mock import MagicMock, patch
 
 from appinfra.ui import prompts
 from appinfra.ui.prompts import (

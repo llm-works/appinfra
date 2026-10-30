@@ -19,7 +19,6 @@ from appinfra.log.builder.file import (
 )
 
 
-@pytest.mark.unit
 class TestLogConfigSerialization:
     """Test LogConfig.to_dict() and from_dict()."""
 
@@ -101,7 +100,6 @@ class TestLogConfigSerialization:
         assert config.colors is True  # default
 
 
-@pytest.mark.unit
 class TestConsoleHandlerConfigSerialization:
     """Test ConsoleHandlerConfig.to_dict()."""
 
@@ -156,7 +154,6 @@ class TestConsoleHandlerConfigSerialization:
         assert unpickled == d
 
 
-@pytest.mark.unit
 class TestFileHandlerConfigSerialization:
     """Test FileHandlerConfig.to_dict()."""
 
@@ -187,7 +184,6 @@ class TestFileHandlerConfigSerialization:
         assert d["encoding"] == "utf-8"
 
 
-@pytest.mark.unit
 class TestRotatingFileHandlerConfigSerialization:
     """Test RotatingFileHandlerConfig.to_dict()."""
 
@@ -209,7 +205,6 @@ class TestRotatingFileHandlerConfigSerialization:
         assert d["level"] == "warning"
 
 
-@pytest.mark.unit
 class TestTimedRotatingFileHandlerConfigSerialization:
     """Test TimedRotatingFileHandlerConfig.to_dict()."""
 
@@ -233,7 +228,6 @@ class TestTimedRotatingFileHandlerConfigSerialization:
         assert d["utc"] is True
 
 
-@pytest.mark.unit
 class TestLoggingBuilderSerialization:
     """Test LoggingBuilder.to_dict() and from_dict()."""
 
@@ -397,7 +391,6 @@ class TestLoggingBuilderSerialization:
         assert len(logger.handlers) == 1
 
 
-@pytest.mark.unit
 class TestLoggingBuilderSerializationWithDatabaseHandler:
     """Test LoggingBuilder serialization skips database handlers."""
 
@@ -424,7 +417,6 @@ class TestLoggingBuilderSerializationWithDatabaseHandler:
         assert d["handlers"][0]["type"] == "console"
 
 
-@pytest.mark.unit
 class TestDeserializeHandler:
     """Test _deserialize_handler helper function."""
 
@@ -478,7 +470,6 @@ class TestDeserializeHandler:
         assert result.when == "midnight"
 
 
-@pytest.mark.unit
 class TestDatabaseHandlerNotSerializable:
     """Test DatabaseHandlerConfig raises on serialization."""
 

@@ -11,10 +11,6 @@ against ReDoS (Regular Expression Denial of Service) attacks.
 import re
 import unittest
 
-import pytest
-
-pytestmark = pytest.mark.unit
-
 from appinfra.regex_utils import (
     MAX_PATTERN_LENGTH,
     RegexComplexityError,

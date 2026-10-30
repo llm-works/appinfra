@@ -14,8 +14,6 @@ Tests key date range features including:
 import datetime
 from unittest.mock import patch
 
-import pytest
-
 from appinfra.time.date_range import (
     dates_from_lists,
     iter_dates,
@@ -27,7 +25,6 @@ from appinfra.time.date_range import (
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestIterDates:
     """Test iter_dates function."""
 
@@ -99,7 +96,6 @@ class TestIterDates:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestIterDatesMidnightGmt:
     """Test iter_dates_midnight_gmt function."""
 
@@ -150,7 +146,6 @@ class TestIterDatesMidnightGmt:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestDatesFromLists:
     """Test dates_from_lists function."""
 
@@ -250,7 +245,6 @@ class TestDatesFromLists:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestIntegrationScenarios:
     """Test real-world date range scenarios."""
 

@@ -6,7 +6,6 @@
 import pytest
 
 
-@pytest.mark.unit
 class TestFastAPIImports:
     """Tests for FastAPI module imports."""
 
@@ -63,7 +62,6 @@ class TestFastAPIImports:
             assert hasattr(fastapi_module, name)
 
 
-@pytest.mark.unit
 class TestFastAPIStubs:
     """Tests for stub classes when FastAPI is not installed."""
 

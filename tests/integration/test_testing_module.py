@@ -32,7 +32,6 @@ def pg_test_logger(pg_logger):
 pytestmark = pytest.mark.require_pg
 
 
-@pytest.mark.integration
 class TestPgIsolatedFixture:
     """Test the pg_isolated fixture."""
 
@@ -53,7 +52,6 @@ class TestPgIsolatedFixture:
             assert row[0] == 1
 
 
-@pytest.mark.integration
 class TestPgSessionIsolatedFixture:
     """Test the pg_session_isolated fixture."""
 
@@ -87,7 +85,6 @@ class TestPgSessionIsolatedFixture:
         assert result.scalar() == 1
 
 
-@pytest.mark.integration
 class TestSchemaIsolationRobustness:
     """Regression tests for schema isolation under pool-state stress.
 
@@ -129,7 +126,6 @@ class TestSchemaIsolationRobustness:
                 )
 
 
-@pytest.mark.integration
 class TestMakeMigrateFixture:
     """Test the make_migrate_fixture factory."""
 
@@ -176,7 +172,6 @@ class TestMakeMigrateFixture:
                 pg.dispose()
 
 
-@pytest.mark.integration
 class TestPgMigrateFactory:
     """Test the pg_migrate_factory fixture."""
 
@@ -249,7 +244,6 @@ class TestPgMigrateFactory:
             assert pg.schema is not None
 
 
-@pytest.mark.integration
 class TestPgCleanSchemaFixture:
     """Test the pg_clean_schema fixture."""
 

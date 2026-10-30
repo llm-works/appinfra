@@ -10,13 +10,10 @@ import subprocess
 import sys
 from pathlib import Path
 
-import pytest
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
 RUN_EXAMPLES_PY = REPO_ROOT / "appinfra" / "scripts" / "run_examples.py"
 
 
-@pytest.mark.integration
 def test_examples_import_uninstalled_project_from_source_tree(tmp_path: Path) -> None:
     """An example imports a project that is not installed, with no PYTHONPATH set.
 
@@ -77,7 +74,6 @@ def _run_failing_example(tmp_path: Path, source: str, *flags: str) -> str:
     return result.stdout
 
 
-@pytest.mark.integration
 def test_failed_example_shows_a_tail_of_stderr_by_default(tmp_path: Path) -> None:
     out = _run_failing_example(tmp_path, _FAILS)
 
@@ -85,7 +81,6 @@ def test_failed_example_shows_a_tail_of_stderr_by_default(tmp_path: Path) -> Non
     assert "stdout line 0" not in out  # stdout is dropped when stderr has output
 
 
-@pytest.mark.integration
 def test_full_output_shows_both_streams_whole(tmp_path: Path) -> None:
     out = _run_failing_example(tmp_path, _FAILS, "--full-output")
 
@@ -95,7 +90,6 @@ def test_full_output_shows_both_streams_whole(tmp_path: Path) -> None:
     assert "the root cause" in out
 
 
-@pytest.mark.integration
 def test_full_output_shows_a_timed_out_example(tmp_path: Path) -> None:
     """A hung example's output is the one that explains it."""
     source = (
@@ -110,7 +104,6 @@ def test_full_output_shows_a_timed_out_example(tmp_path: Path) -> None:
     assert "waiting on a server that never answers" in out
 
 
-@pytest.mark.integration
 def test_passing_example_reports_its_warnings(tmp_path: Path) -> None:
     """A warning a library raises in a passing example is printed, under Python's defaults
     hidden: one line per distinct warning, in the form check.sh reads."""

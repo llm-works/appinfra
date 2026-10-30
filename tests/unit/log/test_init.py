@@ -17,7 +17,6 @@ from appinfra.log import (
 )
 
 
-@pytest.mark.unit
 class TestResolveLevel:
     """Test resolve_level function."""
 
@@ -61,7 +60,6 @@ class TestResolveLevel:
         assert result == 123
 
 
-@pytest.mark.unit
 class TestConvenienceFunctions:
     """Test convenience functions for logger creation."""
 

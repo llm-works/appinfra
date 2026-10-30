@@ -29,8 +29,6 @@ from appinfra.cas.conformance import Age, StoreConformance
 from appinfra.log import Logger
 from tests.helpers.fork import forks_in_xdist_worker
 
-pytestmark = pytest.mark.integration
-
 LG = Logger("test-cas")
 
 

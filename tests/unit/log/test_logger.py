@@ -67,7 +67,6 @@ def mock_handler():
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestLogConfig:
     """Test LogConfig creation and methods."""
 
@@ -270,7 +269,6 @@ class TestLogConfig:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestCallbackRegistry:
     """Test CallbackRegistry functionality."""
 
@@ -409,7 +407,6 @@ class TestCallbackRegistry:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestListensForDecorator:
     """Test listens_for decorator."""
 
@@ -442,7 +439,6 @@ class TestListensForDecorator:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestLoggerInitialization:
     """Test Logger initialization."""
 
@@ -487,7 +483,6 @@ class TestLoggerInitialization:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestLoggerProperties:
     """Test Logger properties."""
 
@@ -526,7 +521,6 @@ class TestLoggerProperties:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestLoggerMakeRecord:
     """Test Logger custom makeRecord functionality."""
 
@@ -592,7 +586,6 @@ class TestLoggerMakeRecord:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestReservedKeyValidation:
     """Test validation of reserved keys in extra dict."""
 
@@ -654,7 +647,6 @@ class TestReservedKeyValidation:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestLoggerCustomLevels:
     """Test custom log levels (trace, trace2)."""
 
@@ -699,7 +691,6 @@ class TestLoggerCustomLevels:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestLoggerLogMethod:
     """Test Logger _log method with callback support."""
 
@@ -739,7 +730,6 @@ class TestLoggerLogMethod:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestLoggerIsLogged:
     """Test is_logged method."""
 
@@ -768,7 +758,6 @@ class TestLoggerIsLogged:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestLoggerFindCaller:
     """Test findCaller and location tracking."""
 
@@ -807,7 +796,6 @@ class TestLoggerFindCaller:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestIntegrationScenarios:
     """Test real-world logger usage scenarios."""
 
@@ -883,7 +871,6 @@ class TestIntegrationScenarios:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestEdgeCases:
     """Test edge cases and boundary conditions."""
 
@@ -933,7 +920,6 @@ class TestEdgeCases:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestLevelInheritance:
     """Test logger level inheritance through parent chain."""
 

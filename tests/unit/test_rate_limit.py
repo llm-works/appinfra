@@ -23,7 +23,6 @@ from appinfra.rate_limit import Backoff, RateLimiter
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestRateLimiterInitialization:
     """Test RateLimiter initialization."""
 
@@ -73,7 +72,6 @@ class TestRateLimiterInitialization:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestRateLimiterNext:
     """Test RateLimiter next() method."""
 
@@ -181,7 +179,6 @@ class TestRateLimiterNext:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestRateLimiterTryNext:
     """Test RateLimiter try_next() method."""
 
@@ -286,7 +283,6 @@ class TestRateLimiterTryNext:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestRateLimiterCanProceed:
     """Test RateLimiter can_proceed() method."""
 
@@ -419,7 +415,6 @@ class TestRateLimiterCanProceed:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestRateLimiterTimeUntilNext:
     """Test RateLimiter time_until_next() method."""
 
@@ -540,7 +535,6 @@ class TestRateLimiterTimeUntilNext:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestRateLimitingCalculations:
     """Test rate limiting calculations."""
 
@@ -571,7 +565,6 @@ class TestRateLimitingCalculations:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestRateLimiterIntegration:
     """Test real-world rate limiter scenarios."""
 
@@ -667,7 +660,6 @@ class TestRateLimiterIntegration:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestBackoffInitialization:
     """Test Backoff initialization."""
 
@@ -738,7 +730,6 @@ class TestBackoffInitialization:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestBackoffNextDelay:
     """Test Backoff next_delay() method."""
 
@@ -814,7 +805,6 @@ class TestBackoffNextDelay:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestBackoffWait:
     """Test Backoff wait() method."""
 
@@ -868,7 +858,6 @@ class TestBackoffWait:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestBackoffReset:
     """Test Backoff reset() method."""
 
@@ -907,7 +896,6 @@ class TestBackoffReset:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestBackoffIntegration:
     """Test real-world backoff scenarios."""
 

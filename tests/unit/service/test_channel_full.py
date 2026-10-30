@@ -38,7 +38,6 @@ SYNC_FACTORIES = [QueueChannelFactory, ProcessQueueChannelFactory]
 ASYNC_FACTORIES = [AsyncQueueChannelFactory, AsyncProcessQueueChannelFactory]
 
 
-@pytest.mark.unit
 @pytest.mark.parametrize("factory", SYNC_FACTORIES)
 class TestSyncSendOnFullChannel:
     """BufferedChannel.send() over a full queue.Queue / mp.Queue."""
@@ -105,7 +104,6 @@ async def _close(channel: Any) -> None:
         await result
 
 
-@pytest.mark.unit
 @pytest.mark.parametrize("factory", ASYNC_FACTORIES)
 class TestAsyncSendOnFullChannel:
     """AsyncBufferedChannel.send() over a full asyncio.Queue / mp.Queue."""

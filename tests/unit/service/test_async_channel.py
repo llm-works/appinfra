@@ -21,8 +21,6 @@ from appinfra.service import (
     Message,
 )
 
-pytestmark = pytest.mark.unit
-
 
 @dataclass
 class Request:

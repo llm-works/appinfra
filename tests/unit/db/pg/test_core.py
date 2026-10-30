@@ -27,7 +27,6 @@ from appinfra.db.pg.core import (
 )
 
 
-@pytest.mark.unit
 class TestConfigValidator:
     """Test ConfigValidator class."""
 
@@ -137,7 +136,6 @@ class TestConfigValidator:
         assert kwargs["echo"] is True
 
 
-@pytest.mark.unit
 class TestQueryLogger:
     """Test QueryLogger class."""
 
@@ -193,7 +191,6 @@ class TestQueryLogger:
             assert mock_listen.call_count >= 1
 
 
-@pytest.mark.unit
 class TestLogQueryWithTiming:
     """Test log_query_with_timing function."""
 
@@ -241,7 +238,6 @@ class TestLogQueryWithTiming:
             sys.stderr = old_stderr
 
 
-@pytest.mark.unit
 class TestInitializationHelpers:
     """Test initialization helper functions."""
 

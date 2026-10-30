@@ -15,8 +15,6 @@ Tests key functionality including:
 
 from unittest.mock import Mock, patch
 
-import pytest
-
 from appinfra.app.builder.configurer.tool import ToolConfigurer
 
 # =============================================================================
@@ -24,7 +22,6 @@ from appinfra.app.builder.configurer.tool import ToolConfigurer
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestToolConfigurerInit:
     """Test ToolConfigurer initialization."""
 
@@ -42,7 +39,6 @@ class TestToolConfigurerInit:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestWithTool:
     """Test ToolConfigurer.with_tool method."""
 
@@ -74,7 +70,6 @@ class TestWithTool:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestWithTools:
     """Test ToolConfigurer.with_tools method."""
 
@@ -114,7 +109,6 @@ class TestWithTools:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestWithToolBuilder:
     """Test ToolConfigurer.with_tool_builder method."""
 
@@ -140,7 +134,6 @@ class TestWithToolBuilder:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestWithCmd:
     """Test ToolConfigurer.with_cmd method."""
 
@@ -210,7 +203,6 @@ class TestWithCmd:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestWithPlugin:
     """Test ToolConfigurer.with_plugin method."""
 
@@ -232,7 +224,6 @@ class TestWithPlugin:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestWithPlugins:
     """Test ToolConfigurer.with_plugins method."""
 
@@ -259,7 +250,6 @@ class TestWithPlugins:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestDone:
     """Test ToolConfigurer.done method."""
 
@@ -278,7 +268,6 @@ class TestDone:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestToolConfigurerIntegration:
     """Integration tests for ToolConfigurer."""
 
@@ -365,7 +354,6 @@ def _tool(name: str):
     return Tool(None, ToolConfig(name=name))
 
 
-@pytest.mark.unit
 class TestWithMain:
     """with_main names the tool that runs without a subcommand."""
 
@@ -404,7 +392,6 @@ class TestWithMain:
         assert builder._tools == [main]
 
 
-@pytest.mark.unit
 class TestKeywordForm:
     """Calling the block takes tools by position, plugins and main by keyword."""
 
