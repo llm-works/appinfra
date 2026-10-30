@@ -35,8 +35,7 @@ class FailOnceService(Service):
         return "fail-once"
 
     def execute(self) -> None:
-        runs = _runs(self._counter) + 1
-        self._counter.write_text(str(runs))
+        runs = _count_run(self._counter)
         if runs == 1:
             # Fail only once the parent has seen this run healthy, so the failure
             # reaches the monitor rather than wait_healthy()'s startup check
@@ -64,8 +63,7 @@ class FailAlwaysService(Service):
         return "fail-always"
 
     def execute(self) -> None:
-        runs = _runs(self._counter) + 1
-        self._counter.write_text(str(runs))
+        runs = _count_run(self._counter)
         if runs == 1:
             self._healthy = True
             while not _go(self._counter).exists():
@@ -86,6 +84,16 @@ def _fail(failure: str) -> None:
 
 def _runs(counter: Path) -> int:
     return int(counter.read_text()) if counter.exists() else 0
+
+
+def _count_run(counter: Path) -> int:
+    """Add a run to the counter. The new count replaces the file in one step (os.replace),
+    so the parent's reads never find it empty mid-write."""
+    runs = _runs(counter) + 1
+    tmp = counter.with_suffix(".tmp")
+    tmp.write_text(str(runs))
+    os.replace(tmp, counter)
+    return runs
 
 
 def _go(counter: Path) -> Path:
