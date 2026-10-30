@@ -11,7 +11,6 @@ from appinfra.app.fastapi.builder.server import ServerBuilder
 from appinfra.app.fastapi.ratelimit import TokenBucketLimiter
 
 
-@pytest.mark.unit
 class TestServerBuilderIntegration:
     """Test with_rate_limiter on ServerBuilder."""
 
@@ -74,7 +73,6 @@ class TestServerBuilderIntegration:
         assert builder._defs.rate_limiters[1].limiter is per_ip_limiter
 
 
-@pytest.mark.integration
 class TestServerBuilderBuild:
     """Test that rate limiting is wired into the built server."""
 
@@ -116,7 +114,6 @@ class TestServerBuilderBuild:
         assert server is not None
 
 
-@pytest.mark.integration
 @pytest.mark.asyncio
 class TestHttpIntegration:
     """Test rate limiting via HTTP requests using httpx2."""

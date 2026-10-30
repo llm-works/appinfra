@@ -48,7 +48,6 @@ def _load(app, etc_dir: Path, *extra_argv: str) -> None:
         app._load_and_merge_config()
 
 
-@pytest.mark.e2e
 @pytest.mark.usefixtures("clean_env")
 class TestConfigFileWorkflow:
     """E2E tests for config file loading workflow."""
@@ -279,7 +278,6 @@ class TestConfigFileWorkflow:
             assert hasattr(app.config.logging, "topics")
 
 
-@pytest.mark.e2e
 @pytest.mark.usefixtures("clean_env")
 class TestConfigSectionIncludeWorkflow:
     """E2E tests for section includes with variable resolution."""
@@ -392,7 +390,6 @@ class TestConfigSectionIncludeWorkflow:
             assert app.config.name == "myapp"
 
 
-@pytest.mark.e2e
 @pytest.mark.usefixtures("clean_env")
 class TestConfigIncludeErrorWorkflow:
     """E2E tests for config file include error handling workflow."""
@@ -448,7 +445,6 @@ name: test-app
             assert "line 1" in error_str
 
 
-@pytest.mark.e2e
 @pytest.mark.usefixtures("clean_env")
 class TestLogOutputCliOverrides:
     """E2E tests for --log-json and --no-log-colors CLI overrides."""

@@ -32,7 +32,6 @@ def _executed_params(mock: MagicMock, call_index: int = 0) -> dict:
     return mock.execute.call_args_list[call_index].args[1]
 
 
-@pytest.mark.unit
 class TestWithObjectLock:
     """with_object_lock issues the advisory lock and yields."""
 
@@ -91,7 +90,6 @@ class TestWithObjectLock:
             pass
 
 
-@pytest.mark.unit
 class TestEnsureObject:
     """ensure_object skips create_fn when exists_fn is True, else calls it."""
 
@@ -150,7 +148,6 @@ class TestEnsureObject:
         assert calls == ["lock", "exists", "create"]
 
 
-@pytest.mark.unit
 class TestTableExists:
     """table_exists emits an nspname-filtered catalog query."""
 
@@ -199,7 +196,6 @@ class TestTableExists:
         assert table_exists(conn, "t", schema="s") is True
 
 
-@pytest.mark.unit
 class TestIndexExists:
     """index_exists uses pg_indexes with optional schemaname filter."""
 

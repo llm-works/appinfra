@@ -7,12 +7,9 @@ E2E tests for size formatting workflow.
 Tests realistic use cases for size_str and size_to_bytes in application contexts.
 """
 
-import pytest
-
 from appinfra.size import size_str, size_to_bytes
 
 
-@pytest.mark.e2e
 class TestSizeFormattingWorkflow:
     """E2E tests for size formatting in real use cases."""
 

@@ -15,8 +15,6 @@ Example:
 import sys
 from unittest.mock import patch
 
-import pytest
-
 from appinfra.app.builder import AppBuilder
 from appinfra.app.tools import Tool, ToolConfig
 
@@ -44,7 +42,6 @@ class ProxyTool(Tool):
         return 0
 
 
-@pytest.mark.e2e
 class TestMainToolWorkflow:
     """E2E tests for the tools.with_main() feature."""
 
@@ -236,7 +233,6 @@ class TestMainToolWorkflow:
         assert result == 0
 
 
-@pytest.mark.e2e
 class TestMainToolPositionalArgsConflict:
     """
     E2E tests for positional argument conflict resolution.
@@ -415,7 +411,6 @@ class TestMainToolPositionalArgsConflict:
         assert result == 0
 
 
-@pytest.mark.e2e
 class TestMainToolWithDecorators:
     """E2E tests for tools.with_main() with @app.tool decorator post-build."""
 

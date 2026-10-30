@@ -21,7 +21,6 @@ from appinfra.log import LoggingBuilder
 _CONFIG_PATH = Path(__file__).resolve().parent.parent.parent / "etc" / "infra.yaml"
 
 
-@pytest.mark.e2e
 @pytest.mark.require_pg
 class TestPGSessionWorkflow:
     """E2E tests for PG session context managers."""
