@@ -17,7 +17,6 @@ from appinfra.regex_utils import (
 )
 
 
-@pytest.mark.unit
 class TestRegexProperties:
     """Property-based tests for regex_utils.py functions."""
 
