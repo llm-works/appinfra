@@ -571,7 +571,7 @@ class TestRateLimitingCalculations:
 # =============================================================================
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 class TestRateLimiterIntegration:
     """Test real-world rate limiter scenarios."""
 
@@ -907,7 +907,7 @@ class TestBackoffReset:
 # =============================================================================
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 class TestBackoffIntegration:
     """Test real-world backoff scenarios."""
 

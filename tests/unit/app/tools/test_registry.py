@@ -450,7 +450,7 @@ class TestToolRegistryIsRegistered:
 # =============================================================================
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 class TestToolRegistryIntegration:
     """Integration tests for ToolRegistry."""
 

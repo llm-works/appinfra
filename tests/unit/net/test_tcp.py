@@ -616,7 +616,7 @@ class TestRequestHandler:
 # =============================================================================
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 class TestIntegrationScenarios:
     """Test real-world server scenarios."""
 

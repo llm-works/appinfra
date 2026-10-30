@@ -272,7 +272,7 @@ class TestListCommands:
 # =============================================================================
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 class TestCommandHandlerIntegration:
     """Integration tests for CommandHandler."""
 

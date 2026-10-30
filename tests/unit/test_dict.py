@@ -431,7 +431,7 @@ class TestAbstractMethodCoverage:
             PartialImpl()
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 class TestDictInterfaceIntegration:
     """Test DictInterface in realistic scenarios."""
 

@@ -12,7 +12,7 @@ import pytest
 from appinfra.version.git import find_git_root, head_commit, is_modified, run_git
 
 
-@pytest.mark.unit
+@pytest.mark.integration
 class TestFindGitRoot:
     """Test find_git_root()."""
 
@@ -27,7 +27,7 @@ class TestFindGitRoot:
         assert find_git_root(tmp_path) is None
 
 
-@pytest.mark.unit
+@pytest.mark.integration
 class TestRunGit:
     """Test run_git()."""
 
@@ -52,7 +52,7 @@ class TestRunGit:
             assert run_git(tmp_path, "status") is None
 
 
-@pytest.mark.unit
+@pytest.mark.integration
 class TestIsModified:
     """Test is_modified()."""
 
@@ -67,7 +67,7 @@ class TestIsModified:
         assert is_modified(tmp_path) is None
 
 
-@pytest.mark.unit
+@pytest.mark.integration
 class TestHeadCommit:
     """Test head_commit()."""
 

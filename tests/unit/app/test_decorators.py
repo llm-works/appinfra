@@ -605,7 +605,7 @@ class TestDecoratorAPIGetToolFunctions:
 # =============================================================================
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 class TestDecoratorIntegration:
     """Integration tests for decorator-based tool creation."""
 

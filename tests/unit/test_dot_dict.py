@@ -400,7 +400,7 @@ class TestDotDictPathNotFoundError:
 # =============================================================================
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 class TestDotDictIntegration:
     """Test real-world DotDict usage scenarios."""
 

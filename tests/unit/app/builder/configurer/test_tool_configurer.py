@@ -278,7 +278,7 @@ class TestDone:
 # =============================================================================
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 class TestToolConfigurerIntegration:
     """Integration tests for ToolConfigurer."""
 

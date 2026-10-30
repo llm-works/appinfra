@@ -361,7 +361,7 @@ class TestAuthMiddlewareCreateUnauthorizedResponse:
 # =============================================================================
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 class TestMiddlewareIntegration:
     """Integration tests for middleware."""
 
@@ -385,7 +385,7 @@ class TestMiddlewareIntegration:
         assert auth_checker.called
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 class TestRequestHandlerIntegration:
     """Integration tests for RequestHandler."""
 

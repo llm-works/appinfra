@@ -467,7 +467,7 @@ class TestObservabilityHooksCallbackQuery:
 # =============================================================================
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 class TestObservabilityHooksIntegration:
     """Test real-world usage scenarios."""
 

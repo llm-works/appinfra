@@ -122,7 +122,7 @@ class TestKeywordForm:
 # =============================================================================
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 class TestHooksReachApp:
     """The builder's hook manager is the one the app's lifecycle uses."""
 

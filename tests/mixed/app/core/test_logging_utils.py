@@ -264,7 +264,7 @@ class TestFrameInspection:
 # =============================================================================
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 class TestLoggingUtilsIntegration:
     """Test logging utils integration scenarios."""
 

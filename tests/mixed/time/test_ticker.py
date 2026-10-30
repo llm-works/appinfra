@@ -737,7 +737,7 @@ class TestTickerControl:
 # =============================================================================
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 class TestIntegrationScenarios:
     """Test real-world ticker scenarios."""
 
@@ -1109,7 +1109,7 @@ class TestTickerContextManager:
         assert sig.getsignal(sig.SIGTERM) == original_sigterm
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 class TestTickerIteratorIntegration:
     """Integration tests for Ticker iterator with SubprocessContext pattern."""
 

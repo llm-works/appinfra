@@ -808,7 +808,7 @@ class TestAppBuilderBuild:
 # =============================================================================
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 class TestAppBuilderIntegration:
     """Integration tests for AppBuilder."""
 

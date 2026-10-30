@@ -673,7 +673,7 @@ class TestDerive:
 # =============================================================================
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 class TestFactoryIntegration:
     """Test factory integration scenarios."""
 

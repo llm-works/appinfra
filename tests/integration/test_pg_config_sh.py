@@ -43,7 +43,7 @@ def _run_expect_failure(
     )
 
 
-@pytest.mark.unit
+@pytest.mark.integration
 class TestPgConfigSh:
     """YAML → Make variable rendering."""
 

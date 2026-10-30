@@ -583,7 +583,7 @@ class TestFactoryFunctions:
 # =============================================================================
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 class TestMiddlewareIntegration:
     """Test middleware integration scenarios."""
 

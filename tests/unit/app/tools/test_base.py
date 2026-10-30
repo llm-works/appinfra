@@ -888,7 +888,7 @@ class TestToolRun:
 # =============================================================================
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 class TestToolIntegration:
     """Integration tests for Tool class."""
 

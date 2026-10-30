@@ -252,7 +252,7 @@ class TestGenerateUsageExamples:
 # =============================================================================
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 class TestHelpGeneratorIntegration:
     """Test HelpGenerator integration scenarios."""
 

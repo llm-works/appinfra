@@ -280,7 +280,7 @@ class TestCreateConsoleLogger:
 # =============================================================================
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 class TestConsoleLoggingIntegration:
     """Integration tests for console logging."""
 

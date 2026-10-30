@@ -612,7 +612,7 @@ class TestRepr:
 # =============================================================================
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 class TestIntegrationScenarios:
     """Test real-world scheduler scenarios."""
 

@@ -638,7 +638,7 @@ class TestGetServerRoutes:
 # =============================================================================
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 class TestToolGroupIntegration:
     """Test ToolGroup integration scenarios."""
 

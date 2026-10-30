@@ -597,7 +597,7 @@ class TestFactoryFunctions:
 # =============================================================================
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 class TestHookIntegration:
     """Test hook system integration."""
 

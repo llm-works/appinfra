@@ -348,7 +348,7 @@ class TestFinalize:
 # =============================================================================
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 class TestLifecycleIntegration:
     """Test full lifecycle scenarios."""
 
@@ -795,7 +795,7 @@ class TestExecutePhase:
         assert manager._shutdown_timeouts["test_phase"] == 15.0
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 class TestShutdownIntegration:
     """Test full shutdown flow integration."""
 
