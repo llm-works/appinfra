@@ -18,6 +18,21 @@ import pytest
 from appinfra.log.builder.database.config import DatabaseHandlerConfig
 from appinfra.log.builder.database.handler import DatabaseHandler
 from appinfra.log.config import LogConfig
+from appinfra.log.logger import Logger
+
+
+def _logged_record(extra: dict) -> logging.LogRecord:
+    """Return the record appinfra's Logger produces for an error with *extra*."""
+    records: list[logging.LogRecord] = []
+
+    class Capture(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            records.append(record)
+
+    lg = Logger(name="test")
+    lg.addHandler(Capture())
+    lg.error("Error", extra=extra)
+    return records[0]
 
 
 @pytest.fixture
@@ -244,18 +259,18 @@ class TestIsCriticalError:
         handler.handler_config.critical_flush_enabled = True
         handler.handler_config.critical_trigger_fields = ["fatal", "critical_error"]
 
-        record = logging.LogRecord(
-            name="test",
-            level=logging.ERROR,
-            pathname="test.py",
-            lineno=10,
-            msg="Error",
-            args=(),
-            exc_info=None,
-        )
-        record.extra = {"fatal": True, "user_id": 123}
+        record = _logged_record({"fatal": True, "user_id": 123})
 
         assert handler._is_critical_error(record) is True
+
+    def test_extra_without_trigger_fields_is_not_critical(self, handler):
+        """Test extra fields that name no trigger field leave the record batched."""
+        handler.handler_config.critical_flush_enabled = True
+        handler.handler_config.critical_trigger_fields = ["fatal", "critical_error"]
+
+        record = _logged_record({"user_id": 123})
+
+        assert handler._is_critical_error(record) is False
 
     def test_returns_false_for_normal_records(self, handler):
         """Test returns False for normal records without critical indicators."""

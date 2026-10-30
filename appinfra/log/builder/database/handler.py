@@ -117,10 +117,12 @@ class DatabaseHandler(logging.Handler):
         if hasattr(record, "exc_info") and record.exc_info:
             return True
 
-        # Check if 'extra' dict contains trigger fields
-        if hasattr(record, "extra") and record.extra:
+        # Check if the extra fields (stored by Logger, as the data mapper reads
+        # them) contain a trigger field
+        extra = getattr(record, "__infra__extra", None)
+        if extra:
             for field in self.handler_config.critical_trigger_fields:
-                if field in record.extra:
+                if field in extra:
                     return True
 
         return False
