@@ -21,7 +21,6 @@ from appinfra.dot_dict import DotDict, DotDictPathNotFoundError
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestDotDictBasicOperations:
     """Test basic DotDict operations."""
 
@@ -221,7 +220,6 @@ class TestDotDictBasicOperations:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestDotDictNestedStructures:
     """Test DotDict nested structure support."""
 
@@ -274,7 +272,6 @@ class TestDotDictNestedStructures:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestDotDictKeyConversions:
     """Test key type conversion in DotDict."""
 
@@ -290,7 +287,6 @@ class TestDotDictKeyConversions:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestDotDictPathOperations:
     """Test DotDict path traversal operations."""
 
@@ -377,7 +373,6 @@ class TestDotDictPathOperations:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestDotDictPathNotFoundError:
     """Test DotDictPathNotFoundError exception class."""
 
@@ -400,7 +395,6 @@ class TestDotDictPathNotFoundError:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestDotDictIntegration:
     """Test real-world DotDict usage scenarios."""
 
@@ -448,7 +442,6 @@ class TestDotDictIntegration:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestDotDictIsDict:
     """Test that DotDict is a proper dict subclass."""
 
@@ -473,7 +466,6 @@ class TestDotDictIsDict:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestDotDictRequire:
     """Test DotDict require() method."""
 

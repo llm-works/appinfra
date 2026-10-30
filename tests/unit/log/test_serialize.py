@@ -50,7 +50,6 @@ def _make_url(password: str = "secret"):
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestCoerceLeaf:
     def test_returns_scalar_unchanged(self):
         for value in ("s", 1, 1.5, True, None):
@@ -77,7 +76,6 @@ class TestCoerceLeaf:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestCoerceTree:
     @pytest.mark.skipif(not _HAVE_SA, reason="sqlalchemy not installed")
     def test_recurses_into_dict(self):
@@ -142,7 +140,6 @@ class TestCoerceTree:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestJSONFormatterSanitize:
     @pytest.mark.skipif(not _HAVE_SA, reason="sqlalchemy not installed")
     def test_url_rendered_as_string(self):
@@ -200,7 +197,6 @@ class TestJSONFormatterSanitize:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestQueueHandlerSanitize:
     @pytest.mark.skipif(not _HAVE_SA, reason="sqlalchemy not installed")
     def test_url_preserved_as_string(self):
@@ -240,7 +236,6 @@ def _record(exc_info=None, extra=None):
     return record
 
 
-@pytest.mark.unit
 class TestRecordTraceback:
     def test_none_without_exception(self):
         assert record_traceback(_record(extra={"k": 1})) is None

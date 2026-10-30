@@ -28,7 +28,6 @@ def mock_db_interface():
     return db
 
 
-@pytest.mark.unit
 class TestDatabaseHandlerConfigInit:
     """Test DatabaseHandlerConfig initialization."""
 
@@ -95,7 +94,6 @@ class TestDatabaseHandlerConfigInit:
         assert config.data_mapper == config._default_data_mapper
 
 
-@pytest.mark.unit
 class TestDefaultDataMapper:
     """Test _default_data_mapper method."""
 
@@ -265,7 +263,6 @@ class TestDefaultDataMapper:
         assert data["line_number"] == 42
 
 
-@pytest.mark.unit
 class TestCreateHandler:
     """Test create_handler method."""
 

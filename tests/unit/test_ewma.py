@@ -8,7 +8,6 @@ import pytest
 from appinfra.ewma import EWMA
 
 
-@pytest.mark.unit
 class TestEWMAInitialization:
     """Test EWMA initialization."""
 
@@ -40,7 +39,6 @@ class TestEWMAInitialization:
         assert ewma.value() == 0.0
 
 
-@pytest.mark.unit
 class TestEWMAAddAndValue:
     """Test EWMA add and value methods."""
 
@@ -100,7 +98,6 @@ class TestEWMAAddAndValue:
         assert ewma_fast.value() > ewma_slow.value()
 
 
-@pytest.mark.unit
 class TestEWMAReset:
     """Test EWMA reset method."""
 

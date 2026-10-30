@@ -15,8 +15,6 @@ import time
 from io import StringIO
 from unittest.mock import Mock, patch
 
-import pytest
-
 from appinfra.observability.hooks import (
     HookContext,
     HookEvent,
@@ -28,7 +26,6 @@ from appinfra.observability.hooks import (
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestHookEvent:
     """Test HookEvent enumeration."""
 
@@ -62,7 +59,6 @@ class TestHookEvent:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestHookContext:
     """Test HookContext dataclass."""
 
@@ -127,7 +123,6 @@ class TestHookContext:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestObservabilityHooksInit:
     """Test ObservabilityHooks initialization."""
 
@@ -140,7 +135,6 @@ class TestObservabilityHooksInit:
         assert hooks._enabled is True
 
 
-@pytest.mark.unit
 class TestObservabilityHooksRegister:
     """Test register and on methods."""
 
@@ -197,7 +191,6 @@ class TestObservabilityHooksRegister:
         assert callback in hooks._global_hooks
 
 
-@pytest.mark.unit
 class TestObservabilityHooksUnregister:
     """Test unregister method."""
 
@@ -232,7 +225,6 @@ class TestObservabilityHooksUnregister:
         assert result is False
 
 
-@pytest.mark.unit
 class TestObservabilityHooksClear:
     """Test clear method."""
 
@@ -267,7 +259,6 @@ class TestObservabilityHooksClear:
         hooks.clear(HookEvent.QUERY_START)
 
 
-@pytest.mark.unit
 class TestObservabilityHooksTrigger:
     """Test trigger method."""
 
@@ -379,7 +370,6 @@ class TestObservabilityHooksTrigger:
         hooks.trigger(HookEvent.QUERY_START)
 
 
-@pytest.mark.unit
 class TestObservabilityHooksEnableDisable:
     """Test enable/disable methods."""
 
@@ -415,7 +405,6 @@ class TestObservabilityHooksEnableDisable:
         assert hooks.enabled is True
 
 
-@pytest.mark.unit
 class TestObservabilityHooksCallbackQuery:
     """Test get_callbacks and has_callbacks methods."""
 
@@ -467,7 +456,6 @@ class TestObservabilityHooksCallbackQuery:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestObservabilityHooksIntegration:
     """Test real-world usage scenarios."""
 

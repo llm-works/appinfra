@@ -61,7 +61,6 @@ def handler(mock_logger, handler_config, log_config):
     return DatabaseHandler(mock_logger, handler_config, log_config)
 
 
-@pytest.mark.unit
 class TestDatabaseHandlerInit:
     """Test DatabaseHandler initialization."""
 
@@ -97,7 +96,6 @@ class TestDatabaseHandlerInit:
         lifecycle_mgr.register_db_handler.assert_called_once_with(handler)
 
 
-@pytest.mark.unit
 class TestDatabaseHandlerEmit:
     """Test DatabaseHandler.emit() method."""
 
@@ -175,7 +173,6 @@ class TestDatabaseHandlerEmit:
         handler.emit(record)  # Should not raise
 
 
-@pytest.mark.unit
 class TestShouldFlushBatch:
     """Test _should_flush_batch logic."""
 
@@ -207,7 +204,6 @@ class TestShouldFlushBatch:
         assert handler._should_flush_batch() is True
 
 
-@pytest.mark.unit
 class TestIsCriticalError:
     """Test _is_critical_error detection logic."""
 
@@ -278,7 +274,6 @@ class TestIsCriticalError:
         assert handler._is_critical_error(record) is False
 
 
-@pytest.mark.unit
 class TestGetInsertSQL:
     """Test SQL statement caching."""
 
@@ -315,7 +310,6 @@ class TestGetInsertSQL:
         assert len(handler._sql_cache) == 2
 
 
-@pytest.mark.unit
 class TestInsertSingleRecord:
     """Test single record insertion."""
 
@@ -339,7 +333,6 @@ class TestInsertSingleRecord:
         session.execute.assert_not_called()
 
 
-@pytest.mark.unit
 class TestFlushBatch:
     """Test batch flushing logic."""
 
@@ -413,7 +406,6 @@ class TestFlushBatch:
         assert handler.last_flush > old_timestamp
 
 
-@pytest.mark.unit
 class TestClose:
     """Test handler close method."""
 
@@ -427,7 +419,6 @@ class TestClose:
         mock_db_interface.session.assert_called_once()
 
 
-@pytest.mark.unit
 class TestCriticalFlush:
     """Test critical error immediate flush."""
 
@@ -470,7 +461,6 @@ class TestCriticalFlush:
         assert "DB flush failed" in str(mock_logger.critical.call_args)
 
 
-@pytest.mark.unit
 class TestInsertBatch:
     """Test batch insertion."""
 
@@ -497,7 +487,6 @@ class TestInsertBatch:
         session.execute.assert_not_called()
 
 
-@pytest.mark.unit
 class TestIntegration:
     """Integration tests for complete workflows."""
 
@@ -551,7 +540,6 @@ class TestIntegration:
         assert len(handler.batch) == 0
 
 
-@pytest.mark.unit
 class TestPerformanceOptimizations:
     """Test performance optimization features."""
 

@@ -15,7 +15,6 @@ import pytest
 from appinfra.db.pg import ScopedPG
 
 
-@pytest.mark.unit
 class TestScopedPGInit:
     """Test ScopedPG initialization and schema validation."""
 
@@ -72,7 +71,6 @@ class TestScopedPGInit:
             assert scoped.schema == "test_schema"
 
 
-@pytest.mark.unit
 class TestScopedPGSession:
     """Test ScopedPG session delegation."""
 
@@ -121,7 +119,6 @@ class TestScopedPGSession:
             mock_inner_pg.session.assert_called_once_with(autocommit=True)
 
 
-@pytest.mark.unit
 class TestScopedPGEnsureSchema:
     """Test ScopedPG ensure_schema method."""
 
@@ -185,7 +182,6 @@ class TestScopedPGEnsureSchema:
                 scoped.ensure_schema()
 
 
-@pytest.mark.unit
 class TestScopedPGProperties:
     """Test ScopedPG property accessors."""
 
@@ -232,7 +228,6 @@ class TestScopedPGProperties:
             assert scoped.cfg == {"inherited": True}
 
 
-@pytest.mark.unit
 class TestPGScopedCaching:
     """Test PG.scoped() caching behavior."""
 
@@ -335,7 +330,6 @@ class TestPGScopedCaching:
         pg._engine.dispose.assert_called_once()
 
 
-@pytest.mark.unit
 class TestScopedPGDispose:
     """Test ScopedPG dispose method."""
 

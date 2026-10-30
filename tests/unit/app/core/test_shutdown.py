@@ -21,7 +21,6 @@ import pytest
 from appinfra.app.core.shutdown import ShutdownManager
 
 
-@pytest.mark.unit
 class TestShutdownManagerInit:
     """Test ShutdownManager initialization."""
 
@@ -34,7 +33,6 @@ class TestShutdownManagerInit:
         assert manager._original_handlers == {}
 
 
-@pytest.mark.unit
 class TestSignalRegistration:
     """Test signal handler registration."""
 
@@ -106,7 +104,6 @@ class TestSignalRegistration:
             signal.signal(signal.SIGTERM, before)
 
 
-@pytest.mark.unit
 class TestSignalHandling:
     """Test signal handling logic."""
 
@@ -153,7 +150,6 @@ class TestSignalHandling:
         assert manager.get_signal_return_code() == 130
 
 
-@pytest.mark.unit
 class TestIsShuttingDown:
     """Test is_shutting_down method."""
 
@@ -173,7 +169,6 @@ class TestIsShuttingDown:
         assert manager.is_shutting_down() is True
 
 
-@pytest.mark.unit
 class TestSleep:
     """Test the shutdown-aware sleep primitive."""
 

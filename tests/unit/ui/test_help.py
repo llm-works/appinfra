@@ -6,11 +6,6 @@
 from __future__ import annotations
 
 import argparse
-
-import pytest
-
-pytestmark = pytest.mark.unit
-
 from unittest.mock import MagicMock, patch
 
 from appinfra.ui import help as help_module

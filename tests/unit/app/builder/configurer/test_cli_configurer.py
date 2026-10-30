@@ -19,7 +19,6 @@ from appinfra.app.core.app import DEFAULT_STANDARD_ARGS
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestWithFlags:
     """Flags merge onto the current set; names and values are validated."""
 
@@ -123,7 +122,6 @@ class TestWithFlags:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestWithoutFlags:
     """without_flags clears every flag, help included."""
 
@@ -158,7 +156,6 @@ class TestWithoutFlags:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestWithAllFlags:
     """with_all_flags enables every standard flag, help included."""
 
@@ -207,7 +204,6 @@ class TestWithAllFlags:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestWithoutFlag:
     """without_flag disables one standard flag."""
 
@@ -252,7 +248,6 @@ class TestWithoutFlag:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestKeywordForm:
     """Calling the block sets flags and returns the AppBuilder."""
 
@@ -294,7 +289,6 @@ class TestKeywordForm:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestWithFlag:
     """with_flag stores argparse presentation for one standard flag."""
 
@@ -368,7 +362,6 @@ class TestWithFlag:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestWithArgument:
     """with_argument stores add_argument arguments for build time."""
 
@@ -400,7 +393,6 @@ def _action_for(app, dest: str):
     return next(a for a in app.parser.parser._actions if a.dest == dest)
 
 
-@pytest.mark.unit
 class TestFlagsIntegration:
     """Flags declared on the block decide what the App's parser gets."""
 
@@ -459,7 +451,6 @@ class TestFlagsIntegration:
         assert "flag" in _dests(app)
 
 
-@pytest.mark.unit
 class TestPresentationIntegration:
     """with_flag overrides reach the parser's actions."""
 

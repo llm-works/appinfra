@@ -40,7 +40,6 @@ from appinfra.app.tools.base import ToolConfig
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestBuildToolConfig:
     """Test _build_tool_config helper."""
 
@@ -64,7 +63,6 @@ class TestBuildToolConfig:
         assert config.aliases == ["t", "test"]
 
 
-@pytest.mark.unit
 class TestRegisterToolArguments:
     """Test _register_tool_arguments helper."""
 
@@ -85,7 +83,6 @@ class TestRegisterToolArguments:
         parser.add_argument.assert_any_call("-v", "--verbose", action="store_true")
 
 
-@pytest.mark.unit
 class TestRunSetupHook:
     """Test _run_setup_hook helper."""
 
@@ -111,7 +108,6 @@ class TestRunSetupHook:
         _run_setup_hook(tool_func, tool_instance, {})
 
 
-@pytest.mark.unit
 class TestRunConfigureHook:
     """Test _run_configure_hook helper."""
 
@@ -137,7 +133,6 @@ class TestRunConfigureHook:
         _run_configure_hook(tool_func, tool_instance)
 
 
-@pytest.mark.unit
 class TestNormalizeReturnValue:
     """Test _normalize_return_value helper."""
 
@@ -164,7 +159,6 @@ class TestNormalizeReturnValue:
             assert "str" in str(w[0].message)
 
 
-@pytest.mark.unit
 class TestExecuteToolFunction:
     """Test _execute_tool_function helper."""
 
@@ -201,7 +195,6 @@ class TestExecuteToolFunction:
         assert result == 42
 
 
-@pytest.mark.unit
 class TestHandleSubtools:
     """Test _handle_subtools helper."""
 
@@ -221,7 +214,6 @@ class TestHandleSubtools:
         assert result == 42
 
 
-@pytest.mark.unit
 class TestSetDecoratedToolMetadata:
     """Test _set_decorated_tool_metadata helper."""
 
@@ -241,7 +233,6 @@ class TestSetDecoratedToolMetadata:
         assert TestClass.__doc__ == "My description"
 
 
-@pytest.mark.unit
 class TestApplyPendingArguments:
     """Test _apply_pending_arguments helper."""
 
@@ -269,7 +260,6 @@ class TestApplyPendingArguments:
         assert tool_func.arguments == []
 
 
-@pytest.mark.unit
 class TestRegisterToolWithTarget:
     """Test _register_tool_with_target helper."""
 
@@ -298,7 +288,6 @@ class TestRegisterToolWithTarget:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestToolFunctionInit:
     """Test ToolFunction initialization."""
 
@@ -348,7 +337,6 @@ class TestToolFunctionInit:
         assert tool_func.help_text == "This is the help text."
 
 
-@pytest.mark.unit
 class TestToolFunctionExtractHelp:
     """Test ToolFunction._extract_help static method."""
 
@@ -371,7 +359,6 @@ class TestToolFunctionExtractHelp:
         assert result == "Actual help text."
 
 
-@pytest.mark.unit
 class TestToolFunctionArgument:
     """Test ToolFunction.argument method."""
 
@@ -399,7 +386,6 @@ class TestToolFunctionArgument:
         assert len(tool_func.arguments) == 3
 
 
-@pytest.mark.unit
 class TestToolFunctionOnSetup:
     """Test ToolFunction.on_setup method."""
 
@@ -417,7 +403,6 @@ class TestToolFunctionOnSetup:
         assert tool_func.setup_hook is setup_func
 
 
-@pytest.mark.unit
 class TestToolFunctionOnConfigure:
     """Test ToolFunction.on_configure method."""
 
@@ -435,7 +420,6 @@ class TestToolFunctionOnConfigure:
         assert tool_func.configure_hook is configure_func
 
 
-@pytest.mark.unit
 class TestToolFunctionSubtool:
     """Test ToolFunction.subtool decorator."""
 
@@ -453,7 +437,6 @@ class TestToolFunctionSubtool:
         assert tool_func.subtools[0].help_text == "Child help"
 
 
-@pytest.mark.unit
 class TestToolFunctionToToolClass:
     """Test ToolFunction.to_tool_class method."""
 
@@ -496,7 +479,6 @@ class TestToolFunctionToToolClass:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestDecoratorAPIInit:
     """Test DecoratorAPI initialization."""
 
@@ -509,7 +491,6 @@ class TestDecoratorAPIInit:
         assert api._tool_functions == []
 
 
-@pytest.mark.unit
 class TestDecoratorAPITool:
     """Test DecoratorAPI.tool decorator."""
 
@@ -530,7 +511,6 @@ class TestDecoratorAPITool:
         assert test_func.name == "test"
 
 
-@pytest.mark.unit
 class TestDecoratorAPIArgument:
     """Test DecoratorAPI.argument decorator."""
 
@@ -575,7 +555,6 @@ class TestDecoratorAPIArgument:
         assert len(my_func._tool_arguments) == 2
 
 
-@pytest.mark.unit
 class TestDecoratorAPIGetToolFunctions:
     """Test DecoratorAPI.get_tool_functions method."""
 
@@ -605,7 +584,6 @@ class TestDecoratorAPIGetToolFunctions:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestDecoratorIntegration:
     """Integration tests for decorator-based tool creation."""
 

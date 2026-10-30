@@ -31,7 +31,6 @@ except ImportError:
 @pytest.mark.skipif(
     not PYDANTIC_AVAILABLE, reason=SKIP_REASON or "pydantic not available"
 )
-@pytest.mark.unit
 class TestPostgreSQLServerConfigValidation:
     """Test PostgreSQL server configuration validation."""
 
@@ -103,7 +102,6 @@ class TestPostgreSQLServerConfigValidation:
 @pytest.mark.skipif(
     not PYDANTIC_AVAILABLE, reason=SKIP_REASON or "pydantic not available"
 )
-@pytest.mark.unit
 class TestDatabaseConfigValidation:
     """Test database configuration validation."""
 
@@ -172,7 +170,6 @@ class TestDatabaseConfigValidation:
 @pytest.mark.skipif(
     not PYDANTIC_AVAILABLE, reason=SKIP_REASON or "pydantic not available"
 )
-@pytest.mark.unit
 class TestLoggingConfigValidation:
     """Test logging configuration validation."""
 

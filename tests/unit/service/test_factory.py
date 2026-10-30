@@ -29,8 +29,6 @@ from appinfra.service import (
     ThreadRunner,
 )
 
-pytestmark = pytest.mark.unit
-
 # Test fixtures
 
 

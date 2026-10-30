@@ -13,8 +13,6 @@ from appinfra.cas import Blob, Commit, MemoryStore, Repo, Tree, TreeEntry
 from appinfra.cas.conformance import dangling_links
 from appinfra.log import Logger
 
-pytestmark = pytest.mark.unit
-
 LG = Logger("test-cas")
 
 

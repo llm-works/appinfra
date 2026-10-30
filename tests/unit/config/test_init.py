@@ -6,10 +6,7 @@
 import sys
 from unittest.mock import patch
 
-import pytest
 
-
-@pytest.mark.unit
 class TestPydanticImportFallback:
     """Test fallback behavior when pydantic is not available."""
 

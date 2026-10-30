@@ -27,7 +27,6 @@ from sqlalchemy.orm import declarative_base
 pytestmark = pytest.mark.require_pg
 
 
-@pytest.mark.integration
 class TestSchemaCreation:
     """Test schema creation and management."""
 
@@ -74,7 +73,6 @@ class TestSchemaCreation:
         assert pg_connection.schema is None
 
 
-@pytest.mark.integration
 class TestSchemaIsolation:
     """Test that queries are isolated to the configured schema."""
 
@@ -185,7 +183,6 @@ class TestSchemaIsolation:
                 conn.commit()
 
 
-@pytest.mark.integration
 class TestSchemaPoolBehavior:
     """Test schema isolation survives connection pool operations."""
 
@@ -247,7 +244,6 @@ class TestSchemaPoolBehavior:
                 conn.commit()
 
 
-@pytest.mark.integration
 class TestParallelSchemaIsolation:
     """Test schema isolation with multiple concurrent connections."""
 
@@ -384,7 +380,6 @@ class TestParallelSchemaIsolation:
                 conn.commit()
 
 
-@pytest.mark.integration
 class TestSchemaFromConfig:
     """Test schema configuration via config object."""
 
@@ -427,7 +422,6 @@ class TestSchemaFromConfig:
                 conn.commit()
 
 
-@pytest.mark.integration
 class TestSchemaReset:
     """Test schema reset functionality."""
 

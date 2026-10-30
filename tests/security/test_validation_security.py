@@ -35,7 +35,6 @@ class MockTool(Tool):
         return super().name
 
 
-@pytest.mark.security
 @pytest.mark.parametrize("payload", SHELL_INJECTION)
 def test_tool_name_shell_injection(payload: str):
     """
@@ -68,7 +67,6 @@ def test_tool_name_shell_injection(payload: str):
     assert "valid-tool_name" in registry.list_tools()
 
 
-@pytest.mark.security
 @pytest.mark.parametrize(
     "invalid_name,reason",
     [
@@ -113,7 +111,6 @@ def test_tool_name_format_validation(invalid_name: str, reason: str):
         registry.register(tool)
 
 
-@pytest.mark.security
 def test_tool_name_empty_string():
     """
     Verify empty tool name is rejected.
@@ -141,7 +138,6 @@ def test_tool_name_empty_string():
         assert valid_name in registry_test.list_tools()
 
 
-@pytest.mark.security
 def test_tool_name_length_limit():
     """
     Verify MAX_TOOL_NAME_LENGTH enforcement prevents excessively long names.
@@ -185,7 +181,6 @@ def test_tool_name_length_limit():
     assert normal_name in registry.list_tools()
 
 
-@pytest.mark.security
 @pytest.mark.parametrize("payload", SHELL_INJECTION)
 def test_tool_alias_injection(payload: str):
     """
@@ -225,7 +220,6 @@ def test_tool_alias_injection(payload: str):
     assert registry.get_tool("alias1") == valid_tool
 
 
-@pytest.mark.security
 def test_tool_count_limit():
     """
     Verify MAX_TOOL_COUNT enforcement prevents DoS via registry exhaustion.
@@ -271,7 +265,6 @@ def test_tool_count_limit():
 # Additional security tests for completeness
 
 
-@pytest.mark.security
 def test_duplicate_tool_name_rejected():
     """
     Verify duplicate tool names are rejected to prevent shadowing attacks.
@@ -300,7 +293,6 @@ def test_duplicate_tool_name_rejected():
     assert registry.get_tool("mytool") == tool1
 
 
-@pytest.mark.security
 def test_duplicate_alias_rejected():
     """
     Verify duplicate aliases across tools are rejected.
@@ -328,7 +320,6 @@ def test_duplicate_alias_rejected():
         registry.register(tool2)
 
 
-@pytest.mark.security
 def test_alias_count_limit():
     """
     Verify MAX_ALIAS_COUNT enforcement prevents excessive aliases per tool.

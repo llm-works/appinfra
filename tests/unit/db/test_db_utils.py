@@ -48,7 +48,6 @@ def mock_obj():
     return obj
 
 
-@pytest.mark.unit
 class TestDetach:
     """Test detach function."""
 
@@ -103,7 +102,6 @@ class TestDetach:
         assert result is mock_obj
 
 
-@pytest.mark.unit
 class TestDetachAll:
     """Test detach_all function."""
 

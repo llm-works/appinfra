@@ -19,7 +19,6 @@ def mock_lg():
     return MagicMock()
 
 
-@pytest.mark.unit
 class TestServerBuilder:
     """Tests for ServerBuilder fluent interface."""
 
@@ -200,7 +199,6 @@ class TestServerBuilder:
             mock_adapter.return_value.add_exception_handler.assert_called()
 
 
-@pytest.mark.unit
 class TestRouteConfigurer:
     """Tests for RouteConfigurer."""
 
@@ -315,7 +313,6 @@ class TestRouteConfigurer:
         assert builder._defs.middleware[0].options == {"timeout": 30}
 
 
-@pytest.mark.unit
 class TestSubprocessConfigurer:
     """Tests for SubprocessConfigurer."""
 
@@ -482,7 +479,6 @@ class TestSubprocessConfigurer:
         assert builder._api.ipc.enable_health_reporting is False
 
 
-@pytest.mark.unit
 class TestUvicornConfigurer:
     """Tests for UvicornConfigurer."""
 
@@ -652,7 +648,6 @@ class TestUvicornConfigurer:
         assert builder._api.uvicorn.backlog == 4096
 
 
-@pytest.mark.unit
 class TestServerBuilderLifecycleCallbacks:
     """Tests for ServerBuilder lifecycle callback methods."""
 
@@ -798,7 +793,6 @@ class TestServerBuilderLifecycleCallbacks:
 _DOCS_PATHS = ["/docs", "/docs/oauth2-redirect", "/redoc", "/openapi.json"]
 
 
-@pytest.mark.unit
 class TestDocsRoutes:
     """Docs and schema routes served by a real FastAPI app."""
 

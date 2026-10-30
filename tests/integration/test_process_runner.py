@@ -36,7 +36,6 @@ class SimpleProcessService(Service):
         return True
 
 
-@pytest.mark.integration
 @forks_in_xdist_worker
 class TestProcessRunnerIntegration:
     """Integration tests for ProcessRunner with real subprocesses."""

@@ -31,7 +31,6 @@ from appinfra.app.builder.hook import (
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestHookManagerInit:
     """Test HookManager initialization (lines 17-19)."""
 
@@ -48,7 +47,6 @@ class TestHookManagerInit:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestHookManagerRegisterHook:
     """Test HookManager register_hook method (lines 21-53)."""
 
@@ -99,7 +97,6 @@ class TestHookManagerRegisterHook:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestHookManagerTriggerHook:
     """Test HookManager trigger_hook method (lines 55-96)."""
 
@@ -182,7 +179,6 @@ class TestHookManagerTriggerHook:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestHookManagerOtherMethods:
     """Test HookManager utility methods (lines 98-113)."""
 
@@ -256,7 +252,6 @@ class TestHookManagerOtherMethods:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestHookBuilder:
     """Test HookBuilder class (lines 116-207)."""
 
@@ -398,7 +393,6 @@ class TestHookBuilder:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestHookContext:
     """Test HookContext class (lines 210-234)."""
 
@@ -446,7 +440,6 @@ class TestHookContext:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestBuiltinHooks:
     """Test BuiltinHooks class (lines 237-288)."""
 
@@ -560,7 +553,6 @@ class TestBuiltinHooks:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestFactoryFunctions:
     """Test factory functions (lines 291-309)."""
 
@@ -597,7 +589,6 @@ class TestFactoryFunctions:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestHookIntegration:
     """Test hook system integration."""
 

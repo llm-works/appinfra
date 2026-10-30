@@ -33,7 +33,6 @@ from appinfra.app.errors import (
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestInfraAppError:
     """Test base InfraAppError class."""
 
@@ -52,7 +51,6 @@ class TestInfraAppError:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestUndefNameError:
     """Test UndefNameError class."""
 
@@ -85,7 +83,6 @@ class TestUndefNameError:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestUndefGroupError:
     """Test UndefGroupError class."""
 
@@ -106,7 +103,6 @@ class TestUndefGroupError:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestNoSubToolsError:
     """Test NoSubToolsError class."""
 
@@ -121,7 +117,6 @@ class TestNoSubToolsError:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestDupToolError:
     """Test DupToolError class."""
 
@@ -142,7 +137,6 @@ class TestDupToolError:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestMissingRunFuncError:
     """Test MissingRunFuncError class."""
 
@@ -160,7 +154,6 @@ class TestMissingRunFuncError:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestAttrNotFoundError:
     """Test AttrNotFoundError class."""
 
@@ -178,7 +171,6 @@ class TestAttrNotFoundError:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestToolRegistrationError:
     """Test ToolRegistrationError class."""
 
@@ -198,7 +190,6 @@ class TestToolRegistrationError:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestConfigError:
     """Test ConfigError class."""
 
@@ -215,7 +206,6 @@ class TestConfigError:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestLifecycleError:
     """Test LifecycleError class."""
 
@@ -232,7 +222,6 @@ class TestLifecycleError:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestAppError:
     """Test AppError class."""
 
@@ -249,7 +238,6 @@ class TestAppError:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestCommandError:
     """Test CommandError class."""
 
@@ -266,7 +254,6 @@ class TestCommandError:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestMissingLoggerError:
     """Test MissingLoggerError class."""
 
@@ -283,7 +270,6 @@ class TestMissingLoggerError:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestMissingParentError:
     """Test MissingParentError class."""
 

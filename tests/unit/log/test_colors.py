@@ -11,8 +11,6 @@ Tests key functionality including:
 
 import logging
 
-import pytest
-
 from appinfra.log.colors import ColorManager
 from appinfra.log.constants import LogConstants
 
@@ -21,7 +19,6 @@ from appinfra.log.constants import LogConstants
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestColorManager:
     """Test ColorManager class."""
 

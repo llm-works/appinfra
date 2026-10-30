@@ -33,7 +33,6 @@ def mock_root_logger():
     return logger
 
 
-@pytest.mark.integration
 class TestConfigWatcher:
     """Unit tests for ConfigWatcher."""
 
@@ -126,7 +125,6 @@ class TestConfigWatcher:
         assert result is watcher
 
 
-@pytest.mark.integration
 class TestConfigWatcherDebounce:
     """Tests for debounce behavior."""
 
@@ -163,7 +161,6 @@ class TestConfigWatcherDebounce:
         assert reload_count == 0  # All debounced
 
 
-@pytest.mark.integration
 @pytest.mark.usefixtures("clean_env")
 class TestConfigWatcherIntegration:
     """Integration tests for ConfigWatcher with LogConfigReloader."""
@@ -477,7 +474,6 @@ class TestConfigWatcherIntegration:
         assert reload_count == 1
 
 
-@pytest.mark.integration
 class TestConfigWatcherReloadPaths:
     """Tests for reload configuration paths."""
 
@@ -542,7 +538,6 @@ class TestConfigWatcherReloadPaths:
 # =============================================================================
 
 
-@pytest.mark.integration
 @pytest.mark.usefixtures("clean_env")
 class TestConfigWatcherIncludedFiles:
     """Tests for watching included configuration files."""
@@ -776,7 +771,6 @@ class TestConfigWatcherIncludedFiles:
 # =============================================================================
 
 
-@pytest.mark.integration
 @pytest.mark.usefixtures("clean_env")
 class TestConfigWatcherSectionCallbacks:
     """Tests for section-specific callbacks."""
@@ -973,7 +967,6 @@ app:
         assert results == []
 
 
-@pytest.mark.integration
 @pytest.mark.usefixtures("clean_env")
 class TestConfigWatcherStopBounded:
     """stop() returns even when the observer's own stop() never does."""
@@ -1212,7 +1205,6 @@ class TestConfigWatcherStopBounded:
         assert watcher._last_config_hash is None
 
 
-@pytest.mark.integration
 @pytest.mark.usefixtures("clean_env")
 class TestConfigWatcherMultiConfig:
     """Tests for multi-config file scenarios."""

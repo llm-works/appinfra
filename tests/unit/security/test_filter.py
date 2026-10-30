@@ -7,8 +7,6 @@ import logging
 
 import pytest
 
-pytestmark = pytest.mark.unit
-
 from appinfra.security.filter import SecretMaskingFilter, add_masking_filter_to_logger
 from appinfra.security.masking import SecretMasker, reset_masker
 

@@ -8,7 +8,6 @@ import pytest
 from appinfra.time.eta import ETA
 
 
-@pytest.mark.unit
 class TestETAInitialization:
     """Test ETA initialization."""
 
@@ -43,7 +42,6 @@ class TestETAInitialization:
         assert eta.remaining_secs() is None
 
 
-@pytest.mark.unit
 class TestETAPercent:
     """Test ETA percent method."""
 
@@ -71,7 +69,6 @@ class TestETAPercent:
         assert eta.percent() == 25.0
 
 
-@pytest.mark.unit
 class TestETARateCalculation:
     """Test ETA rate calculation."""
 
@@ -105,7 +102,6 @@ class TestETARateCalculation:
         assert eta.rate() == pytest.approx(250.0)
 
 
-@pytest.mark.unit
 class TestETARemaining:
     """Test ETA remaining_secs calculation."""
 
@@ -159,7 +155,6 @@ class TestETARemaining:
         assert remaining_75 == pytest.approx(2.0)
 
 
-@pytest.mark.unit
 class TestETAEdgeCases:
     """Test ETA edge cases."""
 

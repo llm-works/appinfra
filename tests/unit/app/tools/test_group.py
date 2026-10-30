@@ -24,7 +24,6 @@ from appinfra.app.tools.group import ToolGroup
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestToolGroupInit:
     """Test ToolGroup initialization (lines 21-34)."""
 
@@ -52,7 +51,6 @@ class TestToolGroupInit:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestLgProperty:
     """Test lg property (lines 36-39)."""
 
@@ -70,7 +68,6 @@ class TestLgProperty:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestSetTool:
     """Test _set_tool method (lines 41-43)."""
 
@@ -105,7 +102,6 @@ class TestSetTool:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestSetFunc:
     """Test _set_func method (lines 45-47)."""
 
@@ -125,7 +121,6 @@ class TestSetFunc:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestCheckNewTool:
     """Test _check_new_tool method (lines 49-63)."""
 
@@ -169,7 +164,6 @@ class TestCheckNewTool:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestSetDefault:
     """Test _set_default method (lines 65-70)."""
 
@@ -199,7 +193,6 @@ class TestSetDefault:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestAddTool:
     """Test add_tool method (lines 72-87)."""
 
@@ -269,7 +262,6 @@ class TestAddTool:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestGetTool:
     """Test get_tool method (lines 89-93)."""
 
@@ -301,7 +293,6 @@ class TestGetTool:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestAddToolArgs:
     """Test add_tool_args method (lines 95-102)."""
 
@@ -344,7 +335,6 @@ class TestAddToolArgs:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestAddCmd:
     """Test add_cmd method (lines 104-118)."""
 
@@ -413,7 +403,6 @@ class TestAddCmd:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestFinalizeArgs:
     """Test finalize_args method (lines 120-122)."""
 
@@ -433,7 +422,6 @@ class TestFinalizeArgs:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestIsToolSelected:
     """Test _is_tool_selected method (lines 124-133)."""
 
@@ -494,7 +482,6 @@ class TestIsToolSelected:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestRun:
     """Test run method (lines 135-158)."""
 
@@ -548,7 +535,6 @@ class TestRun:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestCheckRunTool:
     """Test _check_run_tool method (lines 160-172)."""
 
@@ -611,7 +597,6 @@ class TestCheckRunTool:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestGetServerRoutes:
     """Test get_server_routes method (lines 174-176)."""
 
@@ -638,7 +623,6 @@ class TestGetServerRoutes:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestToolGroupIntegration:
     """Test ToolGroup integration scenarios."""
 

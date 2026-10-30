@@ -23,7 +23,6 @@ from appinfra.app.errors import CommandError
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestCommandHandlerInit:
     """Test CommandHandler initialization."""
 
@@ -41,7 +40,6 @@ class TestCommandHandlerInit:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestSetupSubcommands:
     """Test CommandHandler.setup_subcommands method."""
 
@@ -142,7 +140,6 @@ class TestSetupSubcommands:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestExecuteCommand:
     """Test CommandHandler.execute_command method."""
 
@@ -195,7 +192,6 @@ class TestExecuteCommand:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestListCommands:
     """Test CommandHandler.list_commands method."""
 
@@ -272,7 +268,6 @@ class TestListCommands:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestCommandHandlerIntegration:
     """Integration tests for CommandHandler."""
 

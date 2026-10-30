@@ -31,7 +31,6 @@ def mock_db_interface():
     return db
 
 
-@pytest.mark.unit
 class TestDatabaseLoggingBuilderInit:
     """Test DatabaseLoggingBuilder initialization."""
 
@@ -43,7 +42,6 @@ class TestDatabaseLoggingBuilderInit:
         assert builder._handlers == []
 
 
-@pytest.mark.unit
 class TestWithDatabaseTable:
     """Test with_database_table method."""
 
@@ -89,7 +87,6 @@ class TestWithDatabaseTable:
         assert handler_config.critical_flush_enabled is True
 
 
-@pytest.mark.unit
 class TestWithAuditTable:
     """Test with_audit_table convenience method."""
 
@@ -115,7 +112,6 @@ class TestWithAuditTable:
         assert handler_config.flush_interval == 5.0
 
 
-@pytest.mark.unit
 class TestWithErrorTable:
     """Test with_error_table convenience method."""
 
@@ -141,7 +137,6 @@ class TestWithErrorTable:
         assert handler_config.flush_interval == 2.0
 
 
-@pytest.mark.unit
 class TestWithCustomTable:
     """Test with_custom_table method."""
 
@@ -160,7 +155,6 @@ class TestWithCustomTable:
         assert handler_config.data_mapper == custom_mapper
 
 
-@pytest.mark.unit
 class TestWithCriticalErrorFlush:
     """Test with_critical_error_flush configuration."""
 
@@ -181,7 +175,6 @@ class TestWithCriticalErrorFlush:
             assert handler_config.critical_flush_timeout == 3.0
 
 
-@pytest.mark.unit
 class TestBuild:
     """Test build method."""
 
@@ -213,7 +206,6 @@ class TestBuild:
         assert len(logger.handlers) >= 3
 
 
-@pytest.mark.unit
 class TestCreateDatabaseLogger:
     """Test create_database_logger utility function."""
 
@@ -225,7 +217,6 @@ class TestCreateDatabaseLogger:
         assert builder._name == "test"
 
 
-@pytest.mark.unit
 class TestLoadDatabaseLoggingConfig:
     """Test load_database_logging_config function."""
 
@@ -276,7 +267,6 @@ class TestLoadDatabaseLoggingConfig:
         assert result["critical_flush"]["enabled"] is True
 
 
-@pytest.mark.unit
 class TestCreateDatabaseLoggerFromConfig:
     """Test create_database_logger_from_config function."""
 

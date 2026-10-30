@@ -7,13 +7,10 @@ import io
 import logging
 import time
 
-import pytest
-
 from appinfra.log import LoggingBuilder
 from appinfra.time import delta_str
 
 
-@pytest.mark.performance
 class TestLoggingThroughput:
     def test_logging_overhead_with_varied_messages(self):
         """Measure pure logging overhead without I/O, with varied messages."""

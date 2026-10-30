@@ -97,7 +97,6 @@ def config_missing_url():
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestManagerInitialization:
     """Test Manager initialization and validation."""
 
@@ -135,7 +134,6 @@ class TestManagerInitialization:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestManagerSetup:
     """Test database connection setup."""
 
@@ -282,7 +280,6 @@ class TestManagerSetup:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestDatabaseAccess:
     """Test database connection retrieval."""
 
@@ -331,7 +328,6 @@ class TestDatabaseAccess:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestDatabaseListing:
     """Test database listing functionality."""
 
@@ -362,7 +358,6 @@ class TestDatabaseListing:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestErrorTracking:
     """Test setup error tracking."""
 
@@ -414,7 +409,6 @@ class TestErrorTracking:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestHealthCheck:
     """Test database health check functionality."""
 
@@ -497,7 +491,6 @@ class TestHealthCheck:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestConnectionManagement:
     """Test database connection lifecycle management."""
 
@@ -557,7 +550,6 @@ class TestConnectionManagement:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestStatistics:
     """Test database statistics functionality."""
 
@@ -643,7 +635,6 @@ class TestStatistics:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestConfigurationValidation:
     """Test database configuration validation."""
 
@@ -723,7 +714,6 @@ class TestConfigurationValidation:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestUnknownDBTypeException:
     """Test UnknownDBTypeException."""
 

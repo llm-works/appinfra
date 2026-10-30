@@ -57,7 +57,6 @@ class ConcreteInterfaceImpl(Interface):
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestInterface:
     """Test Interface abstract base class."""
 
@@ -102,7 +101,6 @@ class TestInterface:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestAbstractMethodCoverage:
     """Test abstract methods/properties to ensure full coverage."""
 
@@ -305,7 +303,6 @@ class TestAbstractMethodCoverage:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestIncompleteImplementation:
     """Test that incomplete implementations raise errors."""
 
@@ -335,7 +332,6 @@ class TestIncompleteImplementation:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestInterfaceIntegration:
     """Test Interface integration with real implementations."""
 

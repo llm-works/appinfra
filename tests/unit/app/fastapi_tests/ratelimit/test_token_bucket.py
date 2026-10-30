@@ -19,7 +19,6 @@ from appinfra.app.fastapi.ratelimit.token_bucket import (
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestExtractIpFromScope:
     """Test _extract_ip_from_scope helper."""
 
@@ -34,7 +33,6 @@ class TestExtractIpFromScope:
         assert _extract_ip_from_scope({"client": None}) == "unknown"
 
 
-@pytest.mark.unit
 class TestExtractIpWithHeader:
     """Test _extract_ip_with_header helper."""
 
@@ -90,7 +88,6 @@ class TestExtractIpWithHeader:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestTokenBucketInit:
     """Test TokenBucketLimiter initialization."""
 
@@ -146,7 +143,6 @@ class TestTokenBucketInit:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestIsAllowed:
     """Test rate limiting logic."""
 
@@ -234,7 +230,6 @@ class TestIsAllowed:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestExtractKey:
     """Test key extraction from ASGI scope."""
 
@@ -278,7 +273,6 @@ class TestExtractKey:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestCleanup:
     """Test stale entry cleanup."""
 
@@ -309,7 +303,6 @@ class TestCleanup:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestPickle:
     """Test pickle support for subprocess mode."""
 

@@ -21,8 +21,6 @@ from appinfra.cas import (
 )
 from appinfra.cas.objects import deserialize
 
-pytestmark = pytest.mark.unit
-
 ID = "a" * 64
 
 

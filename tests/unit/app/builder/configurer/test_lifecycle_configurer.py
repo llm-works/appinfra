@@ -19,7 +19,6 @@ from appinfra.app.builder.hook import HookBuilder
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestWithHook:
     """with_hook registers a callback on the builder's hook manager."""
 
@@ -55,7 +54,6 @@ class TestWithHook:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestWithHookBuilder:
     """with_hook_builder merges a HookBuilder's hooks with their metadata."""
 
@@ -92,7 +90,6 @@ class TestWithHookBuilder:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestKeywordForm:
     """Calling the block registers one callback per event and returns the builder."""
 
@@ -122,7 +119,6 @@ class TestKeywordForm:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestHooksReachApp:
     """The builder's hook manager is the one the app's lifecycle uses."""
 

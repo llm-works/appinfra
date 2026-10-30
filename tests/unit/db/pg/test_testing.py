@@ -9,8 +9,6 @@ Tests the utility functions and fixture factories without requiring a database.
 
 from unittest.mock import Mock
 
-import pytest
-
 from appinfra.db.pg.testing import (
     _create_extensions_in_db,
     _setup_database_with_lock,
@@ -18,7 +16,6 @@ from appinfra.db.pg.testing import (
 )
 
 
-@pytest.mark.unit
 class TestMakeMigrateFixture:
     """Test make_migrate_fixture factory."""
 
@@ -49,7 +46,6 @@ class TestMakeMigrateFixture:
         assert fixture1 is not fixture2
 
 
-@pytest.mark.unit
 class TestSetupDatabaseWithLock:
     """Test _setup_database_with_lock helper."""
 
@@ -65,7 +61,6 @@ class TestSetupDatabaseWithLock:
         _setup_database_with_lock(config)
 
 
-@pytest.mark.unit
 class TestCreateExtensionsInDb:
     """Test _create_extensions_in_db helper."""
 

@@ -14,7 +14,6 @@ from appinfra.db.pg.pg import PG
 from appinfra.dot_dict import DotDict
 
 
-@pytest.mark.unit
 class TestPGValidation:
     """Test PG class input validation."""
 
@@ -59,7 +58,6 @@ class TestPGValidation:
         validate_readonly_config(readonly=True, create_db=False)
 
 
-@pytest.mark.unit
 class TestPGHelperFunctions:
     """Test PG helper functions."""
 
@@ -119,7 +117,6 @@ class TestPGHelperFunctions:
         assert callable(session_cls)
 
 
-@pytest.mark.unit
 class TestPGErrorHandlers:
     """Test PG error handling functions."""
 
@@ -220,7 +217,6 @@ class TestPGErrorHandlers:
         assert exc_info.value.__cause__ is error
 
 
-@pytest.mark.unit
 class TestPGDictConfig:
     """Test PG class dict config normalization."""
 
@@ -307,7 +303,6 @@ class TestPGDictConfig:
         assert getattr(pg._cfg, "missing_key", "default") == "default"
 
 
-@pytest.mark.unit
 class TestPGLifecycleHooks:
     """Test PG lifecycle hook registration."""
 
@@ -410,7 +405,6 @@ class TestPGLifecycleHooks:
         assert seed_data in pg._after_migrate_hooks
 
 
-@pytest.mark.unit
 class TestPGExtensionValidation:
     """Test PG extension name validation."""
 
@@ -601,7 +595,6 @@ def mocked_pg(mocked_pg_factory):
     return mocked_pg_factory()
 
 
-@pytest.mark.unit
 class TestPGPropertiesAndDelegations:
     """Cover trivial property accessors and manager delegations."""
 
@@ -682,7 +675,6 @@ class TestPGPropertiesAndDelegations:
         mocked_pg._schema_mgr.setup_listeners.assert_called_once()
 
 
-@pytest.mark.unit
 class TestDisposeROEngine:
     """Cover the dispose_ro_engine helper used by the pg_connection_ro fixture.
 

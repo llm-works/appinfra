@@ -24,7 +24,6 @@ from appinfra.app.server.base import Server, get_server_routes, lock_helper
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestServerInit:
     """Test Server initialization (lines 29-38)."""
 
@@ -56,7 +55,6 @@ class TestServerInit:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestServerRoutesProperty:
     """Test server_routes property (lines 40-48)."""
 
@@ -72,7 +70,6 @@ class TestServerRoutesProperty:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestAddRoute:
     """Test add_route method (lines 50-63)."""
 
@@ -116,7 +113,6 @@ class TestAddRoute:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestAddMiddleware:
     """Test add_middleware method (lines 65-72)."""
 
@@ -148,7 +144,6 @@ class TestAddMiddleware:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestServerStart:
     """Test server_start method (lines 74-81)."""
 
@@ -168,7 +163,6 @@ class TestServerStart:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestServerTick:
     """Test server_tick method (lines 83-89)."""
 
@@ -187,7 +181,6 @@ class TestServerTick:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestHttpMethodHandlers:
     """Test HTTP method handler methods (lines 91-141)."""
 
@@ -233,7 +226,6 @@ class TestHttpMethodHandlers:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestHandleRequest:
     """Test handle_request method (lines 143-164)."""
 
@@ -317,7 +309,6 @@ class TestHandleRequest:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestLockHelper:
     """Test lock_helper context manager (lines 167-222)."""
 
@@ -430,7 +421,6 @@ class TestLockHelper:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestGetServerRoutes:
     """Test get_server_routes function (lines 225-249)."""
 
@@ -522,7 +512,6 @@ class TestGetServerRoutes:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestServerIntegration:
     """Test Server integration scenarios."""
 

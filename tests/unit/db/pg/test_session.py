@@ -47,7 +47,6 @@ def session_mgr(mock_session_cls, mock_logger):
     return SessionManager(mock_session_cls, mock_logger, auto_reconnect=True)
 
 
-@pytest.mark.unit
 class TestSessionManagerInit:
     """Test SessionManager initialization."""
 
@@ -67,7 +66,6 @@ class TestSessionManagerInit:
         assert mgr._auto_reconnect is False
 
 
-@pytest.mark.unit
 class TestCreateSessionWithRetry:
     """Test create_session_with_retry method."""
 
@@ -124,7 +122,6 @@ class TestCreateSessionWithRetry:
         assert "Session creation failed" in str(exc_info.value)
 
 
-@pytest.mark.unit
 class TestRetrySessionAfterReconnect:
     """Test _retry_session_after_reconnect method."""
 
@@ -160,7 +157,6 @@ class TestRetrySessionAfterReconnect:
         mock_logger.error.assert_called()
 
 
-@pytest.mark.unit
 class TestEnsureConnectionHealthy:
     """Test ensure_connection_healthy method."""
 
@@ -213,7 +209,6 @@ class TestEnsureConnectionHealthy:
         mock_reconnect_strategy.check_connection.assert_not_called()
 
 
-@pytest.mark.unit
 class TestSession:
     """Test session public method."""
 
@@ -238,7 +233,6 @@ class TestSession:
         mock_reconnect_strategy.check_connection.assert_called()
 
 
-@pytest.mark.unit
 class TestSetters:
     """Test setter methods."""
 

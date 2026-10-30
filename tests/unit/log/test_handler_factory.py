@@ -38,7 +38,6 @@ from appinfra.log.handler_factory import (
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestValidateHandlerType:
     """Test _validate_handler_type helper."""
 
@@ -59,7 +58,6 @@ class TestValidateHandlerType:
         assert "type" in str(exc_info.value)
 
 
-@pytest.mark.unit
 class TestIsHandlerEnabled:
     """Test _is_handler_enabled helper."""
 
@@ -82,7 +80,6 @@ class TestIsHandlerEnabled:
         assert _is_handler_enabled(config) is True
 
 
-@pytest.mark.unit
 class TestFilterMetadataFields:
     """Test _filter_metadata_fields helper."""
 
@@ -103,7 +100,6 @@ class TestFilterMetadataFields:
         assert result["format"] == "text"
 
 
-@pytest.mark.unit
 class TestResolveLogLevel:
     """Test _resolve_log_level helper."""
 
@@ -142,7 +138,6 @@ class TestResolveLogLevel:
         assert config["level"] == logging.WARNING
 
 
-@pytest.mark.unit
 class TestPreserveSpecialFields:
     """Test _preserve_special_fields helper."""
 
@@ -165,7 +160,6 @@ class TestPreserveSpecialFields:
         assert filtered_config["table"] == "logs"
 
 
-@pytest.mark.unit
 class TestConvertConsoleStream:
     """Test _convert_console_stream helper."""
 
@@ -202,7 +196,6 @@ class TestConvertConsoleStream:
         assert "stream" not in config
 
 
-@pytest.mark.unit
 class TestExtractJsonFormatOptions:
     """Test _extract_json_format_options helper."""
 
@@ -236,7 +229,6 @@ class TestExtractJsonFormatOptions:
         assert "pretty_print" not in config
 
 
-@pytest.mark.unit
 class TestSetHandlerName:
     """Test _set_handler_name helper."""
 
@@ -262,7 +254,6 @@ class TestSetHandlerName:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestCreateFileHandler:
     """Test _create_file_handler helper."""
 
@@ -295,7 +286,6 @@ class TestCreateFileHandler:
         assert "filename" in str(exc_info.value)
 
 
-@pytest.mark.unit
 class TestCreateRotatingFileHandler:
     """Test _create_rotating_file_handler helper."""
 
@@ -319,7 +309,6 @@ class TestCreateRotatingFileHandler:
         assert "filename" in str(exc_info.value)
 
 
-@pytest.mark.unit
 class TestCreateDatabaseHandler:
     """Test _create_database_handler helper."""
 
@@ -359,7 +348,6 @@ class TestCreateDatabaseHandler:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestHandlerFactoryGetHandlerClass:
     """Test HandlerFactory.get_handler_class method."""
 
@@ -388,7 +376,6 @@ class TestHandlerFactoryGetHandlerClass:
         assert "unknown" in str(exc_info.value)
 
 
-@pytest.mark.unit
 class TestHandlerFactoryGetSupportedTypes:
     """Test HandlerFactory.get_supported_types method."""
 
@@ -403,7 +390,6 @@ class TestHandlerFactoryGetSupportedTypes:
         assert "database" in result
 
 
-@pytest.mark.unit
 class TestHandlerFactoryIterSupportedTypes:
     """Test HandlerFactory.iter_supported_types method."""
 
@@ -415,7 +401,6 @@ class TestHandlerFactoryIterSupportedTypes:
         assert "file" in result
 
 
-@pytest.mark.unit
 class TestHandlerFactoryCreateHandlerConfig:
     """Test HandlerFactory.create_handler_config method."""
 
@@ -451,7 +436,6 @@ class TestHandlerFactoryCreateHandlerConfig:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestHandlerRegistryInit:
     """Test HandlerRegistry initialization."""
 
@@ -470,7 +454,6 @@ class TestHandlerRegistryInit:
         assert registry.handlers == []
 
 
-@pytest.mark.unit
 class TestHandlerRegistryAddHandler:
     """Test HandlerRegistry.add_handler_from_config method."""
 
@@ -501,7 +484,6 @@ class TestHandlerRegistryAddHandler:
             registry.add_handler_from_config(config)
 
 
-@pytest.mark.unit
 class TestHandlerRegistryGetHandler:
     """Test HandlerRegistry.get_handler method."""
 
@@ -532,7 +514,6 @@ class TestHandlerRegistryGetHandler:
         assert result is None
 
 
-@pytest.mark.unit
 class TestHandlerRegistryGetHandlerByName:
     """Test HandlerRegistry.get_handler_by_name method."""
 
@@ -558,7 +539,6 @@ class TestHandlerRegistryGetHandlerByName:
         assert result is None
 
 
-@pytest.mark.unit
 class TestHandlerRegistryGetEnabledHandlers:
     """Test HandlerRegistry.get_enabled_handlers method."""
 
@@ -573,7 +553,6 @@ class TestHandlerRegistryGetEnabledHandlers:
         assert len(result) == 2
 
 
-@pytest.mark.unit
 class TestHandlerRegistryIterHandlers:
     """Test HandlerRegistry.iter_handlers method."""
 
@@ -588,7 +567,6 @@ class TestHandlerRegistryIterHandlers:
         assert len(result) == 2
 
 
-@pytest.mark.unit
 class TestHandlerRegistryIterEnabledHandlers:
     """Test HandlerRegistry.iter_enabled_handlers method."""
 
@@ -602,7 +580,6 @@ class TestHandlerRegistryIterEnabledHandlers:
         assert len(result) == 1
 
 
-@pytest.mark.unit
 class TestHandlerRegistryLoadFromConfig:
     """Test HandlerRegistry.load_from_config method."""
 
@@ -644,7 +621,6 @@ class TestHandlerRegistryLoadFromConfig:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestHandlerFactoryIntegration:
     """Integration tests for handler factory."""
 

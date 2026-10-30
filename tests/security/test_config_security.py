@@ -17,7 +17,6 @@ from tests.security.payloads.traversal import (
 )
 
 
-@pytest.mark.security
 def test_config_file_size_limit(secure_temp_project: Path):
     """
     Verify MAX_CONFIG_SIZE_BYTES enforcement prevents DoS attacks.
@@ -67,7 +66,6 @@ def test_config_file_size_limit(secure_temp_project: Path):
         assert "bytes" in error_msg
 
 
-@pytest.mark.security
 @pytest.mark.parametrize("payload", ENV_VAR_INJECTION[:3])  # Test first 3 payloads
 def test_variable_substitution_injection(payload: str, secure_temp_project: Path):
     """
@@ -102,7 +100,6 @@ malicious: "{payload}"
     # The presence of the string is OK - it's execution that's bad
 
 
-@pytest.mark.security
 def test_variable_substitution_recursion(secure_temp_project: Path):
     """
     Verify circular variable references don't cause infinite loops.
@@ -134,7 +131,6 @@ var_b: "${var_a}"
     # Verify we didn't enter infinite loop (test completes)
 
 
-@pytest.mark.security
 @pytest.mark.parametrize("payload", ENV_VAR_INJECTION)
 def test_environment_variable_injection(
     payload: str, secure_temp_project: Path, clean_env
@@ -193,7 +189,6 @@ app:
             del os.environ[env_key]
 
 
-@pytest.mark.security
 @pytest.mark.parametrize(
     "env_value,expected_type,expected_value",
     [
@@ -261,7 +256,6 @@ test:
             del os.environ[env_key]
 
 
-@pytest.mark.security
 @pytest.mark.expected_skip  # Skips non-relative paths (absolute, Windows, etc.)
 @pytest.mark.parametrize("traversal_path", CLASSIC_TRAVERSAL + ABSOLUTE_PATH_ESCAPE)
 def test_config_path_resolution_traversal(
@@ -307,7 +301,6 @@ paths:
         assert resolved_path.is_absolute()
 
 
-@pytest.mark.security
 @pytest.mark.expected_skip  # Skips on Windows (no /etc/passwd)
 def test_config_path_symlink_attack(secure_temp_project: Path):
     """
@@ -358,7 +351,6 @@ paths:
     assert resolved.is_absolute()
 
 
-@pytest.mark.security
 @pytest.mark.parametrize(
     "null_byte_key", ["key\x00name", "section\x00field", "data\x00"]
 )
@@ -411,7 +403,6 @@ normal_key: "normal_value"
 
 
 # Positive test: Verify legitimate config operations work
-@pytest.mark.security
 def test_legitimate_config_operations(secure_temp_project: Path, clean_env):
     """
     Verify legitimate config operations are not blocked by security measures.

@@ -8,8 +8,6 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-import pytest
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PG_CONFIG_SH = REPO_ROOT / "appinfra" / "scripts" / "pg-config.sh"
 
@@ -43,7 +41,6 @@ def _run_expect_failure(
     )
 
 
-@pytest.mark.integration
 class TestPgConfigSh:
     """YAML → Make variable rendering."""
 

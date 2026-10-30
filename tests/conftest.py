@@ -40,6 +40,7 @@ pytest_plugins = [
     "tests.fixtures.pg_integration",
     "tests.fixtures.sqlite_integration",
     "tests.fixtures.logging",
+    "tests.fixtures.suite_markers",
 ]
 
 
@@ -166,23 +167,12 @@ def sample_config_dict() -> dict:
 
 def pytest_collection_modifyitems(config, items):
     """
-    Check that every test names its suite, and apply skip conditions.
+    Apply skip conditions (suite markers: tests/fixtures/suite_markers.py).
 
     Args:
         config: Pytest config object
         items: List of collected test items
     """
-    # A test without a suite marker would run in no suite: stop collection instead
-    suites = {"unit", "integration", "e2e", "security", "performance"}
-    unmarked = [
-        i.nodeid for i in items if not suites & {m.name for m in i.iter_markers()}
-    ]
-    if unmarked:
-        raise pytest.UsageError(
-            "tests without a suite marker (unit, integration, e2e, security or "
-            "performance): " + ", ".join(unmarked)
-        )
-
     # Skip @pytest.mark.require_pg tests with the uniform sentinel reason when
     # PG is unreachable. The terminal-summary banner consolidates them.
     status = config.stash.get(PG_STATUS_KEY, None)

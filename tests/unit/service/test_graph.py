@@ -28,7 +28,6 @@ class MockService(Service):
         pass
 
 
-@pytest.mark.unit
 class TestValidateDependencies:
     """Test validate_dependencies function."""
 
@@ -109,7 +108,6 @@ class TestValidateDependencies:
             validate_dependencies(services)
 
 
-@pytest.mark.unit
 class TestDependencyLevels:
     """Test dependency_levels function."""
 

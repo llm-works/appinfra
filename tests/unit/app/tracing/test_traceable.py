@@ -25,7 +25,6 @@ from appinfra.app.tracing.traceable import Traceable
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestTraceableInit:
     """Test Traceable initialization."""
 
@@ -48,7 +47,6 @@ class TestTraceableInit:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestParentProperty:
     """Test Traceable.parent property."""
 
@@ -71,7 +69,6 @@ class TestParentProperty:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestSetParent:
     """Test Traceable.set_parent method."""
 
@@ -118,7 +115,6 @@ class TestSetParent:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestTraceAttr:
     """Test Traceable.trace_attr method."""
 
@@ -245,7 +241,6 @@ class TestTraceAttr:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestTraceRoot:
     """Test Traceable.trace_root method."""
 
@@ -295,7 +290,6 @@ class TestTraceRoot:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestHasAttr:
     """Test Traceable.has_attr method."""
 
@@ -326,7 +320,6 @@ class TestHasAttr:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestGetAttrOrDefault:
     """Test Traceable.get_attr_or_default method."""
 
@@ -371,7 +364,6 @@ class TestGetAttrOrDefault:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestTraceableIntegration:
     """Integration tests for Traceable."""
 

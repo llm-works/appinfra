@@ -24,7 +24,6 @@ from appinfra.db.pg.pg import PG
 pytestmark = pytest.mark.require_pg
 
 
-@pytest.mark.integration
 class TestCreateDbOnSession:
     """Verify create_db=True works on the session() path without migrate()."""
 

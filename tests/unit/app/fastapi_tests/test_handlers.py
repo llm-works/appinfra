@@ -57,7 +57,6 @@ class PicklableHandlerWithLoggerAttr:
         pass
 
 
-@pytest.mark.unit
 class TestLoggerInjectableProtocol:
     """Tests for LoggerInjectable protocol."""
 
@@ -87,7 +86,6 @@ class TestLoggerInjectableProtocol:
         assert not isinstance(obj, LoggerInjectable)
 
 
-@pytest.mark.unit
 class TestExceptionHandler:
     """Tests for ExceptionHandler base class."""
 
@@ -127,7 +125,6 @@ class TestExceptionHandler:
         assert handler._lg is mock_lg
 
 
-@pytest.mark.unit
 class TestExceptionHandlerPickling:
     """Tests for ExceptionHandler pickling behavior."""
 
@@ -169,7 +166,6 @@ class TestExceptionHandlerPickling:
         assert unpickled._lg is None  # Logger still stripped
 
 
-@pytest.mark.unit
 class TestExceptionHandlerCall:
     """Tests for ExceptionHandler.__call__."""
 
@@ -209,7 +205,6 @@ class TestExceptionHandlerCall:
         assert handler.handled is True
 
 
-@pytest.mark.unit
 class TestFastAPIAdapterInjectSubprocessLogger:
     """Tests for FastAPIAdapter.inject_subprocess_logger."""
 
@@ -276,7 +271,6 @@ class TestFastAPIAdapterInjectSubprocessLogger:
         assert handler2._lg is new_lg
 
 
-@pytest.mark.unit
 class TestServerBuilderValidation:
     """Tests for ServerBuilder subprocess handler validation."""
 

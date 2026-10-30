@@ -58,7 +58,6 @@ def run_inner(pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch):
     return run
 
 
-@pytest.mark.integration
 @pytest.mark.parametrize("filterwarnings", ["error", "default"])
 @pytest.mark.parametrize("workers", [[], ["-n", "2"]], ids=["in-process", "xdist"])
 def test_every_warning_at_exit_is_printed(
@@ -73,7 +72,6 @@ def test_every_warning_at_exit_is_printed(
         assert warning in err
 
 
-@pytest.mark.integration
 def test_exit_deprecation_is_silent_without_the_plugin(run_inner) -> None:
     """At exit Python's default filters apply, which ignore a DeprecationWarning outside
     __main__: the plugin is what shows it. (An unclosed file is no control: Python 3.14 reports
@@ -84,7 +82,6 @@ def test_exit_deprecation_is_silent_without_the_plugin(run_inner) -> None:
     assert _DEPRECATION not in result.stderr.str()
 
 
-@pytest.mark.integration
 @pytest.mark.parametrize(
     ("filterwarnings", "mode"),
     [

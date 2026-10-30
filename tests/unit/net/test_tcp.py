@@ -81,7 +81,6 @@ def mock_ticker_handler():
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestServerClass:
     """Test _Server internal class."""
 
@@ -130,7 +129,6 @@ class TestServerClass:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestHelperFunctions:
     """Test module-level helper functions."""
 
@@ -202,7 +200,6 @@ class TestHelperFunctions:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestRunHTTPServerWithCleanup:
     """Test HTTP server execution with cleanup."""
 
@@ -273,7 +270,6 @@ class TestRunHTTPServerWithCleanup:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestServerInitialization:
     """Test Server class initialization."""
 
@@ -331,7 +327,6 @@ class TestServerInitialization:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestServerRunInProcess:
     """Test Server.run() in single-process mode."""
 
@@ -378,7 +373,6 @@ class TestServerRunInProcess:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestServerRunMultiprocessing:
     """Test Server.run() in multiprocessing mode."""
 
@@ -524,7 +518,6 @@ class TestServerRunMultiprocessing:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestRequestHandler:
     """Test HTTP RequestHandler."""
 
@@ -616,7 +609,6 @@ class TestRequestHandler:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestIntegrationScenarios:
     """Test real-world server scenarios."""
 
@@ -639,7 +631,6 @@ class TestIntegrationScenarios:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestEdgeCases:
     """Test edge cases and boundary conditions."""
 

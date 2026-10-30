@@ -80,7 +80,6 @@ def lg():
     return mock_lg
 
 
-@pytest.mark.unit
 class TestManagerRegistration:
     """Test service registration."""
 
@@ -165,7 +164,6 @@ class TestManagerRegistration:
             mgr.get("nonexistent")
 
 
-@pytest.mark.unit
 class TestManagerLifecycle:
     """Test service lifecycle management."""
 
@@ -320,7 +318,6 @@ class TestManagerLifecycle:
         mgr.stop()
 
 
-@pytest.mark.unit
 class TestManagerIsRunning:
     """Test is_running method."""
 
@@ -356,7 +353,6 @@ class TestManagerIsRunning:
         assert not mgr.is_running("nonexistent")
 
 
-@pytest.mark.unit
 class TestManagerCheckAll:
     """Test check_all method."""
 
@@ -396,7 +392,6 @@ class UnhealthyService(Service):
         return False  # Never healthy
 
 
-@pytest.mark.unit
 class TestManagerHealthCheckFailure:
     """Test health check failure handling."""
 

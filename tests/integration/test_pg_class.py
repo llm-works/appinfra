@@ -21,7 +21,6 @@ from sqlalchemy.orm import declarative_base
 pytestmark = pytest.mark.require_pg
 
 
-@pytest.mark.integration
 class TestPGConnection:
     """Test PG connection and session management."""
 
@@ -72,7 +71,6 @@ class TestPGConnection:
             assert row[0] == "read_test"
 
 
-@pytest.mark.integration
 class TestPGHealthCheck:
     """Test PG health check functionality."""
 
@@ -94,7 +92,6 @@ class TestPGHealthCheck:
         assert result["response_time_ms"] > 0
 
 
-@pytest.mark.integration
 class TestPGPoolStatus:
     """Test connection pool status monitoring."""
 
@@ -110,7 +107,6 @@ class TestPGPoolStatus:
         assert "total_connections" in status
 
 
-@pytest.mark.integration
 class TestPGQueryExecution:
     """Test query execution and transaction handling."""
 
@@ -216,7 +212,6 @@ class TestPGQueryExecution:
         assert count == 1
 
 
-@pytest.mark.integration
 class TestPGMigration:
     """Test database migration functionality."""
 
@@ -353,7 +348,6 @@ class TestPGMigration:
         assert execution_order == ["before", "after"]
 
 
-@pytest.mark.integration
 class TestPGConfigValidation:
     """Test configuration validation."""
 
@@ -381,7 +375,6 @@ class TestPGConfigValidation:
         assert isinstance(engine, sqlalchemy.engine.Engine)
 
 
-@pytest.mark.integration
 class TestPGComplexQueries:
     """Test complex query scenarios."""
 

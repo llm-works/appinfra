@@ -50,7 +50,6 @@ class ConcreteDictImpl(DictInterface):
         return len(self._data)
 
 
-@pytest.mark.unit
 class TestDictInterface:
     """Test DictInterface abstract base class."""
 
@@ -159,7 +158,6 @@ class TestDictInterface:
         assert list(impl.items()) == []
 
 
-@pytest.mark.unit
 class TestIncompleteImplementation:
     """Test that incomplete implementations raise errors."""
 
@@ -202,7 +200,6 @@ class TestIncompleteImplementation:
             IncompleteImpl()
 
 
-@pytest.mark.unit
 class TestAbstractMethodCoverage:
     """Test abstract methods to ensure full coverage."""
 
@@ -431,7 +428,6 @@ class TestAbstractMethodCoverage:
             PartialImpl()
 
 
-@pytest.mark.unit
 class TestDictInterfaceIntegration:
     """Test DictInterface in realistic scenarios."""
 

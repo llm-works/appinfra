@@ -8,7 +8,6 @@ import pytest
 from appinfra.app.fastapi.ratelimit.parsing import parse_rate
 
 
-@pytest.mark.unit
 class TestParseRate:
     """Test parse_rate function."""
 

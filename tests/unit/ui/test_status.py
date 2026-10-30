@@ -10,8 +10,6 @@ from unittest.mock import patch
 
 import pytest
 
-pytestmark = pytest.mark.unit
-
 from appinfra.ui import status
 
 

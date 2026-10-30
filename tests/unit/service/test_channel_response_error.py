@@ -46,7 +46,6 @@ SYNC_FACTORIES = [QueueChannelFactory, ProcessQueueChannelFactory]
 ASYNC_FACTORIES = [AsyncQueueChannelFactory, AsyncProcessQueueChannelFactory]
 
 
-@pytest.mark.unit
 class TestValidateResponse:
     """validate_response() raises ChannelResponseError carrying the message."""
 
@@ -63,7 +62,6 @@ class TestValidateResponse:
             validate_response(Message(error="fail"))
 
 
-@pytest.mark.unit
 @pytest.mark.parametrize("factory", SYNC_FACTORIES)
 class TestSyncSubmit:
     """BufferedChannel.submit() over queue.Queue / mp.Queue."""
@@ -98,7 +96,6 @@ async def _send(channel: Any, message: Any) -> None:
         await result
 
 
-@pytest.mark.unit
 @pytest.mark.parametrize("factory", ASYNC_FACTORIES)
 class TestAsyncSubmit:
     """AsyncBufferedChannel.submit() and submit_stream()."""

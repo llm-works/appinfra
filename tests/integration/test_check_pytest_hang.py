@@ -47,7 +47,6 @@ def run_with_plugin(pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch):
     return run
 
 
-@pytest.mark.integration
 def test_long_test_gets_a_report_with_stacks_and_a_closing_line(
     run_with_plugin,
 ) -> None:
@@ -62,7 +61,6 @@ def test_long_test_gets_a_report_with_stacks_and_a_closing_line(
     assert "test_fast" not in err  # a test under the threshold gets nothing
 
 
-@pytest.mark.integration
 def test_report_starts_on_its_own_line(run_with_plugin) -> None:
     """pytest's progress output leaves the line open; the report must not continue it."""
     result = run_with_plugin("0.3")
@@ -119,7 +117,6 @@ def pytest_configure(config):
 """
 
 
-@pytest.mark.integration
 def test_thread_left_running_is_reported_with_its_test(
     run_with_plugin, pytester: pytest.Pytester
 ) -> None:
@@ -137,7 +134,6 @@ def test_thread_left_running_is_reported_with_its_test(
     assert "cleaned-up" not in err  # nor one a config cleanup stops before the report
 
 
-@pytest.mark.integration
 def test_nothing_without_the_variable(run_with_plugin) -> None:
     for seconds in (None, "0"):
         result = run_with_plugin(seconds)

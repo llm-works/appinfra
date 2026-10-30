@@ -61,7 +61,6 @@ def cleanup_public_object(pg_connection):
             session.execute(text(f'DROP TABLE IF EXISTS public."{name}" CASCADE'))
 
 
-@pytest.mark.integration
 class TestExistenceChecks:
     """table_exists / index_exists against a real catalog."""
 
@@ -175,7 +174,6 @@ class TestExistenceChecks:
             assert index_exists(conn, f"{idx_name}_missing") is False
 
 
-@pytest.mark.integration
 class TestEnsureObjectIdempotent:
     """ensure_object twice on the same key creates one object."""
 
@@ -217,7 +215,6 @@ class TestEnsureObjectIdempotent:
         assert create_calls == 1
 
 
-@pytest.mark.integration
 class TestEnsureObjectConcurrent:
     """Concurrent workers on the same key produce one CREATE."""
 

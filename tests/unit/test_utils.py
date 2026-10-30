@@ -9,8 +9,6 @@ Tests key utility features including:
 - Type checking
 """
 
-import pytest
-
 from appinfra.utils import is_int, pretty
 
 # =============================================================================
@@ -18,7 +16,6 @@ from appinfra.utils import is_int, pretty
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestPrettyFunction:
     """Test pretty() formatting function."""
 
@@ -64,7 +61,6 @@ class TestPrettyFunction:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestIsIntFunction:
     """Test is_int() type checking function."""
 
@@ -121,7 +117,6 @@ class TestIsIntFunction:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestEdgeCases:
     """Test edge cases for utility functions."""
 

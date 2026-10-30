@@ -49,7 +49,6 @@ def log_record():
     )
 
 
-@pytest.mark.unit
 class TestMPQueueHandlerInit:
     """Test MPQueueHandler initialization."""
 
@@ -63,7 +62,6 @@ class TestMPQueueHandlerInit:
         assert isinstance(handler, logging.Handler)
 
 
-@pytest.mark.unit
 class TestMPQueueHandlerEmit:
     """Test MPQueueHandler.emit() method."""
 
@@ -103,7 +101,6 @@ class TestMPQueueHandlerEmit:
         assert result.args is None
 
 
-@pytest.mark.unit
 class TestMPQueueHandlerPrepare:
     """Test MPQueueHandler._prepare() method."""
 
@@ -263,7 +260,6 @@ class TestMPQueueHandlerPrepare:
         pickle.loads(pickled)
 
 
-@pytest.mark.unit
 class TestMPQueueHandlerFormatException:
     """Test exception formatting methods."""
 
@@ -306,7 +302,6 @@ class TestMPQueueHandlerFormatException:
         assert "Traceback" not in result
 
 
-@pytest.mark.unit
 class TestMPQueueHandlerClose:
     """Test MPQueueHandler.close() method."""
 
@@ -316,7 +311,6 @@ class TestMPQueueHandlerClose:
         # Should not raise
 
 
-@pytest.mark.unit
 class TestLoggerWithQueue:
     """Test Logger.with_queue() class method."""
 
@@ -357,7 +351,6 @@ class TestLoggerWithQueue:
         assert record.msg == "test message"
 
 
-@pytest.mark.unit
 class TestMPQueueHandlerIntegration:
     """Integration tests for MPQueueHandler."""
 
@@ -404,7 +397,6 @@ class TestMPQueueHandlerIntegration:
         assert "missing key" in record.exc_text
 
 
-@pytest.mark.unit
 class TestLoggerQueueConfig:
     """Test Logger.queue_config() and Logger.from_queue_config() methods."""
 

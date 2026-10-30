@@ -212,7 +212,6 @@ def _build_server_with_shutdown_callback(port: int, marker_path: Path) -> Any:
     )
 
 
-@pytest.mark.integration
 class TestSubprocessExit:
     """The uvicorn subprocess exits promptly when told to or orphaned."""
 

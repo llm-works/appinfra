@@ -51,7 +51,6 @@ def log_record():
     )
 
 
-@pytest.mark.unit
 class TestLogQueueListenerInit:
     """Test LogQueueListener initialization."""
 
@@ -71,7 +70,6 @@ class TestLogQueueListenerInit:
         assert listener._respect_handler_level is False
 
 
-@pytest.mark.unit
 class TestLogQueueListenerStartStop:
     """Test start() and stop() methods."""
 
@@ -113,7 +111,6 @@ class TestLogQueueListenerStartStop:
         listener.stop()  # Should not raise
 
 
-@pytest.mark.unit
 class TestLogQueueListenerIsAlive:
     """Test is_alive property."""
 
@@ -138,7 +135,6 @@ class TestLogQueueListenerIsAlive:
         assert not listener.is_alive
 
 
-@pytest.mark.unit
 class TestLogQueueListenerHandleRecord:
     """Test _handle_record() method."""
 
@@ -203,7 +199,6 @@ class TestLogQueueListenerHandleRecord:
         handler.handleError.assert_called_once_with(log_record)
 
 
-@pytest.mark.unit
 class TestLogQueueListenerErrorHandling:
     """Test error handling in LogQueueListener."""
 
@@ -256,7 +251,6 @@ class TestLogQueueListenerErrorHandling:
             listener.stop()
 
 
-@pytest.mark.unit
 class TestLogQueueListenerIntegration:
     """Integration tests for LogQueueListener."""
 

@@ -13,8 +13,6 @@ Tests the @deprecated decorator including:
 
 import warnings
 
-import pytest
-
 from appinfra.deprecation import deprecated
 
 # =============================================================================
@@ -22,7 +20,6 @@ from appinfra.deprecation import deprecated
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestDeprecatedBasic:
     """Test basic @deprecated decorator functionality."""
 
@@ -105,7 +102,6 @@ class TestDeprecatedBasic:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestDeprecatedMetadata:
     """Test that @deprecated preserves function metadata."""
 
@@ -143,7 +139,6 @@ class TestDeprecatedMetadata:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestDeprecatedArgsReturn:
     """Test that @deprecated correctly passes arguments and return values."""
 
@@ -197,7 +192,6 @@ class TestDeprecatedArgsReturn:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestDeprecatedMethods:
     """Test @deprecated on class methods."""
 
@@ -259,7 +253,6 @@ class TestDeprecatedMethods:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestDeprecatedStackLevel:
     """Test that warning points to caller, not decorator."""
 
@@ -286,7 +279,6 @@ class TestDeprecatedStackLevel:
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestDeprecatedMultipleCalls:
     """Test behavior with multiple calls to deprecated function."""
 
