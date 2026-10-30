@@ -11,7 +11,7 @@ from __future__ import annotations
 import signal
 from pathlib import Path
 from types import FrameType
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from ..config import ConfigWatcher
@@ -67,6 +67,8 @@ class SubprocessContext:
         self._origin = Path(str(origin)).expanduser().resolve() if origin else None
         self._running = True
         self._watcher: ConfigWatcher | None = None
+        # Handlers __enter__ replaced, restored by __exit__
+        self._previous_handlers: dict[signal.Signals, Any] = {}
 
     @property
     def running(self) -> bool:
@@ -88,8 +90,10 @@ class SubprocessContext:
     def __enter__(self) -> SubprocessContext:
         """Set up subprocess infrastructure."""
         if self._handle_signals:
-            signal.signal(signal.SIGTERM, self._handle_stop_signal)
-            signal.signal(signal.SIGINT, self._handle_stop_signal)
+            for signum in (signal.SIGTERM, signal.SIGINT):
+                self._previous_handlers[signum] = signal.signal(
+                    signum, self._handle_stop_signal
+                )
 
         if self._config_files:
             self._start_config_watcher()
@@ -97,7 +101,18 @@ class SubprocessContext:
         return self
 
     def __exit__(self, *args: object) -> None:
-        """Clean up subprocess infrastructure."""
+        """Clean up subprocess infrastructure.
+
+        Puts back the SIGTERM and SIGINT handlers __enter__ replaced. Without that,
+        a reused worker process keeps turning those signals into a stop request for
+        a context that has already ended, and SIGTERM no longer ends the process.
+        """
+        for signum, handler in self._previous_handlers.items():
+            # None: a handler not installed from Python, which cannot be put back
+            if handler is not None:
+                signal.signal(signum, handler)
+        self._previous_handlers.clear()
+
         if self._watcher:
             try:
                 self._watcher.stop()

@@ -15,6 +15,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from ... import time
+from ...alarm import alarm_timeout
 from ...log import LoggerFactory
 from ...log.handler_factory import HandlerRegistry
 from ..errors import LifecycleError
@@ -363,35 +364,26 @@ class LifecycleManager:
             phase_name: Name of the phase for logging
             phase_func: Function to execute for this phase
         """
-        import signal
-
         assert (
             self._lifecycle_logger is not None
         )  # Only called from shutdown after init check
 
         timeout = self._shutdown_timeouts.get(phase_name, 5.0)
 
-        def timeout_handler(signum: int, frame: Any) -> None:
-            raise TimeoutError(
+        def expired() -> TimeoutError:
+            return TimeoutError(
                 f"Shutdown phase '{phase_name}' exceeded timeout of {timeout}s"
             )
 
-        # Set alarm for timeout
-        old_handler = signal.signal(signal.SIGALRM, timeout_handler)
-        signal.alarm(int(timeout))
-
         try:
-            phase_func()
+            with alarm_timeout(timeout, expired):
+                phase_func()
         except TimeoutError as e:
             self._lifecycle_logger.warning("shutdown timeout", extra={"exception": e})
         except Exception as e:
             self._lifecycle_logger.error(
                 "shutdown phase failed", extra={"phase": phase_name, "exception": e}
             )
-        finally:
-            # Cancel alarm and restore handler
-            signal.alarm(0)
-            signal.signal(signal.SIGALRM, old_handler)
 
     def _trigger_startup_hooks(self) -> None:
         """Trigger startup hooks."""

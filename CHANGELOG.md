@@ -136,6 +136,13 @@ earlier: pre-release builds (0.13.1.devN) would not satisfy it. -->
   `make_migrate_fixture`) close their pooled connections at teardown; psycopg used to report each
   one with a `ResourceWarning` at garbage collection.
 - `Manager.close_all()` also closes the connections of each `PG`'s cached `ScopedPG`s.
+- `SubprocessContext` puts back the SIGTERM and SIGINT handlers it replaced; a reused worker
+  process that had run a task in one no longer ended on SIGTERM.
+- The database log handler writes a critical record logged from a worker thread; it used to lose
+  it. Its critical-flush timeout and the shutdown phase timeouts honour sub-second values.
+- `safe_compile`, `safe_match`, `safe_search` and `safe_findall` work from a worker thread, without
+  a timeout, and honour a sub-second timeout. Off the main thread they failed with
+  `UnboundLocalError`, and they left their own SIGALRM handler installed.
 
 ## [0.13.0] - 2026-10-25
 

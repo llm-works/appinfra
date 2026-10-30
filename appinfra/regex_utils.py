@@ -35,9 +35,11 @@ Example Usage:
 
 import re
 import signal
-from contextlib import contextmanager
+from contextlib import AbstractContextManager
 from re import Match, Pattern
 from typing import Any
+
+from .alarm import alarm_timeout
 
 
 class RegexTimeoutError(TimeoutError):
@@ -88,10 +90,14 @@ def _validate_pattern_complexity(pattern: str) -> None:
             )
 
 
-@contextmanager
-def _timeout_context(timeout_seconds: float) -> Any:
+def _timeout_context(
+    timeout_seconds: float,
+) -> AbstractContextManager[None]:
     """
-    Context manager for timing out operations (Unix-only).
+    Context manager for timing out operations.
+
+    The timeout applies on the main thread of a Unix process only; elsewhere the
+    operation runs without one (see alarm_timeout).
 
     Args:
         timeout_seconds: Maximum time to allow
@@ -99,20 +105,12 @@ def _timeout_context(timeout_seconds: float) -> Any:
     Raises:
         RegexTimeoutError: If operation exceeds timeout
     """
-
-    def timeout_handler(signum: int, frame: Any) -> None:
-        raise RegexTimeoutError(f"Regex operation exceeded {timeout_seconds}s timeout")
-
-    # Note: signal.alarm only works on Unix systems
-    # On Windows, this is a no-op and timeout protection is disabled
-    try:
-        old_handler = signal.signal(signal.SIGALRM, timeout_handler)
-        signal.alarm(int(timeout_seconds) if timeout_seconds >= 1 else 1)
-        yield
-    finally:
-        signal.alarm(0)
-        if old_handler:
-            signal.signal(signal.SIGALRM, old_handler)
+    return alarm_timeout(
+        timeout_seconds,
+        lambda: RegexTimeoutError(
+            f"Regex operation exceeded {timeout_seconds}s timeout"
+        ),
+    )
 
 
 def safe_compile(
