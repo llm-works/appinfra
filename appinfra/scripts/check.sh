@@ -181,9 +181,12 @@ PYTEST_PLUGINS="-p pytest_hang -p pytest_exit_warnings"
 # own "warning:" line): strict when the project's pytest filterwarnings has a bare "error" (every
 # warning an error), so the check fails; warn otherwise, so the check passes with a warning.
 # Asked once from pytest_exit_warnings, in a run that only reads the configuration.
-WARNINGS_MODE=$({ cd "$PROJECT_ROOT" && eval "${PYTEST_PLUGIN_PATH}${PYTHON} -m pytest -p pytest_exit_warnings --collect-only -q --noconftest -p no:cacheprovider --ignore-glob='*'" 2>&1 || true; } \
+WARNINGS_MODE=$({ cd "$PROJECT_ROOT" && eval "COVERAGE_FILE=${STATUS_DIR}/probe.coverage ${PYTEST_PLUGIN_PATH}${PYTHON} -m pytest -p pytest_exit_warnings --collect-only -q --noconftest --ignore-glob='*'" 2>&1 || true; } \
     | sed -nE 's/^=== exit warnings: (strict|warn) ===$/\1/p' | tail -1)
-WARNINGS_MODE="${WARNINGS_MODE:-warn}"
+if [ -z "$WARNINGS_MODE" ]; then
+    echo "check.sh: pytest could not read the project's configuration (run: ${PYTHON} -m pytest --collect-only)" >&2
+    exit 1
+fi
 
 # Terminal width for fit_slow_row, read here because stdout is the terminal only at the top
 # level: inside $(...) it is a pipe. Empty without a terminal (CI), where rows are not cut.
