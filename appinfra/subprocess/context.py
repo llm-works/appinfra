@@ -106,11 +106,11 @@ class SubprocessContext:
         Puts back the SIGTERM and SIGINT handlers __enter__ replaced. Without that,
         a reused worker process keeps turning those signals into a stop request for
         a context that has already ended, and SIGTERM no longer ends the process.
+        A handler not installed from Python (reported as None) cannot be put back;
+        the default action takes its place.
         """
         for signum, handler in self._previous_handlers.items():
-            # None: a handler not installed from Python, which cannot be put back
-            if handler is not None:
-                signal.signal(signum, handler)
+            signal.signal(signum, signal.SIG_DFL if handler is None else handler)
         self._previous_handlers.clear()
 
         if self._watcher:

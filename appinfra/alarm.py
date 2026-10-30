@@ -31,13 +31,18 @@ def alarm_timeout(
 
     The block runs without a timeout when ``seconds`` is not positive, off the main
     thread, where Python cannot set a signal handler, on platforms without SIGALRM,
-    and when a timer is already armed: the outer deadline then applies, and its
-    timer and handler are left untouched.
+    when a timer is already armed (the outer deadline then applies, and its timer
+    and handler are left untouched), and when the current SIGALRM handler was not
+    installed from Python (``getsignal`` returns None): it could not be put back.
 
-    The previous SIGALRM handler is restored on exit. A handler not installed from
-    Python (``getsignal`` returns None) cannot be restored and is left alone.
+    The previous SIGALRM handler is restored on exit.
     """
-    if seconds <= 0 or not _can_arm() or signal.getitimer(signal.ITIMER_REAL)[0] > 0:
+    if (
+        seconds <= 0
+        or not _can_arm()
+        or signal.getitimer(signal.ITIMER_REAL)[0] > 0
+        or signal.getsignal(signal.SIGALRM) is None
+    ):
         yield
         return
 
@@ -50,5 +55,4 @@ def alarm_timeout(
         yield
     finally:
         signal.setitimer(signal.ITIMER_REAL, 0)
-        if previous is not None:
-            signal.signal(signal.SIGALRM, previous)
+        signal.signal(signal.SIGALRM, previous)

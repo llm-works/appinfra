@@ -97,6 +97,24 @@ def test_restores_the_default_handler() -> None:
     assert signal.getsignal(signal.SIGALRM) == signal.SIG_DFL
 
 
+def test_leaves_a_handler_not_installed_from_python_alone(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """getsignal returns None for a handler installed from C. It could not be put
+    back, so the block runs without a timeout and the handler is not replaced."""
+    real_getsignal = signal.getsignal
+    signal.signal(signal.SIGALRM, _sentinel_handler)
+    monkeypatch.setattr(
+        signal,
+        "getsignal",
+        lambda signum: None if signum == signal.SIGALRM else real_getsignal(signum),
+    )
+
+    with alarm_timeout(5.0, _ExpiredError):
+        assert real_getsignal(signal.SIGALRM) is _sentinel_handler
+        assert signal.getitimer(signal.ITIMER_REAL) == (0.0, 0.0)
+
+
 def test_runs_the_block_without_a_timeout_off_the_main_thread() -> None:
     signal.signal(signal.SIGALRM, _sentinel_handler)
     seen: dict[str, Any] = {}

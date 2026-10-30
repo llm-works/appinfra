@@ -291,6 +291,40 @@ class TestSubprocessContextHotReload:
                 signal.signal(signum, handler)
             lg.handlers.clear()
 
+    def test_subprocess_context_restores_default_for_handler_not_from_python(self):
+        """A previous handler installed from C (reported as None) cannot be put back;
+        the default action is restored instead, so SIGTERM still ends the process."""
+        import signal
+        from unittest.mock import patch
+
+        from appinfra.log import LoggerFactory
+        from appinfra.log.config import LogConfig
+        from appinfra.subprocess import SubprocessContext
+
+        lg = LoggerFactory.create_root(LogConfig.from_params(level="info", location=0))
+        signals = (signal.SIGTERM, signal.SIGINT)
+        before = {s: signal.getsignal(s) for s in signals}
+        real_signal = signal.signal
+
+        def reports_c_handler(signum, handler):
+            """Install the handler; report no previous one, as for a C handler."""
+            real_signal(signum, handler)
+
+        try:
+            with (
+                patch.object(signal, "signal", side_effect=reports_c_handler),
+                SubprocessContext(lg=lg),
+            ):
+                pass
+
+            assert {s: signal.getsignal(s) for s in signals} == dict.fromkeys(
+                signals, signal.SIG_DFL
+            )
+        finally:
+            for signum, handler in before.items():
+                signal.signal(signum, handler)
+            lg.handlers.clear()
+
     def test_reused_worker_ends_on_sigterm_after_a_task(self):
         """A worker that ran a task in a SubprocessContext still dies on SIGTERM
         while it waits for the next task."""
