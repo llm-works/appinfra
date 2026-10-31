@@ -57,6 +57,7 @@ make uninstall
 **Wheel artifact:** `make install` also drops the built wheel into
 `$VENV/share/appinfra/wheels/` for each env it installs to (byte-identical to what's installed).
 Container builds and ops handoff can pull from there instead of the dev checkout's `dist/`.
+In a virtualenv a missing `share/` is created; any other prefix must already have one.
 
 Alternatively, install directly with pip:
 
