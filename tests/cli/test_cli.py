@@ -33,7 +33,7 @@ class TestCLI:
             assert exc_info.value.code != 0
 
 
-@pytest.mark.unit
+@pytest.mark.integration
 class TestPathCommands:
     """Test path command early exit handlers."""
 

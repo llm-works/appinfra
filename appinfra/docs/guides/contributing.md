@@ -50,6 +50,8 @@ make test.coverage      # Coverage report
 make test.coverage.html # HTML coverage report
 ```
 
+[Test Suites](test-suites.md) defines what belongs in each suite and how a test is assigned one.
+
 ## Code Quality
 
 ```bash

@@ -449,6 +449,7 @@ class TestCriticalFlush:
         assert timeout.call_args.args[0] == 0.5
         mock_db_interface.session.return_value.execute.assert_called_once()
 
+    @pytest.mark.integration
     def test_critical_flush_fallback_to_console(
         self, handler, mock_logger, mock_db_interface
     ):
@@ -593,6 +594,7 @@ def _logger_on_failing_db(
 class TestFailingDatabase:
     """A failed write is reported once, not fed back into the failing handler."""
 
+    @pytest.mark.integration
     def test_failed_critical_write_is_not_retried_through_its_report(self, log_config):
         """The fallback report of a failed critical write does not re-enter the handler."""
         lg, db, seen = _logger_on_failing_db(

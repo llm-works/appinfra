@@ -78,17 +78,66 @@ def test_a_marker_naming_another_suite_overrides_the_directory(
     assert (nodeid in _ids(result)) is expected
 
 
-def test_a_test_with_two_suite_markers_stops_collection(
+_CLASS_DEFAULT = (
+    "import pytest\n\n\n@pytest.mark.unit\nclass TestMixed:\n"
+    "    def test_default(self):\n        pass\n\n"
+    "    @pytest.mark.integration\n    def test_override(self):\n        pass\n"
+)
+
+_MODULE_DEFAULT = (
+    "import pytest\n\npytestmark = pytest.mark.unit\n\n\n"
+    "def test_default():\n    pass\n\n\n"
+    "@pytest.mark.integration\ndef test_override():\n    pass\n"
+)
+
+
+@pytest.mark.parametrize(
+    ("expr", "expected"),
+    [
+        ("unit", {"TestMixed::test_default"}),
+        ("integration", {"TestMixed::test_override"}),
+        ("not unit", {"TestMixed::test_override"}),
+        (
+            "unit or integration",
+            {"TestMixed::test_default", "TestMixed::test_override"},
+        ),
+    ],
+)
+def test_a_marker_on_the_test_overrides_its_class(
+    pytester: pytest.Pytester,
+    monkeypatch: pytest.MonkeyPatch,
+    expr: str,
+    expected: set[str],
+) -> None:
+    layout = {"tests/cli/test_cli_mixed.py": _CLASS_DEFAULT}
+    result = _run(pytester, monkeypatch, layout, "-m", expr)
+    assert result.ret == pytest.ExitCode.OK
+    assert _ids(result) == {f"tests/cli/test_cli_mixed.py::{t}" for t in expected}
+
+
+@pytest.mark.parametrize(
+    ("expr", "expected"), [("unit", "test_default"), ("integration", "test_override")]
+)
+def test_a_marker_on_the_test_overrides_its_module(
+    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch, expr: str, expected: str
+) -> None:
+    layout = {"tests/cli/test_cli_module.py": _MODULE_DEFAULT}
+    result = _run(pytester, monkeypatch, layout, "-m", expr)
+    assert result.ret == pytest.ExitCode.OK
+    assert _ids(result) == {f"tests/cli/test_cli_module.py::{expected}"}
+
+
+def test_two_suite_markers_on_one_test_stop_collection(
     pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     source = (
-        "import pytest\n\n\n@pytest.mark.unit\nclass TestBoth:\n"
-        "    @pytest.mark.integration\n    def test_both(self):\n        pass\n"
+        "import pytest\n\n\n@pytest.mark.unit\n@pytest.mark.integration\n"
+        "def test_both():\n    pass\n"
     )
     layout = {"tests/unit/test_unit_both.py": source}
     result = _run(pytester, monkeypatch, layout)
     assert result.ret == pytest.ExitCode.USAGE_ERROR
-    assert "tests/unit/test_unit_both.py::TestBoth::test_both" in result.stderr.str()
+    assert "tests/unit/test_unit_both.py::test_both" in result.stderr.str()
 
 
 def test_a_test_outside_the_suite_directories_must_name_its_suite(

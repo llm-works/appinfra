@@ -4,12 +4,14 @@
 """
 Tests for regex utilities with ReDoS protection.
 
-These tests verify that the regex utility functions properly protect
-against ReDoS (Regular Expression Denial of Service) attacks.
+The default timeout arms SIGALRM; tests that disable it or fail before compiling
+run as unit tests.
 """
 
 import re
 import unittest
+
+import pytest
 
 from appinfra.regex_utils import (
     MAX_PATTERN_LENGTH,
@@ -42,6 +44,7 @@ class TestPatternComplexityValidation(unittest.TestCase):
         self.assertIsNotNone(pattern)
         self.assertTrue(pattern.match("Test_123"))
 
+    @pytest.mark.unit
     def test_pattern_too_long_rejected(self):
         """Patterns exceeding max length should be rejected."""
         long_pattern = "a" * (MAX_PATTERN_LENGTH + 1)
@@ -49,6 +52,7 @@ class TestPatternComplexityValidation(unittest.TestCase):
             safe_compile(long_pattern)
         self.assertIn("too long", str(ctx.exception))
 
+    @pytest.mark.unit
     def test_nested_quantifiers_rejected(self):
         """Patterns with nested quantifiers should be rejected."""
         dangerous_patterns = [
@@ -80,6 +84,7 @@ class TestSafeCompile(unittest.TestCase):
         with self.assertRaises(re.error):
             safe_compile(r"[invalid")
 
+    @pytest.mark.unit
     def test_timeout_disabled_with_none(self):
         """Should work when timeout is None."""
         pattern = safe_compile(r"^test$", timeout=None)
@@ -112,6 +117,7 @@ class TestSafeMatch(unittest.TestCase):
         match = safe_match(r"^HELLO", "hello", flags=re.IGNORECASE)
         self.assertIsNotNone(match)
 
+    @pytest.mark.unit
     def test_match_with_timeout_none(self):
         """Should work when timeout is None (no timeout protection)."""
         match = safe_match(r"^hello", "hello world", timeout=None)
@@ -139,6 +145,7 @@ class TestSafeSearch(unittest.TestCase):
         match = safe_search(r"xyz", "hello world")
         self.assertIsNone(match)
 
+    @pytest.mark.unit
     def test_search_with_timeout_none(self):
         """Should work when timeout is None (no timeout protection)."""
         match = safe_search(r"world", "hello world", timeout=None)
@@ -170,6 +177,7 @@ class TestSafeFindall(unittest.TestCase):
         matches = safe_findall(r"(\d+)([a-z]+)", "1test2hello3world")
         self.assertEqual(matches, [("1", "test"), ("2", "hello"), ("3", "world")])
 
+    @pytest.mark.unit
     def test_findall_with_timeout_none(self):
         """Should work when timeout is None (no timeout protection)."""
         matches = safe_findall(r"\d+", "a1b2c3", timeout=None)
@@ -239,7 +247,3 @@ class TestEdgeCases(unittest.TestCase):
         """Should support DOTALL flag."""
         pattern = safe_compile(r"a.b", flags=re.DOTALL)
         self.assertTrue(pattern.match("a\nb"))
-
-
-if __name__ == "__main__":
-    unittest.main()

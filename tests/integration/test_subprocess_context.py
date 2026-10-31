@@ -171,7 +171,6 @@ class TestSubprocessContextHotReload:
                         p.terminate()
                         p.join()
 
-    @pytest.mark.unit
     def test_subprocess_context_handles_missing_config(self):
         """Test that SubprocessContext works without config_files (no watcher)."""
         from appinfra.log import LoggerFactory
@@ -204,7 +203,6 @@ class TestSubprocessContextHotReload:
 
         lg.handlers.clear()
 
-    @pytest.mark.unit
     def test_subprocess_context_signal_handling(self):
         """Test that SubprocessContext properly sets running=False on signal."""
         import signal

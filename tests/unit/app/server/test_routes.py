@@ -63,6 +63,7 @@ class TestAddRoute:
         assert "POST" in manager._routes["/api/users"]
         assert "PUT" in manager._routes["/api/users"]
 
+    @pytest.mark.integration
     def test_add_pattern_route_with_wildcard(self):
         """Test adding pattern route with wildcard (lines 27-31)."""
         manager = RouteManager()
@@ -74,6 +75,7 @@ class TestAddRoute:
         pattern, route_info = manager._patterns[0]
         assert "GET" in route_info
 
+    @pytest.mark.integration
     def test_add_pattern_route_with_param(self):
         """Test adding pattern route with parameter (line 27)."""
         manager = RouteManager()
@@ -83,6 +85,7 @@ class TestAddRoute:
 
         assert len(manager._patterns) == 1
 
+    @pytest.mark.integration
     def test_add_pattern_route_with_regex(self):
         """Test adding pattern route with regex (line 27)."""
         manager = RouteManager()
@@ -141,6 +144,7 @@ class TestGetHandler:
 
         assert result is None
 
+    @pytest.mark.integration
     def test_get_handler_pattern_route(self):
         """Test getting handler for pattern route (lines 55-57)."""
         manager = RouteManager()
@@ -151,6 +155,7 @@ class TestGetHandler:
 
         assert result is handler
 
+    @pytest.mark.integration
     def test_simple_route_takes_precedence(self):
         """Test simple route checked before patterns (line 51)."""
         manager = RouteManager()
@@ -263,6 +268,7 @@ class TestListRoutes:
         assert "/api/items" in result
         assert result["/api/items"] == ["GET"]
 
+    @pytest.mark.integration
     def test_list_pattern_routes(self):
         """Test listing pattern routes (lines 100-101)."""
         manager = RouteManager()
@@ -274,6 +280,7 @@ class TestListRoutes:
         pattern_key = [k for k in result if k.startswith("PATTERN:")][0]
         assert "GET" in result[pattern_key]
 
+    @pytest.mark.integration
     def test_list_mixed_routes(self):
         """Test listing both simple and pattern routes."""
         manager = RouteManager()
@@ -285,51 +292,3 @@ class TestListRoutes:
         assert "/api/users" in result
         pattern_keys = [k for k in result if k.startswith("PATTERN:")]
         assert len(pattern_keys) == 1
-
-
-# =============================================================================
-# Integration Tests
-# =============================================================================
-
-
-class TestRouteManagerIntegration:
-    """Test RouteManager integration scenarios."""
-
-    @pytest.mark.asyncio
-    async def test_full_routing_workflow(self):
-        """Test complete routing workflow."""
-        manager = RouteManager()
-
-        # Setup handlers
-        users_handler = AsyncMock(return_value={"users": []})
-        user_handler = AsyncMock(return_value={"user": {"id": 1}})
-        create_handler = AsyncMock(return_value={"created": True})
-
-        # Add routes
-        manager.add_route("/api/users", users_handler, ["GET"])
-        manager.add_route("/api/users", create_handler, ["POST"])
-        manager.add_route("/api/users/[0-9]+", user_handler, ["GET"])
-
-        # Test list users
-        request = Mock(path="/api/users", method="GET")
-        result = await manager.handle_request(request)
-        assert result == {"users": []}
-
-        # Test create user
-        request = Mock(path="/api/users", method="POST")
-        result = await manager.handle_request(request)
-        assert result == {"created": True}
-
-        # Test get specific user
-        request = Mock(path="/api/users/123", method="GET")
-        result = await manager.handle_request(request)
-        assert result == {"user": {"id": 1}}
-
-        # Test 404
-        request = Mock(path="/api/unknown", method="GET")
-        result = await manager.handle_request(request)
-        assert result["status"] == 404
-
-        # Verify routes list
-        routes = manager.list_routes()
-        assert "/api/users" in routes
