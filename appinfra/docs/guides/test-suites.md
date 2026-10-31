@@ -87,6 +87,9 @@ markers. A project opts in from its top-level `conftest.py`:
 pytest_plugins = ["appinfra.pytest_suites"]
 ```
 
+The plugin needs the test tooling of the `check` extra (`pip install appinfra[check]`), which
+`make setup` installs.
+
 The suite directories are fixed at `tests/<suite>/` under the rootdir, where `make check` also
 looks for them. `-m` selects by each test's resolved suite, so `-m unit` leaves out an integration
 test in a class marked unit. `make test.unit`, `make test.integration` and `make test.e2e` select

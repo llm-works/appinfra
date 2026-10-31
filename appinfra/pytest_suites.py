@@ -7,6 +7,8 @@ A project opts in from its top-level ``conftest.py``::
 
     pytest_plugins = ["appinfra.pytest_suites"]
 
+It needs the test tooling of the ``check`` extra (``pip install appinfra[check]``).
+
 The suites are unit, integration, e2e, security and performance. The nearest marker wins: one on
 the test overrides its class, a class overrides its module, and a module overrides the directory.
 A test under ``tests/<suite>/`` with no marker runs in that directory's suite; a test outside

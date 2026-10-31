@@ -1113,7 +1113,8 @@ run_raw_test_structure() {
 raw_health_findings() {
     local kind where detail
     while IFS=$'\t' read -r kind where detail; do
-        echo -e "    ${UI_GRAY}- ${where}: ${detail}${UI_RESET}"
+        # printf, not echo -e: a node id holds pytest's escapes (\n) as literal text
+        printf '    %s- %s: %s%s\n' "$UI_GRAY" "$where" "$detail" "$UI_RESET"
     done < <(tail -n +2 <<< "$1")
 }
 
