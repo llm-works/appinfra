@@ -19,11 +19,16 @@ looks for them as well.
 left out of ``-m unit``. The rules: appinfra's docs/guides/test-suites.md.
 """
 
+import os
 from pathlib import Path
 
 import pytest
 from _pytest.mark import MarkMatcher
 from _pytest.mark.expression import Expression
+
+from ._suite_health import REPORT_DIR_ENV, SuiteHealth
+
+_HEALTH_KEY = pytest.StashKey[SuiteHealth]()
 
 SUITES = ("unit", "integration", "e2e", "security", "performance")
 
@@ -38,9 +43,17 @@ _MARKER_HELP = {
 
 
 def pytest_configure(config: pytest.Config) -> None:
-    """Register the suite markers, so they work in a project that declares none."""
+    """Register the suite markers, so they work in a project that declares none.
+
+    Under make check, which names a report directory, also record the suite health report.
+    """
     for suite in SUITES:
         config.addinivalue_line("markers", f"{suite}: {_MARKER_HELP[suite]}")
+    report_dir = os.environ.get(REPORT_DIR_ENV)
+    if report_dir:
+        health = SuiteHealth(Path(report_dir))
+        config.stash[_HEALTH_KEY] = health
+        config.pluginmanager.register(health, "appinfra-suite-health")
 
 
 def _directory_suite(item: pytest.Item, root: Path) -> str | None:
@@ -129,5 +142,11 @@ def pytest_collection_modifyitems(
     if conflicting:
         raise pytest.UsageError(
             "tests with more than one suite marker: " + ", ".join(conflicting)
+        )
+    health = config.stash.get(_HEALTH_KEY, None)
+    if health is not None:
+        root = config.rootpath
+        health.record_collection(
+            root, items, suite_of, lambda i: _directory_suite(i, root)
         )
     _deselect_by_suite(config, items, suite_of)

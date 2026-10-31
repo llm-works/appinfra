@@ -67,14 +67,18 @@ path, never the expected one. Logic that depends on time runs against a fake clo
 - **Directory**: a test under one of the suite directories above belongs to that suite and needs
   no marker.
 - **Override**: the nearest marker wins. A marker on a test overrides its class, a class overrides
-  its module, and a module overrides the directory, so a class of unit tests may hold a test or
-  two of another suite (`@pytest.mark.integration` on the test).
+  its module, and a module overrides the directory, so a class of unit tests may hold a few tests
+  of another suite (`@pytest.mark.integration` on the test).
 - **Outside the suite directories** (e.g. `tests/cli/`): every test gets its suite from a marker
   on the test, its class or its module.
 - **One suite only**: collection stops on a test with no suite, or with two suite markers on the
   same level.
-- **Whole classes and files**: a class or file whose tests all belong to another suite lives in
-  that suite's directory instead of carrying a class- or module-wide marker.
+- **Placement**: a class lives in the directory of the suite most of its tests belong to, and
+  module-level tests in the directory of the suite most of their file's tests belong to. A class
+  or file of another suite never carries a class- or module-wide marker instead.
+- **Overrides**: up to 15% of a class's tests may belong to another suite. Past that they split
+  off into a class in their suite's directory. Module-level tests count against every test of
+  their file.
 
 The pytest plugin `appinfra.pytest_suites` applies these rules and registers the five suite
 markers. A project opts in from its top-level `conftest.py`:
@@ -87,6 +91,32 @@ The suite directories are fixed at `tests/<suite>/` under the rootdir, where `ma
 looks for them. `-m` selects by each test's resolved suite, so `-m unit` leaves out an integration
 test in a class marked unit. `make test.unit`, `make test.integration` and `make test.e2e` select
 by marker; `make check` runs unit and integration tests together for coverage.
+
+## Test structure in make check
+
+In a project that loads `appinfra.pytest_suites`, `make check` shows how well the tests keep to
+these rules, on a Test structure line under the test suite:
+
+```
+[✓]    Test structure (97.8% ≥ 95.0% clean, 61 findings)
+```
+
+The run that executes the unit tests records the figures, and the line follows it. A finding is
+one of:
+
+- **placement**: most of a class's tests belong to another suite; the class moves to that suite's
+  directory;
+- **overrides**: more than `APPINFRA_DEV_TEST_HEALTH_OVERRIDE_THRESHOLD` (15%) of a class's tests
+  belong to another suite; they split off into a class in their suite's directory;
+- **leak**: a unit test left process-wide state changed: a signal handler, the `ITIMER_REAL`
+  timer, an environment variable or the working directory, compared from before its setup to
+  after its teardown.
+
+A test is clean unless it needs moving (the tests a placement or overrides finding moves) or it
+leaks. The line passes when the share of clean tests reaches `APPINFRA_DEV_TEST_HEALTH_THRESHOLD`
+(90%); the findings are then in `.build/check/test-structure.log`, named in an `[i]` note. Below
+it, the findings show under the checklist, and `APPINFRA_DEV_TEST_HEALTH` decides the outcome:
+`warn` (the default) reports a warning, `strict` fails `make check`, `false` drops the line.
 
 ## Rationale
 
