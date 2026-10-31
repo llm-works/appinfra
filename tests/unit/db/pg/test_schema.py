@@ -73,6 +73,17 @@ class TestValidateSchemaName:
         """Test rejects names starting with underscore."""
         assert validate_schema_name("_test") is False
 
+    def test_accepts_up_to_63_characters(self):
+        """PostgreSQL truncates longer identifiers, so they are refused."""
+        assert validate_schema_name("a" * 63) is True
+        assert validate_schema_name("a" * 64) is False
+
+    def test_rejects_a_trailing_newline(self):
+        """`$` alone matches before a final newline; the whole name must match."""
+        assert validate_schema_name("test_gw0\n") is False
+        # 64 bytes, which PostgreSQL would truncate onto the 63-character name
+        assert validate_schema_name("a" * 63 + "\n") is False
+
 
 class TestSchemaManagerInit:
     """Test SchemaManager initialization."""
@@ -112,6 +123,11 @@ class TestSchemaManagerInit:
 
         with pytest.raises(ValueError, match="Invalid schema name"):
             SchemaManager(engine, "", logger)
+
+    def test_init_rejects_a_name_postgres_would_truncate(self):
+        """A 64-character name would be cut to 63 and collide with another."""
+        with pytest.raises(ValueError, match="at most 63 characters"):
+            SchemaManager(Mock(), "a" * 64, Mock())
 
 
 class TestSchemaManagerListeners:

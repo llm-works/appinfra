@@ -7,14 +7,43 @@ Unit tests for appinfra.db.pg.testing module.
 Tests the utility functions and fixture factories without requiring a database.
 """
 
+import itertools
 from unittest.mock import Mock, patch
+
+import pytest
 
 from appinfra.db.pg.testing import (
     _create_extensions_in_db,
+    _migrated_pg,
     _setup_database_with_lock,
     make_migrate_fixture,
+    pg_test_schema,
 )
 from appinfra.envelope import Envelope
+
+
+class TestPgTestSchemaSuite:
+    """The suite prefix becomes part of a schema name."""
+
+    def test_suite_with_a_trailing_newline_is_rejected(self, monkeypatch):
+        monkeypatch.setenv("_APPINFRA_CHECK_PYTEST_SUITE", "unit\n")
+        with pytest.raises(ValueError, match="_APPINFRA_CHECK_PYTEST_SUITE"):
+            pg_test_schema.__wrapped__("gw0")
+
+
+class TestMigratedPgSchemaName:
+    """The derived migrate schema must fit PostgreSQL's 63-character names."""
+
+    def test_too_long_a_name_fails_before_any_database_work(self):
+        worker_schema = "a" * 51 + "_master"  # longest pg_test_schema allows
+        with (
+            patch("appinfra.db.pg.testing._migrate_ids", itertools.count(1000)),
+            patch("appinfra.db.pg.testing._setup_database_with_lock") as setup,
+            pytest.raises(ValueError, match="_APPINFRA_CHECK_PYTEST_SUITE"),
+            _migrated_pg({}, Mock(), worker_schema, Mock(), None),
+        ):
+            pass
+        setup.assert_not_called()
 
 
 class TestMakeMigrateFixture:
@@ -85,3 +114,13 @@ class TestCreateExtensionsInDb:
         """Test that function returns early with empty extensions."""
         # Should not raise or try to connect
         _create_extensions_in_db("postgresql://localhost/test", [])
+
+    def test_skips_a_name_with_a_trailing_newline(self):
+        with patch("sqlalchemy.create_engine") as create_engine:
+            _create_extensions_in_db("postgresql://localhost/test", ["vector\n"])
+        create_engine.return_value.connect.assert_not_called()
+
+    def test_skips_a_name_longer_than_63_characters(self):
+        with patch("sqlalchemy.create_engine") as create_engine:
+            _create_extensions_in_db("postgresql://localhost/test", ["a" * 64])
+        create_engine.return_value.connect.assert_not_called()

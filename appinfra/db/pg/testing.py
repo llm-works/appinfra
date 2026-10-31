@@ -6,7 +6,8 @@ Pytest fixtures for PostgreSQL testing with schema isolation.
 
 This module provides turnkey fixtures for parallel test execution with pytest-xdist.
 Each worker gets an isolated PostgreSQL schema (e.g., test_gw0, test_gw1), preventing
-race conditions when tests share the same database.
+race conditions when tests share the same database. pg_isolated uses it for the whole
+session; each migrate fixture works in a schema of its own (e.g., test_gw0_m1).
 
 Usage (minimal - one line in conftest.py):
     pytest_plugins = ["appinfra.db.pg.testing"]
@@ -39,7 +40,7 @@ read from environment variables (APPINFRA_TEST_PG_URL) or skip the tests.
 from __future__ import annotations
 
 from collections.abc import Callable, Generator
-from contextlib import contextmanager
+from contextlib import AbstractContextManager, contextmanager
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -57,10 +58,14 @@ if TYPE_CHECKING:
 # Helpers
 # =============================================================================
 
+import itertools
 import re
 
 # Extension name validation pattern (same as PG class)
-_EXT_PATTERN = re.compile(r"^[a-z][a-z0-9_-]*$")
+_EXT_PATTERN = re.compile(r"^[a-z][a-z0-9_-]{0,62}$")
+
+# Numbers the migrate fixtures of this worker process, one schema each
+_migrate_ids = itertools.count(1)
 
 
 def _create_extensions_in_db(url: str, extensions: list[str]) -> None:
@@ -74,7 +79,7 @@ def _create_extensions_in_db(url: str, extensions: list[str]) -> None:
     engine = sqlalchemy.create_engine(url)
     try:
         for ext in extensions:
-            if _EXT_PATTERN.match(ext):
+            if _EXT_PATTERN.fullmatch(ext):
                 with engine.connect() as conn:
                     conn.execute(text(f'CREATE EXTENSION IF NOT EXISTS "{ext}"'))
                     conn.commit()
@@ -131,6 +136,48 @@ def _drop_and_dispose(pg: PG) -> None:
         pg.dispose()
 
 
+@contextmanager
+def _migrated_pg(
+    config: dict[str, Any],
+    lg: Logger,
+    worker_schema: str,
+    base: DeclarativeBase,
+    extensions: list[str] | None,
+) -> Generator[PG, None, None]:
+    """
+    Yield a PG migrated from ``base`` in a schema of its own, dropped on exit.
+
+    The schema is ``<worker_schema>_m<n>``: the worker schema itself belongs to
+    pg_isolated for the whole session, and a migrate fixture that reset or
+    dropped it would leave pg_isolated's search_path without it.
+    """
+    from .pg import PG
+
+    schema = f"{worker_schema}_m{next(_migrate_ids)}"
+    if len(schema) > 63:  # PostgreSQL's limit for names
+        raise ValueError(
+            f"Migrate fixture schema '{schema}' is longer than 63 characters. "
+            "Shorten _APPINFRA_CHECK_PYTEST_SUITE, which prefixes the worker schema, "
+            "or use fewer migrate fixtures per worker."
+        )
+
+    config = dict(config)  # Copy to avoid mutating the fixture's dict
+    if extensions is not None:
+        config["extensions"] = extensions
+
+    # Set up database and extensions under advisory lock (handles xdist race conditions)
+    _setup_database_with_lock(config)
+
+    pg = PG(lg, config, schema=schema)
+    try:
+        if pg._schema_mgr:
+            pg._schema_mgr.reset_schema()
+        pg.migrate(base)
+        yield pg
+    finally:
+        _drop_and_dispose(pg)
+
+
 # =============================================================================
 # Core Fixtures
 # =============================================================================
@@ -161,7 +208,7 @@ def pg_test_schema(worker_id: str) -> str:
     import re
 
     suite = os.environ.get("_APPINFRA_CHECK_PYTEST_SUITE") or "test"
-    if not re.match(r"^[a-z][a-z0-9_]{0,50}$", suite):
+    if not re.fullmatch(r"[a-z][a-z0-9_]{0,50}", suite):
         raise ValueError(
             f"Invalid _APPINFRA_CHECK_PYTEST_SUITE value: {suite!r}. "
             "Must start with lowercase letter, contain only lowercase letters, "
@@ -319,8 +366,10 @@ def pg_migrate_factory(
     Factory for creating schema-isolated PG instances with migrations.
 
     Returns a context manager factory that handles setup (schema creation,
-    migrations) and cleanup (schema drop). This avoids the need to import
-    from this module, preventing PytestAssertRewriteWarning.
+    migrations) and cleanup (schema drop). Each context gets a schema of its
+    own (``<pg_test_schema>_m<n>``), so pg_isolated's schema is left alone.
+    This avoids the need to import from this module, preventing
+    PytestAssertRewriteWarning.
 
     Args:
         pg_test_config: Database configuration
@@ -346,29 +395,12 @@ def pg_migrate_factory(
                 pass
     """
 
-    @contextmanager
     def _factory(
         base: DeclarativeBase, extensions: list[str] | None = None
-    ) -> Generator[PG, None, None]:
-        from .pg import PG
-
-        # Merge extensions into config if provided
-        config = dict(pg_test_config)
-        if extensions is not None:
-            config["extensions"] = extensions
-
-        # Set up database and extensions under advisory lock (handles xdist race conditions)
-        _setup_database_with_lock(config)
-
-        pg = PG(pg_test_logger, config, schema=pg_test_schema)
-
-        try:
-            if pg._schema_mgr:
-                pg._schema_mgr.reset_schema()
-            pg.migrate(base)
-            yield pg
-        finally:
-            _drop_and_dispose(pg)
+    ) -> AbstractContextManager[PG]:
+        return _migrated_pg(
+            pg_test_config, pg_test_logger, pg_test_schema, base, extensions
+        )
 
     return _factory
 
@@ -385,7 +417,7 @@ def make_migrate_fixture(
     module while also using it as a pytest plugin causes the warning).
 
     This factory function creates a session-scoped fixture that:
-    1. Creates a fresh schema
+    1. Creates a fresh schema of its own (``<pg_test_schema>_m<n>``)
     2. Creates configured extensions
     3. Runs migrations to create all tables
 
@@ -419,24 +451,10 @@ def make_migrate_fixture(
         pg_test_logger: Logger,
         pg_test_schema: str,
     ) -> Generator[PG, None, None]:
-        from .pg import PG
-
-        config = dict(pg_test_config)  # Copy to avoid mutating fixture
-        if extensions is not None:
-            config["extensions"] = extensions
-
-        # Set up database and extensions under advisory lock (handles xdist race conditions)
-        _setup_database_with_lock(config)
-
-        pg = PG(pg_test_logger, config, schema=pg_test_schema)
-
-        try:
-            if pg._schema_mgr:
-                pg._schema_mgr.reset_schema()
-            pg.migrate(base)
+        with _migrated_pg(
+            pg_test_config, pg_test_logger, pg_test_schema, base, extensions
+        ) as pg:
             yield pg
-        finally:
-            _drop_and_dispose(pg)
 
     return _migrate_fixture
 
