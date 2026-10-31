@@ -95,15 +95,19 @@ looks for them. `-m` selects by each test's resolved suite, so `-m unit` leaves 
 test in a class marked unit. `make test.unit`, `make test.integration` and `make test.e2e` select
 by marker; `make check` runs unit and integration tests together for coverage.
 
-## Test structure in make check
+## Test structure health in make check
 
 In a project that loads `appinfra.pytest_suites` and sets `APPINFRA_DEV_TEST_HEALTH` to `warn` or
-`strict`, `make check` shows how well the tests keep to these rules, on a Test structure line under
-the test suite:
+`strict`, `make check` shows how well the tests keep to these rules, on a Test structure health
+line under the test suite:
 
 ```
-[⚠]    Test structure (2 findings)
+[✓]    Test structure health (98.2%, clean)
+[⚠]    Test structure health (95.1%, 2 findings)
 ```
+
+The percentage is the share of tests that run in their directory's suite; the tests the rules
+tolerate elsewhere count against it. It is for reading, not judged: the findings decide the line.
 
 The run that executes the unit tests records the figures, and the line follows it. A class, or a
 file's module-level tests, may hold up to `APPINFRA_DEV_TEST_HEALTH_OUTLIERS` (3) tests of other
@@ -121,7 +125,7 @@ handler, the `ITIMER_REAL` timer, an environment variable or the working directo
 before its setup to after its teardown.
 
 The line passes with no finding. Otherwise the findings show under the checklist and in
-`.build/check/test-structure.log`, and `APPINFRA_DEV_TEST_HEALTH` decides the outcome: `warn`
+`.build/check/test-structure-health.log`, and `APPINFRA_DEV_TEST_HEALTH` decides the outcome: `warn`
 reports a warning, `strict` fails `make check`; `false` (the default) drops the line. A project
 turning the line on with findings to fix starts at `warn` and moves to `strict` once it is clean.
 

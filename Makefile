@@ -37,7 +37,7 @@ APPINFRA_PYTEST_COVERAGE_THRESHOLD ?= 95
 # Docstring coverage threshold (framework default is 80%)
 APPINFRA_DEV_DOCSTRING_THRESHOLD ?= 95
 
-# Test structure line in make check (framework default is off)
+# Test structure health line in make check (framework default is off)
 APPINFRA_DEV_TEST_HEALTH ?= strict
 
 # Install with all optional extras

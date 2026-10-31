@@ -6,9 +6,9 @@
 """
 Judge the test structure reports appinfra.pytest_suites writes during make check, for check.sh.
 
-Each pytest process of make check's test run writes a report (appinfra/_suite_health.py): each
-scope (a class, or a file's module-level tests) under ``tests/<suite>/`` holding tests of
-another suite, and each unit test that left process-wide state changed. This
+Each pytest process of make check's test run writes a report (appinfra/_suite_health.py): the
+tests under ``tests/<suite>/`` directories, each scope (a class, or a file's module-level tests)
+there holding tests of another suite, and each unit test that left process-wide state changed. This
 script merges the reports of a directory and applies the rules of docs/guides/test-suites.md.
 A scope holding at most ``--outliers`` tests of other suites keeps to the rules, whatever its
 size; past that:
@@ -21,8 +21,10 @@ size; past that:
 
 A unit test that left process-wide state changed is a ``leak``, a finding of its own.
 
-A scope takes one finding at most, placement first. The output is one line per finding:
+A scope takes one finding at most, placement first. The output is the share of tests that run in
+their directory's suite, tolerated ones counted as outside, then one line per finding:
 
+    <percent>
     <kind><TAB><where><TAB><detail>
 
 The exit code is 0, or 3 when the directory holds no report: the project does not load
@@ -33,6 +35,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import sys
 from collections.abc import Iterable
 from pathlib import Path
@@ -108,6 +111,23 @@ def judge(
     return findings
 
 
+def health(reports: Iterable[dict[str, Any]]) -> str:
+    """The share of tests that run in their directory's suite, rounded down, so 100.0 means
+    every test does; tests the rules tolerate in another directory count as outside it."""
+    total = 0
+    outside: dict[str, int] = {}
+    for report in reports:
+        total = max(total, report["total"])
+        for scope in report["scopes"]:
+            outside[scope["scope"]] = sum(
+                n for suite, n in scope["suites"].items() if suite != scope["directory"]
+            )
+    if not total:
+        return "100.0"
+    inside = total - sum(outside.values())
+    return f"{math.floor(inside * 1000 / total) / 10:.1f}"
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[1])
     parser.add_argument("report_dir", type=Path)
@@ -120,6 +140,7 @@ def main(argv: list[str] | None = None) -> int:
     reports = load(args.report_dir, args.root) if args.report_dir.is_dir() else []
     if not reports:
         return NO_REPORT
+    print(health(reports))
     for kind, where, detail in judge(reports, args.threshold, args.outliers):
         print(f"{kind}\t{where}\t{detail}")
     return 0

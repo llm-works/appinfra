@@ -74,6 +74,7 @@ def test_the_report_counts_each_scope_holding_another_suite(
     pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     report = _report(_run(pytester, monkeypatch, {"tests/unit/test_mixed.py": _MIXED}))
+    assert report["total"] == 5
     assert report["leaks"] == []
     assert sorted(report["scopes"], key=lambda s: s["scope"]) == [
         {
@@ -198,13 +199,15 @@ class TestMisplaced:
 """
 
 
-def test_the_check_prints_the_findings(
+def test_the_check_prints_the_health_then_the_findings(
     pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     layout = {"tests/unit/test_checked.py": _CHECKED}
     result = _check(_run(pytester, monkeypatch, layout))
     assert result.returncode == 0
+    # 2 of the 6 tests run in their directory's suite
     assert result.stdout.splitlines() == [
+        "33.3",
         "placement\ttests/unit/test_checked.py::TestMisplaced\t"
         "4 of 4 tests (100%) are integration, the majority: "
         "move them to tests/integration/",

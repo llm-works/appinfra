@@ -19,9 +19,9 @@ earlier: pre-release builds (0.13.1.devN) would not satisfy it. -->
 - `appinfra.pytest_suites`, an opt-in pytest plugin (`pytest_plugins = ["appinfra.pytest_suites"]`)
   that gives each test the suite of its nearest marker or its `tests/<suite>/` directory, and stops
   collection on a test with no suite or two. See the test suites guide.
-- `make check` shows a Test structure line when `APPINFRA_DEV_TEST_HEALTH` is `warn` or `strict`
-  (default `false`) in a project that loads `appinfra.pytest_suites`: the classes holding too many
-  tests of another suite, and unit tests that leak process-wide state.
+- `make check` shows a Test structure health line when `APPINFRA_DEV_TEST_HEALTH` is `warn` or
+  `strict` (default `false`) in a project that loads `appinfra.pytest_suites`: the share of tests in
+  their directory's suite, classes holding too many tests of another suite, and leaking unit tests.
 - `start_method=` on `ProcessRunner`, `RunnerFactory`, the process channel factories and the FastAPI
   subprocess builder (`with_start_method()`); spawn or forkserver keeps restarts from forking off
   the monitor thread. `ProcessRunner.process` and `start_subprocess()` are typed `BaseProcess`.

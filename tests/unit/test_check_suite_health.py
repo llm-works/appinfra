@@ -32,9 +32,9 @@ def _scope(name: str, home: str, **suites: int) -> dict[str, Any]:
 
 
 def _report(
-    *scopes: dict[str, Any], leaks: list[dict[str, Any]] | None = None
+    *scopes: dict[str, Any], leaks: list[dict[str, Any]] | None = None, total: int = 100
 ) -> dict[str, Any]:
-    return {"scopes": list(scopes), "leaks": leaks or []}
+    return {"total": total, "scopes": list(scopes), "leaks": leaks or []}
 
 
 def _judge(
@@ -137,3 +137,26 @@ class TestMerge:
             leaks=[leak],
         )
         assert _kinds(report) == ["placement", "overrides", "leak"]
+
+
+class TestHealth:
+    def test_tolerated_tests_outside_their_directory_count_too(self) -> None:
+        report = _report(
+            _scope("u.py::A", "unit", unit=3, integration=1),
+            _scope("i.py::B", "integration", integration=5, unit=2),
+            total=200,
+        )
+        # 3 of 200 tests run outside their directory's suite, with no finding
+        assert _judge(report) == []
+        assert check_suite_health.health([report]) == "98.5"
+
+    def test_reports_of_one_run_count_each_scope_once(self) -> None:
+        report = _report(_scope("u.py::A", "unit", unit=3, integration=1), total=10)
+        assert check_suite_health.health([report, report]) == "90.0"
+
+    def test_the_share_rounds_down(self) -> None:
+        report = _report(_scope("u.py", "unit", integration=1), total=3)
+        assert check_suite_health.health([report]) == "66.6"
+
+    def test_no_tests_is_all_in_place(self) -> None:
+        assert check_suite_health.health([_report(total=0)]) == "100.0"

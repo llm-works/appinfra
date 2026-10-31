@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright 2026 The appinfra Authors
 
-"""Records how a project's tests follow the suite rules, for make check's Test structure row.
+"""Records how a project's tests follow the suite rules, for make check's Test structure health
+row.
 
 appinfra.pytest_suites registers it when ``_APPINFRA_CHECK_SUITE_HEALTH_DIR`` names a directory,
 which make check sets for its pytest checks. Each pytest process (the main one, or each
@@ -9,6 +10,7 @@ pytest-xdist worker) writes one JSON report there at the end of the session, ``<
 
 - ``rootdir``: the pytest rootdir, which tells the project's reports from those of a pytest its
   tests start, which inherits the report directory;
+- ``total``: the number of tests under a ``tests/<suite>/`` directory;
 - ``scopes``: each class, and each file's module-level tests, under a ``tests/<suite>/``
   directory holding at least one test of another suite, with its test count per suite; for
   module-level tests, also the count per suite of every test in the file (``file_suites``);
@@ -99,6 +101,7 @@ class SuiteHealth:
     def __init__(self, report_dir: Path) -> None:
         self._report_dir = report_dir
         self._rootdir = ""
+        self._collected = 0
         self._total = 0
         self._suite_of: dict[str, str] = {}
         self._scopes: list[dict[str, Any]] = []
@@ -113,7 +116,8 @@ class SuiteHealth:
     ) -> None:
         """Count each scope's tests by suite, keeping the scopes that hold another suite."""
         self._rootdir = str(rootdir)
-        self._total = len(items)
+        self._collected = len(items)
+        self._total = 0
         self._suite_of = suite_of
         own: dict[str, Counter[str]] = {}
         files: dict[str, Counter[str]] = {}
@@ -122,6 +126,7 @@ class SuiteHealth:
             home = home_of(item)
             if home is None:
                 continue
+            self._total += 1
             suite = suite_of[item.nodeid]
             scope = _scope(item)
             own.setdefault(scope, Counter())[suite] += 1
@@ -150,11 +155,12 @@ class SuiteHealth:
 
     def pytest_sessionfinish(self, session: pytest.Session) -> None:
         """Write the report; a process that collected nothing (the xdist controller) writes none."""
-        if not self._total:
+        if not self._collected:
             return
         self._report_dir.mkdir(parents=True, exist_ok=True)
         report = {
             "rootdir": self._rootdir,
+            "total": self._total,
             "scopes": self._scopes,
             "leaks": self._leaks,
         }
