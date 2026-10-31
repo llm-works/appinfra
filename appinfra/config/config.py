@@ -18,6 +18,7 @@ import yaml
 
 from ..dot_dict import DotDict
 from ..errors import UndeclaredConfigPathError
+from ..security.envelope import Envelope
 from ..yaml._utils import substitute_references
 from .constants import MAX_CONFIG_SIZE_BYTES
 from .spec import AUTO, Auto, ConfigFile, ConfigSpec, _resolve_origin
@@ -560,7 +561,6 @@ class Config(DotDict):
         if not path:
             return
 
-        converted_value = self._convert_env_value(value)
         current = data
         i = 0
 
@@ -578,22 +578,23 @@ class Config(DotDict):
                 raise UndeclaredConfigPathError(self._env_prefix, path)
 
             if consumed == remaining:
-                self._set_final_value(current, matched_key, converted_value)
+                self._set_final_value(current, matched_key, value)
                 return
 
             current = current[matched_key]
             i += consumed
 
-    def _set_final_value(self, target: dict[str, Any], key: str, value: Any) -> None:
-        """Assign a converted env value to the matched yaml key.
+    def _set_final_value(self, target: dict[str, Any], key: str, raw: str) -> None:
+        """Assign a raw env value to the matched yaml key.
 
-        When the existing yaml value is a list, a non-None scalar override
-        is wrapped into a single-element list so the declared type is
-        preserved. The comma path in `_convert_env_value` already produces
-        a list and is unaffected. A null override clears the field rather
-        than producing `[None]`.
+        The value is converted per `_override_value`. When the existing yaml
+        value is a list, a non-None scalar override is wrapped into a
+        single-element list so the declared type is preserved. The comma path
+        in `_convert_env_value` already produces a list and is unaffected. A
+        null override clears the field rather than producing `[None]`.
         """
         existing = target.get(key)
+        value = self._override_value(existing, raw)
         if (
             isinstance(existing, list)
             and value is not None
@@ -601,6 +602,32 @@ class Config(DotDict):
         ):
             value = [value]
         target[key] = value
+
+    def _override_value(self, existing: Any, raw: str) -> Any:
+        """Convert a raw env value for the yaml value it overrides.
+
+        An override of a secret replaces its value, not its Envelope, and is
+        taken verbatim: a password like ``1234`` or ``a,b`` is not a number or
+        a list.
+        """
+        if isinstance(existing, Envelope):
+            return Envelope(raw)
+        return self._convert_env_value(raw)
+
+    def _loaded_value(self, path: list[str]) -> Any:
+        """Return the loaded value an env path names, or None if it names none.
+
+        Keys are matched like `_set_nested_value` matches them.
+        """
+        current: Any = self.dict()
+        i = 0
+        while i < len(path):
+            key, consumed = self._match_key_greedy(current, path, i)
+            if key is None:
+                return None
+            current = current[key]
+            i += consumed
+        return current
 
     def _match_key_greedy(
         self, data: dict[str, Any], path: list[str], start_idx: int
@@ -717,7 +744,8 @@ class Config(DotDict):
         for env_key, env_value in env_vars.items():
             config_path = self._env_key_to_path(env_key)
             path_str = ".".join(config_path)
-            overrides[path_str] = self._convert_env_value(env_value)
+            existing = self._loaded_value(config_path)
+            overrides[path_str] = self._override_value(existing, env_value)
 
         return overrides
 

@@ -257,6 +257,34 @@ class TestSecretReferences:
         with pytest.raises(EmbeddedSecretError, match="dbserver.pass"):
             Config(str(config_file))
 
+    def test_an_override_of_a_secret_stays_an_envelope(self, config, monkeypatch):
+        monkeypatch.setenv("INFRA_DBSERVER_PASS", "override")
+        config.reload()
+        assert isinstance(config.dbserver["pass"], Envelope)
+        assert config.dbserver["pass"].reveal() == "override"
+
+    def test_a_reference_carries_the_overridden_envelope(self, config, monkeypatch):
+        monkeypatch.setenv("INFRA_DBSERVER_PASS", "override")
+        config.reload()
+        assert isinstance(config.dbs.main.password, Envelope)
+        assert config.dbs.main.password.reveal() == "override"
+
+    def test_an_override_of_a_secret_is_not_converted(self, config, monkeypatch):
+        monkeypatch.setenv("INFRA_DBSERVER_PASS", "12,34")
+        config.reload()
+        assert config.dbserver["pass"].reveal() == "12,34"
+
+    def test_get_env_overrides_reports_a_secret_as_an_envelope(
+        self, config, monkeypatch
+    ):
+        monkeypatch.setenv("INFRA_DBSERVER_PASS", "override")
+        monkeypatch.setenv("INFRA_DBSERVER_PORT", "6543")
+        config.reload()
+        overrides = config.get_env_overrides()
+        assert isinstance(overrides["dbserver.pass"], Envelope)
+        assert overrides["dbserver.pass"].reveal() == "override"
+        assert overrides["dbserver.port"] == 6543
+
 
 # =============================================================================
 # Test Security

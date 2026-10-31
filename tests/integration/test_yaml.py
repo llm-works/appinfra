@@ -1386,6 +1386,33 @@ dbs:
         assert isinstance(data["db"]["password"], Envelope)
         assert data["db"]["password"].reveal() == "s3cret"
 
+    def test_an_override_of_a_secret_reference_stays_an_envelope(
+        self, tmp_path, monkeypatch
+    ):
+        """An env override replaces the secret's value, not its envelope."""
+        monkeypatch.setenv("TEST_DB_PW", "s3cret")
+        (tmp_path / "pg.yaml").write_text(
+            """
+pgserver:
+  pass: !env TEST_DB_PW !secret
+dbs:
+  main:
+    password: "${pgserver.pass}"
+"""
+        )
+        app_file = tmp_path / "app.yaml"
+        app_file.write_text("db: !include './pg.yaml#dbs.main'\n")
+
+        with open(app_file) as f:
+            data = load(
+                f,
+                current_file=app_file,
+                env_overrides={"pgserver.pass": "override"},
+            )
+
+        assert isinstance(data["db"]["password"], Envelope)
+        assert data["db"]["password"].reveal() == "override"
+
     def test_a_secret_inside_text_is_rejected(self, tmp_path, monkeypatch):
         """Splicing a secret into a string would leave '***' in its place."""
         monkeypatch.setenv("TEST_DB_PW", "s3cret")

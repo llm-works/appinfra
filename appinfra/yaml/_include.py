@@ -21,6 +21,7 @@ from typing import Any
 
 import yaml
 
+from ..security.envelope import Envelope
 from ._utils import _file_exists, substitute_references
 from .types import DOCUMENT_INCLUDE_PATTERN, ErrorContext
 
@@ -385,18 +386,16 @@ def _substitute_vars_in_string(
 ) -> Any:
     """Resolve `${var}` references inside a single string. See
     `_resolve_variables_in_data` for the lookup order, and
-    `substitute_references` for how an Envelope is carried.
+    `substitute_references` for how an Envelope is carried. An override of
+    a secret replaces its value, not its Envelope.
     """
 
     def lookup(match: re.Match[str]) -> Any:
         var_name = match.group(1)
-        if env_overrides is not None:
-            if var_name in env_overrides:
-                return env_overrides[var_name]
-            canonical = var_name.replace(".", "_").replace("-", "_").lower()
-            if canonical in env_overrides:
-                return env_overrides[canonical]
         value = _get_value_by_path(context, var_name)
+        override = _env_override(env_overrides, var_name)
+        if override is not None:
+            return Envelope(override) if isinstance(value, Envelope) else override
         if value is _NOT_FOUND:
             if pass_through_undefined:
                 return match.group(0)  # Keep original ${var}
@@ -404,6 +403,16 @@ def _substitute_vars_in_string(
         return value
 
     return substitute_references(data, lookup)
+
+
+def _env_override(env_overrides: dict[str, str] | None, var_name: str) -> str | None:
+    """Return the override for `var_name`, by its dotted or canonical name."""
+    if env_overrides is None:
+        return None
+    if var_name in env_overrides:
+        return env_overrides[var_name]
+    canonical = var_name.replace(".", "_").replace("-", "_").lower()
+    return env_overrides.get(canonical)
 
 
 def _create_document_error_context(
