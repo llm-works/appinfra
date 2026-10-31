@@ -46,6 +46,7 @@ earlier: pre-release builds (0.13.1.devN) would not satisfy it. -->
 - `PG.dispose()` closes the pooled connections of a `PG` and of its cached `ScopedPG`s.
 
 ### Changed
+- `make install` creates a missing `share/` (0755) in a virtualenv; other prefixes still need one.
 - **Breaking:** `appinfra.yaml.SecretStr` is now `appinfra.envelope.Envelope`, also exported as
   `appinfra.Envelope`; `!secret` loads as an `Envelope`. No alias is kept. `Envelope(e)` returns
   `e`, replacing `ensure()`.
@@ -119,6 +120,9 @@ earlier: pre-release builds (0.13.1.devN) would not satisfy it. -->
   implement it to be instantiated.
 
 ### Fixed
+- `make install` and `make reinstall` check every environment before changing any: an environment
+  that cannot take the wheel no longer leaves the others uninstalled or half installed.
+  `make reinstall` asks for confirmation once.
 - `password(confirm=True)` accepts a matching confirmation; with questionary installed it always
   reported a mismatch and prompted again.
 - `JSONLoggingBuilder` and `DatabaseLoggingBuilder` apply the location color; a database handler
