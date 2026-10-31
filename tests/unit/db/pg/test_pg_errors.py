@@ -467,9 +467,10 @@ class TestPGExtensionValidation:
             "ext name",  # contains space
             "ext;drop",  # contains semicolon (SQL injection attempt)
             "",  # empty
+            "vector\n",  # trailing newline
         ]
         for name in invalid_names:
-            assert not pg._is_valid_extension_name(name), f"{name} should be invalid"
+            assert not pg._is_valid_extension_name(name), f"{name!r} should be invalid"
 
     @patch("appinfra.db.pg.pg.LoggerFactory")
     @patch.object(PG, "_create_managers")

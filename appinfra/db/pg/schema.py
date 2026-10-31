@@ -44,7 +44,7 @@ def validate_schema_name(name: str) -> bool:
     Returns:
         True if valid, False otherwise
     """
-    return bool(_SCHEMA_NAME_PATTERN.match(name))
+    return bool(_SCHEMA_NAME_PATTERN.fullmatch(name))
 
 
 class SchemaManager:

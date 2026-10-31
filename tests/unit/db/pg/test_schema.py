@@ -78,6 +78,12 @@ class TestValidateSchemaName:
         assert validate_schema_name("a" * 63) is True
         assert validate_schema_name("a" * 64) is False
 
+    def test_rejects_a_trailing_newline(self):
+        """`$` alone matches before a final newline; the whole name must match."""
+        assert validate_schema_name("test_gw0\n") is False
+        # 64 bytes, which PostgreSQL would truncate onto the 63-character name
+        assert validate_schema_name("a" * 63 + "\n") is False
+
 
 class TestSchemaManagerInit:
     """Test SchemaManager initialization."""

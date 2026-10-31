@@ -79,7 +79,7 @@ def _create_extensions_in_db(url: str, extensions: list[str]) -> None:
     engine = sqlalchemy.create_engine(url)
     try:
         for ext in extensions:
-            if _EXT_PATTERN.match(ext):
+            if _EXT_PATTERN.fullmatch(ext):
                 with engine.connect() as conn:
                     conn.execute(text(f'CREATE EXTENSION IF NOT EXISTS "{ext}"'))
                     conn.commit()
@@ -208,7 +208,7 @@ def pg_test_schema(worker_id: str) -> str:
     import re
 
     suite = os.environ.get("_APPINFRA_CHECK_PYTEST_SUITE") or "test"
-    if not re.match(r"^[a-z][a-z0-9_]{0,50}$", suite):
+    if not re.fullmatch(r"[a-z][a-z0-9_]{0,50}", suite):
         raise ValueError(
             f"Invalid _APPINFRA_CHECK_PYTEST_SUITE value: {suite!r}. "
             "Must start with lowercase letter, contain only lowercase letters, "

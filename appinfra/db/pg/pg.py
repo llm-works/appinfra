@@ -621,7 +621,7 @@ class PG(Interface):
 
         Defense-in-depth check - names should already be validated by Pydantic.
         """
-        return bool(self._EXTENSION_NAME_PATTERN.match(name))
+        return bool(self._EXTENSION_NAME_PATTERN.fullmatch(name))
 
     def _run_hooks(self, hooks: list[Callable[[Any], None]], hook_type: str) -> None:
         """Execute lifecycle hooks with a connection."""

@@ -190,6 +190,13 @@ class TestDatabaseConfigValidation:
         with pytest.raises(ValidationError, match="at most 63 characters"):
             DatabaseConfig(url=url, schema="a" * 64)
 
+    def test_identifiers_with_a_trailing_newline_are_rejected(self):
+        url = "postgresql://localhost/db"
+        with pytest.raises(ValidationError, match="Invalid schema name"):
+            DatabaseConfig(url=url, schema="a" * 63 + "\n")
+        with pytest.raises(ValidationError, match="Invalid extension name"):
+            DatabaseConfig(url=url, extensions=["vector\n"])
+
 
 @pytest.mark.skipif(
     not PYDANTIC_AVAILABLE, reason=SKIP_REASON or "pydantic not available"

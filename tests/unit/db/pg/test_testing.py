@@ -17,8 +17,18 @@ from appinfra.db.pg.testing import (
     _migrated_pg,
     _setup_database_with_lock,
     make_migrate_fixture,
+    pg_test_schema,
 )
 from appinfra.envelope import Envelope
+
+
+class TestPgTestSchemaSuite:
+    """The suite prefix becomes part of a schema name."""
+
+    def test_suite_with_a_trailing_newline_is_rejected(self, monkeypatch):
+        monkeypatch.setenv("_APPINFRA_CHECK_PYTEST_SUITE", "unit\n")
+        with pytest.raises(ValueError, match="_APPINFRA_CHECK_PYTEST_SUITE"):
+            pg_test_schema.__wrapped__("gw0")
 
 
 class TestMigratedPgSchemaName:
@@ -104,3 +114,8 @@ class TestCreateExtensionsInDb:
         """Test that function returns early with empty extensions."""
         # Should not raise or try to connect
         _create_extensions_in_db("postgresql://localhost/test", [])
+
+    def test_skips_a_name_with_a_trailing_newline(self):
+        with patch("sqlalchemy.create_engine") as create_engine:
+            _create_extensions_in_db("postgresql://localhost/test", ["vector\n"])
+        create_engine.return_value.connect.assert_not_called()
