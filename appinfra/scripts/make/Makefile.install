@@ -36,10 +36,10 @@ ifndef PYTHON
 include $(_APPINFRA_INSTALL_MAKE_DIR)Makefile.env
 endif
 
-# Reject APPINFRA_DEV_PKG_NAME values that would escape sys.prefix/share/ when used
-# as a path component (empty, `.`, `..`, leading/trailing `.` or `-`).
-# PEP 503 normalized distribution names: starts and ends with alphanumeric;
-# inner chars may be alphanumeric, `.`, `-`, or `_`.
+# APPINFRA_DEV_PKG_NAME goes into the install recipes' shell commands, so it is
+# checked here, before any recipe runs. PEP 503 normalized distribution names:
+# start and end with alphanumeric; inner chars may be alphanumeric, `.`, `-`, `_`.
+# install_pkg.py repeats the check (PKG_NAME) for the share/<pkg> path.
 ifeq ($(shell echo "$(APPINFRA_DEV_PKG_NAME)" | grep -qE '^([A-Za-z0-9]|[A-Za-z0-9][A-Za-z0-9._-]*[A-Za-z0-9])$$' && echo ok),)
 $(error APPINFRA_DEV_PKG_NAME='$(APPINFRA_DEV_PKG_NAME)' must be a PEP 503 distribution name (alphanumeric, `.`, `-`, `_`; must start and end with alphanumeric))
 endif

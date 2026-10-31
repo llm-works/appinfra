@@ -371,8 +371,8 @@ jobs:
 
   # Install verification: run `make install` against a clean ubuntu runner and
   # confirm the wheel is published to $prefix/share/$pkg/wheels/ with the mode
-  # derived from $prefix/share/, and that the install refuses on a fresh venv
-  # where $prefix/share/ is missing. Guards Makefile.install against regressions
+  # derived from $prefix/share/, that a fresh venv gets share/ created (0755),
+  # and that a non-venv prefix without share/ is refused. Guards Makefile.install against regressions
   # in the wheel-publish path, which is otherwise untested in CI.
   install:
     name: Install
@@ -432,11 +432,26 @@ jobs:
           [ "$wheel_mode"  = "664"  ] || { echo "ERROR: wheel mode $wheel_mode != 664"; exit 1; }
           echo "OK: wheel at $wheel"
 
-      - name: Verify make install refuses when $prefix/share/ is missing
+      - name: Verify make install creates share/ in a fresh venv
         run: |
+          set -e
           python -m venv /tmp/fresh-venv
           test ! -d /tmp/fresh-venv/share || { echo "ERROR: fresh venv unexpectedly has share/"; exit 1; }
-          if APPINFRA_YES=1 APPINFRA_PYTHON_ENVS=/tmp/fresh-venv/bin/python make install > /tmp/install.log 2>&1; then
+          APPINFRA_YES=1 APPINFRA_PYTHON_ENVS=/tmp/fresh-venv/bin/python make install
+          mode=$(stat -c %a /tmp/fresh-venv/share)
+          [ "$mode" = "755" ] || { echo "ERROR: share/ mode $mode != 755"; exit 1; }
+          wheel=$(find /tmp/fresh-venv/share/appinfra/wheels -maxdepth 1 -name '*.whl' | head -1)
+          test -n "$wheel" || { echo "ERROR: no .whl under /tmp/fresh-venv/share/appinfra/wheels"; exit 1; }
+          echo "OK: share/ created (mode $mode), wheel at $wheel"
+
+      - name: Verify make install refuses a non-venv prefix without share/
+        run: |
+          # setup-python's interpreter is not a venv (sys.prefix == sys.base_prefix);
+          # its share/ is moved aside for this step and restored on exit
+          prefix="$(python -c 'import sys; print(sys.prefix)')"
+          sudo mv "$prefix/share" "$prefix/share.bak"
+          trap 'sudo mv "$prefix/share.bak" "$prefix/share"' EXIT
+          if APPINFRA_YES=1 make install > /tmp/install.log 2>&1; then
             echo "ERROR: make install should have failed but succeeded"
             cat /tmp/install.log
             exit 1

@@ -43,8 +43,29 @@ class TestProbe:
     def _run(
         self, monkeypatch: pytest.MonkeyPatch, ip: ModuleType, out: list[str]
     ) -> None:
-        result = SimpleNamespace(stdout=json.dumps(out))
+        self._run_raw(monkeypatch, ip, json.dumps(out) + "\n")
+
+    def _run_raw(
+        self, monkeypatch: pytest.MonkeyPatch, ip: ModuleType, stdout: str
+    ) -> None:
+        result = SimpleNamespace(stdout=stdout)
         monkeypatch.setattr(ip.subprocess, "run", lambda *a, **k: result)
+
+    def test_output_before_the_prefix_ignored(
+        self, ip: ModuleType, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A sitecustomize that prints at startup does not hide the prefix."""
+        self._run_raw(monkeypatch, ip, 'hello from sitecustomize\n["/v", "/usr"]\n')
+        assert ip.probe("py") == ip.Env("py", Path("/v"), True)
+
+    @pytest.mark.parametrize("stdout", ["", "not json\n", '["/only-one"]\n', "5\n"])
+    def test_unreadable_output_refused(
+        self, ip: ModuleType, monkeypatch: pytest.MonkeyPatch, stdout: str
+    ) -> None:
+        """An interpreter that does not report a prefix is refused, not a traceback."""
+        self._run_raw(monkeypatch, ip, stdout)
+        with pytest.raises(ip.RefusedError, match="py did not report its prefix"):
+            ip.probe("py")
 
     def test_venv(self, ip: ModuleType, monkeypatch: pytest.MonkeyPatch) -> None:
         self._run(monkeypatch, ip, ["/home/u/.venv", "/usr"])
@@ -139,6 +160,19 @@ def test_install_refused_before_cleaning(
     with pytest.raises(ip.RefusedError):
         ip.install([_env(ip, False)], "pkg", "")
     assert cleaned == []
+
+
+def test_install_env_never_creates_share_outside_a_venv(
+    ip: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """share/ gone after preflight: a non-venv is refused, nothing created or built."""
+    made: list[Path] = []
+    monkeypatch.setattr(ip, "_make_dir", lambda path, mode: made.append(path))
+    monkeypatch.setattr(ip, "build_wheel", lambda env: pytest.fail("built a wheel"))
+    _share_exists(monkeypatch, False)
+    with pytest.raises(ip.RefusedError, match="/p/share no longer exists"):
+        ip.install_env(_env(ip, False), "pkg", "")
+    assert made == []
 
 
 def test_resolve_skips_missing(

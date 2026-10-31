@@ -36,7 +36,8 @@ from pathlib import Path
 PROBE = "import json, sys; print(json.dumps([sys.prefix, sys.base_prefix]))"
 VENV_SHARE_MODE = 0o755
 BUILD_ARTIFACTS = (".dist", ".build", "dist", "build")
-# PEP 503 distribution name: it becomes a path component under share/
+# PEP 503 distribution name: it becomes a path component under share/. Makefile.install
+# checks the same pattern before the name reaches a shell; this covers direct runs too.
 PKG_NAME = re.compile(r"[A-Za-z0-9]|[A-Za-z0-9][A-Za-z0-9._-]*[A-Za-z0-9]")
 
 
@@ -67,7 +68,12 @@ def probe(python: str) -> Env:
     out = subprocess.run(
         [python, "-c", PROBE], check=True, capture_output=True, text=True
     ).stdout
-    prefix, base_prefix = json.loads(out)
+    # the last line only: a sitecustomize or .pth hook may print at startup
+    lines = out.strip().splitlines()
+    try:
+        prefix, base_prefix = json.loads(lines[-1])
+    except (IndexError, TypeError, ValueError) as e:
+        raise RefusedError(f"ERROR: {python} did not report its prefix: {out!r}") from e
     if not prefix:
         raise RefusedError(f"ERROR: {python} reported empty sys.prefix")
     return Env(python, Path(prefix), prefix != base_prefix)
@@ -163,7 +169,10 @@ def install_env(env: Env, pkg: str, extras: str) -> None:
     """Build, install and publish the wheel for one env."""
     print(f"  → {env.python}")
     if not env.share.is_dir():
-        _make_dir(env.share, VENV_SHARE_MODE)  # preflight admits this only for a venv
+        # preflight passed it, so share/ existed then; outside a venv it is never created
+        if not env.venv:
+            raise RefusedError(f"ERROR: {env.share} no longer exists")
+        _make_dir(env.share, VENV_SHARE_MODE)
         print(f"    created {env.share} (mode 0{VENV_SHARE_MODE:o})")
     wheel = build_wheel(env)
     pip(env, "install", "-q", with_extras(str(wheel), extras))
