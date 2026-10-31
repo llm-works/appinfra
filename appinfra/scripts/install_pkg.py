@@ -239,7 +239,9 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--pkg", required=True, help="distribution name")
     parser.add_argument("--extras", default="", help="comma-separated extras")
     parser.add_argument("envs", nargs="*", metavar="ENV", help="interpreter paths")
-    args = parser.parse_args(argv)
+    # intermixed: options may sit between action and ENVs; parse_args rejects the
+    # ENVs after them on Python 3.11, where the action already took envs as []
+    args = parser.parse_intermixed_args(argv)
     if not PKG_NAME.fullmatch(args.pkg):
         parser.error(f"--pkg {args.pkg!r} is not a PEP 503 distribution name")
     return args
