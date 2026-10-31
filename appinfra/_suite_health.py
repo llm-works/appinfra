@@ -9,7 +9,6 @@ pytest-xdist worker) writes one JSON report there at the end of the session, ``<
 
 - ``rootdir``: the pytest rootdir, which tells the project's reports from those of a pytest its
   tests start, which inherits the report directory;
-- ``total``: the number of tests collected;
 - ``scopes``: each class, and each file's module-level tests, under a ``tests/<suite>/``
   directory holding at least one test of another suite, with its test count per suite; for
   module-level tests, also the count per suite of every test in the file (``file_suites``);
@@ -147,9 +146,7 @@ class SuiteHealth:
         finally:
             changed = _changed(before, _snapshot())
             if changed:
-                self._leaks.append(
-                    {"test": item.nodeid, "scope": _scope(item), "changed": changed}
-                )
+                self._leaks.append({"test": item.nodeid, "changed": changed})
 
     def pytest_sessionfinish(self, session: pytest.Session) -> None:
         """Write the report; a process that collected nothing (the xdist controller) writes none."""
@@ -158,7 +155,6 @@ class SuiteHealth:
         self._report_dir.mkdir(parents=True, exist_ok=True)
         report = {
             "rootdir": self._rootdir,
-            "total": self._total,
             "scopes": self._scopes,
             "leaks": self._leaks,
         }

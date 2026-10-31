@@ -97,29 +97,32 @@ by marker; `make check` runs unit and integration tests together for coverage.
 
 ## Test structure in make check
 
-In a project that loads `appinfra.pytest_suites`, `make check` shows how well the tests keep to
-these rules, on a Test structure line under the test suite:
+In a project that loads `appinfra.pytest_suites` and sets `APPINFRA_DEV_TEST_HEALTH` to `warn` or
+`strict`, `make check` shows how well the tests keep to these rules, on a Test structure line under
+the test suite:
 
 ```
-[✓]    Test structure (97.8% ≥ 95.0% clean, 61 findings)
+[⚠]    Test structure (17 findings)
 ```
 
-The run that executes the unit tests records the figures, and the line follows it. A finding is
-one of:
+The run that executes the unit tests records the figures, and the line follows it. A class, or a
+file's module-level tests, may hold up to `APPINFRA_DEV_TEST_HEALTH_OUTLIERS` (2) tests of other
+suites whatever its size; a few tests that need a file or a signal fit in any class. Past that, a
+finding is one of:
 
-- **placement**: most of a class's tests belong to another suite; the class moves to that suite's
-  directory;
-- **overrides**: more than `APPINFRA_DEV_TEST_HEALTH_OVERRIDE_THRESHOLD` (15%) of a class's tests
-  belong to another suite; they split off into a class in their suite's directory;
-- **leak**: a unit test left process-wide state changed: a signal handler, the `ITIMER_REAL`
-  timer, an environment variable or the working directory, compared from before its setup to
-  after its teardown.
+- **placement**: most of a class's tests belong to another suite; they move to that suite's
+  directory, and the rest of the class stays;
+- **overrides**: more than `APPINFRA_DEV_TEST_HEALTH_THRESHOLD` (15%) of a class's tests belong to
+  another suite; they split off into a class in their suite's directory.
 
-A test is clean unless it needs moving (the tests a placement or overrides finding moves) or it
-leaks. The line passes when the share of clean tests reaches `APPINFRA_DEV_TEST_HEALTH_THRESHOLD`
-(90%); the findings are then in `.build/check/test-structure.log`, named in an `[i]` note. Below
-it, the findings show under the checklist, and `APPINFRA_DEV_TEST_HEALTH` decides the outcome:
-`warn` (the default) reports a warning, `strict` fails `make check`, `false` drops the line.
+A unit test that left process-wide state changed is a **leak**, a finding of its own: a signal
+handler, the `ITIMER_REAL` timer, an environment variable or the working directory, compared from
+before its setup to after its teardown.
+
+The line passes with no finding. Otherwise the findings show under the checklist and in
+`.build/check/test-structure.log`, and `APPINFRA_DEV_TEST_HEALTH` decides the outcome: `warn`
+reports a warning, `strict` fails `make check`; `false` (the default) drops the line. A project
+turning the line on with findings to fix starts at `warn` and moves to `strict` once it is clean.
 
 ## Rationale
 
