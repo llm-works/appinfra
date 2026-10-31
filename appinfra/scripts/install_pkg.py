@@ -22,6 +22,7 @@ all of them as they were, and `reinstall` uninstalls nothing.
 from __future__ import annotations
 
 import argparse
+import io
 import json
 import os
 import re
@@ -253,4 +254,8 @@ def main(argv: list[str]) -> int:
 
 
 if __name__ == "__main__":
+    # pip writes to the same stdout directly; a pipe would otherwise hold these
+    # progress lines back until exit, behind the output of the pip runs they announce
+    if isinstance(sys.stdout, io.TextIOWrapper):
+        sys.stdout.reconfigure(line_buffering=True)
     sys.exit(main(sys.argv[1:]))

@@ -23,6 +23,7 @@ STUB = """\
 #!/bin/bash
 if [ "$1" = "-m" ] && [ "$2" = "pip" ]; then
     echo "$*" >> "{log}"
+    echo "stub pip $3"
     if [ "$3" = "wheel" ]; then
         while [ $# -gt 0 ]; do
             if [ "$1" = "-w" ]; then mkdir -p "$2" && touch "$2/{pkg}-0.1-py3-none-any.whl"; fi
@@ -142,3 +143,23 @@ def test_reinstall_asks_once(tmp_path: Path) -> None:
     calls = _pip_calls(python)
     assert calls[0].startswith("-m pip uninstall")
     assert any(call.startswith("-m pip install") for call in calls)
+
+
+def test_progress_lines_stay_in_order_with_pip_output(tmp_path: Path) -> None:
+    """Captured stdout (CI, a pipe) keeps each progress line ahead of the pip run it announces."""
+    python = _stub_env(tmp_path / "envs", "venv", venv=True, share=True)
+    result = _make(tmp_path, "reinstall", [python])
+    assert result.returncode == 0, result.stdout + result.stderr
+    expected = [
+        "* uninstalling",
+        "stub pip uninstall",
+        "* cleaning build artifacts",
+        "building wheel",
+        "stub pip wheel",
+        "built dist/",
+        "stub pip install",
+        "wheel →",
+    ]
+    positions = [result.stdout.find(line) for line in expected]
+    assert -1 not in positions, result.stdout
+    assert positions == sorted(positions), result.stdout
