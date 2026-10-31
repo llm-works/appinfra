@@ -554,42 +554,38 @@ result of the old form leaked in logs. Migrate to `!env VAR !secret`.
 plain `str`, so masked secrets loaded from an included file remain masked in
 the merged config.
 
-A `${path}` reference to a secret carries the `Envelope` when it is the whole
-value, so the secret travels to the code that reveals it. A secret cannot be
-part of a larger string: splicing it would insert its mask, so it raises
-`EmbeddedSecretError`. Pass it separately instead of building it into a URL:
+A `${path}` reference to a secret carries its `Envelope`, so the secret
+travels to the code that reveals it. Text a secret is spliced into is a secret
+as a whole: a database URL built from a secret password loads as an `Envelope`
+of the full URL, and `PG` opens it when it creates the engine:
 
 ```yaml
 dbserver:
   pass: !env DB_PASSWORD !secret
 dbs:
   main:
-    url: postgresql://app@db.local:5432/main
-    password: ${dbserver.pass}       # Envelope('***')
-    # url: postgresql://app:${dbserver.pass}@db.local/main  → EmbeddedSecretError
+    url: postgresql://app:${dbserver.pass}@db.local:5432/main   # Envelope('***')
 ```
 
-**`Envelope.ensure(value)` — boundary coercion.** Library code that
-historically accepted a plain `str` and now accepts `Envelope` too should
-call `Envelope.ensure(...)` at the boundary rather than reimplementing the
-coerce shim:
+A value that is not declared `!secret` stays plain text.
+
+**Taking `str | Envelope`.** `Envelope` is immutable and, like `str(s) is s`,
+`Envelope(e)` returns `e` itself. Code that accepts either form normalizes with
+the constructor and opens the value with `reveal()`, the only method that
+returns plaintext:
 
 ```python
 from appinfra import Envelope
 
 
-def connect(dsn: str | Envelope | None) -> None:
-    dsn = Envelope.ensure(dsn)  # None → None, Envelope → same, str → wrapped
-    if dsn is not None:
-        raw_dsn = dsn.reveal()
-        ...
+def connect(dsn: str | Envelope) -> None:
+    raw_dsn = Envelope(dsn).reveal()  # str → wrapped, Envelope → same
+    ...
 ```
 
-`ensure` preserves identity for already-wrapped inputs, passes `None` through,
-and raises `TypeError` for any other type. The `Envelope` constructor accepts
-only `str` — it rejects existing `Envelope` instances so accidental
-double-wraps surface loudly. `Envelope` is not a `str` subclass and is
-unhashable — do not use as a dict key or set member.
+Any other type raises `TypeError`. `copy` and `deepcopy` return the same
+`Envelope`. `Envelope` is not a `str` subclass and is unhashable — do not use
+as a dict key or set member.
 
 **`!path`** - Resolve paths relative to config file location with tilde expansion:
 

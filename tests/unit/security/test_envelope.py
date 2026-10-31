@@ -3,6 +3,9 @@
 
 """Tests for appinfra.security.envelope module."""
 
+import copy
+import pickle
+
 import pytest
 
 from appinfra.security.envelope import Envelope
@@ -41,24 +44,19 @@ class TestEnvelope:
         with pytest.raises(TypeError):
             Envelope(123)  # type: ignore[arg-type]
 
-    def test_rejects_envelope_value(self):
-        # Constructor is strict: only str accepted. Boundary code that wants
-        # to accept Envelope too must go through Envelope.ensure().
-        with pytest.raises(TypeError):
-            Envelope(Envelope("x"))  # type: ignore[arg-type]
+    def test_wrapping_an_envelope_returns_it(self):
+        # Like str(s) is s: a value that may or may not be wrapped normalizes
+        # with Envelope(value), without nesting or copying
+        existing = Envelope("x")
+        assert Envelope(existing) is existing
 
-    def test_ensure_none_passes_through(self):
-        assert Envelope.ensure(None) is None
+    def test_copy_returns_the_same_envelope(self):
+        existing = Envelope("x")
+        assert copy.copy(existing) is existing
+        assert copy.deepcopy(existing) is existing
+        assert copy.deepcopy({"pass": existing})["pass"] is existing
 
-    def test_ensure_str_wraps(self):
-        result = Envelope.ensure("hunter2")
-        assert isinstance(result, Envelope)
-        assert result.reveal() == "hunter2"
-
-    def test_ensure_envelope_preserves_identity(self):
-        existing = Envelope("hunter2")
-        assert Envelope.ensure(existing) is existing
-
-    def test_ensure_rejects_other_types(self):
-        with pytest.raises(TypeError):
-            Envelope.ensure(123)  # type: ignore[arg-type]
+    def test_pickle_round_trip_keeps_the_value(self):
+        restored = pickle.loads(pickle.dumps(Envelope("hunter2")))
+        assert isinstance(restored, Envelope)
+        assert restored.reveal() == "hunter2"

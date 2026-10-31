@@ -14,7 +14,6 @@ from pathlib import Path
 import pytest
 import yaml
 
-from appinfra.errors import EmbeddedSecretError
 from appinfra.security.envelope import Envelope
 from appinfra.yaml import (
     load,
@@ -1413,8 +1412,8 @@ dbs:
         assert isinstance(data["db"]["password"], Envelope)
         assert data["db"]["password"].reveal() == "override"
 
-    def test_a_secret_inside_text_is_rejected(self, tmp_path, monkeypatch):
-        """Splicing a secret into a string would leave '***' in its place."""
+    def test_text_with_a_secret_is_a_secret(self, tmp_path, monkeypatch):
+        """A string a secret is spliced into becomes an Envelope as a whole."""
         monkeypatch.setenv("TEST_DB_PW", "s3cret")
         (tmp_path / "pg.yaml").write_text(
             """
@@ -1428,11 +1427,11 @@ dbs:
         app_file = tmp_path / "app.yaml"
         app_file.write_text("db: !include './pg.yaml#dbs.main'\n")
 
-        with (
-            open(app_file) as f,
-            pytest.raises(EmbeddedSecretError, match="pgserver.pass"),
-        ):
-            load(f, current_file=app_file)
+        with open(app_file) as f:
+            data = load(f, current_file=app_file)
+
+        assert isinstance(data["db"]["url"], Envelope)
+        assert data["db"]["url"].reveal() == "postgresql://app:s3cret@h/db"
 
     def test_undefined_vars_pass_through(self, tmp_path):
         """Test undefined variables are passed through for Config._resolve() to handle."""

@@ -23,7 +23,7 @@ from appinfra.config import MAX_CONFIG_SIZE_BYTES, Config, ConfigFile, ConfigSpe
 from appinfra.config.config import (
     _check_file_size,
 )
-from appinfra.errors import EmbeddedSecretError, UndeclaredConfigPathError
+from appinfra.errors import UndeclaredConfigPathError
 from appinfra.security import Envelope
 
 # =============================================================================
@@ -227,7 +227,7 @@ dbs:
 
 @pytest.mark.usefixtures("clean_env")
 class TestSecretReferences:
-    """A reference to a secret carries its Envelope; a secret is never spliced into text."""
+    """A reference to a secret carries its Envelope; text built from a secret is one."""
 
     @pytest.fixture
     def config(self, tmp_path, monkeypatch):
@@ -247,15 +247,16 @@ class TestSecretReferences:
     def test_a_reference_to_a_plain_value_is_still_text(self, config):
         assert config.dbs.main.port == "5432"
 
-    def test_a_secret_inside_text_is_rejected(self, tmp_path, monkeypatch):
+    def test_text_with_a_secret_is_a_secret(self, tmp_path, monkeypatch):
         monkeypatch.setenv("TEST_DB_PW", "s3cret")
         config_file = tmp_path / "config.yaml"
         config_file.write_text(
             _SECRET_REFERENCES
             + '    url: "postgresql://${dbserver.user}:${dbserver.pass}@h/db"\n'
         )
-        with pytest.raises(EmbeddedSecretError, match="dbserver.pass"):
-            Config(str(config_file))
+        url = Config(str(config_file)).dbs.main.url
+        assert isinstance(url, Envelope)
+        assert url.reveal() == "postgresql://app:s3cret@h/db"
 
     def test_an_override_of_a_secret_stays_an_envelope(self, config, monkeypatch):
         monkeypatch.setenv("INFRA_DBSERVER_PASS", "override")

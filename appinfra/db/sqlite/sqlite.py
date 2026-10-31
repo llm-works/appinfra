@@ -19,6 +19,7 @@ import sqlalchemy
 import sqlalchemy.orm
 
 from ...log import Logger, LoggerFactory
+from ...security.envelope import Envelope
 from ..pg.interface import Interface
 
 if TYPE_CHECKING:
@@ -35,7 +36,8 @@ def _validate_sqlite_config(cfg: Any) -> None:
         raise ValueError("Configuration missing required 'url' field")
 
     url = cfg.url
-    if not url.startswith("sqlite"):
+    if not Envelope(url).reveal().startswith("sqlite"):
+        # An Envelope formats as its mask
         raise ValueError(f"Invalid SQLite URL: {url}")
 
 
@@ -97,7 +99,9 @@ class SQLite(Interface):
 
         # Create engine and session factory
         engine_kwargs = _get_engine_kwargs(cfg)
-        self._engine: Engine = sqlalchemy.create_engine(cfg.url, **engine_kwargs)
+        self._engine: Engine = sqlalchemy.create_engine(
+            Envelope(cfg.url).reveal(), **engine_kwargs
+        )
         self._SessionCls = sqlalchemy.orm.sessionmaker(
             bind=self._engine,
             expire_on_commit=getattr(cfg, "expire_on_commit", False),

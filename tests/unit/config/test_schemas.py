@@ -12,6 +12,8 @@ Tests Pydantic-based validation for configuration schemas including:
 
 import pytest
 
+from appinfra.security import Envelope
+
 try:
     from pydantic import ValidationError
 
@@ -165,6 +167,20 @@ class TestDatabaseConfigValidation:
             extensions=["pg_trgm", "some-extension", "ext_with-both"],
         )
         assert config.extensions == ["pg_trgm", "some-extension", "ext_with-both"]
+
+    def test_secret_url_keeps_its_envelope(self):
+        """A URL built from a secret stays an Envelope."""
+        config = DatabaseConfig(url=Envelope("postgresql://app:pw@localhost/db"))
+        assert isinstance(config.url, Envelope)
+
+    def test_secret_url_with_wrong_scheme_is_rejected(self):
+        with pytest.raises(ValidationError, match="must start with"):
+            DatabaseConfig(url=Envelope("mysql://app:pw@localhost/db"))
+
+    def test_server_password_keeps_its_envelope(self):
+        """pgserver.pass declared `!secret` stays an Envelope."""
+        config = PostgreSQLServerConfig(version=18, **{"pass": Envelope("pw")})
+        assert isinstance(config.password, Envelope)
 
 
 @pytest.mark.skipif(

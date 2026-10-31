@@ -16,6 +16,9 @@ import sqlalchemy
 from sqlalchemy import text
 from sqlalchemy.orm import declarative_base
 
+from appinfra.db.pg import PG
+from appinfra.security import Envelope
+
 # All tests in this module exercise a real PG instance; skip the whole module
 # with the sentinel reason if PG is unreachable.
 pytestmark = pytest.mark.require_pg
@@ -69,6 +72,18 @@ class TestPGConnection:
             result = session.execute(text("SELECT 'read_test' as msg"))
             row = result.fetchone()
             assert row[0] == "read_test"
+
+
+class TestPGSecretUrl:
+    """A URL built from a secret arrives as an Envelope; PG connects with it."""
+
+    def test_connects_with_a_secret_url(self, pg_config, pg_logger):
+        pg = PG(pg_logger, {"url": Envelope(pg_config.url)})
+        try:
+            with pg.connect() as conn:
+                assert conn.execute(text("SELECT 1")).scalar() == 1
+        finally:
+            pg.dispose()
 
 
 class TestPGHealthCheck:

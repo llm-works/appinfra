@@ -39,6 +39,7 @@ from appinfra.cli.tools.pg_tool import (
     _resolve_image,
 )
 from appinfra.dot_dict import DotDict
+from appinfra.security import Envelope
 
 # =============================================================================
 # _render_conf_value — postgres_conf value serialization
@@ -792,6 +793,13 @@ class TestPgUrlTool:
         rc = self._run(cfg, db="main")
         assert rc == 0
         assert capsys.readouterr().out.strip() == "postgresql://x/main"
+
+    def test_db_url_lookup_prints_a_secret_url(self, capsys):
+        """Printing the URL is the command's purpose, so a secret one is revealed."""
+        cfg = {"dbs": {"main": {"url": Envelope("postgresql://u:pw@x/main")}}}
+        rc = self._run(cfg, db="main")
+        assert rc == 0
+        assert capsys.readouterr().out.strip() == "postgresql://u:pw@x/main"
 
     def test_db_url_missing_returns_1(self):
         assert self._run({"dbs": {}}, db="nope") == 1

@@ -17,6 +17,7 @@ import sqlalchemy
 import sqlalchemy.dialects.postgresql
 
 from ...log import resolve_level
+from ...security.envelope import Envelope
 
 
 def validate_init_params(lg: Any, cfg: Any) -> None:
@@ -27,9 +28,11 @@ def validate_init_params(lg: Any, cfg: Any) -> None:
         raise ValueError("Configuration cannot be None")
 
 
-def create_sqlalchemy_engine(url: str) -> sqlalchemy.engine.Engine:
+def create_sqlalchemy_engine(url: str | Envelope) -> sqlalchemy.engine.Engine:
     """Create SQLAlchemy engine from URL."""
-    return sqlalchemy.create_engine(url, poolclass=sqlalchemy.pool.NullPool)
+    return sqlalchemy.create_engine(
+        Envelope(url).reveal(), poolclass=sqlalchemy.pool.NullPool
+    )
 
 
 def initialize_performance_cache(pg_instance: Any) -> None:
@@ -40,7 +43,7 @@ def initialize_performance_cache(pg_instance: Any) -> None:
 def create_engine_and_session(cfg: Any) -> tuple[sqlalchemy.engine.Engine, Any]:
     """Create SQLAlchemy engine and session factory."""
     engine_kwargs = {"poolclass": sqlalchemy.pool.NullPool}
-    engine = sqlalchemy.create_engine(cfg.url, **engine_kwargs)
+    engine = sqlalchemy.create_engine(Envelope(cfg.url).reveal(), **engine_kwargs)
     session_cls = sqlalchemy.orm.sessionmaker(bind=engine)
     return engine, session_cls
 
@@ -235,10 +238,10 @@ class ConfigValidator:
         if not hasattr(cfg, "url") or not cfg.url:
             raise ValueError("Database URL is required")
 
-        if not isinstance(cfg.url, str):
+        if not isinstance(cfg.url, (str, Envelope)):
             raise ValueError("Database URL must be a string")
 
-        if not cfg.url.startswith(("postgresql://", "postgres://")):
+        if not Envelope(cfg.url).reveal().startswith(("postgresql://", "postgres://")):
             raise ValueError(
                 "Database URL must start with 'postgresql://' or 'postgres://'"
             )

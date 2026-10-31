@@ -12,6 +12,7 @@ from appinfra.db.pg.connection import validate_readonly_config
 from appinfra.db.pg.core import validate_init_params
 from appinfra.db.pg.pg import PG
 from appinfra.dot_dict import DotDict
+from appinfra.security import Envelope
 
 
 class TestPGValidation:
@@ -215,6 +216,19 @@ class TestPGErrorHandlers:
         # Verify exception was wrapped
         assert "Database connection failed" in str(exc_info.value)
         assert exc_info.value.__cause__ is error
+
+
+class TestPGSecretUrl:
+    """A URL built from a secret arrives as an Envelope and is opened for the engine."""
+
+    @patch("appinfra.db.pg.pg.LoggerFactory")
+    @patch.object(PG, "_create_managers")
+    @patch.object(PG, "_initialize_subsystems")
+    def test_engine_connects_with_the_revealed_url(self, *_mocks):
+        pg = PG(Mock(), {"url": Envelope("postgresql://app:s3cret@localhost/db")})
+
+        assert pg.engine.url.password == "s3cret"
+        assert "s3cret" not in pg.url
 
 
 class TestPGDictConfig:

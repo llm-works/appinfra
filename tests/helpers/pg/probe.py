@@ -21,6 +21,7 @@ from urllib.parse import urlparse
 import pytest
 
 from appinfra.config import Config
+from appinfra.security import Envelope
 
 PG_SKIP_REASON = "pg-unavailable"
 REQUIRE_PG_MARKER = "require_pg"
@@ -80,7 +81,7 @@ def resolve_pgserver_endpoint() -> tuple[str, int]:
             cfg = Config(str(infra_yaml))
             url = cfg.get("dbs.unittest.url")
             if url:
-                parsed = urlparse(str(url))
+                parsed = urlparse(Envelope(url).reveal())
                 if parsed.hostname:
                     return parsed.hostname, (
                         parsed.port if parsed.port is not None else DEFAULT_PG_PORT

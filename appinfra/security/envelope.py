@@ -23,11 +23,11 @@ class Envelope:
     f-strings, ``%``-formatting, or ``print``. The plaintext is only
     available via ``.reveal()``.
 
-    The constructor accepts ``str`` only; passing an already-wrapped
-    ``Envelope`` raises ``TypeError`` so accidental double-wraps surface
-    loudly. Boundary code that must accept a mixed ``str | Envelope | None``
-    input should call ``Envelope.ensure(...)`` instead of re-implementing
-    the coerce shim.
+    Immutable. Like ``str(s) is s``, ``Envelope(e)`` returns ``e`` itself, so
+    code that takes ``str | Envelope`` normalizes with ``Envelope(value)`` and
+    consumes the text with ``Envelope(value).reveal()``; envelopes never nest.
+    ``copy`` and ``deepcopy`` return the same object. Any type other than
+    ``str`` or ``Envelope`` raises ``TypeError``.
 
     Equality compares underlying values so config round-trips work in tests.
     Hashing is deliberately omitted; secrets should not be dict keys or set
@@ -36,24 +36,26 @@ class Envelope:
 
     __slots__ = ("_value",)
     _MASK = "***"
+    _value: str
 
-    def __init__(self, value: str) -> None:
+    def __new__(cls, value: str | Envelope) -> Envelope:
+        if isinstance(value, Envelope):
+            return value
         if not isinstance(value, str):
             raise TypeError(f"Envelope requires a str, got {type(value).__name__}")
-        self._value = value
+        envelope = super().__new__(cls)
+        envelope._value = value
+        return envelope
 
-    @staticmethod
-    def ensure(value: str | Envelope | None) -> Envelope | None:
-        """Normalize a boundary value to ``Envelope`` (or ``None``).
+    def __reduce__(self) -> tuple[type[Envelope], tuple[str]]:
+        # __new__ takes the value; copyreg's default rebuild passes none
+        return (Envelope, (self._value,))
 
-        Intended for library boundaries that historically accepted a plain
-        ``str`` and now accept ``Envelope`` too. Preserves identity for
-        already-wrapped inputs and passes ``None`` through untouched. Any
-        other type raises ``TypeError`` via the constructor.
-        """
-        if value is None or isinstance(value, Envelope):
-            return value
-        return Envelope(value)
+    def __copy__(self) -> Envelope:
+        return self
+
+    def __deepcopy__(self, memo: dict[int, object]) -> Envelope:
+        return self
 
     def reveal(self) -> str:
         """Return the underlying plaintext. The only path to the raw value."""

@@ -44,6 +44,8 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
+from ...security.envelope import Envelope
+
 if TYPE_CHECKING:
     from sqlalchemy.orm import DeclarativeBase
 
@@ -98,7 +100,7 @@ def _setup_database_with_lock(config: dict[str, Any]) -> None:
     if not config.get("create_db"):
         return
 
-    url = config["url"]
+    url = Envelope(config["url"]).reveal()
     parsed = urlparse(url)
     db_name = parsed.path.lstrip("/")
     postgres_url = urlunparse(parsed._replace(path="/postgres"))

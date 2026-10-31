@@ -11,6 +11,7 @@ connections of different types, supporting PostgreSQL and SQLite.
 from typing import Any
 
 from ..log import Logger, LoggerFactory
+from ..security.envelope import Envelope
 from . import pg, sqlite
 
 
@@ -67,10 +68,13 @@ def _setup_single_database(
 ) -> bool:
     """Set up a single database connection based on URL type."""
     url = cfg.url
-    if url.startswith(("postgresql", "postgres://")):
+    # A URL a secret was spliced into is an Envelope; open it for the scheme
+    # check only, so the error path logs the masked value
+    text = Envelope(url).reveal()
+    if text.startswith(("postgresql", "postgres://")):
         _setup_postgresql_database(name, cfg, lg, lg_level, dbs)
         return True
-    if url.startswith("sqlite"):
+    if text.startswith("sqlite"):
         _setup_sqlite_database(name, cfg, lg, dbs)
         return True
     _handle_unknown_db_type(name, url, lg, errors)
@@ -180,12 +184,12 @@ class Manager:
         if not hasattr(cfg, "url") or not cfg.url:
             raise ValueError(f"Database '{name}' missing required 'url' field")
 
-        if not isinstance(cfg.url, str):
+        if not isinstance(cfg.url, (str, Envelope)):
             raise ValueError(f"Database '{name}' URL must be a string")
 
         # Validate URL format - accept PostgreSQL or SQLite
         valid_prefixes = ("postgresql://", "postgres://", "sqlite://", "sqlite:///")
-        if not cfg.url.startswith(valid_prefixes):
+        if not Envelope(cfg.url).reveal().startswith(valid_prefixes):
             raise ValueError(
                 f"Database '{name}' URL must start with a supported prefix: "
                 f"postgresql://, postgres://, or sqlite://"

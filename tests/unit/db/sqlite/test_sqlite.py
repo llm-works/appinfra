@@ -13,6 +13,7 @@ from sqlalchemy import Column, Integer, String, text
 from sqlalchemy.orm import declarative_base
 
 from appinfra.db.sqlite import SQLite
+from appinfra.security import Envelope
 
 
 @pytest.fixture
@@ -92,6 +93,26 @@ class TestSQLiteInit:
         config.url = "postgresql://localhost/db"
         with pytest.raises(ValueError, match="Invalid SQLite URL"):
             SQLite(mock_logger, config)
+
+    def test_init_with_a_secret_url(self, mock_logger):
+        """A URL built from a secret arrives as an Envelope."""
+        config = Mock(spec=["url"])
+        config.url = Envelope("sqlite:///:memory:")
+        with patch(
+            "appinfra.db.sqlite.sqlite.LoggerFactory.derive", return_value=mock_logger
+        ):
+            db = SQLite(mock_logger, config)
+        try:
+            assert sqlalchemy.make_url(db.url).database == ":memory:"
+        finally:
+            db.dispose()
+
+    def test_an_invalid_secret_url_stays_masked(self, mock_logger):
+        config = Mock()
+        config.url = Envelope("postgresql://u:pw@localhost/db")
+        with pytest.raises(ValueError, match="Invalid SQLite URL") as exc_info:
+            SQLite(mock_logger, config)
+        assert "pw" not in str(exc_info.value)
 
 
 class TestSQLiteProperties:

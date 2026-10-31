@@ -89,25 +89,6 @@ class UndeclaredConfigPathError(ConfigError):
         self.path = path
 
 
-class EmbeddedSecretError(ConfigError):
-    """
-    A ``${path}`` reference to a secret sits inside a larger string.
-
-    Splicing an Envelope into text would put its mask, not its value, into
-    the result. A secret is referenced as a whole value only, so it travels
-    as an Envelope to the code that reveals it.
-    """
-
-    def __init__(self, path: str) -> None:
-        super().__init__(
-            f"'${{{path}}}' is a secret and cannot be part of a larger string; "
-            f"reference it as a whole value (key: ${{{path}}}) and pass it on "
-            "separately",
-            path=path,
-        )
-        self.path = path
-
-
 class DatabaseError(InfraError):
     """
     Database-related errors.

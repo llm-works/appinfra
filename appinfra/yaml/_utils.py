@@ -8,7 +8,6 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from ..errors import EmbeddedSecretError
 from ..security.envelope import Envelope
 
 # A ${path} reference. Restricted to config key characters (alphanumeric, dot,
@@ -20,23 +19,23 @@ def substitute_references(text: str, lookup: Callable[[re.Match[str]], Any]) -> 
     """
     Replace each ``${path}`` in ``text`` with the value ``lookup`` returns for its match.
 
-    A text that is one reference and nothing else yields an ``Envelope`` as
-    itself, so a secret travels on to the code that reveals it. Any other
-    value is spliced in as ``str(value)``. An ``Envelope`` inside a larger
-    string raises ``EmbeddedSecretError``: its ``str()`` is its mask.
+    Values are spliced in as ``str(value)``. Text that references an
+    ``Envelope`` is a secret as a whole: the result is an ``Envelope`` of the
+    substituted text, so a URL built from a secret password travels on masked
+    to the code that reveals it.
     """
-    whole = REFERENCE_PATTERN.fullmatch(text)
-    if whole is not None:
-        value = lookup(whole)
-        return value if isinstance(value, Envelope) else str(value)
+    secret = False
 
     def splice(match: re.Match[str]) -> str:
+        nonlocal secret
         value = lookup(match)
         if isinstance(value, Envelope):
-            raise EmbeddedSecretError(match.group(1))
+            secret = True
+            return value.reveal()
         return str(value)
 
-    return REFERENCE_PATTERN.sub(splice, text)
+    result = REFERENCE_PATTERN.sub(splice, text)
+    return Envelope(result) if secret else result
 
 
 def _file_exists(path: Path) -> bool:
