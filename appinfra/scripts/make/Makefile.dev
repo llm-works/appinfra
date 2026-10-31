@@ -38,8 +38,10 @@
 #   APPINFRA_DEV_CHECK_SCRIPT  - Path to check.sh (default: auto-derived)
 #   APPINFRA_DEV_INSTALL_EXTRAS - Optional extras for install (e.g., "ui,fastapi")
 #   APPINFRA_DEV_MYPY_FLAGS    - Extra flags for mypy (e.g., "--follow-imports=skip" for large deps)
+#   APPINFRA_DEV_DEPS_ARGS     - Extra deps_report.py flags for `make deps` / `make deps.deep`
+#                             (e.g., --include-pre)
 #   APPINFRA_DEV_SKIP_TARGETS  - Space-separated list of targets to skip (project provides own)
-#                             Supported: fmt lint type cq
+#                             Supported: fmt lint type cq deps
 
 # Path to this Makefile's directory (for deriving paths), taken before the
 # include below changes MAKEFILE_LIST
@@ -109,6 +111,19 @@ setup:: ## sets up dev environment with all dependencies for all APPINFRA_PYTHON
 	done
 	@echo "* setup done"
 .PHONY: setup
+
+# Read-only reports on the dependencies `make setup` installs, from the appinfra
+# copy this Makefile belongs to (like install_deps.py). pip looks up the newest
+# releases on the indexes it is configured with, so they stay out of `make check`.
+ifeq ($(filter deps,$(APPINFRA_DEV_SKIP_TARGETS)),)
+deps:: ## Installed versus newest releases of the project's dependencies, then pip check
+	@$(PYTHON) $(_APPINFRA_DEV_MAKE_DIR)../deps_report.py $(APPINFRA_DEV_DEPS_ARGS)
+.PHONY: deps
+
+deps.deep:: ## As deps, for the whole tree of installed dependencies
+	@$(PYTHON) $(_APPINFRA_DEV_MAKE_DIR)../deps_report.py --deep $(APPINFRA_DEV_DEPS_ARGS)
+.PHONY: deps.deep
+endif
 
 ##@ Code Quality
 

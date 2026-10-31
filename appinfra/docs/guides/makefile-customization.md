@@ -159,6 +159,22 @@ Use `--json` for machine-readable output:
 make doctor ARGS="--json"
 ```
 
+### Dependency Report
+
+`make deps` checks the dependencies `make setup` installs against the releases pip can install,
+then runs `pip check`; `make deps.deep` does the same for the whole dependency tree.
+
+```
+package     floor   ceil    installed  ci        available  status
+hypothesis  6.0.0   7.0.0   6.170.13   6.170.14             behind (patch)
+rich        13.0.0  14.0.0  13.9.4     ✓         15.0.0     capped (2 majors)
+```
+
+`ci` is the version a fresh install (as in CI) gets, `✓` when it matches the installed one;
+`available` is the newest release outside the range. Releases come from `pip index versions`, so
+from the indexes pip is configured with. Both targets query the index, so they are not part of
+`make check`. Flags such as `--include-pre` or `--no-color` go in `APPINFRA_DEV_DEPS_ARGS`.
+
 ### Dry-Run Mode
 
 Preview what commands would run without executing them:
@@ -410,6 +426,7 @@ These targets can be extended by defining them again in your Makefile:
 **Health Check:**
 - `doctor::` - Add project health checks
 - `init::` - Add initialization steps
+- `deps::`, `deps.deep::` - Add steps to the dependency report
 
 **Documentation:**
 - `docs.serve::` - Extend doc server
@@ -497,7 +514,8 @@ Each setting has a type, and a value that does not fit it stops make:
 | `APPINFRA_DEV_PROJECT_ROOT` | `$(CURDIR)` | Project root for check.sh |
 | `APPINFRA_DEV_INSTALL_EXTRAS` | (empty) | Optional extras for install (e.g., `ui,fastapi`) |
 | `APPINFRA_DEV_MYPY_FLAGS` | (empty) | Extra mypy flags (e.g., `--follow-imports=skip` for large deps) |
-| `APPINFRA_DEV_SKIP_TARGETS` | (empty) | Targets to skip so project can override (e.g., `type`, `test.e2e`) |
+| `APPINFRA_DEV_DEPS_ARGS` | (empty) | Extra flags for `make deps` / `make deps.deep` (e.g., `--include-pre`) |
+| `APPINFRA_DEV_SKIP_TARGETS` | (empty) | Targets to skip so project can override (e.g., `type`, `test.e2e`, `deps`) |
 | `APPINFRA_DRY_RUN` | `false` | `true` previews commands without executing them |
 
 **Testing (PYTEST):**

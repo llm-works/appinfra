@@ -16,6 +16,9 @@ pinning an older appinfra resolves a release with no `check` extra and pip only 
 earlier: pre-release builds (0.13.1.devN) would not satisfy it. -->
 
 ### Added
+- `make deps` reports each dependency's installed version against the version a fresh install
+  (CI) gets and the newest release outside its range, then `pip check`'s conflicts;
+  `make deps.deep` shows the whole dependency tree. The `check` extra now includes `packaging`.
 - `appinfra.pytest_suites`, an opt-in pytest plugin (`pytest_plugins = ["appinfra.pytest_suites"]`)
   that gives each test the suite of its nearest marker or its `tests/<suite>/` directory, and stops
   collection on a test with no suite or two. See the test suites guide.

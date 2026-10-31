@@ -43,6 +43,8 @@ check = [
     "pytest-cov>=4.0.0,<8.0.0",
     "pytest-xdist>=3.2.0,<4.0.0",
     "interrogate>=1.5.0,<2.0.0",
+    # deps_report.py (make deps): requirements, ranges and versions; 22 drops legacy versions
+    "packaging>=22.0,<27.0",
     # 4.1 made duplicate-code fast on large trees. Capped at the tested minor: cq dup's plugin
     # patches astroid, whose version pylint pins.
     "pylint>=4.1.0,<4.2",
