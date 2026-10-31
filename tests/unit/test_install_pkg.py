@@ -51,6 +51,21 @@ class TestProbe:
         result = SimpleNamespace(stdout=stdout)
         monkeypatch.setattr(ip.subprocess, "run", lambda *a, **k: result)
 
+    def test_hung_interpreter_refused(
+        self, ip: ModuleType, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """An interpreter that does not start in time is refused, named, not waited on."""
+        timeouts: list[float] = []
+
+        def hang(cmd: list[str], **kwargs: Any) -> None:
+            timeouts.append(kwargs["timeout"])
+            raise subprocess.TimeoutExpired(cmd, kwargs["timeout"])
+
+        monkeypatch.setattr(ip.subprocess, "run", hang)
+        with pytest.raises(ip.RefusedError, match="py did not start within 10s"):
+            ip.probe("py")
+        assert timeouts == [10]
+
     def test_output_before_the_prefix_ignored(
         self, ip: ModuleType, monkeypatch: pytest.MonkeyPatch
     ) -> None:

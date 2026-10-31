@@ -34,6 +34,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 PROBE = "import json, sys; print(json.dumps([sys.prefix, sys.base_prefix]))"
+# the probe takes milliseconds; the bound tells a slow start (cold cache, network
+# storage) from one that hangs, which would stall make install with no output
+PROBE_TIMEOUT_S = 10
 VENV_SHARE_MODE = 0o755
 BUILD_ARTIFACTS = (".dist", ".build", "dist", "build")
 # PEP 503 distribution name: it becomes a path component under share/. Makefile.install
@@ -65,9 +68,18 @@ class Env:
 
 def probe(python: str) -> Env:
     """The env's prefix, and whether it is a virtualenv."""
-    out = subprocess.run(
-        [python, "-c", PROBE], check=True, capture_output=True, text=True
-    ).stdout
+    try:
+        out = subprocess.run(
+            [python, "-c", PROBE],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=PROBE_TIMEOUT_S,
+        ).stdout
+    except subprocess.TimeoutExpired as e:
+        raise RefusedError(
+            f"ERROR: {python} did not start within {PROBE_TIMEOUT_S}s"
+        ) from e
     # the last line only: a sitecustomize or .pth hook may print at startup
     lines = out.strip().splitlines()
     try:
