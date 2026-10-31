@@ -14,8 +14,8 @@ from pathlib import Path
 import pytest
 import yaml
 
+from appinfra.security.envelope import Envelope
 from appinfra.yaml import (
-    SecretStr,
     load,
     load_file,
 )
@@ -1261,11 +1261,11 @@ config:
         assert result2 == "<<: !chain:include+deep './base.yaml'"
 
     def test_secretstr_in_deep_included_file_survives_merge(self, tmp_path):
-        """A SecretStr in a !deep !include? child must round-trip as SecretStr, not '***'.
+        """A Envelope in a !deep !include? child must round-trip as Envelope, not '***'.
 
         Regression: flatten_mapping reconstructed the merged mapping via
         _value_to_node, whose else branch stringified any non-primitive value.
-        str(SecretStr) is "***", so credentials from the child file were
+        str(Envelope) is "***", so credentials from the child file were
         silently masked before reaching consumers.
         """
         child = tmp_path / "deep_secret_child.yaml"
@@ -1292,14 +1292,14 @@ config:
             )
 
         api_key = data["web_search"]["backend"]["config"]["api_key"]
-        assert isinstance(api_key, SecretStr)
+        assert isinstance(api_key, Envelope)
         assert api_key.reveal() == "hunter2"
         # Document-side value merged around it, not overwritten
         assert data["web_search"]["backend"]["kind"] == "serper"
 
     def test_secretstr_in_bare_included_file_survives_merge(self, tmp_path):
         """Companion: bare `<<: !include?` (DeepMergeDict path) must also
-        preserve SecretStr — the same _value_to_node path handles merge_base
+        preserve Envelope — the same _value_to_node path handles merge_base
         and override_base.
         """
         child = tmp_path / "bare_secret_child.yaml"
@@ -1315,7 +1315,7 @@ config:
             )
 
         token = data["creds"]["token"]
-        assert isinstance(token, SecretStr)
+        assert isinstance(token, Envelope)
         assert token.reveal() == "s3cret"
         assert data["creds"]["user"] == "alice"
 

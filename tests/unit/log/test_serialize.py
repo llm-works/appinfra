@@ -158,10 +158,10 @@ class TestJSONFormatterSanitize:
         out = sanitize_extra(extra)
         assert out == extra
 
-    def test_secret_str_masked_in_extra(self):
-        from appinfra.yaml import SecretStr
+    def test_envelope_masked_in_extra(self):
+        from appinfra.security.envelope import Envelope
 
-        out = sanitize_extra({"pwd": SecretStr("hunter2")})
+        out = sanitize_extra({"pwd": Envelope("hunter2")})
         assert "hunter2" not in str(out)
 
     @pytest.mark.skipif(not _HAVE_SA, reason="sqlalchemy not installed")

@@ -43,6 +43,8 @@ earlier: pre-release builds (0.13.1.devN) would not satisfy it. -->
 - `PG.dispose()` closes the pooled connections of a `PG` and of its cached `ScopedPG`s.
 
 ### Changed
+- **Breaking:** `appinfra.yaml.SecretStr` is now `appinfra.security.Envelope`, also exported as
+  `appinfra.Envelope`; `!secret` loads as an `Envelope`. No alias is kept.
 - `make check` prints its result last, after the failures, kept logs, skips and `[i]` notes.
   Warnings show in bright yellow, failures in red.
 - **Breaking:** `make check.summary` is now `make check.ci`: `make check`'s checks and warning

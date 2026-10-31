@@ -24,11 +24,13 @@ Example:
     masker.add_pattern(r"MY_TOKEN_[A-Z0-9]+")
 """
 
+from .envelope import Envelope
 from .filter import SecretMaskingFilter
 from .masking import SecretMasker, get_masker, reset_masker
 from .patterns import DEFAULT_PATTERNS, PATTERN_NAMES
 
 __all__ = [
+    "Envelope",
     "SecretMasker",
     "SecretMaskingFilter",
     "get_masker",

@@ -25,6 +25,7 @@ from typing import Any
 
 import yaml
 
+from ..security.envelope import Envelope
 from ._include import _extract_section_data
 from ._utils import _file_exists, _normalize_allowed_paths
 from .types import (
@@ -33,7 +34,6 @@ from .types import (
     ErrorContext,
     IncludeContext,
     ResetValue,
-    SecretStr,
 )
 
 # Pattern to match !deep *anchor and transform to !deep anchor
@@ -266,7 +266,7 @@ class Loader(yaml.SafeLoader):
         ] = {}  # Temp storage for include source maps
         self._anchor_nodes: dict[str, yaml.Node] = {}  # Track anchors for !deep lookup
         # Intern table for Python values whose str() is not a round-trippable
-        # form (SecretStr masks to "***"). _value_to_node parks the object here
+        # form (Envelope masks to "***"). _value_to_node parks the object here
         # under a token and emits a !__literal__ ScalarNode; literal_constructor
         # resolves the token back to the original instance.
         self._literal_values: dict[str, Any] = {}
@@ -870,7 +870,7 @@ class Loader(yaml.SafeLoader):
 
         ``!secret`` only carries meaning inside a chain: ``!env VAR !secret``
         (or the reversed ``!secret !env VAR``) resolves the variable and
-        returns a ``SecretStr`` that stays masked in logs. Solo ``!secret X``
+        returns an ``Envelope`` that stays masked in logs. Solo ``!secret X``
         would silently return a plain ``str`` that leaks unmasked, so it's
         rejected at parse time.
         """
@@ -878,7 +878,7 @@ class Loader(yaml.SafeLoader):
         raise yaml.YAMLError(
             f"Solo `!secret` is not supported ({ctx.format_location()}). "
             "Use `!env VAR !secret` (or `!secret !env VAR`) to resolve VAR "
-            "and wrap the result in a SecretStr."
+            "and wrap the result in an Envelope."
         )
 
     def path_constructor(self, node: Any) -> str:
@@ -1464,8 +1464,8 @@ class Loader(yaml.SafeLoader):
             return yaml.ScalarNode(tag="tag:yaml.org,2002:float", value=str(value))
         if value is None:
             return yaml.ScalarNode(tag="tag:yaml.org,2002:null", value="null")
-        if isinstance(value, SecretStr):
-            # Intern SecretStr (str() masks to "***") and emit !__literal__ placeholder.
+        if isinstance(value, Envelope):
+            # Intern Envelope (str() masks to "***") and emit !__literal__ placeholder.
             token = f"lit-{len(self._literal_values)}"
             self._literal_values[token] = value
             node = yaml.ScalarNode(tag="!__literal__", value=token)
@@ -1478,7 +1478,7 @@ class Loader(yaml.SafeLoader):
         Resolve a ``!__literal__`` placeholder back to the interned Python value.
 
         Placeholders are emitted by ``_value_to_node`` for Python objects whose
-        ``str()`` is not a lossless representation (SecretStr today). The tag
+        ``str()`` is not a lossless representation (Envelope today). The tag
         is internal — it is never written by users and never leaves the loader.
         """
         if id(node) not in self._literal_node_ids:
@@ -1527,17 +1527,17 @@ def _compose_include_optional_deep(  # cq: keep registered by @register_chain
 @register_chain("env", "secret")
 def _compose_env_secret(  # cq: keep registered by @register_chain
     loader: Loader, node: yaml.Node
-) -> SecretStr:
+) -> Envelope:
     """!secret !env VAR or !env VAR !secret — resolve VAR, wrap masked."""
     value = loader._construct_env(node, optional=False)
     assert value is not None  # non-optional path raises otherwise
-    return SecretStr(value)
+    return Envelope(value)
 
 
 @register_chain("env?", "secret")
 def _compose_env_optional_secret(  # cq: keep registered by @register_chain
     loader: Loader, node: yaml.Node
-) -> SecretStr | None:
+) -> Envelope | None:
     """!secret !env? VAR or !env? VAR !secret — resolve VAR, wrap masked, None if missing."""
     value = loader._construct_env(node, optional=True)
-    return SecretStr(value) if value is not None else None
+    return Envelope(value) if value is not None else None
