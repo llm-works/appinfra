@@ -23,8 +23,15 @@ if TYPE_CHECKING:  # pragma: no cover
     from ...log import Logger
 
 
-# Schema name validation pattern - must be a valid SQL identifier
-_SCHEMA_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
+# Schema name validation pattern - must be a valid SQL identifier. PostgreSQL
+# silently truncates identifiers to 63 bytes, so two longer names could map to
+# the same schema; the pattern is ASCII, so 63 characters are 63 bytes.
+_SCHEMA_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_]{0,62}$")
+
+_SCHEMA_NAME_RULE = (
+    "Must start with lowercase letter, contain only lowercase letters, numbers, "
+    "and underscores, and be at most 63 characters."
+)
 
 
 def validate_schema_name(name: str) -> bool:
@@ -37,7 +44,7 @@ def validate_schema_name(name: str) -> bool:
     Returns:
         True if valid, False otherwise
     """
-    return bool(_SCHEMA_NAME_PATTERN.match(name))
+    return bool(_SCHEMA_NAME_PATTERN.fullmatch(name))
 
 
 class SchemaManager:
@@ -66,10 +73,7 @@ class SchemaManager:
             ValueError: If schema name is invalid
         """
         if not validate_schema_name(schema):
-            raise ValueError(
-                f"Invalid schema name '{schema}'. Must start with lowercase letter "
-                "and contain only lowercase letters, numbers, and underscores."
-            )
+            raise ValueError(f"Invalid schema name '{schema}'. {_SCHEMA_NAME_RULE}")
 
         self._engine = engine
         self._schema = schema
@@ -193,10 +197,7 @@ def create_all_in_schema(base: DeclarativeBase, engine: Engine, schema: str) -> 
         ValueError: If schema name is invalid
     """
     if not validate_schema_name(schema):
-        raise ValueError(
-            f"Invalid schema name '{schema}'. Must start with lowercase letter "
-            "and contain only lowercase letters, numbers, and underscores."
-        )
+        raise ValueError(f"Invalid schema name '{schema}'. {_SCHEMA_NAME_RULE}")
 
     # Store original schemas and temporarily set target schema
     original_schemas: dict[Any, str | None] = {}

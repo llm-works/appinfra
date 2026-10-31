@@ -152,6 +152,11 @@ earlier: pre-release builds (0.13.1.devN) would not satisfy it. -->
 - The `appinfra.db.pg.testing` fixtures (`pg_isolated`, `pg_migrate_factory`,
   `make_migrate_fixture`) close their pooled connections at teardown; psycopg used to report each
   one with a `ResourceWarning` at garbage collection.
+- `pg_migrate_factory` and `make_migrate_fixture` work in a schema of their own
+  (`<pg_test_schema>_m<n>`); they used to reset and drop the worker schema `pg_isolated` relies
+  on, so its later tables landed in `public`.
+- A schema name longer than 63 characters raises `ValueError`; PostgreSQL truncated it silently,
+  so two long names could share one schema.
 - `Manager.close_all()` also closes the connections of each `PG`'s cached `ScopedPG`s.
 - `SubprocessContext` puts back the SIGTERM and SIGINT handlers it replaced; a reused worker
   process that had run a task in one no longer ended on SIGTERM.

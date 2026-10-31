@@ -11,6 +11,31 @@ import pytest
 from sqlalchemy import Column, Integer, String, text
 from sqlalchemy.orm import declarative_base
 
+from appinfra.db.pg.testing import make_migrate_fixture
+
+MigrateBase = declarative_base()
+
+
+class MigrateFixtureModel(MigrateBase):
+    __tablename__ = "migrate_fixture_test"
+    id = Column(Integer, primary_key=True)
+    name = Column(String(50))
+
+
+pg_migrated = make_migrate_fixture(MigrateBase)
+
+
+def _schema_exists(pg, schema: str) -> bool:
+    with pg.engine.connect() as conn:
+        result = conn.execute(
+            text(
+                "SELECT COUNT(*) FROM information_schema.schemata "
+                "WHERE schema_name = :schema"
+            ),
+            {"schema": schema},
+        )
+        return result.scalar() == 1
+
 
 # Override the default fixtures to use our test config
 @pytest.fixture(scope="session")
@@ -129,47 +154,26 @@ class TestSchemaIsolationRobustness:
 class TestMakeMigrateFixture:
     """Test the make_migrate_fixture factory."""
 
-    def test_creates_tables_from_base(
-        self, pg_test_config, pg_test_logger, pg_test_schema
-    ):
-        """Test that make_migrate_fixture creates tables in the schema."""
-        from appinfra.db.pg import PG
+    def test_creates_tables_from_base(self, pg_migrated):
+        """Test that make_migrate_fixture creates tables in its schema."""
+        with pg_migrated.engine.connect() as conn:
+            result = conn.execute(
+                text(
+                    """
+                    SELECT COUNT(*)
+                    FROM information_schema.tables
+                    WHERE table_schema = :schema
+                    AND table_name = 'migrate_fixture_test'
+                    """
+                ),
+                {"schema": pg_migrated.schema},
+            )
+            assert result.scalar() == 1
 
-        Base = declarative_base()
-
-        class MigrateTestModel(Base):
-            __tablename__ = "migrate_fixture_test"
-            id = Column(Integer, primary_key=True)
-            name = Column(String(50))
-
-        # Manually invoke what the fixture would do
-        pg = PG(pg_test_logger, pg_test_config, schema=pg_test_schema)
-
-        try:
-            if pg._schema_mgr:
-                pg._schema_mgr.reset_schema()
-            pg.migrate(Base)
-
-            # Verify table exists in correct schema
-            with pg.engine.connect() as conn:
-                result = conn.execute(
-                    text(
-                        """
-                        SELECT COUNT(*)
-                        FROM information_schema.tables
-                        WHERE table_schema = :schema
-                        AND table_name = 'migrate_fixture_test'
-                        """
-                    ),
-                    {"schema": pg_test_schema},
-                )
-                assert result.scalar() == 1
-        finally:
-            try:
-                if pg._schema_mgr:
-                    pg._schema_mgr.drop_schema(cascade=True)
-            finally:
-                pg.dispose()
+    def test_uses_a_schema_of_its_own(self, pg_isolated, pg_migrated):
+        """The fixture's schema is not the worker schema pg_isolated uses."""
+        assert pg_migrated.schema != pg_isolated.schema
+        assert _schema_exists(pg_isolated, pg_isolated.schema)
 
 
 class TestPgMigrateFactory:
@@ -229,6 +233,19 @@ class TestPgMigrateFactory:
                 assert result.scalar() == 0
         finally:
             engine.dispose()
+
+    def test_factory_leaves_the_worker_schema(self, pg_isolated, pg_migrate_factory):
+        """Entering and leaving the factory keeps pg_isolated's schema."""
+        Base = declarative_base()
+
+        class WorkerSchemaTestModel(Base):
+            __tablename__ = "worker_schema_test_table"
+            id = Column(Integer, primary_key=True)
+
+        with pg_migrate_factory(Base) as pg:
+            assert pg.schema != pg_isolated.schema
+
+        assert _schema_exists(pg_isolated, pg_isolated.schema)
 
     def test_factory_accepts_extensions(self, pg_migrate_factory):
         """Test that pg_migrate_factory accepts extensions parameter."""

@@ -170,7 +170,7 @@ try:
             """Validate extension names are safe SQL identifiers."""
             pattern = re.compile(r"^[a-z][a-z0-9_-]*$")
             for ext in v:
-                if not pattern.match(ext):
+                if not pattern.fullmatch(ext):
                     raise ValueError(
                         f"Invalid extension name '{ext}'. Must start with lowercase "
                         "letter and contain only lowercase letters, numbers, "
@@ -184,11 +184,14 @@ try:
             """Validate schema name is a safe SQL identifier."""
             if v is None:
                 return v
-            pattern = re.compile(r"^[a-z][a-z0-9_]*$")
-            if not pattern.match(v):
+            # Same rule as appinfra.db.pg.schema, which needs the sql extra and
+            # so is not imported here; PostgreSQL truncates identifiers past 63 bytes
+            pattern = re.compile(r"^[a-z][a-z0-9_]{0,62}$")
+            if not pattern.fullmatch(v):
                 raise ValueError(
-                    f"Invalid schema name '{v}'. Must start with lowercase letter "
-                    "and contain only lowercase letters, numbers, and underscores."
+                    f"Invalid schema name '{v}'. Must start with lowercase letter, "
+                    "contain only lowercase letters, numbers, and underscores, "
+                    "and be at most 63 characters."
                 )
             return v
 

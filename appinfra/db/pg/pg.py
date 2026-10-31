@@ -621,7 +621,7 @@ class PG(Interface):
 
         Defense-in-depth check - names should already be validated by Pydantic.
         """
-        return bool(self._EXTENSION_NAME_PATTERN.match(name))
+        return bool(self._EXTENSION_NAME_PATTERN.fullmatch(name))
 
     def _run_hooks(self, hooks: list[Callable[[Any], None]], hook_type: str) -> None:
         """Execute lifecycle hooks with a connection."""
@@ -676,7 +676,7 @@ class ScopedPG:
         Raises:
             ValueError: If schema name is invalid
         """
-        from .schema import validate_schema_name
+        from .schema import _SCHEMA_NAME_RULE, validate_schema_name
 
         self._lg = lg
         self._parent_pg = parent_pg
@@ -684,8 +684,7 @@ class ScopedPG:
         # Validate schema name
         if not validate_schema_name(schema_name):
             raise ValueError(
-                f"Invalid schema name '{schema_name}'. Must start with lowercase letter "
-                "and contain only lowercase letters, numbers, and underscores."
+                f"Invalid schema name '{schema_name}'. {_SCHEMA_NAME_RULE}"
             )
         self._schema_name = schema_name
 
