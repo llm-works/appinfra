@@ -705,18 +705,26 @@ class TestShutdown:
 
     def test_shutdown_restores_the_signal_handlers(self):
         """The handlers initialize() installed do not outlive the lifecycle."""
-        before = signal.getsignal(signal.SIGTERM)
+        before = {s: signal.getsignal(s) for s in (signal.SIGTERM, signal.SIGINT)}
         config = DotDict(logging=DotDict(level="info", location=0, micros=False))
         manager = LifecycleManager(Mock())
+        initialized = False
         try:
             manager.initialize(config)
-            assert signal.getsignal(signal.SIGTERM) != before
+            initialized = True
+            assert signal.getsignal(signal.SIGTERM) != before[signal.SIGTERM]
 
             manager.shutdown(0)
 
-            assert signal.getsignal(signal.SIGTERM) == before
+            assert {s: signal.getsignal(s) for s in before} == before
         finally:
-            signal.signal(signal.SIGTERM, before)
+            try:
+                if initialized:
+                    # A no-op after a shutdown; releases "/" after a failed assert
+                    manager.shutdown(0)
+            finally:
+                for signum, handler in before.items():
+                    signal.signal(signum, handler)
 
     def test_shutdown_raises_a_handler_close_error_once(self):
         """The root logger is still released, and a second shutdown does nothing."""
