@@ -7,14 +7,33 @@ Unit tests for appinfra.db.pg.testing module.
 Tests the utility functions and fixture factories without requiring a database.
 """
 
+import itertools
 from unittest.mock import Mock, patch
+
+import pytest
 
 from appinfra.db.pg.testing import (
     _create_extensions_in_db,
+    _migrated_pg,
     _setup_database_with_lock,
     make_migrate_fixture,
 )
 from appinfra.envelope import Envelope
+
+
+class TestMigratedPgSchemaName:
+    """The derived migrate schema must fit PostgreSQL's 63-character names."""
+
+    def test_too_long_a_name_fails_before_any_database_work(self):
+        worker_schema = "a" * 51 + "_master"  # longest pg_test_schema allows
+        with (
+            patch("appinfra.db.pg.testing._migrate_ids", itertools.count(1000)),
+            patch("appinfra.db.pg.testing._setup_database_with_lock") as setup,
+            pytest.raises(ValueError, match="_APPINFRA_CHECK_PYTEST_SUITE"),
+            _migrated_pg({}, Mock(), worker_schema, Mock(), None),
+        ):
+            pass
+        setup.assert_not_called()
 
 
 class TestMakeMigrateFixture:

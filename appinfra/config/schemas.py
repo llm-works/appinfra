@@ -184,8 +184,8 @@ try:
             """Validate schema name is a safe SQL identifier."""
             if v is None:
                 return v
-            # Same rule as appinfra.db.pg.schema; PostgreSQL truncates
-            # identifiers past 63 bytes
+            # Same rule as appinfra.db.pg.schema, which needs the sql extra and
+            # so is not imported here; PostgreSQL truncates identifiers past 63 bytes
             pattern = re.compile(r"^[a-z][a-z0-9_]{0,62}$")
             if not pattern.match(v):
                 raise ValueError(

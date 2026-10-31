@@ -153,6 +153,14 @@ def _migrated_pg(
     """
     from .pg import PG
 
+    schema = f"{worker_schema}_m{next(_migrate_ids)}"
+    if len(schema) > 63:  # PostgreSQL's limit for names
+        raise ValueError(
+            f"Migrate fixture schema '{schema}' is longer than 63 characters. "
+            "Shorten _APPINFRA_CHECK_PYTEST_SUITE, which prefixes the worker schema, "
+            "or use fewer migrate fixtures per worker."
+        )
+
     config = dict(config)  # Copy to avoid mutating the fixture's dict
     if extensions is not None:
         config["extensions"] = extensions
@@ -160,7 +168,7 @@ def _migrated_pg(
     # Set up database and extensions under advisory lock (handles xdist race conditions)
     _setup_database_with_lock(config)
 
-    pg = PG(lg, config, schema=f"{worker_schema}_m{next(_migrate_ids)}")
+    pg = PG(lg, config, schema=schema)
     try:
         if pg._schema_mgr:
             pg._schema_mgr.reset_schema()
