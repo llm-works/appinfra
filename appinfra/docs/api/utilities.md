@@ -554,6 +554,21 @@ result of the old form leaked in logs. Migrate to `!env VAR !secret`.
 plain `str`, so masked secrets loaded from an included file remain masked in
 the merged config.
 
+A `${path}` reference to a secret carries the `Envelope` when it is the whole
+value, so the secret travels to the code that reveals it. A secret cannot be
+part of a larger string: splicing it would insert its mask, so it raises
+`EmbeddedSecretError`. Pass it separately instead of building it into a URL:
+
+```yaml
+dbserver:
+  pass: !env DB_PASSWORD !secret
+dbs:
+  main:
+    url: postgresql://app@db.local:5432/main
+    password: ${dbserver.pass}       # Envelope('***')
+    # url: postgresql://app:${dbserver.pass}@db.local/main  → EmbeddedSecretError
+```
+
 **`Envelope.ensure(value)` — boundary coercion.** Library code that
 historically accepted a plain `str` and now accepts `Envelope` too should
 call `Envelope.ensure(...)` at the boundary rather than reimplementing the

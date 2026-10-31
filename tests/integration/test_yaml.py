@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+from appinfra.errors import EmbeddedSecretError
 from appinfra.security.envelope import Envelope
 from appinfra.yaml import (
     load,
@@ -1363,6 +1364,48 @@ learn:
         assert (
             data["learn"]["db"]["url"] == "postgresql://postgres:@127.0.0.1:7632/learn"
         )
+
+    def test_a_secret_reference_carries_the_envelope(self, tmp_path, monkeypatch):
+        """A sibling secret reached through a section include stays an Envelope."""
+        monkeypatch.setenv("TEST_DB_PW", "s3cret")
+        (tmp_path / "pg.yaml").write_text(
+            """
+pgserver:
+  pass: !env TEST_DB_PW !secret
+dbs:
+  main:
+    password: "${pgserver.pass}"
+"""
+        )
+        app_file = tmp_path / "app.yaml"
+        app_file.write_text("db: !include './pg.yaml#dbs.main'\n")
+
+        with open(app_file) as f:
+            data = load(f, current_file=app_file)
+
+        assert isinstance(data["db"]["password"], Envelope)
+        assert data["db"]["password"].reveal() == "s3cret"
+
+    def test_a_secret_inside_text_is_rejected(self, tmp_path, monkeypatch):
+        """Splicing a secret into a string would leave '***' in its place."""
+        monkeypatch.setenv("TEST_DB_PW", "s3cret")
+        (tmp_path / "pg.yaml").write_text(
+            """
+pgserver:
+  pass: !env TEST_DB_PW !secret
+dbs:
+  main:
+    url: "postgresql://app:${pgserver.pass}@h/db"
+"""
+        )
+        app_file = tmp_path / "app.yaml"
+        app_file.write_text("db: !include './pg.yaml#dbs.main'\n")
+
+        with (
+            open(app_file) as f,
+            pytest.raises(EmbeddedSecretError, match="pgserver.pass"),
+        ):
+            load(f, current_file=app_file)
 
     def test_undefined_vars_pass_through(self, tmp_path):
         """Test undefined variables are passed through for Config._resolve() to handle."""

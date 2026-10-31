@@ -18,6 +18,7 @@ import yaml
 
 from ..dot_dict import DotDict
 from ..errors import UndeclaredConfigPathError
+from ..yaml._utils import substitute_references
 from .constants import MAX_CONFIG_SIZE_BYTES
 from .spec import AUTO, Auto, ConfigFile, ConfigSpec, _resolve_origin
 
@@ -442,20 +443,20 @@ class Config(DotDict):
             for k in list(content):
                 content[k] = self._resolve(content[k])
         elif isinstance(content, str):
-            # Replace ${variable_name} patterns with actual values
-            # Restrict to valid config keys (alphanumeric + dot + underscore) to prevent ReDoS
-            return re.sub(r"\$\{([a-zA-Z0-9_.]+)\}", self._substitute_var, content)
+            # Replace ${variable_name} patterns with actual values; a whole-value
+            # reference to a secret keeps its Envelope
+            return substitute_references(content, self._reference_value)
         return content
 
-    def _substitute_var(self, match: re.Match[str]) -> str:
+    def _reference_value(self, match: re.Match[str]) -> Any:
         """
-        Substitute a variable reference with its value.
+        Look up the value a ``${variable_name}`` reference names.
 
         Args:
             match: Regex match object containing the variable name
 
         Returns:
-            String value of the variable
+            The variable's value, as stored
 
         Raises:
             DotDictPathNotFoundError: If the variable is not defined
@@ -465,7 +466,7 @@ class Config(DotDict):
         var_name = match.group(1)
         if not self.has(var_name):
             raise DotDictPathNotFoundError(self, var_name)
-        return str(self.get(var_name))
+        return self.get(var_name)
 
     def _apply_env_overrides(self, config_data: dict[str, Any]) -> dict[str, Any]:
         """

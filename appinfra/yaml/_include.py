@@ -21,7 +21,7 @@ from typing import Any
 
 import yaml
 
-from ._utils import _file_exists
+from ._utils import _file_exists, substitute_references
 from .types import DOCUMENT_INCLUDE_PATTERN, ErrorContext
 
 
@@ -382,12 +382,13 @@ def _substitute_vars_in_string(
     context: dict[str, Any],
     pass_through_undefined: bool,
     env_overrides: dict[str, str] | None,
-) -> str:
+) -> Any:
     """Resolve `${var}` references inside a single string. See
-    `_resolve_variables_in_data` for the lookup order.
+    `_resolve_variables_in_data` for the lookup order, and
+    `substitute_references` for how an Envelope is carried.
     """
 
-    def substitute(match: re.Match[str]) -> str:
+    def lookup(match: re.Match[str]) -> Any:
         var_name = match.group(1)
         if env_overrides is not None:
             if var_name in env_overrides:
@@ -400,10 +401,9 @@ def _substitute_vars_in_string(
             if pass_through_undefined:
                 return match.group(0)  # Keep original ${var}
             raise KeyError(f"Variable '{var_name}' not found")
-        return str(value)
+        return value
 
-    # Same pattern as Config._resolve() for consistency
-    return re.sub(r"\$\{([a-zA-Z0-9_.]+)\}", substitute, data)
+    return substitute_references(data, lookup)
 
 
 def _create_document_error_context(

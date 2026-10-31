@@ -3,7 +3,40 @@
 
 """Internal utilities for YAML processing."""
 
+import re
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
+
+from ..errors import EmbeddedSecretError
+from ..security.envelope import Envelope
+
+# A ${path} reference. Restricted to config key characters (alphanumeric, dot,
+# underscore) to prevent ReDoS.
+REFERENCE_PATTERN = re.compile(r"\$\{([a-zA-Z0-9_.]+)\}")
+
+
+def substitute_references(text: str, lookup: Callable[[re.Match[str]], Any]) -> Any:
+    """
+    Replace each ``${path}`` in ``text`` with the value ``lookup`` returns for its match.
+
+    A text that is one reference and nothing else yields an ``Envelope`` as
+    itself, so a secret travels on to the code that reveals it. Any other
+    value is spliced in as ``str(value)``. An ``Envelope`` inside a larger
+    string raises ``EmbeddedSecretError``: its ``str()`` is its mask.
+    """
+    whole = REFERENCE_PATTERN.fullmatch(text)
+    if whole is not None:
+        value = lookup(whole)
+        return value if isinstance(value, Envelope) else str(value)
+
+    def splice(match: re.Match[str]) -> str:
+        value = lookup(match)
+        if isinstance(value, Envelope):
+            raise EmbeddedSecretError(match.group(1))
+        return str(value)
+
+    return REFERENCE_PATTERN.sub(splice, text)
 
 
 def _file_exists(path: Path) -> bool:

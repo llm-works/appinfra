@@ -23,7 +23,8 @@ from appinfra.config import MAX_CONFIG_SIZE_BYTES, Config, ConfigFile, ConfigSpe
 from appinfra.config.config import (
     _check_file_size,
 )
-from appinfra.errors import UndeclaredConfigPathError
+from appinfra.errors import EmbeddedSecretError, UndeclaredConfigPathError
+from appinfra.security import Envelope
 
 # =============================================================================
 # Fixtures
@@ -209,6 +210,52 @@ values:
         assert config.values.number == 123
         assert config.values.boolean is True
         assert config.values.list == [1, 2, 3]
+
+
+_SECRET_REFERENCES = """
+dbserver:
+  user: app
+  port: 5432
+  pass: !env TEST_DB_PW !secret
+dbs:
+  main:
+    password: ${dbserver.pass}
+    quoted: "${dbserver.pass}"
+    port: ${dbserver.port}
+"""
+
+
+@pytest.mark.usefixtures("clean_env")
+class TestSecretReferences:
+    """A reference to a secret carries its Envelope; a secret is never spliced into text."""
+
+    @pytest.fixture
+    def config(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("TEST_DB_PW", "s3cret")
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text(_SECRET_REFERENCES)
+        return Config(str(config_file))
+
+    def test_a_reference_carries_the_envelope(self, config):
+        assert isinstance(config.dbs.main.password, Envelope)
+        assert config.dbs.main.password.reveal() == "s3cret"
+
+    def test_a_quoted_reference_carries_the_envelope(self, config):
+        assert isinstance(config.dbs.main.quoted, Envelope)
+        assert config.dbs.main.quoted.reveal() == "s3cret"
+
+    def test_a_reference_to_a_plain_value_is_still_text(self, config):
+        assert config.dbs.main.port == "5432"
+
+    def test_a_secret_inside_text_is_rejected(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("TEST_DB_PW", "s3cret")
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text(
+            _SECRET_REFERENCES
+            + '    url: "postgresql://${dbserver.user}:${dbserver.pass}@h/db"\n'
+        )
+        with pytest.raises(EmbeddedSecretError, match="dbserver.pass"):
+            Config(str(config_file))
 
 
 # =============================================================================
