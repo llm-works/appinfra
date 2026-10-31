@@ -383,7 +383,7 @@ def _substitute_vars_in_string(
     context: dict[str, Any],
     pass_through_undefined: bool,
     env_overrides: dict[str, str] | None,
-) -> Any:
+) -> str | Envelope:
     """Resolve `${var}` references inside a single string. See
     `_resolve_variables_in_data` for the lookup order, and
     `substitute_references` for how an Envelope is carried. An override of

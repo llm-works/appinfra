@@ -15,7 +15,9 @@ from ..envelope import Envelope
 REFERENCE_PATTERN = re.compile(r"\$\{([a-zA-Z0-9_.]+)\}")
 
 
-def substitute_references(text: str, lookup: Callable[[re.Match[str]], Any]) -> Any:
+def substitute_references(
+    text: str, lookup: Callable[[re.Match[str]], Any]
+) -> str | Envelope:
     """
     Replace each ``${path}`` in ``text`` with the value ``lookup`` returns for its match.
 
