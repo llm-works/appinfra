@@ -182,6 +182,14 @@ class TestDatabaseConfigValidation:
         config = PostgreSQLServerConfig(version=18, **{"pass": Envelope("pw")})
         assert isinstance(config.password, Envelope)
 
+    def test_isolation_schema_up_to_63_characters(self):
+        """PostgreSQL truncates longer identifiers, so they are refused."""
+        url = "postgresql://localhost/db"
+        config = DatabaseConfig(url=url, schema="a" * 63)
+        assert config.isolation_schema == "a" * 63
+        with pytest.raises(ValidationError, match="at most 63 characters"):
+            DatabaseConfig(url=url, schema="a" * 64)
+
 
 @pytest.mark.skipif(
     not PYDANTIC_AVAILABLE, reason=SKIP_REASON or "pydantic not available"

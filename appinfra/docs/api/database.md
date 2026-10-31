@@ -269,9 +269,12 @@ def test_with_tables(pg_with_tables):
 ```
 
 The `pg_migrate_factory` fixture returns a context manager factory that:
-1. Creates a fresh schema
+1. Creates a fresh schema of its own, `<pg_test_schema>_m<n>` (e.g., `test_gw0_m1`)
 2. Runs migrations to create all tables
 3. Cleans up the schema when the context exits
+
+The worker schema itself stays with `pg_isolated` for the whole session, so the two can be used
+together. `make_migrate_fixture` names its schema the same way.
 
 **Legacy approach** (causes `PytestAssertRewriteWarning`):
 

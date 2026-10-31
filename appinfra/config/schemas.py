@@ -184,11 +184,14 @@ try:
             """Validate schema name is a safe SQL identifier."""
             if v is None:
                 return v
-            pattern = re.compile(r"^[a-z][a-z0-9_]*$")
+            # Same rule as appinfra.db.pg.schema; PostgreSQL truncates
+            # identifiers past 63 bytes
+            pattern = re.compile(r"^[a-z][a-z0-9_]{0,62}$")
             if not pattern.match(v):
                 raise ValueError(
-                    f"Invalid schema name '{v}'. Must start with lowercase letter "
-                    "and contain only lowercase letters, numbers, and underscores."
+                    f"Invalid schema name '{v}'. Must start with lowercase letter, "
+                    "contain only lowercase letters, numbers, and underscores, "
+                    "and be at most 63 characters."
                 )
             return v
 
