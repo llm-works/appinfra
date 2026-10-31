@@ -4,6 +4,7 @@
 """Property-based tests for regex utilities."""
 
 import re
+import warnings
 
 import pytest
 from hypothesis import given, settings
@@ -25,7 +26,12 @@ class TestRegexProperties:
     def test_safe_compile_never_crashes(self, pattern: str) -> None:
         """safe_compile should handle any input without crashing unexpectedly."""
         try:
-            result = safe_compile(pattern, timeout=0.05)
+            # re warns on valid syntax it may read differently later (e.g. "[[",
+            # a possible nested set); a warning is not a crash, but the test run
+            # turns warnings into errors
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", FutureWarning)
+                result = safe_compile(pattern, timeout=0.05)
             # If it compiled, it should be a valid pattern
             assert hasattr(result, "match")
         except RegexComplexityError:
