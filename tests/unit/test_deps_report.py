@@ -159,7 +159,7 @@ class TestStatus:
         [
             (None, "", "1.0", "1.0", False, "missing"),
             ("1.0", "", None, None, False, "unknown"),
-            ("1.0", ">=1", "1.0", "1.0", False, "up to date"),
+            ("1.0", ">=1", "1.0", "1.0", False, "✓"),  # up to date
             ("1.0", ">=1", "1.2", "1.2", False, "behind (2 minors)"),
             ("1.0.1", ">=1", "1.0.4", "1.0.4", False, "behind (patch)"),
             ("1.9", "<2", "1.9", "3.0", False, "capped (2 majors)"),
@@ -256,7 +256,7 @@ class TestCiVersion:
         self, dr: ModuleType
     ) -> None:
         def ci_cell(ci: str) -> str:
-            row = dr.Row(Version("1.0"), Version("1.0"), None, "up to date", ci)
+            row = dr.Row(Version("1.0"), Version("1.0"), None, "✓", ci)
             tree = dr._Tree(dr.declared(["p"], "proj"), {"p": row}, deep=False)
             return dr._paint(tree.build()[0][4], color=True)
 
@@ -439,7 +439,7 @@ class TestReport:
         assert cols["offline"][3:] == ["?", "", "unknown"]
         assert cols["local"][3:] == ["index", "", "direct install"]
         # the framework's check tools, which make setup adds to every other project
-        assert cols["appinfra"][3:] == ["✓", "", "up to date"]
+        assert cols["appinfra"][3:] == ["✓", "", "✓"]  # CI matches, up to date
         assert "proj" not in cols and "core" not in cols
 
     def test_ci_shows_what_a_missing_package_gets(self, dr: ModuleType) -> None:

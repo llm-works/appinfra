@@ -15,7 +15,7 @@ releases for other Python versions. Each package gets a line: required range,
 installed version, newest release within the range and outside it, and a
 status:
 
-- up to date: the newest release within the range is installed
+- ✓: up to date, the newest release within the range is installed
 - behind: a newer release within the range is not installed
 - capped: a newer release exists outside the range
 - out of range: the installed version does not satisfy the range
@@ -52,6 +52,7 @@ from packaging.specifiers import Specifier, SpecifierSet
 from packaging.utils import canonicalize_name
 from packaging.version import InvalidVersion, Version
 
+UP_TO_DATE = "✓"  # the status when nothing else applies
 _TIMEOUT_S = 60.0
 _WORKERS = 16
 
@@ -230,7 +231,7 @@ def status(
             latest, prereleases=True
         ):
             labels.append(_with_gap("capped", installed, latest))
-    return ", ".join(labels) or "up to date"
+    return ", ".join(labels) or UP_TO_DATE
 
 
 def _with_gap(label: str, installed: Version, newer: Version) -> str:
@@ -308,7 +309,7 @@ _STYLES = {
 }
 _RESET = "\033[0m"
 _STATUS_STYLES = {
-    "up to date": "green",
+    UP_TO_DATE: "green",
     "out of range": "red",
     "missing": "red",
     "unknown": "gray",
