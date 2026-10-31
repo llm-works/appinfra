@@ -197,6 +197,14 @@ class TestDatabaseConfigValidation:
         with pytest.raises(ValidationError, match="Invalid extension name"):
             DatabaseConfig(url=url, extensions=["vector\n"])
 
+    def test_extension_names_up_to_63_characters(self):
+        """PostgreSQL truncates longer identifiers, so they are refused."""
+        url = "postgresql://localhost/db"
+        config = DatabaseConfig(url=url, extensions=["a" * 63])
+        assert config.extensions == ["a" * 63]
+        with pytest.raises(ValidationError, match="at most 63 characters"):
+            DatabaseConfig(url=url, extensions=["a" * 64])
+
 
 @pytest.mark.skipif(
     not PYDANTIC_AVAILABLE, reason=SKIP_REASON or "pydantic not available"

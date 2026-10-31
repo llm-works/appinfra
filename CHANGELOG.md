@@ -155,8 +155,8 @@ earlier: pre-release builds (0.13.1.devN) would not satisfy it. -->
 - `pg_migrate_factory` and `make_migrate_fixture` work in a schema of their own
   (`<pg_test_schema>_m<n>`); they used to reset and drop the worker schema `pg_isolated` relies
   on, so its later tables landed in `public`.
-- A schema name longer than 63 characters raises `ValueError`; PostgreSQL truncated it silently,
-  so two long names could share one schema.
+- A schema or extension name longer than 63 characters is refused; PostgreSQL truncated it
+  silently, so two long schema names could share one schema.
 - `Manager.close_all()` also closes the connections of each `PG`'s cached `ScopedPG`s.
 - `SubprocessContext` puts back the SIGTERM and SIGINT handlers it replaced; a reused worker
   process that had run a task in one no longer ended on SIGTERM.

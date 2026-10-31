@@ -91,7 +91,8 @@ class PG(Interface):
     _scoped_cache_lock: threading.Lock
 
     # Extension name validation pattern (defense-in-depth)
-    _EXTENSION_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_-]*$")
+    # PostgreSQL truncates identifiers past 63 bytes; the pattern is ASCII
+    _EXTENSION_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_-]{0,62}$")
 
     def __init__(
         self,

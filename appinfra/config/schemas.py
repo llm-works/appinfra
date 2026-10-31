@@ -168,13 +168,14 @@ try:
         @classmethod
         def validate_extensions(cls, v: list[str]) -> list[str]:
             """Validate extension names are safe SQL identifiers."""
-            pattern = re.compile(r"^[a-z][a-z0-9_-]*$")
+            # PostgreSQL truncates identifiers past 63 bytes
+            pattern = re.compile(r"^[a-z][a-z0-9_-]{0,62}$")
             for ext in v:
                 if not pattern.fullmatch(ext):
                     raise ValueError(
                         f"Invalid extension name '{ext}'. Must start with lowercase "
-                        "letter and contain only lowercase letters, numbers, "
-                        "underscores, and hyphens."
+                        "letter, contain only lowercase letters, numbers, "
+                        "underscores, and hyphens, and be at most 63 characters."
                     )
             return v
 

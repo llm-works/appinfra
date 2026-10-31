@@ -439,7 +439,14 @@ class TestPGExtensionValidation:
 
         pg = PG(mock_logger, {"url": "postgresql://localhost/testdb"})
 
-        valid_names = ["vector", "pg_trgm", "postgis", "timescaledb", "some-ext"]
+        valid_names = [
+            "vector",
+            "pg_trgm",
+            "postgis",
+            "timescaledb",
+            "some-ext",
+            "a" * 63,
+        ]
         for name in valid_names:
             assert pg._is_valid_extension_name(name), f"{name} should be valid"
 
@@ -468,6 +475,7 @@ class TestPGExtensionValidation:
             "ext;drop",  # contains semicolon (SQL injection attempt)
             "",  # empty
             "vector\n",  # trailing newline
+            "a" * 64,  # PostgreSQL would truncate it to 63
         ]
         for name in invalid_names:
             assert not pg._is_valid_extension_name(name), f"{name!r} should be invalid"

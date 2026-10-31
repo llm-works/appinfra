@@ -62,7 +62,7 @@ import itertools
 import re
 
 # Extension name validation pattern (same as PG class)
-_EXT_PATTERN = re.compile(r"^[a-z][a-z0-9_-]*$")
+_EXT_PATTERN = re.compile(r"^[a-z][a-z0-9_-]{0,62}$")
 
 # Numbers the migrate fixtures of this worker process, one schema each
 _migrate_ids = itertools.count(1)

@@ -119,3 +119,8 @@ class TestCreateExtensionsInDb:
         with patch("sqlalchemy.create_engine") as create_engine:
             _create_extensions_in_db("postgresql://localhost/test", ["vector\n"])
         create_engine.return_value.connect.assert_not_called()
+
+    def test_skips_a_name_longer_than_63_characters(self):
+        with patch("sqlalchemy.create_engine") as create_engine:
+            _create_extensions_in_db("postgresql://localhost/test", ["a" * 64])
+        create_engine.return_value.connect.assert_not_called()
