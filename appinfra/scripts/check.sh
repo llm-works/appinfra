@@ -1089,11 +1089,13 @@ run_raw_test_structure() {
         echo "  ${UI_MARK_FAIL} Test structure failed"
         return 1
     fi
-    local percent count summary kind where detail
+    local percent count summary
     IFS=$'\t' read -r percent _ _ <<< "$out"
     count=$(($(wc -l <<< "$out") - 1))
     if summary=$(health_summary "$percent" "$count"); then
+        # Listed even when passing: the log is all a CI job leaves to read
         echo "  ${UI_MARK_OK} Test structure (${summary})"
+        raw_health_findings "$out"
         return 0
     fi
     rc=$EXIT_CODE_WARNING
@@ -1103,10 +1105,16 @@ run_raw_test_structure() {
         mark="${UI_MARK_FAIL}"
     fi
     echo "  ${mark} Test structure (${summary})"
-    while IFS=$'\t' read -r kind where detail; do
-        echo "    - ${where}: ${detail}"
-    done < <(tail -n +2 <<< "$out")
+    raw_health_findings "$out"
     return "$rc"
+}
+
+# run_raw's list of the Test structure findings, muted, one "where: detail" line each
+raw_health_findings() {
+    local kind where detail
+    while IFS=$'\t' read -r kind where detail; do
+        echo -e "    ${UI_GRAY}- ${where}: ${detail}${UI_RESET}"
+    done < <(tail -n +2 <<< "$1")
 }
 
 # The examples runner's summary ends with "N unmet (reason[, reason])" when
