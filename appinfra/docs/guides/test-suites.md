@@ -102,13 +102,14 @@ In a project that loads `appinfra.pytest_suites` and sets `APPINFRA_DEV_TEST_HEA
 the test suite:
 
 ```
-[⚠]    Test structure (17 findings)
+[⚠]    Test structure (2 findings)
 ```
 
 The run that executes the unit tests records the figures, and the line follows it. A class, or a
-file's module-level tests, may hold up to `APPINFRA_DEV_TEST_HEALTH_OUTLIERS` (2) tests of other
-suites whatever its size; a few tests that need a file or a signal fit in any class. Past that, a
-finding is one of:
+file's module-level tests, may hold up to `APPINFRA_DEV_TEST_HEALTH_OUTLIERS` (3) tests of other
+suites whatever its size; a few tests that need a file or a signal fit in any class. The line
+looks for structure gone wrong, such as a batch of integration tests under `tests/unit/`, not
+for every test out of place. Past that, a finding is one of:
 
 - **placement**: most of a class's tests belong to another suite; they move to that suite's
   directory, and the rest of the class stays;

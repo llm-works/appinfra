@@ -278,7 +278,7 @@ esac
 # The share of a class's tests that may be of another suite before it is a finding, and the count
 # of such tests any class may hold
 TEST_HEALTH_THRESHOLD="${APPINFRA_DEV_TEST_HEALTH_THRESHOLD:-15}"
-TEST_HEALTH_OUTLIERS="${APPINFRA_DEV_TEST_HEALTH_OUTLIERS:-2}"
+TEST_HEALTH_OUTLIERS="${APPINFRA_DEV_TEST_HEALTH_OUTLIERS:-3}"
 if ! [[ "$TEST_HEALTH_THRESHOLD" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
     echo "Error: Invalid APPINFRA_DEV_TEST_HEALTH_THRESHOLD: $TEST_HEALTH_THRESHOLD" >&2
     exit 1

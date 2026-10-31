@@ -115,7 +115,7 @@ def main(argv: list[str] | None = None) -> int:
         "--root", type=Path, default=Path.cwd(), help="the project's rootdir"
     )
     parser.add_argument("--threshold", type=float, default=15.0)
-    parser.add_argument("--outliers", type=int, default=2)
+    parser.add_argument("--outliers", type=int, default=3)
     args = parser.parse_args(argv)
     reports = load(args.report_dir, args.root) if args.report_dir.is_dir() else []
     if not reports:

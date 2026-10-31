@@ -38,7 +38,7 @@ def _report(
 
 
 def _judge(
-    *reports: dict[str, Any], threshold: float = 15, outliers: int = 2
+    *reports: dict[str, Any], threshold: float = 15, outliers: int = 3
 ) -> list[tuple[str, str, str]]:
     return check_suite_health.judge(reports, threshold, outliers)
 
@@ -49,12 +49,12 @@ def _kinds(*reports: dict[str, Any], **limits: Any) -> list[str]:
 
 class TestScopeRules:
     def test_a_majority_of_another_suite_moves_the_scope(self) -> None:
-        report = _report(_scope("u.py::A", "unit", unit=2, integration=3))
+        report = _report(_scope("u.py::A", "unit", unit=2, integration=4))
         assert _judge(report) == [
             (
                 "placement",
                 "u.py::A",
-                "3 of 5 tests (60%) are integration, the majority: "
+                "4 of 6 tests (67%) are integration, the majority: "
                 "move them to tests/integration/",
             )
         ]
@@ -62,16 +62,16 @@ class TestScopeRules:
     def test_up_to_the_outliers_a_small_scope_is_clean(self) -> None:
         report = _report(
             _scope("u.py::A", "unit", unit=3, integration=1),
-            _scope("u.py::B", "unit", unit=2, integration=2),
+            _scope("u.py::B", "unit", unit=3, integration=3),
         )
         assert _judge(report) == []
 
     def test_up_to_the_outliers_a_scope_of_another_suite_stays(self) -> None:
-        report = _report(_scope("u.py::A", "unit", unit=1, integration=2))
+        report = _report(_scope("u.py::A", "unit", unit=1, integration=3))
         assert _judge(report) == []
 
     def test_past_the_outliers_the_threshold_applies(self) -> None:
-        report = _report(_scope("u.py::A", "unit", unit=5, integration=3))
+        report = _report(_scope("u.py::A", "unit", unit=5, integration=4))
         assert _kinds(report) == ["overrides"]
 
     def test_the_outliers_are_configurable(self) -> None:
@@ -79,7 +79,7 @@ class TestScopeRules:
         assert _kinds(report, outliers=0) == ["overrides"]
 
     def test_the_outliers_count_every_other_suite(self) -> None:
-        report = _report(_scope("u.py::A", "unit", unit=3, integration=2, e2e=1))
+        report = _report(_scope("u.py::A", "unit", unit=5, integration=3, e2e=1))
         assert _kinds(report) == ["overrides"]
 
     def test_overrides_up_to_the_threshold_are_clean(self) -> None:
@@ -97,7 +97,7 @@ class TestScopeRules:
         assert _judge(report, threshold=20) == []
 
     def test_a_tie_is_not_a_majority(self) -> None:
-        report = _report(_scope("u.py::A", "unit", unit=3, integration=3))
+        report = _report(_scope("u.py::A", "unit", unit=4, integration=4))
         assert _kinds(report) == ["overrides"]
 
     def test_module_level_tests_are_judged_against_the_whole_file(self) -> None:
@@ -106,11 +106,11 @@ class TestScopeRules:
         assert _judge(_report(scope)) == []
 
     def test_module_level_overrides_past_the_threshold_of_the_file(self) -> None:
-        scope = _scope("u.py", "unit", integration=3)
-        scope["file_suites"] = {"unit": 7, "integration": 3}
+        scope = _scope("u.py", "unit", integration=4)
+        scope["file_suites"] = {"unit": 6, "integration": 4}
         ((kind, _, detail),) = _judge(_report(scope))
         assert kind == "overrides"
-        assert detail.startswith("3 integration of 10 tests")
+        assert detail.startswith("4 integration of 10 tests")
 
     def test_a_file_mostly_of_another_suite_moves(self) -> None:
         scope = _scope("u.py", "unit", integration=4)
@@ -120,7 +120,7 @@ class TestScopeRules:
 
 class TestMerge:
     def test_reports_of_one_run_count_each_scope_once(self) -> None:
-        scope = _scope("u.py::A", "unit", integration=3)
+        scope = _scope("u.py::A", "unit", integration=4)
         assert _kinds(_report(scope), _report(scope)) == ["placement"]
 
     def test_a_leak_is_always_a_finding(self) -> None:
@@ -132,8 +132,8 @@ class TestMerge:
     def test_findings_order_placement_overrides_leaks(self) -> None:
         leak = {"test": "a.py::test_z", "changed": ["cwd"]}
         report = _report(
-            _scope("b.py::Split", "unit", unit=5, integration=3),
-            _scope("c.py::Move", "unit", integration=3),
+            _scope("b.py::Split", "unit", unit=5, integration=4),
+            _scope("c.py::Move", "unit", integration=4),
             leaks=[leak],
         )
         assert _kinds(report) == ["placement", "overrides", "leak"]

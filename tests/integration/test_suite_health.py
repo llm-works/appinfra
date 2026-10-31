@@ -192,6 +192,9 @@ class TestMisplaced:
 
     def test_c(self):
         pass
+
+    def test_d(self):
+        pass
 """
 
 
@@ -203,7 +206,7 @@ def test_the_check_prints_the_findings(
     assert result.returncode == 0
     assert result.stdout.splitlines() == [
         "placement\ttests/unit/test_checked.py::TestMisplaced\t"
-        "3 of 3 tests (100%) are integration, the majority: "
+        "4 of 4 tests (100%) are integration, the majority: "
         "move them to tests/integration/",
         "leak\ttests/unit/test_checked.py::test_leak\tleft changed: $SUITE_HEALTH_LEAK",
     ]

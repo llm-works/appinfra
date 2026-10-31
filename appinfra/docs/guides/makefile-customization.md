@@ -491,7 +491,7 @@ Each setting has a type, and a value that does not fit it stops make:
 | `APPINFRA_DEV_CQ_DEAD` | `warn` | Dead private code in the Code quality check: `false`, `warn` or `strict` |
 | `APPINFRA_DEV_TEST_HEALTH` | `false` | The Test structure line of `make check`, for a project that loads `appinfra.pytest_suites`: off, or `warn` or `strict` on any finding ([Test suites](test-suites.md)) |
 | `APPINFRA_DEV_TEST_HEALTH_THRESHOLD` | `15` | Percent of a class's tests that may belong to another suite before the Test structure line asks to split them off |
-| `APPINFRA_DEV_TEST_HEALTH_OUTLIERS` | `2` | Tests of another suite any class may hold, whatever its size, before the Test structure line reports it |
+| `APPINFRA_DEV_TEST_HEALTH_OUTLIERS` | `3` | Tests of another suite any class may hold, whatever its size, before the Test structure line reports it |
 | `APPINFRA_DEV_DOCSTRING_THRESHOLD` | `80` | Docstring coverage threshold for `make check` (0 to disable) |
 | `APPINFRA_DEV_CHECK_EXAMPLES` | `false` | Run `examples.check` as a test subcheck of `make check` |
 | `APPINFRA_DEV_PROJECT_ROOT` | `$(CURDIR)` | Project root for check.sh |
