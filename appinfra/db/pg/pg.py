@@ -20,6 +20,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from ...dot_dict import DotDict
+from ...envelope import Envelope
 from ...log import Logger, LoggerFactory
 from .connection import ConnectionManager
 from .core import (
@@ -144,7 +145,8 @@ class PG(Interface):
     def _create_engine_and_session(self, cfg: Any) -> None:
         """Create SQLAlchemy engine and session maker, ensuring DB exists."""
         engine_kwargs = ConfigValidator.get_engine_kwargs(cfg)
-        self._engine = sqlalchemy.create_engine(self._cfg.url, **engine_kwargs)
+        url = Envelope(self._cfg.url).reveal()
+        self._engine = sqlalchemy.create_engine(url, **engine_kwargs)
         self._SessionCls = sqlalchemy.orm.sessionmaker(
             bind=self._engine,
             expire_on_commit=getattr(cfg, "expire_on_commit", False),

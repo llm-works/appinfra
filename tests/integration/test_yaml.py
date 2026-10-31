@@ -14,8 +14,8 @@ from pathlib import Path
 import pytest
 import yaml
 
+from appinfra.envelope import Envelope
 from appinfra.yaml import (
-    SecretStr,
     load,
     load_file,
 )
@@ -1261,11 +1261,11 @@ config:
         assert result2 == "<<: !chain:include+deep './base.yaml'"
 
     def test_secretstr_in_deep_included_file_survives_merge(self, tmp_path):
-        """A SecretStr in a !deep !include? child must round-trip as SecretStr, not '***'.
+        """A Envelope in a !deep !include? child must round-trip as Envelope, not '***'.
 
         Regression: flatten_mapping reconstructed the merged mapping via
         _value_to_node, whose else branch stringified any non-primitive value.
-        str(SecretStr) is "***", so credentials from the child file were
+        str(Envelope) is "***", so credentials from the child file were
         silently masked before reaching consumers.
         """
         child = tmp_path / "deep_secret_child.yaml"
@@ -1292,14 +1292,14 @@ config:
             )
 
         api_key = data["web_search"]["backend"]["config"]["api_key"]
-        assert isinstance(api_key, SecretStr)
+        assert isinstance(api_key, Envelope)
         assert api_key.reveal() == "hunter2"
         # Document-side value merged around it, not overwritten
         assert data["web_search"]["backend"]["kind"] == "serper"
 
     def test_secretstr_in_bare_included_file_survives_merge(self, tmp_path):
         """Companion: bare `<<: !include?` (DeepMergeDict path) must also
-        preserve SecretStr — the same _value_to_node path handles merge_base
+        preserve Envelope — the same _value_to_node path handles merge_base
         and override_base.
         """
         child = tmp_path / "bare_secret_child.yaml"
@@ -1315,7 +1315,7 @@ config:
             )
 
         token = data["creds"]["token"]
-        assert isinstance(token, SecretStr)
+        assert isinstance(token, Envelope)
         assert token.reveal() == "s3cret"
         assert data["creds"]["user"] == "alice"
 
@@ -1363,6 +1363,75 @@ learn:
         assert (
             data["learn"]["db"]["url"] == "postgresql://postgres:@127.0.0.1:7632/learn"
         )
+
+    def test_a_secret_reference_carries_the_envelope(self, tmp_path, monkeypatch):
+        """A sibling secret reached through a section include stays an Envelope."""
+        monkeypatch.setenv("TEST_DB_PW", "s3cret")
+        (tmp_path / "pg.yaml").write_text(
+            """
+pgserver:
+  pass: !env TEST_DB_PW !secret
+dbs:
+  main:
+    password: "${pgserver.pass}"
+"""
+        )
+        app_file = tmp_path / "app.yaml"
+        app_file.write_text("db: !include './pg.yaml#dbs.main'\n")
+
+        with open(app_file) as f:
+            data = load(f, current_file=app_file)
+
+        assert isinstance(data["db"]["password"], Envelope)
+        assert data["db"]["password"].reveal() == "s3cret"
+
+    def test_an_override_of_a_secret_reference_stays_an_envelope(
+        self, tmp_path, monkeypatch
+    ):
+        """An env override replaces the secret's value, not its envelope."""
+        monkeypatch.setenv("TEST_DB_PW", "s3cret")
+        (tmp_path / "pg.yaml").write_text(
+            """
+pgserver:
+  pass: !env TEST_DB_PW !secret
+dbs:
+  main:
+    password: "${pgserver.pass}"
+"""
+        )
+        app_file = tmp_path / "app.yaml"
+        app_file.write_text("db: !include './pg.yaml#dbs.main'\n")
+
+        with open(app_file) as f:
+            data = load(
+                f,
+                current_file=app_file,
+                env_overrides={"pgserver.pass": "override"},
+            )
+
+        assert isinstance(data["db"]["password"], Envelope)
+        assert data["db"]["password"].reveal() == "override"
+
+    def test_text_with_a_secret_is_a_secret(self, tmp_path, monkeypatch):
+        """A string a secret is spliced into becomes an Envelope as a whole."""
+        monkeypatch.setenv("TEST_DB_PW", "s3cret")
+        (tmp_path / "pg.yaml").write_text(
+            """
+pgserver:
+  pass: !env TEST_DB_PW !secret
+dbs:
+  main:
+    url: "postgresql://app:${pgserver.pass}@h/db"
+"""
+        )
+        app_file = tmp_path / "app.yaml"
+        app_file.write_text("db: !include './pg.yaml#dbs.main'\n")
+
+        with open(app_file) as f:
+            data = load(f, current_file=app_file)
+
+        assert isinstance(data["db"]["url"], Envelope)
+        assert data["db"]["url"].reveal() == "postgresql://app:s3cret@h/db"
 
     def test_undefined_vars_pass_through(self, tmp_path):
         """Test undefined variables are passed through for Config._resolve() to handle."""

@@ -28,6 +28,7 @@ import appinfra
 
 from ...app.tools import Tool, ToolConfig
 from ...app.tracing.traceable import Traceable
+from ...envelope import Envelope
 
 _SUPPORTED_POSTGRES_CONF = {
     "max_connections",
@@ -680,7 +681,8 @@ class PgUrlTool(Tool):
             if not url:
                 self.lg.error("no dbs entry found", extra={"name": self.args.db})
                 return 1
-            print(url)
+            # Printing the URL is this command's purpose: open a secret one
+            print(Envelope(url).reveal())
             return 0
 
         host = cfg.get("pgserver.host", "127.0.0.1") or "127.0.0.1"

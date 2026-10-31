@@ -80,7 +80,6 @@ Interactive UI components:
 - `interactive_prompts.py` - User input prompts
 - `rich_output.py` - Styled terminal output
 - `scrollable_selection.py` - Scrollable menu selection
-- `secret_masking.py` - Secret redaction in output
 - `deploy_tool.py` - Complete UI integration example
 
 ### 10. Plugins → [10_plugins/](10_plugins/)
@@ -161,7 +160,6 @@ Note: For direct execution, ensure `python3` resolves to your venv. See
 - Spinners: `09_ui/spinners_and_progress.py`
 - Prompts: `09_ui/interactive_prompts.py`
 - Rich output: `09_ui/rich_output.py`
-- Secret masking: `09_ui/secret_masking.py`
 
 ### Plugins
 - Plugin architecture: `10_plugins/example_plugins.py`

@@ -23,6 +23,7 @@ from appinfra.config import MAX_CONFIG_SIZE_BYTES, Config, ConfigFile, ConfigSpe
 from appinfra.config.config import (
     _check_file_size,
 )
+from appinfra.envelope import Envelope
 from appinfra.errors import UndeclaredConfigPathError
 
 # =============================================================================
@@ -209,6 +210,81 @@ values:
         assert config.values.number == 123
         assert config.values.boolean is True
         assert config.values.list == [1, 2, 3]
+
+
+_SECRET_REFERENCES = """
+dbserver:
+  user: app
+  port: 5432
+  pass: !env TEST_DB_PW !secret
+dbs:
+  main:
+    password: ${dbserver.pass}
+    quoted: "${dbserver.pass}"
+    port: ${dbserver.port}
+"""
+
+
+@pytest.mark.usefixtures("clean_env")
+class TestSecretReferences:
+    """A reference to a secret carries its Envelope; text built from a secret is one."""
+
+    @pytest.fixture
+    def config(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("TEST_DB_PW", "s3cret")
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text(_SECRET_REFERENCES)
+        return Config(str(config_file))
+
+    def test_a_reference_carries_the_envelope(self, config):
+        assert isinstance(config.dbs.main.password, Envelope)
+        assert config.dbs.main.password.reveal() == "s3cret"
+
+    def test_a_quoted_reference_carries_the_envelope(self, config):
+        assert isinstance(config.dbs.main.quoted, Envelope)
+        assert config.dbs.main.quoted.reveal() == "s3cret"
+
+    def test_a_reference_to_a_plain_value_is_still_text(self, config):
+        assert config.dbs.main.port == "5432"
+
+    def test_text_with_a_secret_is_a_secret(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("TEST_DB_PW", "s3cret")
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text(
+            _SECRET_REFERENCES
+            + '    url: "postgresql://${dbserver.user}:${dbserver.pass}@h/db"\n'
+        )
+        url = Config(str(config_file)).dbs.main.url
+        assert isinstance(url, Envelope)
+        assert url.reveal() == "postgresql://app:s3cret@h/db"
+
+    def test_an_override_of_a_secret_stays_an_envelope(self, config, monkeypatch):
+        monkeypatch.setenv("INFRA_DBSERVER_PASS", "override")
+        config.reload()
+        assert isinstance(config.dbserver["pass"], Envelope)
+        assert config.dbserver["pass"].reveal() == "override"
+
+    def test_a_reference_carries_the_overridden_envelope(self, config, monkeypatch):
+        monkeypatch.setenv("INFRA_DBSERVER_PASS", "override")
+        config.reload()
+        assert isinstance(config.dbs.main.password, Envelope)
+        assert config.dbs.main.password.reveal() == "override"
+
+    def test_an_override_of_a_secret_is_not_converted(self, config, monkeypatch):
+        monkeypatch.setenv("INFRA_DBSERVER_PASS", "12,34")
+        config.reload()
+        assert config.dbserver["pass"].reveal() == "12,34"
+
+    def test_get_env_overrides_reports_a_secret_as_an_envelope(
+        self, config, monkeypatch
+    ):
+        monkeypatch.setenv("INFRA_DBSERVER_PASS", "override")
+        monkeypatch.setenv("INFRA_DBSERVER_PORT", "6543")
+        config.reload()
+        overrides = config.get_env_overrides()
+        assert isinstance(overrides["dbserver.pass"], Envelope)
+        assert overrides["dbserver.pass"].reveal() == "override"
+        assert overrides["dbserver.port"] == 6543
 
 
 # =============================================================================

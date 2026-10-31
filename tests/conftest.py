@@ -91,9 +91,10 @@ def clean_env():
     """Clear INFRA_* environment variables for isolated config tests.
 
     Tests loading Config from minimal yaml files with `enable_env_overrides=True`
-    will fail if CI has INFRA_* env vars for paths not in the yaml (e.g., CI sets
-    INFRA_PGSERVER_PASS but test yaml has no pgserver section). This raises
-    UndeclaredConfigPathError. Use this fixture to isolate such tests.
+    fail on an INFRA_* override for a path the yaml does not declare, with
+    UndeclaredConfigPathError: INFRA_PGSERVER_HOST, which the CI test container
+    and pytest_configure set while the yaml has no pgserver section, or any
+    override a developer exported. Use this fixture to isolate such tests.
     """
     original_env = os.environ.copy()
     for key in list(os.environ.keys()):

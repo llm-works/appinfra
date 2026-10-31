@@ -14,9 +14,9 @@ from pathlib import Path
 import pytest
 import yaml
 
+from appinfra.envelope import Envelope
 from appinfra.yaml import (
     ErrorContext,
-    SecretStr,
     deep_merge,
     load,
 )
@@ -501,67 +501,6 @@ tilde_null: ~
 
 
 # =============================================================================
-# SecretStr wrapper tests
-# =============================================================================
-
-
-class TestSecretStr:
-    """SecretStr must mask itself in every string form and only expose via reveal()."""
-
-    def test_str_returns_mask(self):
-        assert str(SecretStr("hunter2")) == "***"
-
-    def test_repr_returns_mask(self):
-        assert repr(SecretStr("hunter2")) == "SecretStr('***')"
-
-    def test_format_returns_mask(self):
-        assert f"{SecretStr('hunter2')}" == "***"
-        assert f"{SecretStr('hunter2'):>10}" == "***"
-
-    def test_reveal_returns_plaintext(self):
-        assert SecretStr("hunter2").reveal() == "hunter2"
-
-    def test_equality_compares_underlying(self):
-        assert SecretStr("a") == SecretStr("a")
-        assert SecretStr("a") != SecretStr("b")
-
-    def test_not_a_str(self):
-        # Type boundary: consumers cannot pass SecretStr where str is required
-        # without going through .reveal() first.
-        assert not isinstance(SecretStr("x"), str)
-
-    def test_unhashable(self):
-        with pytest.raises(TypeError):
-            {SecretStr("x")}
-
-    def test_rejects_non_str_value(self):
-        with pytest.raises(TypeError):
-            SecretStr(123)  # type: ignore[arg-type]
-
-    def test_rejects_secret_str_value(self):
-        # Constructor is strict: only str accepted. Boundary code that wants
-        # to accept SecretStr too must go through SecretStr.ensure().
-        with pytest.raises(TypeError):
-            SecretStr(SecretStr("x"))  # type: ignore[arg-type]
-
-    def test_ensure_none_passes_through(self):
-        assert SecretStr.ensure(None) is None
-
-    def test_ensure_str_wraps(self):
-        result = SecretStr.ensure("hunter2")
-        assert isinstance(result, SecretStr)
-        assert result.reveal() == "hunter2"
-
-    def test_ensure_secret_preserves_identity(self):
-        existing = SecretStr("hunter2")
-        assert SecretStr.ensure(existing) is existing
-
-    def test_ensure_rejects_other_types(self):
-        with pytest.raises(TypeError):
-            SecretStr.ensure(123)  # type: ignore[arg-type]
-
-
-# =============================================================================
 # Solo !secret rejection
 # =============================================================================
 
@@ -632,14 +571,14 @@ class TestEnvOverrides:
 
 
 class TestSecretEnvChain:
-    """!env !secret / !secret !env returns a SecretStr wrapping the resolved value."""
+    """!env !secret / !secret !env returns a Envelope wrapping the resolved value."""
 
     def test_prefix_form_returns_secret_str(self):
         data = load(
             StringIO("password: !secret !env DB_PASSWORD\n"),
             env_overrides={"DB_PASSWORD": "hunter2"},
         )
-        assert isinstance(data["password"], SecretStr)
+        assert isinstance(data["password"], Envelope)
         assert data["password"].reveal() == "hunter2"
 
     def test_postfix_form_returns_secret_str(self):
@@ -647,7 +586,7 @@ class TestSecretEnvChain:
             StringIO("password: !env DB_PASSWORD !secret\n"),
             env_overrides={"DB_PASSWORD": "hunter2"},
         )
-        assert isinstance(data["password"], SecretStr)
+        assert isinstance(data["password"], Envelope)
         assert data["password"].reveal() == "hunter2"
 
     def test_both_orderings_equivalent(self):
@@ -682,7 +621,7 @@ class TestSecretEnvChain:
             StringIO("k: !env? X !secret\n"),
             env_overrides={"X": "v"},
         )
-        assert isinstance(data["k"], SecretStr)
+        assert isinstance(data["k"], Envelope)
         assert data["k"].reveal() == "v"
 
     def test_missing_required_env_raises(self, monkeypatch):

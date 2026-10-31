@@ -14,6 +14,8 @@ try:
 
     from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+    from ..envelope import Envelope
+
     PYDANTIC_AVAILABLE = True
 
     class HandlerConfig(BaseModel):
@@ -82,7 +84,9 @@ try:
         name: str = Field(default="llm-works-pg", description="Server name")
         port: int = Field(default=25432, ge=1, le=65535, description="Server port")
         user: str = Field(default="postgres", description="Username")
-        password: str = Field(default="", alias="pass", description="Password")
+        password: str | Envelope = Field(
+            default="", alias="pass", description="Password"
+        )
         image: str | None = Field(
             default=None,
             description="Docker image (e.g., pgvector/pgvector:pg18). Defaults to postgres:VERSION",
@@ -102,12 +106,16 @@ try:
         model_config = ConfigDict(
             populate_by_name=True,  # Allow both 'password' and 'pass'
             extra="allow",
+            arbitrary_types_allowed=True,  # Envelope
         )
 
     class DatabaseConfig(BaseModel):
         """Configuration for a database connection."""
 
-        url: str = Field(..., description="Database connection URL")
+        url: str | Envelope = Field(
+            ...,
+            description="Database connection URL; an Envelope if built from a secret",
+        )
         pool_size: int = Field(default=5, ge=1, description="Connection pool size")
         max_overflow: int = Field(
             default=10, ge=0, description="Max overflow connections"
@@ -150,7 +158,7 @@ try:
         @classmethod
         def validate_url(cls, v: Any) -> Any:
             """Validate database URL format."""
-            if not v.startswith(("postgresql://", "postgres://")):
+            if not Envelope(v).reveal().startswith(("postgresql://", "postgres://")):
                 raise ValueError(
                     "Database URL must start with 'postgresql://' or 'postgres://'"
                 )
@@ -184,7 +192,7 @@ try:
                 )
             return v
 
-        model_config = ConfigDict(extra="allow")
+        model_config = ConfigDict(extra="allow", arbitrary_types_allowed=True)
 
     class TestConfig(BaseModel):
         """Configuration for testing."""

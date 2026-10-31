@@ -43,6 +43,15 @@ earlier: pre-release builds (0.13.1.devN) would not satisfy it. -->
 - `PG.dispose()` closes the pooled connections of a `PG` and of its cached `ScopedPG`s.
 
 ### Changed
+- **Breaking:** `appinfra.yaml.SecretStr` is now `appinfra.envelope.Envelope`, also exported as
+  `appinfra.Envelope`; `!secret` loads as an `Envelope`. No alias is kept. `Envelope(e)` returns
+  `e`, replacing `ensure()`.
+- **Breaking:** `appinfra.security` is removed (`SecretMasker`, `SecretMaskingFilter`,
+  `get_masker`). Declare secrets with `!secret`, or wrap them in an `Envelope` where they enter
+  the program.
+- **Breaking:** a `${path}` reference to a secret now carries its `Envelope` instead of `'***'`;
+  text a secret is spliced into, such as a database URL, is an `Envelope` as a whole. `PG`, the db
+  manager, SQLite and `appinfra pg url --db` accept such a URL.
 - `make check` prints its result last, after the failures, kept logs, skips and `[i]` notes.
   Warnings show in bright yellow, failures in red.
 - **Breaking:** `make check.summary` is now `make check.ci`: `make check`'s checks and warning

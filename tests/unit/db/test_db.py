@@ -14,6 +14,7 @@ from unittest.mock import Mock, patch
 import pytest
 
 from appinfra.db.db import Manager, UnknownDBTypeException
+from appinfra.envelope import Envelope
 from appinfra.log import Logger
 
 # =============================================================================
@@ -675,6 +676,23 @@ class TestConfigurationValidation:
             # Setup will fail for connection reasons, not URL validation
             manager._validate_db_config("test", test_db_cfg)
             # No exception means validation passed
+
+    @patch("appinfra.db.pg.PG")
+    def test_a_secret_postgresql_url_sets_up_pg(self, mock_pg_class, mock_logger):
+        """A URL built from a secret arrives as an Envelope and is routed by its scheme."""
+        url = Envelope("postgresql://app:s3cret@localhost:5432/test")
+        db_cfg = Mock(url=url)
+        db_cfg.dict.return_value = {"url": url}
+        cfg = Mock()
+        cfg.dbs = {"test": db_cfg}
+        cfg.logging = Mock(pg_level=None)
+
+        with patch("appinfra.db.db.LoggerFactory.derive", return_value=mock_logger):
+            manager = Manager(mock_logger, cfg)
+            manager.setup()
+
+        assert len(manager._dbs) == 1
+        mock_pg_class.assert_called_once()
 
     def test_validate_rejects_invalid_url_scheme(self, mock_logger):
         """Test validation rejects invalid URL schemes."""

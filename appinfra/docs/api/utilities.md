@@ -532,15 +532,16 @@ api_key:  !secret !env API_KEY         # Prefix form (equivalent)
 token:    !env? TOKEN !secret          # Optional - None if TOKEN unset
 ```
 
-Both orderings resolve `!env` first, then wrap the resolved value in a `SecretStr`
-that masks itself in every string form (`str`, `repr`, `format`, `%`, f-strings all
+Both orderings resolve `!env` first, then wrap the resolved value in an
+`Envelope` (`appinfra.envelope.Envelope`, also `appinfra.Envelope`) that masks
+itself in every string form (`str`, `repr`, `format`, `%`, f-strings all
 produce `'***'`). The plaintext is only reachable via `.reveal()`:
 
 ```python
-from appinfra.yaml import SecretStr, load
+from appinfra.yaml import load
 
 config = load(open("app.yaml"), env_overrides={"DB_PASSWORD": "hunter2"})
-config["password"]  # SecretStr('***')
+config["password"]  # Envelope('***')
 str(config["password"])  # '***'
 f"{config['password']}"  # '***'
 config["password"].reveal()  # 'hunter2'  ← only path to plaintext
@@ -549,31 +550,56 @@ config["password"].reveal()  # 'hunter2'  ← only path to plaintext
 Solo `!secret ${VAR}` raises `yaml.YAMLError` at parse time — the plain-string
 result of the old form leaked in logs. Migrate to `!env VAR !secret`.
 
-`SecretStr` values survive `!deep !include` merges without coercing back to
+`Envelope` values survive `!deep !include` merges without coercing back to
 plain `str`, so masked secrets loaded from an included file remain masked in
 the merged config.
 
-**`SecretStr.ensure(value)` — boundary coercion.** Library code that
-historically accepted a plain `str` and now accepts `SecretStr` too should
-call `SecretStr.ensure(...)` at the boundary rather than reimplementing the
-coerce shim:
+A `${path}` reference to a secret carries its `Envelope`, so the secret
+travels to the code that reveals it. Text a secret is spliced into is a secret
+as a whole: a database URL built from a secret password loads as an `Envelope`
+of the full URL, and `PG` opens it when it creates the engine:
 
-```python
-from appinfra.yaml import SecretStr
-
-
-def connect(dsn: str | SecretStr | None) -> None:
-    dsn = SecretStr.ensure(dsn)  # None → None, SecretStr → same, str → wrapped
-    if dsn is not None:
-        raw_dsn = dsn.reveal()
-        ...
+```yaml
+dbserver:
+  pass: !env DB_PASSWORD !secret
+dbs:
+  main:
+    url: postgresql://app:${dbserver.pass}@db.local:5432/main   # Envelope('***')
 ```
 
-`ensure` preserves identity for already-wrapped inputs, passes `None` through,
-and raises `TypeError` for any other type. The `SecretStr` constructor accepts
-only `str` — it rejects existing `SecretStr` instances so accidental
-double-wraps surface loudly. `SecretStr` is not a `str` subclass and is
-unhashable — do not use as a dict key or set member.
+A value that is not declared `!secret` stays plain text.
+
+**Secrets from other sources.** A secret is wrapped where it enters the
+program; nothing detects or masks plaintext after the fact. Outside yaml that
+is one call:
+
+```python
+token = Envelope(os.environ["API_TOKEN"])  # environment
+parser.add_argument("--token", type=Envelope)  # CLI argument
+```
+
+An `Envelope` keeps a secret out of logs, prints and config dumps. It does not
+hide it in memory: `os.environ`, a database driver holding an open connection,
+and the composed text a secret was spliced into keep the plaintext for as long
+as they live.
+
+**Taking `str | Envelope`.** `Envelope` is immutable and, like `str(s) is s`,
+`Envelope(e)` returns `e` itself. Code that accepts either form normalizes with
+the constructor and opens the value with `reveal()`, the only method that
+returns plaintext:
+
+```python
+from appinfra import Envelope
+
+
+def connect(dsn: str | Envelope) -> None:
+    raw_dsn = Envelope(dsn).reveal()  # str → wrapped, Envelope → same
+    ...
+```
+
+Any other type raises `TypeError`. `copy` and `deepcopy` return the same
+`Envelope`. `Envelope` is not a `str` subclass and is unhashable — do not use
+as a dict key or set member.
 
 **`!path`** - Resolve paths relative to config file location with tilde expansion:
 

@@ -25,10 +25,25 @@ from appinfra.db.pg.core import (
     log_query_with_timing,
     validate_init_params,
 )
+from appinfra.envelope import Envelope
 
 
 class TestConfigValidator:
     """Test ConfigValidator class."""
+
+    def test_valid_secret_url(self):
+        """A URL built from a secret arrives as an Envelope."""
+        cfg = Mock()
+        cfg.url = Envelope("postgresql://user:pw@localhost/testdb")
+
+        ConfigValidator.validate_config(cfg)  # Should not raise
+
+    def test_secret_url_with_wrong_scheme_is_rejected(self):
+        cfg = Mock()
+        cfg.url = Envelope("mysql://user:pw@localhost/testdb")
+
+        with pytest.raises(ValueError, match="must start with"):
+            ConfigValidator.validate_config(cfg)
 
     def test_valid_postgresql_url(self):
         """Test accepts valid PostgreSQL URL."""
@@ -261,6 +276,19 @@ class TestInitializationHelpers:
 
         assert isinstance(engine, sqlalchemy.engine.Engine)
         assert callable(session_cls)
+
+    def test_create_sqlalchemy_engine_opens_a_secret_url(self):
+        """A URL built from a secret arrives as an Envelope."""
+        engine = create_sqlalchemy_engine(Envelope("postgresql://u:pw@h/db"))
+        assert engine.url.password == "pw"
+
+    def test_create_engine_and_session_opens_a_secret_url(self):
+        cfg = Mock()
+        cfg.url = Envelope("postgresql://u:pw@h/db")
+
+        engine, _ = create_engine_and_session(cfg)
+
+        assert engine.url.password == "pw"
 
     def test_initialize_connection_health(self):
         """Test initialize_connection_health sets attributes."""
