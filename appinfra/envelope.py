@@ -72,7 +72,12 @@ class Envelope:
 
     def __eq__(self, other: object) -> bool:
         if isinstance(other, Envelope):
-            return hmac.compare_digest(self._value, other._value)
+            # compare_digest takes str only if it is ASCII; bytes cover any value,
+            # and surrogatepass encodes the lone surrogates a str may hold
+            return hmac.compare_digest(
+                self._value.encode("utf-8", "surrogatepass"),
+                other._value.encode("utf-8", "surrogatepass"),
+            )
         return NotImplemented
 
     __hash__ = None  # type: ignore[assignment]

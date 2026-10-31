@@ -31,6 +31,11 @@ class TestEnvelope:
         assert Envelope("a") == Envelope("a")
         assert Envelope("a") != Envelope("b")
 
+    def test_equality_handles_non_ascii(self):
+        assert Envelope("pässword") == Envelope("pässword")
+        assert Envelope("pässword") != Envelope("passwörd")
+        assert Envelope("\ud800") == Envelope("\ud800")  # lone surrogate
+
     def test_not_a_str(self):
         # Type boundary: consumers cannot pass Envelope where str is required
         # without going through .reveal() first.
