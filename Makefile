@@ -37,6 +37,9 @@ APPINFRA_PYTEST_COVERAGE_THRESHOLD ?= 95
 # Docstring coverage threshold (framework default is 80%)
 APPINFRA_DEV_DOCSTRING_THRESHOLD ?= 95
 
+# Share of tests that keep to the suite rules (framework default is 90%)
+APPINFRA_DEV_TEST_HEALTH_THRESHOLD ?= 95
+
 # Install with all optional extras
 APPINFRA_DEV_INSTALL_EXTRAS ?= all
 

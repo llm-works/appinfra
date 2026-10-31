@@ -31,6 +31,7 @@ from tests.helpers.pg.probe import (
 
 # Register integration test fixtures and appinfra testing utilities
 pytest_plugins = [
+    "appinfra.pytest_suites",
     "appinfra.testing",
     # Registered here, before any test module imports it, so pytest can
     # rewrite its asserts
@@ -40,7 +41,6 @@ pytest_plugins = [
     "tests.fixtures.pg_integration",
     "tests.fixtures.sqlite_integration",
     "tests.fixtures.logging",
-    "tests.fixtures.suite_markers",
     "tests.fixtures.yaml_files",
 ]
 
@@ -168,7 +168,7 @@ def sample_config_dict() -> dict:
 
 def pytest_collection_modifyitems(config, items):
     """
-    Apply skip conditions (suite markers: tests/fixtures/suite_markers.py).
+    Apply skip conditions (suite markers: appinfra/pytest_suites.py).
 
     Args:
         config: Pytest config object

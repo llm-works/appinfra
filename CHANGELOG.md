@@ -16,6 +16,12 @@ pinning an older appinfra resolves a release with no `check` extra and pip only 
 earlier: pre-release builds (0.13.1.devN) would not satisfy it. -->
 
 ### Added
+- `appinfra.pytest_suites`, an opt-in pytest plugin (`pytest_plugins = ["appinfra.pytest_suites"]`)
+  that gives each test the suite of its nearest marker or its `tests/<suite>/` directory, and stops
+  collection on a test with no suite or two. See the test suites guide.
+- `make check` shows a Test structure line in a project that loads `appinfra.pytest_suites`: the
+  share of tests with none to move and no leaked process-wide state, against
+  `APPINFRA_DEV_TEST_HEALTH_THRESHOLD` (default 90%), per `APPINFRA_DEV_TEST_HEALTH`.
 - `start_method=` on `ProcessRunner`, `RunnerFactory`, the process channel factories and the FastAPI
   subprocess builder (`with_start_method()`); spawn or forkserver keeps restarts from forking off
   the monitor thread. `ProcessRunner.process` and `start_subprocess()` are typed `BaseProcess`.
@@ -37,6 +43,8 @@ earlier: pre-release builds (0.13.1.devN) would not satisfy it. -->
 - `PG.dispose()` closes the pooled connections of a `PG` and of its cached `ScopedPG`s.
 
 ### Changed
+- `make check` prints its result last, after the failures, kept logs, skips and `[i]` notes.
+  Warnings show in bright yellow, failures in red.
 - **Breaking:** `make check.summary` is now `make check.ci`: `make check`'s checks and warning
   policy as plain text, with pytest running in parallel. `make check.raw` applies no warning policy.
 - `make check` runs the Performance group on one pytest-xdist worker instead of several.
