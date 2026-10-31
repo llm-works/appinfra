@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright 2026 The appinfra Authors
 
-"""tests/fixtures/suite_markers.py: a test under a suite directory runs in that suite unless it
-names another; a test elsewhere names its suite; collection stops on a test that names none."""
+"""appinfra.pytest_suites: a test under a suite directory runs in that suite unless it names
+another; a test elsewhere names its suite; collection stops on a test that names none."""
 
 from pathlib import Path
 
@@ -31,7 +31,7 @@ def _run(
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(source)
     return pytester.runpytest_subprocess(
-        "-p", "tests.fixtures.suite_markers", "--collect-only", "-q", *args
+        "-p", "appinfra.pytest_suites", "--collect-only", "-q", *args
     )
 
 
@@ -138,6 +138,28 @@ def test_two_suite_markers_on_one_test_stop_collection(
     result = _run(pytester, monkeypatch, layout)
     assert result.ret == pytest.ExitCode.USAGE_ERROR
     assert "tests/unit/test_unit_both.py::test_both" in result.stderr.str()
+
+
+def test_the_suite_markers_are_registered(
+    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    layout = {"tests/unit/test_unit_marked.py": _marked("unit")}
+    result = _run(
+        pytester, monkeypatch, layout, "-W", "error::pytest.PytestUnknownMarkWarning"
+    )
+    assert result.ret == pytest.ExitCode.OK
+
+
+def test_a_test_outside_the_rootdir_must_name_its_suite(
+    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    layout = {
+        "proj/tests/unit/test_unit_plain.py": _PLAIN,
+        "other/test_other_plain.py": _PLAIN,
+    }
+    result = _run(pytester, monkeypatch, layout, "--rootdir", "proj", "proj", "other")
+    assert result.ret == pytest.ExitCode.USAGE_ERROR
+    assert "test_other_plain.py::test_plain" in result.stderr.str()
 
 
 def test_a_test_outside_the_suite_directories_must_name_its_suite(

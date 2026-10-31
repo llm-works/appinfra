@@ -76,9 +76,17 @@ path, never the expected one. Logic that depends on time runs against a fake clo
 - **Whole classes and files**: a class or file whose tests all belong to another suite lives in
   that suite's directory instead of carrying a class- or module-wide marker.
 
-The hook that applies these rules is `tests/fixtures/suite_markers.py`. `make test.unit`,
-`make test.integration` and `make test.e2e` select by marker; `make check` runs unit and
-integration tests together for coverage.
+The pytest plugin `appinfra.pytest_suites` applies these rules and registers the five suite
+markers. A project opts in from its top-level `conftest.py`:
+
+```python
+pytest_plugins = ["appinfra.pytest_suites"]
+```
+
+The suite directories are fixed at `tests/<suite>/` under the rootdir, where `make check` also
+looks for them. `-m` selects by each test's resolved suite, so `-m unit` leaves out an integration
+test in a class marked unit. `make test.unit`, `make test.integration` and `make test.e2e` select
+by marker; `make check` runs unit and integration tests together for coverage.
 
 ## Rationale
 
