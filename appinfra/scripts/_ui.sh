@@ -24,6 +24,7 @@ if $_UI_STDOUT_COLOR; then
     UI_RED=$'\033[0;31m'
     UI_GREEN=$'\033[0;32m'
     UI_YELLOW=$'\033[0;33m'
+    UI_BRIGHT_YELLOW=$'\033[0;93m'
     UI_BLUE=$'\033[0;34m'
     UI_CYAN=$'\033[0;36m'
     UI_GRAY=$'\033[0;90m'
@@ -34,6 +35,7 @@ else
     UI_RED=''
     UI_GREEN=''
     UI_YELLOW=''
+    UI_BRIGHT_YELLOW=''
     UI_BLUE=''
     UI_CYAN=''
     UI_GRAY=''
@@ -41,12 +43,16 @@ else
     UI_CLEAR=''
 fi
 
-# Status marks — the canonical five. Colored for stdout.
+# Status marks — the canonical six. Colored for stdout. Bright yellow is a warning, mark and text;
+# plain yellow marks work in progress, and in reports a path or command to act on.
 UI_MARK_PENDING="${UI_GRAY}[ ]${UI_RESET}"
 UI_MARK_RUNNING="${UI_YELLOW}[…]${UI_RESET}"
 UI_MARK_OK="${UI_GREEN}[✓]${UI_RESET}"
-UI_MARK_WARN="${UI_YELLOW}[⚠]${UI_RESET}"
+UI_MARK_WARN="${UI_BRIGHT_YELLOW}[⚠]${UI_RESET}"
 UI_MARK_FAIL="${UI_RED}[✗]${UI_RESET}"
+# Information that is neither a result nor a warning; an ASCII i, as ℹ is double width in some
+# terminals
+UI_MARK_INFO="${UI_CYAN}[i]${UI_RESET}"
 
 # Convenience printers. ui_fail goes to stderr and checks its own TTY.
 ui_ok()      { printf '%s %s\n' "${UI_MARK_OK}"      "$*"; }

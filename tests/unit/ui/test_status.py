@@ -50,8 +50,9 @@ def test_marks_include_ansi_on_tty() -> None:
         assert status.mark_pending(tty) == "\033[0;90m[ ]\033[0m"
         assert status.mark_running(tty) == "\033[0;33m[…]\033[0m"
         assert status.mark_ok(tty) == "\033[0;32m[✓]\033[0m"
-        assert status.mark_warn(tty) == "\033[0;33m[⚠]\033[0m"
+        assert status.mark_warn(tty) == "\033[0;93m[⚠]\033[0m"
         assert status.mark_fail(tty) == "\033[0;31m[✗]\033[0m"
+        assert status.mark_info(tty) == "\033[0;36m[i]\033[0m"
 
 
 @pytest.mark.parametrize(
@@ -61,6 +62,7 @@ def test_marks_include_ansi_on_tty() -> None:
         (status.red, "0;31"),
         (status.green, "0;32"),
         (status.yellow, "0;33"),
+        (status.bright_yellow, "0;93"),
         (status.blue, "0;34"),
         (status.cyan, "0;36"),
         (status.gray, "0;90"),
