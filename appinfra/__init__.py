@@ -15,6 +15,7 @@ from .config import Config
 from .deprecation import deprecated
 from .dict import DictInterface
 from .dot_dict import DotDict
+from .envelope import Envelope
 from .errors import (
     ConfigError,
     DatabaseError,
@@ -37,7 +38,6 @@ from .regex_utils import (
     safe_match,
     safe_search,
 )
-from .security.envelope import Envelope
 from .size import InvalidSizeError, size_str, size_to_bytes, validate_size
 from .utils import is_int, pretty
 

@@ -159,7 +159,7 @@ class TestJSONFormatterSanitize:
         assert out == extra
 
     def test_envelope_masked_in_extra(self):
-        from appinfra.security.envelope import Envelope
+        from appinfra.envelope import Envelope
 
         out = sanitize_extra({"pwd": Envelope("hunter2")})
         assert "hunter2" not in str(out)

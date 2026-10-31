@@ -20,8 +20,8 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from ...dot_dict import DotDict
+from ...envelope import Envelope
 from ...log import Logger, LoggerFactory
-from ...security.envelope import Envelope
 from .connection import ConnectionManager
 from .core import (
     ConfigValidator,

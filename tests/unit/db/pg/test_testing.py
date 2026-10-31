@@ -14,7 +14,7 @@ from appinfra.db.pg.testing import (
     _setup_database_with_lock,
     make_migrate_fixture,
 )
-from appinfra.security import Envelope
+from appinfra.envelope import Envelope
 
 
 class TestMakeMigrateFixture:

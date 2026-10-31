@@ -17,8 +17,8 @@ from typing import Any, Self
 import yaml
 
 from ..dot_dict import DotDict
+from ..envelope import Envelope
 from ..errors import UndeclaredConfigPathError
-from ..security.envelope import Envelope
 from ..yaml._utils import substitute_references
 from .constants import MAX_CONFIG_SIZE_BYTES
 from .spec import AUTO, Auto, ConfigFile, ConfigSpec, _resolve_origin

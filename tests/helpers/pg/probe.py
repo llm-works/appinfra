@@ -21,7 +21,7 @@ from urllib.parse import urlparse
 import pytest
 
 from appinfra.config import Config
-from appinfra.security import Envelope
+from appinfra.envelope import Envelope
 
 PG_SKIP_REASON = "pg-unavailable"
 REQUIRE_PG_MARKER = "require_pg"

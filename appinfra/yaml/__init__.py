@@ -15,7 +15,7 @@ Public API:
     ErrorContext: Context for YAML error reporting
     IncludeContext: Extended context for !include processing
 
-A value tagged ``!secret`` loads as ``appinfra.security.Envelope``.
+A value tagged ``!secret`` loads as ``appinfra.envelope.Envelope``.
 """
 
 from dataclasses import dataclass, replace

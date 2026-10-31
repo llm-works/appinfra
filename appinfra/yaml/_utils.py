@@ -8,7 +8,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from ..security.envelope import Envelope
+from ..envelope import Envelope
 
 # A ${path} reference. Restricted to config key characters (alphanumeric, dot,
 # underscore) to prevent ReDoS.

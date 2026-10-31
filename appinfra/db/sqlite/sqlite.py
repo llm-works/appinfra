@@ -18,8 +18,8 @@ from typing import TYPE_CHECKING, Any
 import sqlalchemy
 import sqlalchemy.orm
 
+from ...envelope import Envelope
 from ...log import Logger, LoggerFactory
-from ...security.envelope import Envelope
 from ..pg.interface import Interface
 
 if TYPE_CHECKING:

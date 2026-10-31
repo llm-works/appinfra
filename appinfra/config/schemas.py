@@ -14,7 +14,7 @@ try:
 
     from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-    from ..security.envelope import Envelope
+    from ..envelope import Envelope
 
     PYDANTIC_AVAILABLE = True
 

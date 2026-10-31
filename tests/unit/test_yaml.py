@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from appinfra.security.envelope import Envelope
+from appinfra.envelope import Envelope
 from appinfra.yaml import (
     ErrorContext,
     deep_merge,

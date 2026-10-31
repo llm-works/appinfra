@@ -25,7 +25,7 @@ from appinfra.db.pg.core import (
     log_query_with_timing,
     validate_init_params,
 )
-from appinfra.security import Envelope
+from appinfra.envelope import Envelope
 
 
 class TestConfigValidator:

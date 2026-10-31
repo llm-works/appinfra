@@ -17,7 +17,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import declarative_base
 
 from appinfra.db.pg import PG
-from appinfra.security import Envelope
+from appinfra.envelope import Envelope
 
 # All tests in this module exercise a real PG instance; skip the whole module
 # with the sentinel reason if PG is unreachable.

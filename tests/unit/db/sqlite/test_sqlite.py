@@ -13,7 +13,7 @@ from sqlalchemy import Column, Integer, String, text
 from sqlalchemy.orm import declarative_base
 
 from appinfra.db.sqlite import SQLite
-from appinfra.security import Envelope
+from appinfra.envelope import Envelope
 
 
 @pytest.fixture

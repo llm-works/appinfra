@@ -12,7 +12,7 @@ Tests Pydantic-based validation for configuration schemas including:
 
 import pytest
 
-from appinfra.security import Envelope
+from appinfra.envelope import Envelope
 
 try:
     from pydantic import ValidationError

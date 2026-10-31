@@ -23,8 +23,8 @@ from appinfra.config import MAX_CONFIG_SIZE_BYTES, Config, ConfigFile, ConfigSpe
 from appinfra.config.config import (
     _check_file_size,
 )
+from appinfra.envelope import Envelope
 from appinfra.errors import UndeclaredConfigPathError
-from appinfra.security import Envelope
 
 # =============================================================================
 # Fixtures

@@ -28,7 +28,7 @@ import appinfra
 
 from ...app.tools import Tool, ToolConfig
 from ...app.tracing.traceable import Traceable
-from ...security.envelope import Envelope
+from ...envelope import Envelope
 
 _SUPPORTED_POSTGRES_CONF = {
     "max_connections",

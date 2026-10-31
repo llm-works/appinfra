@@ -10,8 +10,8 @@ connections of different types, supporting PostgreSQL and SQLite.
 
 from typing import Any
 
+from ..envelope import Envelope
 from ..log import Logger, LoggerFactory
-from ..security.envelope import Envelope
 from . import pg, sqlite
 
 

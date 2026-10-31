@@ -18,7 +18,7 @@ import logging
 import traceback
 from typing import Any
 
-from ..security.envelope import Envelope
+from ..envelope import Envelope
 
 
 def record_traceback(record: logging.LogRecord) -> str | None:

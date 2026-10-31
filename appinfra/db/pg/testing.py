@@ -44,7 +44,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from ...security.envelope import Envelope
+from ...envelope import Envelope
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import DeclarativeBase

@@ -21,7 +21,7 @@ from typing import Any
 
 import yaml
 
-from ..security.envelope import Envelope
+from ..envelope import Envelope
 from ._utils import _file_exists, substitute_references
 from .types import DOCUMENT_INCLUDE_PATTERN, ErrorContext
 

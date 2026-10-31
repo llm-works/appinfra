@@ -12,7 +12,7 @@ Complete Deploy Tool Example
 A realistic CLI tool that combines all UI features:
 - Rich terminal output for status display
 - Interactive prompts for confirmations
-- Secret masking for credentials
+- Credentials kept in an Envelope, shown masked
 - Progress bars for deployment steps
 
 Run:
@@ -34,7 +34,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from appinfra.app import AppBuilder
 from appinfra.app.tools import Tool, ToolConfig
 from appinfra.app.tracing.traceable import Traceable
-from appinfra.security import SecretMasker
+from appinfra.envelope import Envelope
 from appinfra.ui import (
     RICH_AVAILABLE,
     NonInteractiveError,
@@ -73,7 +73,8 @@ class DeployTool(Tool):
             help_text="Deploy the application to an environment",
         )
         super().__init__(parent, config)
-        self.masker = SecretMasker()
+        # Wrapped where it enters the program: it prints as *** from here on
+        self.api_key = Envelope("sk-1234567890abcdefghij")
 
     def add_args(self, parser: argparse.ArgumentParser) -> None:
         parser.add_argument(
@@ -160,10 +161,7 @@ class DeployTool(Tool):
         console.print_success(f"Successfully deployed {version} to {env}!")
         console.print()
         console.print("[dim]Deployment log (credentials masked):[/dim]")
-        log_msg = (
-            f"Connected with api_key=sk-1234567890abcdefghij to {env_config['url']}"
-        )
-        console.print(f"  {self.masker.mask(log_msg)}")
+        console.print(f"  Connected with api_key={self.api_key} to {env_config['url']}")
 
     def run(self, **kwargs: Any) -> int:
         env = self._get_env(self.args.env)

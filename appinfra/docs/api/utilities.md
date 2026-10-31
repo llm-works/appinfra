@@ -533,7 +533,7 @@ token:    !env? TOKEN !secret          # Optional - None if TOKEN unset
 ```
 
 Both orderings resolve `!env` first, then wrap the resolved value in an
-`Envelope` (`appinfra.security.Envelope`, also `appinfra.Envelope`) that masks
+`Envelope` (`appinfra.envelope.Envelope`, also `appinfra.Envelope`) that masks
 itself in every string form (`str`, `repr`, `format`, `%`, f-strings all
 produce `'***'`). The plaintext is only reachable via `.reveal()`:
 
@@ -568,6 +568,20 @@ dbs:
 ```
 
 A value that is not declared `!secret` stays plain text.
+
+**Secrets from other sources.** A secret is wrapped where it enters the
+program; nothing detects or masks plaintext after the fact. Outside yaml that
+is one call:
+
+```python
+token = Envelope(os.environ["API_TOKEN"])  # environment
+parser.add_argument("--token", type=Envelope)  # CLI argument
+```
+
+An `Envelope` keeps a secret out of logs, prints and config dumps. It does not
+hide it in memory: `os.environ`, a database driver holding an open connection,
+and the composed text a secret was spliced into keep the plaintext for as long
+as they live.
 
 **Taking `str | Envelope`.** `Envelope` is immutable and, like `str(s) is s`,
 `Envelope(e)` returns `e` itself. Code that accepts either form normalizes with

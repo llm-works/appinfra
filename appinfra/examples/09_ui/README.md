@@ -5,7 +5,6 @@ This directory contains examples demonstrating the `appinfra.ui` module features
 - **Rich Terminal Output** - Beautiful tables, panels, and progress bars
 - **Spinners and Progress** - Multiple progress bars, various spinner styles
 - **Interactive Prompts** - Confirmations, selections, and password input
-- **Secret Masking** - Automatic secret detection and masking in output
 
 ## Examples
 
@@ -14,7 +13,6 @@ This directory contains examples demonstrating the `appinfra.ui` module features
 | `rich_output.py` | Tables, panels, styled text, and progress bars |
 | `spinners_and_progress.py` | Multiple progress bars, spinner styles, live tables |
 | `interactive_prompts.py` | Confirmations, selections, text input |
-| `secret_masking.py` | Automatic secret detection and masking |
 | `deploy_tool.py` | Complete tool combining all features |
 
 ## Running Examples
@@ -28,9 +26,6 @@ python examples/09_ui/spinners_and_progress.py
 
 # Interactive prompts (requires TTY)
 python examples/09_ui/interactive_prompts.py
-
-# Secret masking demo
-python examples/09_ui/secret_masking.py
 
 # Full deploy tool example
 python examples/09_ui/deploy_tool.py --help

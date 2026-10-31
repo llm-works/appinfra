@@ -39,7 +39,7 @@ from appinfra.cli.tools.pg_tool import (
     _resolve_image,
 )
 from appinfra.dot_dict import DotDict
-from appinfra.security import Envelope
+from appinfra.envelope import Envelope
 
 # =============================================================================
 # _render_conf_value — postgres_conf value serialization

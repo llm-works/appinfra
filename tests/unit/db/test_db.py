@@ -14,8 +14,8 @@ from unittest.mock import Mock, patch
 import pytest
 
 from appinfra.db.db import Manager, UnknownDBTypeException
+from appinfra.envelope import Envelope
 from appinfra.log import Logger
-from appinfra.security import Envelope
 
 # =============================================================================
 # Fixtures

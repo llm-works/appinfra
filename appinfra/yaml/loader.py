@@ -25,7 +25,7 @@ from typing import Any
 
 import yaml
 
-from ..security.envelope import Envelope
+from ..envelope import Envelope
 from ._include import _extract_section_data
 from ._utils import _file_exists, _normalize_allowed_paths
 from .types import (

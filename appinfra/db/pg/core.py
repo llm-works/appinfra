@@ -16,8 +16,8 @@ from typing import Any
 import sqlalchemy
 import sqlalchemy.dialects.postgresql
 
+from ...envelope import Envelope
 from ...log import resolve_level
-from ...security.envelope import Envelope
 
 
 def validate_init_params(lg: Any, cfg: Any) -> None:

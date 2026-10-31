@@ -12,7 +12,7 @@ from appinfra.db.pg.connection import validate_readonly_config
 from appinfra.db.pg.core import validate_init_params
 from appinfra.db.pg.pg import PG
 from appinfra.dot_dict import DotDict
-from appinfra.security import Envelope
+from appinfra.envelope import Envelope
 
 
 class TestPGValidation:

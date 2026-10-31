@@ -1,14 +1,14 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright 2026 The appinfra Authors
 
-"""Tests for appinfra.security.envelope module."""
+"""Tests for appinfra.envelope module."""
 
 import copy
 import pickle
 
 import pytest
 
-from appinfra.security.envelope import Envelope
+from appinfra.envelope import Envelope
 
 
 class TestEnvelope:
