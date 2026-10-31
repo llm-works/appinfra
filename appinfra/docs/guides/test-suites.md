@@ -66,12 +66,12 @@ path, never the expected one. Logic that depends on time runs against a fake clo
 
 - **Directory**: a test under one of the suite directories above belongs to that suite and needs
   no marker.
-- **Override**: a test marked with another suite runs in that one instead, so a file of unit tests
-  may hold a few integration tests (`@pytest.mark.integration` on the test or its class).
+- **Override**: a test marked with another suite runs in that one instead, so a class of unit tests
+  may hold a test or two of another suite (`@pytest.mark.integration` on the test).
 - **Outside the suite directories** (e.g. `tests/cli/`): every test names its suite with a marker.
 - **One suite only**: collection stops on a test with no suite or with two suite markers.
-- **Whole files**: a file whose tests all belong to another suite moves to that suite's directory
-  instead of carrying a module-wide marker.
+- **Whole classes and files**: a class or file whose tests all belong to another suite lives in
+  that suite's directory instead of carrying a class- or module-wide marker.
 
 The hook that applies these rules is `tests/fixtures/suite_markers.py`. `make test.unit`,
 `make test.integration` and `make test.e2e` select by marker; `make check` runs unit and
