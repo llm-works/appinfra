@@ -190,20 +190,27 @@ class TestMisplaced:
 
     def test_b(self):
         pass
+
+    def test_c(self):
+        pass
+
+    def test_d(self):
+        pass
 """
 
 
-def test_the_check_prints_the_share_then_the_findings(
+def test_the_check_prints_the_health_then_the_findings(
     pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     layout = {"tests/unit/test_checked.py": _CHECKED}
     result = _check(_run(pytester, monkeypatch, layout))
     assert result.returncode == 0
-    # The misplaced class's 2 tests and the leaking test are not clean: 1 of 4 is
+    # 2 of the 6 tests run in their directory's suite
     assert result.stdout.splitlines() == [
-        "25.0\t3\t4",
+        "33.3",
         "placement\ttests/unit/test_checked.py::TestMisplaced\t"
-        "2 of 2 tests (100%) are integration, the majority: move to tests/integration/",
+        "4 of 4 tests (100%) are integration, the majority: "
+        "move them to tests/integration/",
         "leak\ttests/unit/test_checked.py::test_leak\tleft changed: $SUITE_HEALTH_LEAK",
     ]
 

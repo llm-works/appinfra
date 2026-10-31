@@ -267,24 +267,26 @@ for _cq_var in APPINFRA_DEV_CQ_DUP:"$CQ_DUP" APPINFRA_DEV_CQ_DEAD:"$CQ_DEAD"; do
     esac
 done
 
-# Test structure (check_suite_health.py): how the tests keep to the suite rules, from the reports
-# appinfra.pytest_suites writes into HEALTH_DIR while the pytest checks run. Same modes as above.
-TEST_HEALTH="$(printf '%s' "${APPINFRA_DEV_TEST_HEALTH:-warn}" | tr '[:upper:]' '[:lower:]')"
+# Test structure health (check_suite_health.py): how the tests keep to the suite rules, from the
+# reports appinfra.pytest_suites writes into HEALTH_DIR while the pytest checks run. Same modes as
+# above; off unless the project turns it on.
+TEST_HEALTH="$(printf '%s' "${APPINFRA_DEV_TEST_HEALTH:-false}" | tr '[:upper:]' '[:lower:]')"
 case "$TEST_HEALTH" in
     false|warn|strict) ;;
     *) echo "Error: APPINFRA_DEV_TEST_HEALTH must be false, warn or strict, got: $TEST_HEALTH" >&2; exit 1 ;;
 esac
-# The share of clean tests the line passes at, and the share of a class's tests that may be of
-# another suite before it is a finding
-TEST_HEALTH_THRESHOLD="${APPINFRA_DEV_TEST_HEALTH_THRESHOLD:-90}"
-TEST_HEALTH_OVERRIDE_THRESHOLD="${APPINFRA_DEV_TEST_HEALTH_OVERRIDE_THRESHOLD:-15}"
-for _health_var in APPINFRA_DEV_TEST_HEALTH_THRESHOLD:"$TEST_HEALTH_THRESHOLD" \
-    APPINFRA_DEV_TEST_HEALTH_OVERRIDE_THRESHOLD:"$TEST_HEALTH_OVERRIDE_THRESHOLD"; do
-    if ! [[ "${_health_var#*:}" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
-        echo "Error: Invalid ${_health_var%%:*}: ${_health_var#*:}" >&2
-        exit 1
-    fi
-done
+# The share of a class's tests that may be of another suite before it is a finding, and the count
+# of such tests any class may hold
+TEST_HEALTH_THRESHOLD="${APPINFRA_DEV_TEST_HEALTH_THRESHOLD:-15}"
+TEST_HEALTH_OUTLIERS="${APPINFRA_DEV_TEST_HEALTH_OUTLIERS:-3}"
+if ! [[ "$TEST_HEALTH_THRESHOLD" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+    echo "Error: Invalid APPINFRA_DEV_TEST_HEALTH_THRESHOLD: $TEST_HEALTH_THRESHOLD" >&2
+    exit 1
+fi
+if ! [[ "$TEST_HEALTH_OUTLIERS" =~ ^[0-9]+$ ]]; then
+    echo "Error: Invalid APPINFRA_DEV_TEST_HEALTH_OUTLIERS: $TEST_HEALTH_OUTLIERS" >&2
+    exit 1
+fi
 HEALTH_DIR="${STATUS_DIR}/suite-health"
 HEALTH_ENV=""
 if [ "$TEST_HEALTH" != false ]; then
@@ -292,7 +294,7 @@ if [ "$TEST_HEALTH" != false ]; then
 fi
 # Only the run that executes the unit tests writes the reports: every run collects the same
 # tests, and only unit tests are watched for leaks. That is the coverage run when it folds the
-# unit suite, the Unit tests run otherwise; the Test structure line follows it.
+# unit suite, the Unit tests run otherwise; the Test structure health line follows it.
 HEALTH_TARGET="test.unit"
 case " $FOLDED_MARKERS " in
     *" unit "*) HEALTH_TARGET="test.coverage" ;;
@@ -983,18 +985,20 @@ check_warnings() {
     return 0
 }
 
-# check_suite_health.py over the reports the pytest checks wrote: a line "percent<TAB>unclean<TAB>
-# total", then "kind<TAB>where<TAB>detail" per finding; exit 3 when there is no report, as in a
-# project that does not load appinfra.pytest_suites
+# check_suite_health.py over the reports the pytest checks wrote: "kind<TAB>where<TAB>detail" per
+# finding; exit 3 when there is no report, as in a project that does not load
+# appinfra.pytest_suites
 suite_health_report() {
-    eval "${PYTHON} $(printf '%q ' "${SCRIPT_DIR}/check_suite_health.py" "$HEALTH_DIR" --root "$PROJECT_ROOT" --override-threshold "$TEST_HEALTH_OVERRIDE_THRESHOLD")"
+    eval "${PYTHON} $(printf '%q ' "${SCRIPT_DIR}/check_suite_health.py" "$HEALTH_DIR" --root "$PROJECT_ROOT" --threshold "$TEST_HEALTH_THRESHOLD" --outliers "$TEST_HEALTH_OUTLIERS")"
 }
 
-# Findings shown as rows below the checklist; the rest are in the kept log
+# The line's name, and the findings shown as rows below the checklist; the rest are in the kept log
+HEALTH_NAME="Test structure health"
 HEALTH_ROWS=10
 
 # A test subcheck. The one that runs the unit tests (HEALTH_TARGET) then brings the Test structure
-# line up to date from the reports it wrote, so the line does not wait for the other subchecks.
+# health line up to date from the reports it wrote, so the line does not wait for the other
+# subchecks.
 run_test_subcheck() {
     local rc=0
     run_check "$@" || rc=$?
@@ -1004,32 +1008,22 @@ run_test_subcheck() {
     return "$rc"
 }
 
-# The Test structure summary, like the coverage line's: "94.3% ≥ 90.0% clean, 61 findings", with
-# "<" below TEST_HEALTH_THRESHOLD, when it returns 1
+# The Test structure health summary from the share of tests in their directory's suite and the
+# count of findings: "98.2%, clean", "95.1%, 1 finding" or "90.4%, 17 findings"
 health_summary() {
-    local percent="$1" count="$2" sign="≥" rc=0 target text
-    target=$(awk "BEGIN {printf \"%.1f\", $TEST_HEALTH_THRESHOLD}")
-    if ! check_coverage_threshold "$percent" "$TEST_HEALTH_THRESHOLD"; then
-        sign="<"
-        rc=1
-    fi
-    text="${percent}% ${sign} ${target}% clean"
-    if [ "$count" -eq 1 ]; then
-        text="${text}, 1 finding"
-    elif [ "$count" -gt 1 ]; then
-        text="${text}, ${count} findings"
-    fi
-    echo "$text"
-    return "$rc"
+    case "$2" in
+        0) echo "$1%, clean" ;;
+        1) echo "$1%, 1 finding" ;;
+        *) echo "$1%, $2 findings" ;;
+    esac
 }
 
-# The Test structure line: the share of clean tests against TEST_HEALTH_THRESHOLD. At or above it
-# the line passes and the findings stay in the kept log. Below it a row below the checklist shows
-# each finding; warn records a warning, strict a failure. No report: the project does not load
+# The Test structure health line: it passes with no finding. Each finding gets a row below the
+# checklist; warn records a warning, strict a failure. No report: the project does not load
 # appinfra.pytest_suites, or has no unit tests.
 run_test_structure() {
     [ "$TEST_HEALTH" != false ] && [ -d "$STATUS_DIR" ] || return 0
-    local name="Test structure" line_num=${SUBCHECK_LINES["Test structure"]}
+    local name="$HEALTH_NAME" line_num=${SUBCHECK_LINES["$HEALTH_NAME"]}
     local log="${STATUS_DIR}/check-test-structure.log" rc=0
     suite_health_report > "$log" 2>&1 || rc=$?
     if [ "$rc" -eq 3 ]; then
@@ -1040,21 +1034,16 @@ run_test_structure() {
         record_failure "$name" "" "" "$log"
         return 1
     fi
-    local percent count summary passed=true kept=""
-    IFS=$'\t' read -r percent _ _ < "$log"
+    local percent count summary kept=""
+    read -r percent < "$log"
+    # Arithmetic drops the padding BSD wc puts before the number
     count=$(($(wc -l < "$log") - 1))
-    summary=$(health_summary "$percent" "$count") || passed=false
-    if [ "$count" -gt 0 ]; then
-        kept=$(keep_log "$log" "$name") || kept=""
-    fi
-    if [ "$passed" = true ]; then
+    summary=$(health_summary "$percent" "$count")
+    if [ "$count" -eq 0 ]; then
         update_line "$line_num" "${UI_MARK_OK}" "  ${name}" " ${UI_GRAY}(${summary})${UI_RESET}"
-        # Not a warning: a status note says where the findings are
-        if [ -n "$kept" ]; then
-            record_note "$name" "${count} finding$([ "$count" -gt 1 ] && echo s) in ${kept}"
-        fi
         return 0
     fi
+    kept=$(keep_log "$log" "$name") || kept=""
     local mark="${UI_MARK_WARN}" kind where detail
     [ "$TEST_HEALTH" = strict ] && mark="${UI_MARK_FAIL}"
     update_line "$line_num" "$mark" "  ${name}" " ${UI_GRAY}(${summary})${UI_RESET}"
@@ -1073,29 +1062,28 @@ run_test_structure() {
     return 0
 }
 
-# run_raw's Test structure: the summary, and below the threshold every finding. Returns 0,
-# EXIT_CODE_WARNING (below the threshold in warn mode) or 1 (in strict mode).
+# run_raw's Test structure health: the summary and every finding. Returns 0 with no finding,
+# otherwise EXIT_CODE_WARNING in warn mode or 1 in strict mode.
 run_raw_test_structure() {
     [ "$TEST_HEALTH" != false ] || return 0
-    echo "  → Test structure"
+    echo "  → ${HEALTH_NAME}"
     echo ""
     local out rc=0
     out=$(suite_health_report 2>&1) || rc=$?
     if [ "$rc" -eq 3 ]; then
-        echo "  ${UI_GRAY}[ ]${UI_RESET} Test structure ${UI_GRAY}(no report: is appinfra.pytest_suites loaded?)${UI_RESET}"
+        echo "  ${UI_GRAY}[ ]${UI_RESET} ${HEALTH_NAME} ${UI_GRAY}(no report: is appinfra.pytest_suites loaded?)${UI_RESET}"
         return 0
     elif [ "$rc" -ne 0 ]; then
         printf '%s\n' "$out"
-        echo "  ${UI_MARK_FAIL} Test structure failed"
+        echo "  ${UI_MARK_FAIL} ${HEALTH_NAME} failed"
         return 1
     fi
     local percent count summary
-    IFS=$'\t' read -r percent _ _ <<< "$out"
+    read -r percent <<< "$out"
     count=$(($(wc -l <<< "$out") - 1))
-    if summary=$(health_summary "$percent" "$count"); then
-        # Listed even when passing: the log is all a CI job leaves to read
-        echo "  ${UI_MARK_OK} Test structure (${summary})"
-        raw_health_findings "$out"
+    summary=$(health_summary "$percent" "$count")
+    if [ "$count" -eq 0 ]; then
+        echo "  ${UI_MARK_OK} ${HEALTH_NAME} (${summary})"
         return 0
     fi
     rc=$EXIT_CODE_WARNING
@@ -1104,12 +1092,12 @@ run_raw_test_structure() {
         rc=1
         mark="${UI_MARK_FAIL}"
     fi
-    echo "  ${mark} Test structure (${summary})"
+    echo "  ${mark} ${HEALTH_NAME} (${summary})"
     raw_health_findings "$out"
     return "$rc"
 }
 
-# run_raw's list of the Test structure findings, muted, one "where: detail" line each
+# run_raw's list of the Test structure health findings, muted, one "where: detail" line each
 raw_health_findings() {
     local kind where detail
     while IFS=$'\t' read -r kind where detail; do
@@ -1570,18 +1558,18 @@ main() {
 
     [ "$RAW" = true ] && { run_raw; return $?; }
 
-    # The lines under Test suite: the subchecks, with Test structure after the pytest ones,
-    # before Examples
+    # The lines under Test suite: the subchecks, with Test structure health after the pytest
+    # ones, before Examples
     local subline_names=() subname
     for subcheck_def in "${TEST_SUBCHECKS[@]}"; do
         IFS='|' read -r subname _ _ _ <<< "$subcheck_def"
         if [ "$subname" = "Examples" ] && [ "$TEST_HEALTH" != false ]; then
-            subline_names+=("Test structure")
+            subline_names+=("$HEALTH_NAME")
         fi
         subline_names+=("$subname")
     done
-    if [ "$TEST_HEALTH" != false ] && [[ " ${subline_names[*]} " != *" Test structure "* ]]; then
-        subline_names+=("Test structure")
+    if [ "$TEST_HEALTH" != false ] && [[ " ${subline_names[*]} " != *" ${HEALTH_NAME} "* ]]; then
+        subline_names+=("$HEALTH_NAME")
     fi
 
     # Calculate line numbers for cursor positioning

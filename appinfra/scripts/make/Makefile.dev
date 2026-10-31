@@ -20,14 +20,14 @@
 #                             (default: warn; needs pylint, part of the check extra)
 #   APPINFRA_DEV_CQ_DEAD       - Dead private code in the Code quality check: false, warn or strict
 #                             (default: warn)
-#   APPINFRA_DEV_TEST_HEALTH   - The Test structure line of `make check`, in a project that loads
-#                             appinfra.pytest_suites: false, warn or strict below the threshold
-#                             (default: warn)
-#   APPINFRA_DEV_TEST_HEALTH_THRESHOLD - Percent of clean tests the Test structure line passes at
-#                             (default: 90)
-#   APPINFRA_DEV_TEST_HEALTH_OVERRIDE_THRESHOLD - Percent of a class's tests that may belong to
-#                             another suite before the Test structure line asks to split them
-#                             off (default: 15)
+#   APPINFRA_DEV_TEST_HEALTH   - The Test structure health line of `make check`, in a project that
+#                             loads appinfra.pytest_suites: false, or warn or strict on any
+#                             finding (default: false)
+#   APPINFRA_DEV_TEST_HEALTH_THRESHOLD - Percent of a class's tests that may belong to another
+#                             suite before the Test structure health line asks to split them off
+#                             (default: 15)
+#   APPINFRA_DEV_TEST_HEALTH_OUTLIERS - Tests of another suite any class may hold, whatever its
+#                             size, before the Test structure health line reports it (default: 3)
 #   APPINFRA_DEV_CHECK_EXAMPLES - Run every example script as a `make check` test
 #                             subcheck, the same run as `make examples.check`
 #                             (default: false; opt-in because it executes the
@@ -59,7 +59,7 @@ export APPINFRA_DEV_CQ_DUP
 export APPINFRA_DEV_CQ_DEAD
 export APPINFRA_DEV_TEST_HEALTH
 export APPINFRA_DEV_TEST_HEALTH_THRESHOLD
-export APPINFRA_DEV_TEST_HEALTH_OVERRIDE_THRESHOLD
+export APPINFRA_DEV_TEST_HEALTH_OUTLIERS
 export APPINFRA_DEV_CHECK_EXAMPLES
 export APPINFRA_DEV_CQ_EXCLUDE
 export APPINFRA_DEV_DOCSTRING_THRESHOLD

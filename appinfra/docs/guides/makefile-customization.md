@@ -457,8 +457,8 @@ Each setting has a type, and a value that does not fit it stops make:
 |------|--------|----------|
 | on/off | `true`, `1`, `y`, `yes` or `false`, `0`, `n`, `no`, any case; exported as written, and `check.sh` and Python read it by the same rule | `APPINFRA_DRY_RUN`, `APPINFRA_DEV_CQ_STRICT`, `APPINFRA_DEV_CQ_SPDX`, `APPINFRA_DEV_CHECK_EXAMPLES`, `APPINFRA_YES`, `APPINFRA_NON_INTERACTIVE` |
 | mode | `false`, `warn` or `strict`, any case | `APPINFRA_DEV_CQ_DUP`, `APPINFRA_DEV_CQ_DEAD`, `APPINFRA_DEV_TEST_HEALTH` |
-| percent | a number from 0 to 100, e.g. `80` or `95.5` | `APPINFRA_DEV_DOCSTRING_THRESHOLD`, `APPINFRA_PYTEST_COVERAGE_THRESHOLD`, `APPINFRA_DEV_TEST_HEALTH_THRESHOLD`, `APPINFRA_DEV_TEST_HEALTH_OVERRIDE_THRESHOLD` |
-| integer | a whole number, 0 or more | `APPINFRA_PYTEST_HANG_DUMP_SECONDS` |
+| percent | a number from 0 to 100, e.g. `80` or `95.5` | `APPINFRA_DEV_DOCSTRING_THRESHOLD`, `APPINFRA_PYTEST_COVERAGE_THRESHOLD`, `APPINFRA_DEV_TEST_HEALTH_THRESHOLD` |
+| integer | a whole number, 0 or more | `APPINFRA_PYTEST_HANG_DUMP_SECONDS`, `APPINFRA_DEV_TEST_HEALTH_OUTLIERS` |
 | worker count | empty, `auto`, `logical` or a whole number above 0 | `APPINFRA_PYTEST_WORKERS` |
 | text | anything | every other setting |
 
@@ -489,9 +489,9 @@ Each setting has a type, and a value that does not fit it stops make:
 | `APPINFRA_DEV_CQ_LINT_SELECT` | `C90,SIM,RET,PIE,PERF,FURB,C4` | Extra ruff rule codes the Linting check reports as warnings, never failing (`false` to turn off) |
 | `APPINFRA_DEV_CQ_DUP` | `warn` | Duplicated code in the Code quality check (pylint): `false`, `warn` or `strict` |
 | `APPINFRA_DEV_CQ_DEAD` | `warn` | Dead private code in the Code quality check: `false`, `warn` or `strict` |
-| `APPINFRA_DEV_TEST_HEALTH` | `warn` | The Test structure line of `make check`, for a project that loads `appinfra.pytest_suites`: `false`, or `warn` or `strict` below the threshold ([Test suites](test-suites.md)) |
-| `APPINFRA_DEV_TEST_HEALTH_THRESHOLD` | `90` | Percent of clean tests the Test structure line passes at |
-| `APPINFRA_DEV_TEST_HEALTH_OVERRIDE_THRESHOLD` | `15` | Percent of a class's tests that may belong to another suite before the Test structure line asks to split them off |
+| `APPINFRA_DEV_TEST_HEALTH` | `false` | The Test structure health line of `make check`, for a project that loads `appinfra.pytest_suites`: off, or `warn` or `strict` on any finding ([Test suites](test-suites.md)) |
+| `APPINFRA_DEV_TEST_HEALTH_THRESHOLD` | `15` | Percent of a class's tests that may belong to another suite before the Test structure health line asks to split them off |
+| `APPINFRA_DEV_TEST_HEALTH_OUTLIERS` | `3` | Tests of another suite any class may hold, whatever its size, before the Test structure health line reports it |
 | `APPINFRA_DEV_DOCSTRING_THRESHOLD` | `80` | Docstring coverage threshold for `make check` (0 to disable) |
 | `APPINFRA_DEV_CHECK_EXAMPLES` | `false` | Run `examples.check` as a test subcheck of `make check` |
 | `APPINFRA_DEV_PROJECT_ROOT` | `$(CURDIR)` | Project root for check.sh |
