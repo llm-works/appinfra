@@ -446,6 +446,9 @@ class TestReport:
             patch.object(dr, "_installed_version", lambda n: v(self.INSTALLED.get(n))),
             patch.object(dr, "_installed_requires", (requires or self.REQUIRES).get),
             patch.object(dr, "_direct_install", lambda n: n == "local"),
+            # the framework's tools without install_deps' floor, so the fixture's
+            # appinfra versions do not follow it
+            patch.dict(dr.collect_deps.__globals__, FRAMEWORK_TOOLS="appinfra[check]"),
         ):
             text = dr.report(self.PROJECT, deep, False, color, versions)
         assert "local" not in asked  # a direct install is not looked up

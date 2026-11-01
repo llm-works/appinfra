@@ -27,8 +27,9 @@ from typing import Any
 # Distribution name at the start of a PEP 508 requirement string.
 _NAME_RE = re.compile(r"\s*([A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?)")
 
-# The tools the Makefile framework's checks run
-FRAMEWORK_TOOLS = "appinfra[check]"
+# The tools the Makefile framework's checks run. The floor keeps a project that pins an older
+# appinfra from resolving a release without the check extra
+FRAMEWORK_TOOLS = "appinfra[check]>=0.14.0"
 
 
 def normalize_name(name: str) -> str:

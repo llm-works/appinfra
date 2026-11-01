@@ -13,6 +13,7 @@ from types import ModuleType
 from typing import Any
 
 import pytest
+from packaging.requirements import Requirement
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 INSTALL_DEPS_PY = REPO_ROOT / "appinfra" / "scripts" / "install_deps.py"
@@ -30,7 +31,8 @@ beta = ["my-pkg[alpha]", "dep-c"]
 all = ["My.Pkg[beta]>=0.1", "my_pkg[alpha] ; python_version >= '3.11'"]
 """
 
-EXPECTED_DEPS = ["dep-a>=1", "my-pkg-extra>=1", "dep-b>=2", "dep-c", "appinfra[check]"]
+# The project's own dependencies, as collect_deps lists them ahead of FRAMEWORK_TOOLS
+PROJECT_DEPS = ["dep-a>=1", "my-pkg-extra>=1", "dep-b>=2", "dep-c"]
 
 
 @pytest.fixture
@@ -62,7 +64,15 @@ def test_requirement_name(
 
 def test_collect_deps_drops_self_references(install_deps: ModuleType) -> None:
     project: dict[str, Any] = tomllib.loads(PYPROJECT)["project"]
-    assert install_deps.collect_deps(project) == EXPECTED_DEPS
+    expected = [*PROJECT_DEPS, install_deps.FRAMEWORK_TOOLS]
+    assert install_deps.collect_deps(project) == expected
+
+
+def test_framework_tools_have_a_floor(install_deps: ModuleType) -> None:
+    """Without a floor, a project pinning an older appinfra gets no check extra."""
+    tools = Requirement(install_deps.FRAMEWORK_TOOLS)
+    assert tools.name == "appinfra" and tools.extras == {"check"}
+    assert any(s.operator == ">=" for s in tools.specifier)
 
 
 def test_appinfra_itself_gets_no_framework_tools(install_deps: ModuleType) -> None:
@@ -91,4 +101,5 @@ def test_main_passes_filtered_deps_to_pip(
 
     install_deps.main()
 
-    assert calls == [[sys.executable, "-m", "pip", "install", *EXPECTED_DEPS]]
+    expected = [*PROJECT_DEPS, install_deps.FRAMEWORK_TOOLS]
+    assert calls == [[sys.executable, "-m", "pip", "install", *expected]]
