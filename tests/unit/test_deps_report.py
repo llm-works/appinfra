@@ -175,9 +175,13 @@ class TestStatus:
             ),
             ("1.9", "<1.10", "1.9", "1.12", False, "capped (3 minors)"),
             ("3.0", "<2", "1.9", "3.0", False, "out of range"),
-            ("2.0.dev1", "", "1.9", "1.9", False, "pre-release installed"),
-            ("1.0", "", None, None, True, "direct install"),
-            ("3.0", "<2", None, None, True, "out of range, direct install"),
+            # requirers' ranges exclude each other: >=2 from one, <2 from another
+            ("2.4", ">=2,<2", None, "2.4", False, "no release fits"),
+            ("1.0", ">=99", None, "1.0", False, "no release fits"),
+            ("2.0.dev1", "", "1.9", "1.9", False, "pre-release"),
+            ("1.0", "", None, None, True, "local"),
+            ("0.13.1.dev29", "", None, None, True, "local pre-release"),
+            ("3.0", "<2", None, None, True, "out of range, local"),
         ],
     )
     def test_labels(
@@ -199,8 +203,14 @@ class TestBounds:
             (">=2,>2", ">2", ""),
             ("<=3,<3", "", "3"),
             ("<=4.4", "", "<=4.4"),
-            ("!=5.13,<10,>=5", "5", "10,!=5.13"),
-            ("==2.50.1", "==2.50.1", ""),
+            ("!=5.13,<10,>=5", "5", "10"),  # exclusions are not bounds
+            ("<3,>=2.12,!=2.0.*,!=2.1.*", "2.12", "3"),
+            ("==2.50.1", "==2.50.1", ""),  # a pin is the whole range
+            (">=2.10,<3,==2.13.0", "==2.13.0", ""),
+            ("==2.13.*", "==2.13.*", ""),
+            ("===1.0+local", "===1.0+local", ""),
+            (">=2,<2", "2", "2"),  # empty: the status says no release fits
+            ("==1.0,==2.0", "==1.0,==2.0", ""),  # pins that cannot both hold
             ("~=0.1", "0.1", "1"),
             ("~=1.4.2", "1.4.2", "1.5"),
         ],
@@ -209,6 +219,11 @@ class TestBounds:
         self, dr: ModuleType, spec: str, floor: str, ceil: str
     ) -> None:
         assert dr.bounds(SpecifierSet(spec)) == (floor, ceil)
+
+    def test_requirers_pinning_the_same_version(self, dr: ModuleType) -> None:
+        """Two requirers' identical pins show once."""
+        spec = SpecifierSet(">=2.10,<3,==2.13.0") & SpecifierSet("==2.13.0")
+        assert dr.bounds(spec) == ("==2.13.0", "")
 
 
 class TestAvailable:
@@ -437,10 +452,16 @@ class TestReport:
         assert cols["lib"] == ["1", "", "1.0", "1.1", "", "behind (1 minor)"]
         assert cols["gone"] == ["", "", "-", "?", "", "missing"]
         assert cols["offline"][3:] == ["?", "", "unknown"]
-        assert cols["local"][3:] == ["index", "", "direct install"]
+        assert cols["local"][3:] == ["index", "", "local"]
         # the framework's check tools, which make setup adds to every other project
         assert cols["appinfra"][3:] == ["✓", "", "✓"]  # CI matches, up to date
         assert "proj" not in cols and "core" not in cols
+
+    def test_installed_without_the_local_label(self, dr: ModuleType) -> None:
+        """A build's local label (+g<sha>.d<date>) is not shown; it is on no index."""
+        with patch.dict(self.INSTALLED, {"local": "0.1.dev29+ga47dbd027.d20261031"}):
+            cols = {row[0]: row[1:] for row in self.table(self.run(dr, deep=False))}
+        assert cols["local"][2] == "0.1.dev29"
 
     def test_ci_shows_what_a_missing_package_gets(self, dr: ModuleType) -> None:
         with patch.dict(self.INDEX, {"gone": V("4.2")}):
