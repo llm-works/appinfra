@@ -10,11 +10,6 @@ For API stability guarantees and deprecation policy, see
 
 ## [Unreleased]
 
-<!-- RELEASE TODO (remove when done): before tagging 0.14.0, change FRAMEWORK_TOOLS in
-appinfra/scripts/install_deps.py to "appinfra[check]>=0.14.0". Without the floor, a project
-pinning an older appinfra resolves a release with no `check` extra and pip only warns. Not set
-earlier: pre-release builds (0.13.1.devN) would not satisfy it. -->
-
 ### Added
 - `make deps` reports each dependency's installed version against the version a fresh install
   (CI) gets and the newest release outside its range, then `pip check`'s conflicts;
@@ -72,8 +67,9 @@ earlier: pre-release builds (0.13.1.devN) would not satisfy it. -->
 - A bare `make` shows the help screen instead of `make config`'s output.
 - **Breaking:** `make env` is removed. `make config` shows the interpreter and its source, and
   every `APPINFRA_*` setting with its value and source, read from make's own variables.
-- `make setup` installs the tools `make check` runs (the new `check` extra: ruff, mypy, pytest,
-  coverage, interrogate, pylint) in every project, not only those its own dependencies list.
+- `make setup` installs the tools `make check` runs (the new `check` extra of appinfra 0.14.0 or
+  later: ruff, mypy, pytest, coverage, interrogate, pylint) in every project, not only those its
+  own dependencies list.
 - The `check` extra requires ruff 0.16 or later, the first release whose `ruff format --check`
   also checks the Python code blocks in Markdown files.
 - The package type-checks under `mypy --strict`, which `make check` enforces. `App.tool` and
@@ -125,6 +121,9 @@ earlier: pre-release builds (0.13.1.devN) would not satisfy it. -->
   implement it to be instantiated.
 
 ### Fixed
+- `Sched` keeps daily and weekly runs on their local time across DST changes and monthly runs on
+  the 1st; they moved by an hour at each change and by days each month. A schedule set up in the
+  repeated fall-back hour no longer fires in a burst, and one that falls behind runs once.
 - `make install` and `make reinstall` check every environment before changing any: an environment
   that cannot take the wheel no longer leaves the others uninstalled or half installed.
   `make reinstall` asks for confirmation once.
