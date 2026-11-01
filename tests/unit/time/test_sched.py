@@ -321,11 +321,15 @@ class TestSchedSetup:
     """Test Sched setup methods."""
 
     @pytest.mark.parametrize(
-        ("period", "when"),
-        [(Period.DAILY, "14:30"), (Period.HOURLY, "45"), (Period.MINUTELY, "45")],
+        ("period", "when", "at"),
+        [
+            (Period.DAILY, "14:30", (2026, 5, 25, 14, 30)),
+            (Period.HOURLY, "45", (2026, 5, 25, 14, 45)),
+            (Period.MINUTELY, "45", (2026, 5, 25, 14, 30, 45)),
+        ],
     )
-    def test_setup_sets_a_later_next_time(self, mock_logger, clock, period, when):
-        clock.t = _ts(2026, 5, 25, 14, 30, 45)  # on each schedule's own time
+    def test_setup_sets_a_later_next_time(self, mock_logger, clock, period, when, at):
+        clock.t = _ts(*at)  # exactly on the schedule's own time
         sched = Sched(mock_logger, period, when)
         sched._setup(clock.t)
         assert sched.next_t is not None and sched.next_t > clock.t

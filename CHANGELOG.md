@@ -10,6 +10,8 @@ For API stability guarantees and deprecation policy, see
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-11-01
+
 ### Added
 - `make deps` reports each dependency's installed version against the version a fresh install
   (CI) gets and the newest release outside its range, then `pip check`'s conflicts;
@@ -1238,7 +1240,8 @@ as config. Affected: `ConfigValidator`, `PG.readonly`, `PG.migrate()`,
 ### Changed
 - Package renamed to `appinfra` (install and import both use `appinfra`)
 
-[Unreleased]: https://github.com/llm-works/appinfra/compare/v0.13.0...HEAD
+[Unreleased]: https://github.com/llm-works/appinfra/compare/v0.14.0...HEAD
+[0.14.0]: https://github.com/llm-works/appinfra/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/llm-works/appinfra/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/llm-works/appinfra/compare/v0.11.1...v0.12.0
 [0.11.1]: https://github.com/llm-works/appinfra/compare/v0.11.0...v0.11.1
