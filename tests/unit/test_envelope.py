@@ -55,6 +55,23 @@ class TestEnvelope:
         existing = Envelope("x")
         assert Envelope(existing) is existing
 
+    def test_optional_passes_none_through(self):
+        """For a setting that may be absent; Envelope(None) itself raises."""
+        assert Envelope.optional(None) is None
+        with pytest.raises(TypeError):
+            Envelope(None)  # type: ignore[arg-type]
+
+    def test_optional_wraps_a_value(self):
+        wrapped = Envelope.optional("x")
+        assert isinstance(wrapped, Envelope) and wrapped.reveal() == "x"
+        existing = Envelope("y")
+        assert Envelope.optional(existing) is existing
+        assert Envelope.optional("") == Envelope("")  # empty is a value, not absent
+
+    def test_optional_rejects_non_str_value(self):
+        with pytest.raises(TypeError):
+            Envelope.optional(123)  # type: ignore[arg-type]
+
     def test_copy_returns_the_same_envelope(self):
         existing = Envelope("x")
         assert copy.copy(existing) is existing

@@ -19,8 +19,11 @@ status:
 - behind: a newer release within the range is not installed
 - capped: a newer release exists outside the range
 - out of range: the installed version does not satisfy the range
-- pre-release installed: the installed version is a pre-release
-- direct install: installed from a URL or local path (PEP 610); not looked up
+- no release fits: no known release satisfies the range, as when two requirers'
+  ranges exclude each other; a fresh install fails
+- pre-release: the installed version is a pre-release
+- local: installed from a local path, or a URL, not an index (PEP 610); not
+  looked up. "local pre-release" when that version is a pre-release too
 - missing: not installed
 - unknown: pip found no release (index unreachable, or a pip without --json)
 
@@ -38,6 +41,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import tomllib
@@ -53,6 +57,7 @@ from packaging.utils import canonicalize_name
 from packaging.version import InvalidVersion, Version
 
 UP_TO_DATE = "✓"  # the status when nothing else applies
+NO_FIT = "no release fits"  # no known release satisfies every requirer's range
 _TIMEOUT_S = 60.0
 _WORKERS = 16
 
@@ -198,7 +203,7 @@ def lookup_all(
 def newest(
     versions: Iterable[Version], spec: SpecifierSet | None, include_pre: bool
 ) -> Version | None:
-    """The newest version, within ``spec`` if one is given."""
+    """The newest version, within ``spec`` if one is given; pre-releases with ``include_pre``."""
     candidates = [v for v in versions if include_pre or not v.is_prerelease]
     if spec is not None:
         candidates = [v for v in candidates if spec.contains(v, prereleases=True)]
@@ -213,18 +218,25 @@ def status(
     direct: bool,
 ) -> str:
     """The status; several apply at once, comma-separated."""
+    # releases are known, none counted satisfies the combined range. Not for an exact
+    # pin: the index lists no yanked release, which pip installs pinned
+    unseen = not direct and latest is not None and in_range is None
+    pinned = _exact_pin(spec)
+    unfit = unseen and not pinned
     if installed is None:
-        return "missing"
+        return f"missing, {NO_FIT}" if unfit else "missing"
     labels = []
-    if installed.is_prerelease:
-        labels.append("pre-release installed")
-    if not spec.contains(installed, prereleases=True):
+    if installed.is_prerelease and not direct:
+        labels.append("pre-release")
+    if unfit:
+        labels.append(NO_FIT)
+    elif not spec.contains(installed, prereleases=True):
         labels.append("out of range")
     if direct:
-        labels.append("direct install")
-    elif latest is None:
+        labels.append("local pre-release" if installed.is_prerelease else "local")
+    elif latest is None or (unseen and pinned):
         labels.append("unknown")
-    else:
+    elif not unfit:
         if in_range is not None and in_range > installed:
             labels.append(_with_gap("behind", installed, in_range))
         if latest > max(in_range or installed, installed) and not spec.contains(
@@ -232,6 +244,13 @@ def status(
         ):
             labels.append(_with_gap("capped", installed, latest))
     return ", ".join(labels) or UP_TO_DATE
+
+
+def _exact_pin(spec: SpecifierSet) -> bool:
+    """Whether ``spec`` pins one version exactly (``==1.5``, ``===1.5``; not ``==1.*``)."""
+    return any(
+        s.operator in ("==", "===") and not s.version.endswith("*") for s in spec
+    )
 
 
 def _with_gap(label: str, installed: Version, newer: Version) -> str:
@@ -311,10 +330,12 @@ _RESET = "\033[0m"
 _STATUS_STYLES = {
     UP_TO_DATE: "green",
     "out of range": "red",
+    NO_FIT: "red",
     "missing": "red",
     "unknown": "gray",
-    "direct install": "blue",
-    "pre-release installed": "blue",
+    "local": "blue",
+    "local pre-release": "blue",
+    "pre-release": "blue",
 }
 
 
@@ -374,18 +395,40 @@ def _compatible(spec: Specifier) -> list[Specifier]:
 
 
 def bounds(spec: SpecifierSet) -> tuple[str, str]:
-    """The floor and ceiling: bare versions for ``>=`` and ``<``, the operator otherwise."""
+    """The floor and ceiling: bare versions for ``>=`` and ``<``, the operator otherwise.
+
+    An exact pin is the whole range: the floor shows it with its operator
+    (``==2.13.0``) and the ceiling is empty; pins that differ, which cannot all
+    hold, show each once. A wildcard pin (``==2.*``) is a range, so the bounds
+    narrowing it stay: floor ``==2.*,2.10``, ceil ``2.13``. ``!=`` exclusions are
+    no bound and are left out (the ci and available columns still honour them).
+    """
     try:
         specs = [s for each in spec for s in _compatible(each)]
         lower = _tightest([s for s in specs if s.operator in _LOWER], upper=False)
         upper = _tightest([s for s in specs if s.operator in _UPPER], upper=True)
     except InvalidVersion:
         return str(spec), ""
-    pins = sorted(str(s) for s in specs if s.operator in ("==", "==="))
-    excluded = sorted(str(s) for s in specs if s.operator == "!=")
-    floor = [lower.version if lower.operator == ">=" else str(lower)] if lower else []
-    ceil = [upper.version if upper.operator == "<" else str(upper)] if upper else []
-    return ",".join(floor + pins), ",".join(ceil + excluded)
+    pins = sorted({str(s) for s in specs if s.operator in ("==", "===")})
+    if pins and _exact_pin(spec):
+        return ",".join(pins), ""
+    floor = (lower.version if lower.operator == ">=" else str(lower)) if lower else ""
+    ceil = (upper.version if upper.operator == "<" else str(upper)) if upper else ""
+    return ",".join(pins + ([floor] if floor else [])), ceil
+
+
+# the local label setuptools-scm gives a build: g<sha>, .d<date> when dirty
+_BUILD_LABEL = re.compile(r"(g[0-9a-f]+)?(\.?d\d{8})?")
+
+
+def shown_version(version: Version) -> str:
+    """The version as shown: without a build's local label, which is on no index.
+
+    Other local labels stay: ``2.13.0+cu124`` and ``2.13.0+cpu`` are different builds.
+    """
+    if version.local is not None and _BUILD_LABEL.fullmatch(version.local):
+        return version.public
+    return str(version)
 
 
 def _newer(row: Row) -> dict[str, Version]:
@@ -465,7 +508,7 @@ class _Tree:
     def _line(self, name: str, spec: SpecifierSet, lead: str, indent: str) -> None:
         """A package's line, then its children under ``indent`` if deep."""
         row = self.rows[name]
-        installed = str(row.installed) if row.installed is not None else "-"
+        installed = shown_version(row.installed) if row.installed is not None else "-"
         self.lines.append(
             self._range(lead, name, spec, not lead)
             + [
