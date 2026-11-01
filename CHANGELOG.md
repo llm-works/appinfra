@@ -49,7 +49,7 @@ earlier: pre-release builds (0.13.1.devN) would not satisfy it. -->
 - `make install` creates a missing `share/` (0755) in a virtualenv; other prefixes still need one.
 - **Breaking:** `appinfra.yaml.SecretStr` is now `appinfra.envelope.Envelope`, also exported as
   `appinfra.Envelope`; `!secret` loads as an `Envelope`. No alias is kept. `Envelope(e)` returns
-  `e`, replacing `ensure()`.
+  `e`, replacing `ensure()`, but raises on `None`; `Envelope.optional(x)` passes `None` through.
 - **Breaking:** `appinfra.security` is removed (`SecretMasker`, `SecretMaskingFilter`,
   `get_masker`). Declare secrets with `!secret`, or wrap them in an `Envelope` where they enter
   the program.

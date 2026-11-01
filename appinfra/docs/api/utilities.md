@@ -597,7 +597,9 @@ def connect(dsn: str | Envelope) -> None:
     ...
 ```
 
-Any other type raises `TypeError`. `copy` and `deepcopy` return the same
+Any other type raises `TypeError`, `None` included. For a setting that may be
+absent, `Envelope.optional(value)` returns `None` for `None` and
+`Envelope(value)` otherwise. `copy` and `deepcopy` return the same
 `Envelope`. `Envelope` is not a `str` subclass and is unhashable — do not use
 as a dict key or set member.
 

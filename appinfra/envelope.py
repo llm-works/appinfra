@@ -47,6 +47,14 @@ class Envelope:
         envelope._value = value
         return envelope
 
+    @classmethod
+    def optional(cls, value: str | Envelope | None) -> Envelope | None:
+        """``Envelope(value)``, or None for None: for a setting that may be absent.
+
+        ``Envelope(None)`` raises; this names the absence at the call site.
+        """
+        return None if value is None else cls(value)
+
     def __reduce__(self) -> tuple[type[Envelope], tuple[str]]:
         # __new__ takes the value; copyreg's default rebuild passes none
         return (Envelope, (self._value,))
