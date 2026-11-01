@@ -203,13 +203,8 @@ def lookup_all(
 def newest(
     versions: Iterable[Version], spec: SpecifierSet | None, include_pre: bool
 ) -> Version | None:
-    """The newest version, within ``spec`` if one is given.
-
-    Pre-releases count with ``include_pre``, or when ``spec`` names one (``==2.0rc1``),
-    as pip resolves it.
-    """
-    pre = include_pre or bool(spec is not None and spec.prereleases)
-    candidates = [v for v in versions if pre or not v.is_prerelease]
+    """The newest version, within ``spec`` if one is given; pre-releases with ``include_pre``."""
+    candidates = [v for v in versions if include_pre or not v.is_prerelease]
     if spec is not None:
         candidates = [v for v in candidates if spec.contains(v, prereleases=True)]
     return max(candidates, default=None)
@@ -223,8 +218,8 @@ def status(
     direct: bool,
 ) -> str:
     """The status; several apply at once, comma-separated."""
-    # releases are known, none satisfies the combined range: a fresh install fails.
-    # Not for an exact pin: the index lists no yanked release, which pip installs pinned
+    # releases are known, none counted satisfies the combined range. Not for an exact
+    # pin: the index lists no yanked release, which pip installs pinned
     unseen = not direct and latest is not None and in_range is None
     pinned = _exact_pin(spec)
     unfit = unseen and not pinned

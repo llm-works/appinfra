@@ -152,11 +152,14 @@ class TestNewest:
         )
         assert dr.newest(versions, SpecifierSet(">3"), include_pre=False) is None
 
-    def test_a_spec_naming_a_pre_release_admits_it(self, dr: ModuleType) -> None:
-        """As pip does: ==2.0rc1 installs without --pre."""
+    def test_a_spec_naming_a_pre_release_does_not_admit_it(
+        self, dr: ModuleType
+    ) -> None:
+        """Pre-releases count only with --include-pre, whatever the spec names."""
         versions = V("1.9", "2.0rc1")
         spec = SpecifierSet("==2.0rc1")
-        assert dr.newest(versions, spec, include_pre=False) == Version("2.0rc1")
+        assert dr.newest(versions, spec, include_pre=False) is None
+        assert dr.newest(versions, spec, include_pre=True) == Version("2.0rc1")
 
 
 class TestStatus:
