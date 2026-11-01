@@ -46,6 +46,11 @@ earlier: pre-release builds (0.13.1.devN) would not satisfy it. -->
 - `PG.dispose()` closes the pooled connections of a `PG` and of its cached `ScopedPG`s.
 
 ### Changed
+- `make test.all` (and `make test`, now the same) runs every suite but performance in one parallel
+  pytest run, then the performance tests serially; additions to `test.unit::` and the other suite
+  targets no longer run as part of it. `make test` no longer runs performance tests in parallel.
+- `APPINFRA_PYTEST_WORKERS` defaults to `auto`, so the `make test*` targets run on pytest-xdist as
+  `make check` does; an empty value in `Makefile.local` runs pytest in-process.
 - `make install` creates a missing `share/` (0755) in a virtualenv; other prefixes still need one.
 - **Breaking:** `appinfra.yaml.SecretStr` is now `appinfra.envelope.Envelope`, also exported as
   `appinfra.Envelope`; `!secret` loads as an `Envelope`. No alias is kept. `Envelope(e)` returns

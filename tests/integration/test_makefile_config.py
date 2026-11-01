@@ -313,6 +313,72 @@ class TestModuleIncludedAlone:
         assert "check.summary" in result.stderr
 
 
+class TestAllTestsTargets:
+    """test.all and test: one parallel run of every suite but performance, then performance alone."""
+
+    def _pytest_calls(
+        self, tmp_path: Path, target: str, workers: str | None = "4"
+    ) -> list[str]:
+        (tmp_path / "Makefile").write_text(f"include {MAKE_DIR / 'Makefile.pytest'}\n")
+        setting = [] if workers is None else [f"APPINFRA_PYTEST_WORKERS={workers}"]
+        result = subprocess.run(
+            ["make", "--no-print-directory", "-n", target, *setting],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+            env=_clean_env(),
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr
+        return [line for line in result.stdout.splitlines() if " -m pytest " in line]
+
+    @pytest.mark.parametrize(
+        ("target", "verbosity"),
+        [("test.all", "-qq"), ("test", "-qq"), ("test.all.v", "-v"), ("test.v", "-v")],
+    )
+    def test_one_parallel_run_then_performance(
+        self, tmp_path: Path, target: str, verbosity: str
+    ) -> None:
+        calls = self._pytest_calls(tmp_path, target)
+        assert len(calls) == 2, calls
+        suites, perf = calls
+        assert (
+            '-m "not performance"' in suites
+            and "-n 4" in suites
+            and verbosity in suites
+        )
+        assert (
+            "-m performance" in perf and "-n " not in perf
+        )  # performance runs serially
+
+    def test_performance_after_the_suites_under_j(self, tmp_path: Path) -> None:
+        """make -j starts prerequisites together; performance must not share the CPU with them."""
+        (tmp_path / "Makefile").write_text(f"include {MAKE_DIR / 'Makefile.pytest'}\n")
+        result = subprocess.run(
+            ["make", "--no-print-directory", "-n", "-j4", "test.all"],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+            env=_clean_env(),
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr
+        lines = result.stdout.splitlines()
+        suites = next(i for i, line in enumerate(lines) if "not performance" in line)
+        # test.perf runs as the recipe's next command (a sub-make), not as a prerequisite
+        sub_make = next(
+            i for i, line in enumerate(lines) if line.rstrip().endswith(" test.perf")
+        )
+        assert suites < sub_make
+
+    def test_workers_default_to_auto(self, tmp_path: Path) -> None:
+        """Parallel by default, as make check is; 1 keeps a single worker."""
+        suites = self._pytest_calls(tmp_path, "test.all", workers=None)[0]
+        assert "-n auto" in suites
+        suites = self._pytest_calls(tmp_path, "test.all", workers="1")[0]
+        assert "-n 1" in suites
+
+
 class TestConfigLoading:
     """Makefile.local loads in every layout; INFRA_* config overrides pass through."""
 

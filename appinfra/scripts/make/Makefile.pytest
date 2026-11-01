@@ -16,7 +16,8 @@
 #   APPINFRA_PYTEST_PERF_DIR           - Directory test.perf and make check's Performance group
 #                                     collect from (default: tests); narrowing it skips
 #                                     importing the rest of the test tree
-#   APPINFRA_PYTEST_WORKERS            - pytest-xdist worker count, auto, logical or N (default: empty = no -n flag)
+#   APPINFRA_PYTEST_WORKERS            - pytest-xdist worker count, auto, logical or N (default: auto;
+#                                     empty in Makefile.local runs pytest in-process)
 #                                     Never applied to test.perf targets. Not read by check.sh
 #                                     (make check), which runs suites concurrently with its own
 #                                     per-suite worker heuristic
@@ -140,11 +141,20 @@ test.e2e.v:: ## runs end-to-end tests (verbose)
 endif # skip test.e2e
 .PHONY: test.e2e test.e2e.v
 
-test.all:: test.unit test.integration test.e2e test.perf test.security ## runs all test types
+# Every suite but performance in one pytest run, so the workers start, collect and
+# balance the work once; then test.perf, serially. As recipe lines, not prerequisites:
+# make -j would run prerequisites at the same time, and performance tests need the CPU
+test.all:: ## runs all tests: every suite in one parallel run, then performance
+	@echo "* running every suite but performance..."
+	@$(call APPINFRA_RUN_PYTEST,tests/ -m "not performance" -qq --tb=short)
+	@$(MAKE) --no-print-directory test.perf
 	@echo "* all tests completed"
 .PHONY: test.all
 
-test.all.v:: test.unit.v test.integration.v test.e2e.v test.perf.v test.security.v ## runs all test types (verbose)
+test.all.v:: ## runs all tests (verbose)
+	@echo "* running every suite but performance... (verbose)"
+	@$(call APPINFRA_RUN_PYTEST,tests/ -m "not performance" -v)
+	@$(MAKE) --no-print-directory test.perf.v
 	@echo "* all tests completed (verbose)"
 .PHONY: test.all.v
 
@@ -155,16 +165,10 @@ test.slow:: test.integration test.perf test.e2e ## runs slow tests (integration,
 	@echo "* slow tests completed"
 .PHONY: test.slow
 
-test:: ## runs all tests
-	@echo "* running all tests..."
-	@$(call APPINFRA_RUN_PYTEST,tests/ -qq --tb=short)
-	@echo "* all tests completed"
+test:: test.all ## runs all tests (same as test.all)
 .PHONY: test
 
-test.v:: ## runs all tests (verbose)
-	@echo "* running all tests... (verbose)"
-	@$(call APPINFRA_RUN_PYTEST,tests/ -v)
-	@echo "* all tests completed"
+test.v:: test.all.v ## runs all tests, verbose (same as test.all.v)
 .PHONY: test.v
 
 test.coverage:: ## runs tests with coverage analysis (configurable via APPINFRA_PYTEST_COVERAGE_MARKERS)

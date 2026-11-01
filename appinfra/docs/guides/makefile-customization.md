@@ -408,8 +408,9 @@ These targets can be extended by defining them again in your Makefile:
 - `test.e2e::` - Add end-to-end tests
 - `test.perf::` - Add performance tests
 - `test.security::` - Add security tests
-- `test.all::` - Extends all test types
-- `test::` - Extends all tests
+- `test.all::` - Extends the full run: every suite but performance in one parallel pytest run,
+  then `test.perf`. Additions to the per-suite targets above run with that target only.
+- `test::` - Same as `test.all`
 - All verbose variants (`test.*.v::`)
 - All coverage targets (`test.coverage::`, etc.)
 
@@ -527,7 +528,7 @@ Each setting has a type, and a value that does not fit it stops make:
 | `APPINFRA_PYTEST_COVERAGE_THRESHOLD` | `80` | Coverage threshold for `make check` (0 to disable) |
 | `APPINFRA_PYTEST_TESTS_DIR` | `tests` | Tests directory |
 | `APPINFRA_PYTEST_PERF_DIR` | `tests` | Directory `test.perf*` and `make check`'s Performance group collect from. Pointing it at the directory holding the performance tests skips importing the rest of the test tree |
-| `APPINFRA_PYTEST_WORKERS` | (empty) | pytest-xdist worker count (`auto`, `logical`, which needs `psutil`, or N) for `test.*` targets; empty runs pytest in-process. Never applied to `test.perf*`. `make check` ignores it: `check.sh` runs suites concurrently with its own per-suite worker heuristic |
+| `APPINFRA_PYTEST_WORKERS` | `auto` | pytest-xdist worker count (`auto`, `logical`, which needs `psutil`, or N) for `test.*` targets; empty (in `Makefile.local`) runs pytest in-process. Never applied to `test.perf*`. `make check` ignores it: `check.sh` runs suites concurrently with its own per-suite worker heuristic |
 | `APPINFRA_PYTEST_ARGS` | (empty) | Additional pytest arguments |
 | `APPINFRA_PYTEST_HANG_DUMP_SECONDS` | `120` | In `make check`, a test still running after this many seconds gets a row below the checklist and its process's stacks in the check's log; the test is neither stopped nor failed. `0` disables it |
 
