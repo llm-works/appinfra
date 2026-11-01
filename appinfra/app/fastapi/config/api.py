@@ -41,6 +41,10 @@ class ApiConfig:
         auto_restart: Restart subprocess on crash (default: True)
         restart_delay: Delay before restart in seconds (default: 1.0)
         max_restarts: Max restarts before giving up (default: 5, 0=unlimited)
+        start_method: multiprocessing start method for the server subprocess
+            ("fork", "spawn", "forkserver"); None uses the default. Spawn or
+            forkserver keeps restarts from forking off the monitor thread. The
+            queues given to with_ipc() must come from the same start method.
         uvicorn: Uvicorn server configuration
         ipc: IPC configuration (None = direct mode, no subprocess)
     """
@@ -61,5 +65,6 @@ class ApiConfig:
     auto_restart: bool = True
     restart_delay: float = 1.0
     max_restarts: int = 5
+    start_method: str | None = None
     uvicorn: UvicornConfig = field(default_factory=UvicornConfig)
     ipc: IPCConfig | None = None

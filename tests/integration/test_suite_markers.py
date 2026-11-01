@@ -1,0 +1,171 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The appinfra Authors
+
+"""appinfra.pytest_suites: a test under a suite directory runs in that suite unless it names
+another; a test elsewhere names its suite; collection stops on a test that names none."""
+
+from pathlib import Path
+
+import pytest
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+
+_SUITES = ("unit", "integration", "e2e", "security", "performance")
+
+_PLAIN = "def test_plain():\n    pass\n"
+
+
+def _marked(suite: str) -> str:
+    return f"import pytest\n\n\n@pytest.mark.{suite}\ndef test_marked():\n    pass\n"
+
+
+def _run(
+    pytester: pytest.Pytester,
+    monkeypatch: pytest.MonkeyPatch,
+    layout: dict[str, str],
+    *args: str,
+) -> pytest.RunResult:
+    monkeypatch.setenv("PYTHONPATH", str(_REPO_ROOT))
+    for path, source in layout.items():
+        target = pytester.path / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(source)
+    return pytester.runpytest_subprocess(
+        "-p", "appinfra.pytest_suites", "--collect-only", "-q", *args
+    )
+
+
+def _ids(result: pytest.RunResult) -> set[str]:
+    return {line for line in result.outlines if "::" in line}
+
+
+_DIRECTORY_LAYOUT = {
+    f"tests/{suite}/sub/test_{suite}_plain.py": _PLAIN for suite in _SUITES
+} | {"tests/mixed/test_mixed_marked.py": _marked("integration")}
+
+
+@pytest.mark.parametrize("suite", _SUITES)
+def test_a_test_runs_in_the_suite_of_its_directory(
+    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch, suite: str
+) -> None:
+    expected = {f"tests/{suite}/sub/test_{suite}_plain.py::test_plain"}
+    if suite == "integration":
+        expected.add("tests/mixed/test_mixed_marked.py::test_marked")
+    assert _ids(_run(pytester, monkeypatch, _DIRECTORY_LAYOUT, "-m", suite)) == expected
+
+
+def test_a_marker_matching_the_directory_is_accepted(
+    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    layout = {"tests/unit/test_unit_marked.py": _marked("unit")}
+    result = _run(pytester, monkeypatch, layout, "-m", "unit")
+    assert _ids(result) == {"tests/unit/test_unit_marked.py::test_marked"}
+
+
+@pytest.mark.parametrize(
+    ("suite", "expected"), [("integration", True), ("unit", False)]
+)
+def test_a_marker_naming_another_suite_overrides_the_directory(
+    pytester: pytest.Pytester,
+    monkeypatch: pytest.MonkeyPatch,
+    suite: str,
+    expected: bool,
+) -> None:
+    layout = {"tests/unit/test_unit_overridden.py": _marked("integration")}
+    result = _run(pytester, monkeypatch, layout, "-m", suite)
+    nodeid = "tests/unit/test_unit_overridden.py::test_marked"
+    assert result.ret != pytest.ExitCode.USAGE_ERROR
+    assert (nodeid in _ids(result)) is expected
+
+
+_CLASS_DEFAULT = (
+    "import pytest\n\n\n@pytest.mark.unit\nclass TestMixed:\n"
+    "    def test_default(self):\n        pass\n\n"
+    "    @pytest.mark.integration\n    def test_override(self):\n        pass\n"
+)
+
+_MODULE_DEFAULT = (
+    "import pytest\n\npytestmark = pytest.mark.unit\n\n\n"
+    "def test_default():\n    pass\n\n\n"
+    "@pytest.mark.integration\ndef test_override():\n    pass\n"
+)
+
+
+@pytest.mark.parametrize(
+    ("expr", "expected"),
+    [
+        ("unit", {"TestMixed::test_default"}),
+        ("integration", {"TestMixed::test_override"}),
+        ("not unit", {"TestMixed::test_override"}),
+        (
+            "unit or integration",
+            {"TestMixed::test_default", "TestMixed::test_override"},
+        ),
+    ],
+)
+def test_a_marker_on_the_test_overrides_its_class(
+    pytester: pytest.Pytester,
+    monkeypatch: pytest.MonkeyPatch,
+    expr: str,
+    expected: set[str],
+) -> None:
+    layout = {"tests/cli/test_cli_mixed.py": _CLASS_DEFAULT}
+    result = _run(pytester, monkeypatch, layout, "-m", expr)
+    assert result.ret == pytest.ExitCode.OK
+    assert _ids(result) == {f"tests/cli/test_cli_mixed.py::{t}" for t in expected}
+
+
+@pytest.mark.parametrize(
+    ("expr", "expected"), [("unit", "test_default"), ("integration", "test_override")]
+)
+def test_a_marker_on_the_test_overrides_its_module(
+    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch, expr: str, expected: str
+) -> None:
+    layout = {"tests/cli/test_cli_module.py": _MODULE_DEFAULT}
+    result = _run(pytester, monkeypatch, layout, "-m", expr)
+    assert result.ret == pytest.ExitCode.OK
+    assert _ids(result) == {f"tests/cli/test_cli_module.py::{expected}"}
+
+
+def test_two_suite_markers_on_one_test_stop_collection(
+    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = (
+        "import pytest\n\n\n@pytest.mark.unit\n@pytest.mark.integration\n"
+        "def test_both():\n    pass\n"
+    )
+    layout = {"tests/unit/test_unit_both.py": source}
+    result = _run(pytester, monkeypatch, layout)
+    assert result.ret == pytest.ExitCode.USAGE_ERROR
+    assert "tests/unit/test_unit_both.py::test_both" in result.stderr.str()
+
+
+def test_the_suite_markers_are_registered(
+    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    layout = {"tests/unit/test_unit_marked.py": _marked("unit")}
+    result = _run(
+        pytester, monkeypatch, layout, "-W", "error::pytest.PytestUnknownMarkWarning"
+    )
+    assert result.ret == pytest.ExitCode.OK
+
+
+def test_a_test_outside_the_rootdir_must_name_its_suite(
+    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    layout = {
+        "proj/tests/unit/test_unit_plain.py": _PLAIN,
+        "other/test_other_plain.py": _PLAIN,
+    }
+    result = _run(pytester, monkeypatch, layout, "--rootdir", "proj", "proj", "other")
+    assert result.ret == pytest.ExitCode.USAGE_ERROR
+    assert "test_other_plain.py::test_plain" in result.stderr.str()
+
+
+def test_a_test_outside_the_suite_directories_must_name_its_suite(
+    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    layout = {"tests/cli/test_cli_plain.py": _PLAIN}
+    result = _run(pytester, monkeypatch, layout)
+    assert result.ret == pytest.ExitCode.USAGE_ERROR
+    assert "tests/cli/test_cli_plain.py::test_plain" in result.stderr.str()

@@ -29,7 +29,7 @@ class LoggerFactory:
     def create_root(
         config: LogConfig,
         logger_class: type[Logger] = Logger,
-        extra: dict[str, Any] | collections.OrderedDict | None = None,
+        extra: dict[str, Any] | collections.OrderedDict[str, Any] | None = None,
     ) -> Logger:
         """
         Create a root logger with the specified configuration.
@@ -111,7 +111,7 @@ class LoggerFactory:
         name: str,
         config: LogConfig,
         logger_class: type[Logger] = Logger,
-        extra: dict[str, Any] | collections.OrderedDict | None = None,
+        extra: dict[str, Any] | collections.OrderedDict[str, Any] | None = None,
     ) -> Logger:
         """
         Create a logger with the specified configuration.
@@ -179,7 +179,7 @@ class LoggerFactory:
         name: str,
         config: LogConfig,
         logger_class: type[Logger] = Logger,
-        extra: dict[str, Any] | collections.OrderedDict | None = None,
+        extra: dict[str, Any] | collections.OrderedDict[str, Any] | None = None,
     ) -> Logger:
         """
         Create logger ``name``, first destroying any logger this process holds under it.
@@ -322,7 +322,7 @@ class LoggerFactory:
         lg: logging.Logger,
         config: LogConfig,
         logger_class: type[Logger],
-        extra: dict[str, Any] | collections.OrderedDict | None,
+        extra: dict[str, Any] | collections.OrderedDict[str, Any] | None,
     ) -> Logger:
         """
         Turn a library's logger into an appinfra logger, in place.
@@ -408,7 +408,7 @@ class LoggerFactory:
         logger's handlers via the _root_logger reference. They share the root's
         holder for hot-reload of location settings.
         """
-        root = parent._root_logger if parent._root_logger else parent
+        root = parent._root_logger or parent
         effective_config = LoggerFactory._get_view_logger_config(name, parent)
 
         logging.setLoggerClass(parent.__class__)

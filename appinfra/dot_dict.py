@@ -98,9 +98,8 @@ class DotDict(dict[str, V], DictInterface):
             Value associated with the name
         """
         # For data-priority attrs, check if key exists in dict data first
-        if name in DotDict._DATA_PRIORITY_ATTRS:
-            if dict.__contains__(self, name):
-                return dict.__getitem__(self, name)
+        if name in DotDict._DATA_PRIORITY_ATTRS and dict.__contains__(self, name):
+            return dict.__getitem__(self, name)
         return super().__getattribute__(name)
 
     def __getattr__(self, key: str) -> V:

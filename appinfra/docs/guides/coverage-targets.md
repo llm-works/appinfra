@@ -47,19 +47,19 @@ All targets:
 - Include pattern: `infra/*` (project code only)
 - Exclude pattern: `*/site-packages/*` (external libraries)
 - Test pattern: `*_test.py` (unit tests)
-- Uses: `~/.venv/bin/python`
+- Uses: `$(PYTHON)`, by default `python3` on `PATH`
 
 ### Coverage Threshold
 
 The `make check` command enforces a coverage threshold. Configure via
-`INFRA_PYTEST_COVERAGE_THRESHOLD`:
+`APPINFRA_PYTEST_COVERAGE_THRESHOLD`:
 
 ```makefile
 # In your Makefile (before includes)
-INFRA_PYTEST_COVERAGE_THRESHOLD := 95    # Require 95% coverage
+APPINFRA_PYTEST_COVERAGE_THRESHOLD ?= 95    # Require 95% coverage
 
 # Or disable coverage check entirely
-INFRA_PYTEST_COVERAGE_THRESHOLD := 0
+APPINFRA_PYTEST_COVERAGE_THRESHOLD ?= 0
 ```
 
 **Default:** 80%
@@ -71,7 +71,7 @@ INFRA_PYTEST_COVERAGE_THRESHOLD := 0
 
 You can also override at runtime:
 ```bash
-INFRA_PYTEST_COVERAGE_THRESHOLD=50 make check
+APPINFRA_PYTEST_COVERAGE_THRESHOLD=50 make check
 ```
 
 ## Best Practices

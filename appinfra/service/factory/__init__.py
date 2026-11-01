@@ -45,7 +45,7 @@ from .service import ServiceFactory, ServiceRegistration
 
 __all__ = [
     # Channel factories
-    "ChannelConfig",
+    "ChannelConfig",  # cq: keep re-export list, repeated by appinfra.service
     "ChannelPair",
     "ChannelPairFactory",
     "QueueChannelFactory",

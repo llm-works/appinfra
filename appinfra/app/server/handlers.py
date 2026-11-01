@@ -26,7 +26,6 @@ class Middleware(ABC):
         Returns:
             Modified request object
         """
-        pass
 
     @abstractmethod
     async def process_response(self, response: Any) -> Any:
@@ -39,7 +38,6 @@ class Middleware(ABC):
         Returns:
             Modified response object
         """
-        pass
 
 
 class RequestHandler:

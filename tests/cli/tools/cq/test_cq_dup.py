@@ -1,0 +1,226 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The appinfra Authors
+
+"""Tests for appinfra/cli/tools/cq/dup.py."""
+
+import argparse
+import json
+import os
+import subprocess
+from pathlib import Path
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+import appinfra
+from appinfra.cli.tools.cq.common import EXIT_CODE_WARNING
+from appinfra.cli.tools.cq.dup import (
+    Block,
+    CheckDupTool,
+    drop_kept,
+    format_report,
+    module_paths,
+    parse_groups,
+    pylint_command,
+    pylint_env,
+)
+
+# A body long enough to pass the default 8-line threshold
+_BODY = "\n".join(f"    total = total + {i}" for i in range(12))
+
+
+def _r0801(*locations: str) -> dict:
+    text = "Similar lines in 2 files\n" + "\n".join(locations) + "\n    code\n"
+    return {"symbol": "duplicate-code", "message": text}
+
+
+@pytest.mark.unit
+class TestParsing:
+    """Test pylint output parsing."""
+
+    def test_module_paths_maps_dotted_suffixes(self):
+        f = Path("pkg/sub/mod.py")
+        paths = module_paths([f])
+        assert paths["pkg.sub.mod"] == f
+        assert paths["sub.mod"] == f
+
+    def test_parse_groups_resolves_modules_and_lines(self):
+        files = [Path("pkg/a.py"), Path("pkg/b.py")]
+        output = json.dumps({"messages": [_r0801("==pkg.a:[9:20]", "==pkg.b:[0:11]")]})
+
+        groups = parse_groups(output, module_paths(files))
+
+        assert groups == [[Block("pkg/a.py", 10, 20), Block("pkg/b.py", 1, 11)]]
+
+    def test_parse_groups_accepts_non_identifier_module_names(self):
+        files = [Path("pkg/my-script.py"), Path("pkg/b.py")]
+        output = json.dumps(
+            {"messages": [_r0801("==my-script:[0:9]", "==pkg.b:[0:9]")]}
+        )
+
+        groups = parse_groups(output, module_paths(files))
+
+        assert groups == [[Block("pkg/b.py", 1, 9), Block("pkg/my-script.py", 1, 9)]]
+
+    def test_parse_groups_sorts_blocks_by_location(self):
+        files = [Path("pkg/a.py"), Path("pkg/b.py")]
+        output = json.dumps({"messages": [_r0801("==pkg.b:[0:9]", "==pkg.a:[4:13]")]})
+
+        groups = parse_groups(output, module_paths(files))
+
+        assert groups == [[Block("pkg/a.py", 5, 13), Block("pkg/b.py", 1, 9)]]
+
+    def test_parse_groups_keeps_unknown_module_name(self):
+        output = json.dumps({"messages": [_r0801("==other.mod:[0:9]")]})
+        assert parse_groups(output, {}) == [[Block("other.mod", 1, 9)]]
+
+    def test_parse_groups_skips_other_messages(self):
+        output = json.dumps({"messages": [{"symbol": "unused-import", "message": "x"}]})
+        assert parse_groups(output, {}) == []
+
+
+@pytest.mark.unit
+class TestDropKept:
+    """Test drop_kept()."""
+
+    def test_keep_within_one_copy_drops_the_group(self, tmp_path: Path):
+        a, b = tmp_path / "a.py", tmp_path / "b.py"
+        a.write_text("x = 1\ny = 2  # cq: keep mirrors b.py on purpose\nz = 3\n")
+        b.write_text("x = 1\ny = 2\nz = 3\n")
+        groups = [[Block(str(a), 1, 3), Block(str(b), 1, 3)]]
+
+        assert drop_kept(groups) == []
+
+    def test_keep_in_a_file_with_a_declared_encoding(self, tmp_path: Path):
+        a = tmp_path / "a.py"
+        a.write_bytes(
+            b"# -*- coding: latin-1 -*-\n"
+            b"x = '\xe9'  # cq: keep same shape on purpose\n"
+            b"y = 2\n"
+        )
+        groups = [[Block(str(a), 2, 3), Block("missing.py", 1, 2)]]
+
+        assert drop_kept(groups) == []
+
+    def test_keep_in_a_string_does_not_count(self, tmp_path: Path):
+        a = tmp_path / "a.py"
+        a.write_text("x = '# cq: keep is only text here'\ny = 2\n")
+        groups = [[Block(str(a), 1, 2), Block("missing.py", 1, 2)]]
+
+        assert drop_kept(groups) == groups
+
+    def test_keep_outside_the_range_does_not(self, tmp_path: Path):
+        a = tmp_path / "a.py"
+        a.write_text("# cq: keep\nx = 1\ny = 2\n")
+        groups = [[Block(str(a), 2, 3), Block("missing.py", 1, 2)]]
+
+        assert drop_kept(groups) == groups
+
+
+@pytest.mark.unit
+class TestFormatReport:
+    """Test format_report()."""
+
+    def test_counts_smallest_copy_per_extra_copy(self):
+        groups = [[Block("a.py", 1, 10), Block("b.py", 1, 12)]]
+
+        report = format_report(groups, files_checked=2)
+
+        assert "  a.py:1-10 (10 lines)" in report
+        assert "  b.py:1-12 (12 lines)" in report
+        assert report.endswith("Files checked: 2\nDuplicated lines: 10\nViolations: 1")
+
+    def test_no_groups(self):
+        report = format_report([], files_checked=3)
+        assert report == "Files checked: 3\nDuplicated lines: 0\nViolations: 0"
+
+
+def _make_tool(tmp_path: Path, strict: bool = False) -> CheckDupTool:
+    tool = CheckDupTool(parent=None)
+    tool._parsed_args = argparse.Namespace(
+        dir=str(tmp_path), min_lines=8, jobs=1, strict=strict, exclude=None
+    )
+    tool._logger = MagicMock()
+    return tool
+
+
+@pytest.mark.unit
+class TestCheckDupTool:
+    """Test CheckDupTool.run() against pylint."""
+
+    def test_reports_duplicate_across_files(self, tmp_path: Path, capsys):
+        for name in ("a", "b"):
+            (tmp_path / f"{name}.py").write_text(
+                f"def {name}(total):\n{_BODY}\n    return total\n"
+            )
+
+        assert _make_tool(tmp_path).run() == EXIT_CODE_WARNING
+        out = capsys.readouterr().out
+        assert "duplicate block in 2 places:" in out
+        assert "Violations: 1" in out
+
+    def test_strict_mode_fails(self, tmp_path: Path):
+        for name in ("a", "b"):
+            (tmp_path / f"{name}.py").write_text(
+                f"def {name}(total):\n{_BODY}\n    return total\n"
+            )
+        assert _make_tool(tmp_path, strict=True).run() == 1
+
+    def test_kept_duplicate_is_not_reported(self, tmp_path: Path, capsys):
+        for name, keep in (("a", "  # cq: keep same shape on purpose"), ("b", "")):
+            (tmp_path / f"{name}.py").write_text(
+                f"def {name}(total):\n    total = total + 1{keep}\n{_BODY}\n"
+                "    return total\n"
+            )
+
+        assert _make_tool(tmp_path).run() == 0
+        assert "Violations: 0" in capsys.readouterr().out
+
+    def test_clean_tree_exits_zero(self, tmp_path: Path):
+        (tmp_path / "a.py").write_text("x = 1\n")
+        assert _make_tool(tmp_path).run() == 0
+
+    def test_no_files_exits_zero(self, tmp_path: Path):
+        tool = _make_tool(tmp_path)
+        assert tool.run() == 0
+        tool._logger.warning.assert_called()
+
+    def test_pylint_failure_exits_one(self, tmp_path: Path):
+        (tmp_path / "a.py").write_text("x = 1\n")
+        failed = subprocess.CompletedProcess([], 1, stdout="", stderr="No module")
+        tool = _make_tool(tmp_path)
+        with patch("appinfra.cli.tools.cq.dup.subprocess.run", return_value=failed):
+            assert tool.run() == 1
+        tool._logger.error.assert_called()
+
+    def test_plugin_load_failure_exits_one(self, tmp_path: Path):
+        (tmp_path / "a.py").write_text("x = 1\n")
+        message = {"symbol": "bad-plugin-value", "message": "Plugin 'p' is impossible"}
+        output = json.dumps({"messages": [message, message]})
+        loaded = subprocess.CompletedProcess([], 0, stdout=output, stderr="")
+        tool = _make_tool(tmp_path)
+        with patch("appinfra.cli.tools.cq.dup.subprocess.run", return_value=loaded):
+            assert tool.run() == 1
+        errors = tool._logger.error.call_args.kwargs["extra"]["errors"]
+        assert errors == ["Plugin 'p' is impossible"]
+
+    def test_env_puts_this_appinfra_first_on_pythonpath(self, monkeypatch):
+        root = str(Path(appinfra.__file__).resolve().parent.parent)
+        monkeypatch.setenv("PYTHONPATH", "/elsewhere")
+        assert pylint_env()["PYTHONPATH"] == f"{root}{os.pathsep}/elsewhere"
+        monkeypatch.delenv("PYTHONPATH")
+        assert pylint_env()["PYTHONPATH"] == root
+
+    def test_command_passes_threshold_jobs_and_files(self):
+        cmd = pylint_command([Path("a.py")], 6, 4)
+        assert "--min-similarity-lines=6" in cmd
+        assert "--jobs=4" in cmd
+        assert "--load-plugins=appinfra.cli.tools.cq.pylint_plugin" in cmd
+        assert cmd[-1] == "a.py"
+
+    def test_args(self):
+        parser = argparse.ArgumentParser()
+        CheckDupTool(parent=None).add_args(parser)
+        args = parser.parse_args(["pkg", "--min-lines", "5", "--jobs", "2", "--strict"])
+        assert (args.dir, args.min_lines, args.jobs, args.strict) == ("pkg", 5, 2, True)
+        assert parser.parse_args([]).jobs == 4

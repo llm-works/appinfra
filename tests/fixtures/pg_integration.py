@@ -152,7 +152,25 @@ def pg_connection(pg_config, pg_logger, pg_available):
         )
         pytest.skip(PG_SKIP_REASON)
 
-    yield pg
+    try:
+        yield pg
+    finally:
+        pg.dispose()
+
+
+@pytest.fixture
+def make_pg(pg_logger):
+    """Build PG instances for one test; every one is disposed when the test ends."""
+    created: list[PG] = []
+
+    def _make(cfg, schema=None):
+        pg = PG(pg_logger, cfg, schema=schema)
+        created.append(pg)
+        return pg
+
+    yield _make
+    for pg in created:
+        pg.dispose()
 
 
 def _do_cleanup_stale_tables(pg_connection):

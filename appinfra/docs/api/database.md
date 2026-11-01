@@ -38,7 +38,7 @@ PostgreSQL interface with connection pooling, query monitoring, and session mana
 pip install appinfra[sql]
 ```
 
-This installs sqlalchemy, sqlalchemy-utils, and psycopg2-binary.
+This installs sqlalchemy, sqlalchemy-utils, and psycopg (`psycopg[binary]`).
 
 ## PG (PostgreSQL)
 
@@ -139,11 +139,29 @@ dbs:
     readonly: true             # Read-only mode (default: false)
 ```
 
+### Secret Passwords
+
+A password declared `!secret` keeps a URL built from it secret: the URL loads as
+an `Envelope` that logs and prints as `***`, and `PG` opens it only to create
+the engine. The engine's own URL masks the password in what pg logs.
+
+```yaml
+dbserver:
+  pass: !env DB_PASSWORD !secret
+
+dbs:
+  main:
+    url: "postgresql://postgres:${dbserver.pass}@localhost:5432/myapp"
+```
+
+A password left plain stays plain everywhere. See
+[Custom Tags](utilities.md#custom-tags) for `!secret` and `Envelope`.
+
 ### Database Configuration Fields
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `url` | string | required | PostgreSQL connection URL |
+| `url` | string \| Envelope | required | PostgreSQL connection URL; an `Envelope` when built from a secret |
 | `pool_size` | int | 5 | Connection pool size |
 | `max_overflow` | int | 10 | Max overflow connections |
 | `pool_timeout` | int | 30 | Pool timeout in seconds |
@@ -251,9 +269,12 @@ def test_with_tables(pg_with_tables):
 ```
 
 The `pg_migrate_factory` fixture returns a context manager factory that:
-1. Creates a fresh schema
+1. Creates a fresh schema of its own, `<pg_test_schema>_m<n>` (e.g., `test_gw0_m1`)
 2. Runs migrations to create all tables
 3. Cleans up the schema when the context exits
+
+The worker schema itself stays with `pg_isolated` for the whole session, so the two can be used
+together. `make_migrate_fixture` names its schema the same way.
 
 **Legacy approach** (causes `PytestAssertRewriteWarning`):
 

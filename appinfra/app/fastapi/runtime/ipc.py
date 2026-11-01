@@ -157,7 +157,6 @@ class IPCChannel:
         AsyncChannel polls on-demand, so this is a no-op.
         Kept for API compatibility with FastAPI adapter lifespan.
         """
-        pass
 
     async def stop_polling(self) -> None:
         """

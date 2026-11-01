@@ -110,7 +110,6 @@ class Console:
         if force_terminal is None:
             force_terminal = _is_interactive()
 
-        self._no_color = no_color
         self._force_terminal = force_terminal
 
         # Initialize rich console if available and appropriate
@@ -216,9 +215,8 @@ class Console:
         """
         if self._rich_console:
             return self._rich_console.status(message, spinner=spinner)
-        else:
-            # Return a no-op context manager
-            return _NoOpContextManager(message, self._file, self._quiet)
+        # Return a no-op context manager
+        return _NoOpContextManager(message, self._file, self._quiet)
 
     @staticmethod
     def _strip_markup(text: str) -> str:
@@ -247,7 +245,6 @@ class _NoOpContextManager:
 
     def update(self, message: str) -> None:
         """Update status message (no-op in plain mode)."""
-        pass
 
 
 # Global console instance

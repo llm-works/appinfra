@@ -9,32 +9,46 @@ local := $(dir $(realpath $(lastword $(MAKEFILE_LIST))))
 # These settings can also be overridden in Makefile.local (gitignored)
 
 # Enable strict code quality checks (30-line function limit)
-INFRA_DEV_CQ_STRICT := true
+APPINFRA_DEV_CQ_STRICT ?= true
 
 # Enforce SPDX license headers on tracked .py files (Apache-2.0 attribution)
-INFRA_DEV_CQ_SPDX := true
+APPINFRA_DEV_CQ_SPDX ?= true
+
+# No ruff rules reported as warnings only: appinfra enforces them in pyproject's select
+APPINFRA_DEV_CQ_LINT_SELECT ?= false
+
+# Duplicated code and dead private code checks: false, warn or strict
+APPINFRA_DEV_CQ_DUP ?= strict
+APPINFRA_DEV_CQ_DEAD ?= strict
 
 # Run every example script as a test subcheck of `make check`
-INFRA_DEV_CHECK_EXAMPLES := true
+APPINFRA_DEV_CHECK_EXAMPLES ?= true
 
-# Include all tests in coverage (not just unit tests)
-INFRA_PYTEST_COVERAGE_MARKERS := unit or e2e
+# Coverage counts unit and integration tests: code that touches the filesystem, processes or
+# sockets is covered by integration tests
+APPINFRA_PYTEST_COVERAGE_MARKERS ?= unit or integration
+
+# Performance tests all live here; collecting only this directory skips importing the rest
+APPINFRA_PYTEST_PERF_DIR ?= tests/performance
 
 # Coverage threshold (framework default is 80%)
-INFRA_PYTEST_COVERAGE_THRESHOLD := 95
+APPINFRA_PYTEST_COVERAGE_THRESHOLD ?= 95
 
 # Docstring coverage threshold (framework default is 80%)
-INFRA_DEV_DOCSTRING_THRESHOLD := 95
+APPINFRA_DEV_DOCSTRING_THRESHOLD ?= 95
+
+# Test structure health line in make check (framework default is off)
+APPINFRA_DEV_TEST_HEALTH ?= strict
 
 # Install with all optional extras
-INFRA_DEV_INSTALL_EXTRAS := all
+APPINFRA_DEV_INSTALL_EXTRAS ?= all
 
-# PostgreSQL configuration (filename only - resolved from ETC_DIR)
-INFRA_PG_CONFIG_FILE := pg.yaml
-#INFRA_PG_CONFIG_KEY := pgserver
+# PostgreSQL configuration (filename only - resolved from APPINFRA_ETC_DIR)
+APPINFRA_PG_CONFIG_FILE ?= pg.yaml
+#APPINFRA_PG_CONFIG_KEY ?= pgserver
 
-# Documentation configuration (filename only - resolved from ETC_DIR)
-INFRA_DOCS_CONFIG_FILE := mkdocs.yaml
+# Documentation configuration (filename only - resolved from APPINFRA_ETC_DIR)
+APPINFRA_DOCS_CONFIG_FILE ?= mkdocs.yaml
 
 # ============================================================================
 # Load Infra Framework

@@ -11,9 +11,6 @@ database loggers from configuration.
 from collections.abc import Callable
 from typing import Any, Self
 
-from ...config import LogConfig
-from ...factory import LoggerFactory
-from ...logger import Logger
 from ..builder import LoggingBuilder
 from .config import DatabaseHandlerConfig
 
@@ -41,7 +38,7 @@ class DatabaseLoggingBuilder(LoggingBuilder):
         db_interface: Any,
         level: str | int | None = None,
         columns: dict[str, str] | None = None,
-        data_mapper: Callable | None = None,
+        data_mapper: Callable[..., Any] | None = None,
         batch_size: int = 1,
         flush_interval: float = 0.0,
         # Critical flush parameters
@@ -173,7 +170,7 @@ class DatabaseLoggingBuilder(LoggingBuilder):
         self,
         table_name: str,
         db_interface: Any,
-        data_mapper: Callable,
+        data_mapper: Callable[..., Any],
         level: str | int | None = None,
         batch_size: int = 1,
         flush_interval: float = 0.0,
@@ -229,36 +226,6 @@ class DatabaseLoggingBuilder(LoggingBuilder):
                 handler_config.fallback_to_console = fallback_to_console
         return self
 
-    def build(self) -> Logger:
-        """
-        Build and return the configured logger.
-
-        Returns:
-            Configured logger instance
-        """
-        # Create base configuration
-        config = LogConfig.from_params(
-            level=self._level,
-            location=self._location,
-            micros=self._micros,
-            colors=self._colors,
-        )
-
-        # Create logger; raises LoggerExistsError if the name is taken
-        logger = LoggerFactory.create(
-            self._name, config, self._logger_class, self._extra
-        )
-
-        # Clear default handlers since we're configuring our own
-        logger.handlers.clear()
-
-        # Add configured handlers
-        for handler_config in self._handlers:
-            handler = handler_config.create_handler(config, logger=logger)
-            logger.addHandler(handler)
-
-        return logger
-
 
 # Convenience function for database logging builder
 def create_database_logger(name: str) -> DatabaseLoggingBuilder:
@@ -277,7 +244,7 @@ def create_database_logger(name: str) -> DatabaseLoggingBuilder:
 # Helper functions for load_database_logging_config()
 
 
-def _load_config_from_handler(handler_config: dict) -> dict:
+def _load_config_from_handler(handler_config: dict[str, Any]) -> dict[str, Any]:
     """Load database logging config from handler configuration."""
     critical_flush_config = handler_config.get("critical_flush", {})
     return {
@@ -296,7 +263,7 @@ def _load_config_from_handler(handler_config: dict) -> dict:
     }
 
 
-def _load_config_from_top_level(config_dict: dict) -> dict:
+def _load_config_from_top_level(config_dict: dict[str, Any]) -> dict[str, Any]:
     """Load database logging config from top-level configuration (backward compatibility)."""
     db_config = config_dict.get("database_logging", {})
     critical_flush = db_config.get("critical_flush", {})
@@ -313,8 +280,8 @@ def _load_config_from_top_level(config_dict: dict) -> dict:
 
 
 def load_database_logging_config(
-    config_dict: dict, handler_config: dict | None = None
-) -> dict:
+    config_dict: dict[str, Any], handler_config: dict[str, Any] | None = None
+) -> dict[str, Any]:
     """
     Load database logging configuration from config dictionary.
 
@@ -335,16 +302,15 @@ def load_database_logging_config(
     """
     if handler_config:
         return _load_config_from_handler(handler_config)
-    else:
-        return _load_config_from_top_level(config_dict)
+    return _load_config_from_top_level(config_dict)
 
 
 def create_database_logger_from_config(
     name: str,
-    config_dict: dict,
+    config_dict: dict[str, Any],
     db_interface: Any,
     table_name: str = "error_logs",
-    handler_config: dict | None = None,
+    handler_config: dict[str, Any] | None = None,
 ) -> DatabaseLoggingBuilder:
     """
     Create a database logging builder from configuration.

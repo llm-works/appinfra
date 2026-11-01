@@ -159,6 +159,27 @@ ProcessRunner features:
 - IPC for shutdown signaling and health status
 - Service must be picklable
 
+#### Start method and restarts
+
+`start_monitor()` restarts a service whose process raised or exited non-zero, according to its
+`RestartPolicy`. The restart runs on the monitor thread. Under the fork start method, the default
+on Linux before Python 3.14, the restarted process is forked from that thread: Python 3.12+ warns
+that this may deadlock the child, which inherits any lock another thread of the parent holds at
+that moment. Spawn and forkserver start a fresh interpreter instead:
+
+```python
+runner = ProcessRunner(
+    service, policy=RestartPolicy(max_retries=5), start_method="forkserver"
+)
+
+# RunnerFactory applies it to the runner and its channel queues alike
+factory = RunnerFactory(lg, start_method="forkserver")
+result = factory.create_process_runner_with_channel(service)
+```
+
+`start_method=None` (the default) uses multiprocessing's default. Queues and events passed to the
+service must come from the same start method: multiprocessing refuses them in the child otherwise.
+
 ## Scheduled Services
 
 For periodic execution, extend `ScheduledService`:
@@ -384,6 +405,24 @@ arrives. `BufferedChannel` calls both in short slices so that `close()` interrup
 | `ProcessQueueChannelFactory` | `ProcessQueueTransport` (`mp.Queue`) | Sync cross-process IPC |
 | `AsyncQueueChannelFactory` | `AsyncQueueTransport` (`asyncio.Queue`) | Async coroutine communication |
 | `AsyncProcessQueueChannelFactory` | `AsyncProcessQueueTransport` (`mp.Queue`) | Async parent, sync child subprocess |
+
+### Process Channels and Exit
+
+The process transports use `multiprocessing.Queue`, so its rule applies ([Joining processes that
+use queues](https://docs.python.org/3/library/multiprocessing.html#programming-guidelines)): at
+exit, a process waits until its queue's feeder thread has written every message it sent into the
+pipe. Unread messages that fit in the pipe do not delay exit, but once the pipe is full the
+feeder blocks until a reader takes from it, so messages nobody reads can keep the sender alive.
+Pipe capacity varies by system and can be as small as one page, so code must not rely on it.
+
+- `RunnerFactory.create_process_runner_with_channel()` handles the parent side. The service runs
+  as a daemon process, which multiprocessing terminates at exit before the queues flush, so
+  requests the service has not read are dropped instead of blocking exit.
+- Elsewhere, consume every message sent, or call `allow_exit_without_flush()` on the sending
+  `ProcessQueueTransport` where unread messages may be dropped at exit.
+- A channel passed to a child under the spawn or forkserver start method is pickled, by
+  `ProcessRunner` as part of the service or as a `Process` argument; this works only while the
+  child starts. The child's copy starts with an empty redelivery buffer.
 
 ## Factories
 

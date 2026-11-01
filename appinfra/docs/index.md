@@ -29,6 +29,7 @@ appinfra docs find <text>        # Search documentation for text
 - [API Stability](guides/api-stability.md) - API versioning and stability guarantees
 - [Makefile Customization](guides/makefile-customization.md) - Extending framework Makefiles
 - [Virtual Environment](guides/virtual-environment.md) - Development environment setup
+- [Test Suites](guides/test-suites.md) - What makes a test unit, integration or e2e
 - [Test Naming Standards](guides/test-naming-standards.md) - Test naming conventions
 - [Coverage Targets](guides/coverage-targets.md) - Test coverage guidelines
 - [Contributing](guides/contributing.md) - Development setup and guidelines

@@ -14,13 +14,15 @@ pip install appinfra
 
 ```makefile
 # Makefile - using pip-installed appinfra
-infra := $(shell appinfra scripts-path)
+ifeq ($(origin APPINFRA_SCRIPTS),undefined)
+APPINFRA_SCRIPTS := $(shell appinfra scripts-path)
+endif
 
 # Configure your project
-INFRA_DEV_PKG_NAME := myproject
+APPINFRA_DEV_PKG_NAME ?= myproject
 
 # Include framework
-include $(infra)/make/Makefile.all
+include $(APPINFRA_SCRIPTS)/make/Makefile.all
 ```
 
 This is the recommended approach because:
@@ -34,37 +36,39 @@ Submodules are supported but **should rarely be needed**. Use only if you need t
 framework itself or work offline without pip access.
 
 ```bash
-git submodule add <repo-url> submodules/infra
+git submodule add <repo-url> submodules/appinfra
 ```
 
 ```makefile
 # Makefile - using submodule
-infra := submodules/infra
+APPINFRA_SCRIPTS ?= submodules/appinfra/appinfra/scripts
 
-INFRA_DEV_PKG_NAME := myproject
-include $(infra)/scripts/make/Makefile.all
+APPINFRA_DEV_PKG_NAME ?= myproject
+include $(APPINFRA_SCRIPTS)/make/Makefile.all
 ```
 
-Note: With submodules, the path is `$(infra)/scripts/make/` vs `$(infra)/make/` with pip install.
+Either way, `APPINFRA_SCRIPTS` is appinfra's scripts directory, so the includes are the same.
 
 ## Quick Start
 
 ```makefile
 # Recommended setup (pip install)
-infra := $(shell appinfra scripts-path)
+ifeq ($(origin APPINFRA_SCRIPTS),undefined)
+APPINFRA_SCRIPTS := $(shell appinfra scripts-path)
+endif
 
 # Configure your project
-INFRA_DEV_PKG_NAME := myproject
+APPINFRA_DEV_PKG_NAME ?= myproject
 
 # Include framework (config must be first)
-include $(infra)/make/Makefile.config
-include $(infra)/make/Makefile.env
-include $(infra)/make/Makefile.help
-include $(infra)/make/Makefile.utils
-include $(infra)/make/Makefile.dev
-include $(infra)/make/Makefile.install  # Optional: only if building a package
-include $(infra)/make/Makefile.pytest
-include $(infra)/make/Makefile.clean
+include $(APPINFRA_SCRIPTS)/make/Makefile.config
+include $(APPINFRA_SCRIPTS)/make/Makefile.env
+include $(APPINFRA_SCRIPTS)/make/Makefile.help
+include $(APPINFRA_SCRIPTS)/make/Makefile.utils
+include $(APPINFRA_SCRIPTS)/make/Makefile.dev
+include $(APPINFRA_SCRIPTS)/make/Makefile.install  # Optional: only if building a package
+include $(APPINFRA_SCRIPTS)/make/Makefile.pytest
+include $(APPINFRA_SCRIPTS)/make/Makefile.clean
 ```
 
 ## Include Order
@@ -72,47 +76,51 @@ include $(infra)/make/Makefile.clean
 **Critical:** Include order matters. Always follow this sequence:
 
 ```makefile
-# 1. REQUIRED FIRST - Handles config loading and deprecation
-include $(infra)/make/Makefile.config
+# 1. REQUIRED FIRST - loads Makefile.local, the defaults and the setting checks
+include $(APPINFRA_SCRIPTS)/make/Makefile.config
 
 # 2. Core modules (order matters)
-include $(infra)/make/Makefile.env      # Python detection
-include $(infra)/make/Makefile.help     # Help system
-include $(infra)/make/Makefile.utils    # Utilities (areyousure, etc.)
+include $(APPINFRA_SCRIPTS)/make/Makefile.env      # Python detection
+include $(APPINFRA_SCRIPTS)/make/Makefile.help     # Help system
+include $(APPINFRA_SCRIPTS)/make/Makefile.utils    # Utilities (areyousure, etc.)
 
 # 3. Feature modules (order flexible)
-include $(infra)/make/Makefile.dev      # Requires: env, utils
-include $(infra)/make/Makefile.install  # Optional: only if building a package
-include $(infra)/make/Makefile.pytest   # Requires: env
-include $(infra)/make/Makefile.docs     # Requires: env
-include $(infra)/make/Makefile.pg       # Requires: env, utils
-include $(infra)/make/Makefile.clean    # Requires: utils
+include $(APPINFRA_SCRIPTS)/make/Makefile.dev      # Requires: env, utils
+include $(APPINFRA_SCRIPTS)/make/Makefile.install  # Optional: only if building a package
+include $(APPINFRA_SCRIPTS)/make/Makefile.pytest   # Requires: env
+include $(APPINFRA_SCRIPTS)/make/Makefile.docs     # Requires: env
+include $(APPINFRA_SCRIPTS)/make/Makefile.pg       # Requires: env, utils
+include $(APPINFRA_SCRIPTS)/make/Makefile.clean    # Requires: utils
 ```
 
 Or use `Makefile.all` to include everything in the correct order:
 
 ```makefile
-include $(infra)/make/Makefile.all
+include $(APPINFRA_SCRIPTS)/make/Makefile.all
 ```
 
 ## Variable Precedence
 
 Variables are resolved in this order (highest to lowest priority):
 
-1. **Environment variables** - `INFRA_DEV_PKG_NAME=foo make test`
-2. **Makefile variables before include** - `INFRA_DEV_PKG_NAME := foo`
-3. **Makefile.local** - Optional overrides file (not committed)
-4. **Framework defaults** - Defined in `Makefile.config`
+1. **Command line** - `make test APPINFRA_DEV_PKG_NAME=foo`
+2. **Environment variables** - `APPINFRA_DEV_PKG_NAME=foo make test`
+3. **Makefile.local** - Optional overrides file (not committed), `APPINFRA_DEV_PKG_NAME := foo`
+4. **Project Makefile, before the include** - `APPINFRA_DEV_PKG_NAME ?= foo`
+5. **Framework defaults** - Defined in `Makefile.config`
+
+A `:=` in the project Makefile pins the value against the environment; see
+[Configuration Precedence](makefile-customization.md#configuration-precedence).
 
 ### Example: Setting Package Name
 
 ```makefile
 # In Makefile (before include)
-INFRA_DEV_PKG_NAME := myproject
-include $(infra)/make/Makefile.all
+APPINFRA_DEV_PKG_NAME ?= myproject
+include $(APPINFRA_SCRIPTS)/make/Makefile.all
 
 # Or via environment variable (for CI/testing)
-# INFRA_DEV_PKG_NAME=myproject make test.coverage
+# APPINFRA_DEV_PKG_NAME=myproject make test.coverage
 ```
 
 ## Common Configuration
@@ -121,26 +129,30 @@ include $(infra)/make/Makefile.all
 
 ```makefile
 # Makefile
-infra := $(shell appinfra scripts-path)
-INFRA_DEV_PKG_NAME := myproject
+ifeq ($(origin APPINFRA_SCRIPTS),undefined)
+APPINFRA_SCRIPTS := $(shell appinfra scripts-path)
+endif
+APPINFRA_DEV_PKG_NAME ?= myproject
 
-include $(infra)/make/Makefile.all
+include $(APPINFRA_SCRIPTS)/make/Makefile.all
 ```
 
 ### Full Configuration
 
 ```makefile
 # Makefile
-infra := $(shell appinfra scripts-path)
-INFRA_DEV_PKG_NAME := myproject
-INFRA_DEV_CQ_STRICT := true
-INFRA_PYTEST_TESTS_DIR := tests
-INFRA_DOCS_CONFIG_FILE := mkdocs.yaml
+ifeq ($(origin APPINFRA_SCRIPTS),undefined)
+APPINFRA_SCRIPTS := $(shell appinfra scripts-path)
+endif
+APPINFRA_DEV_PKG_NAME ?= myproject
+APPINFRA_DEV_CQ_STRICT ?= true
+APPINFRA_PYTEST_TESTS_DIR ?= tests
+APPINFRA_DOCS_CONFIG_FILE ?= mkdocs.yaml
 
 # Hide unused features
-INFRA_DISABLE_GROUPS := pg.
+APPINFRA_DISABLE_GROUPS ?= pg.
 
-include $(infra)/make/Makefile.all
+include $(APPINFRA_SCRIPTS)/make/Makefile.all
 ```
 
 ## Extending Targets
@@ -148,7 +160,7 @@ include $(infra)/make/Makefile.all
 Use double-colon rules (`::`) to extend framework targets:
 
 ```makefile
-include $(infra)/make/Makefile.all
+include $(APPINFRA_SCRIPTS)/make/Makefile.all
 
 # Extend cleanup
 clean::
@@ -171,13 +183,21 @@ The `check.sh` script is designed to be run via Make, not directly:
 
 ```bash
 # Correct - uses exported variables from Makefile
-make check
-make check.raw      # For CI logs
-make check.summary  # Summaries only
+make check      # Interactive: live checklist, rows below it
+make check.ci   # The same checks and warning policy as plain text, for logs and CI
+make check.raw  # Every tool's output as is, every test listed: the reference without check.sh's policy
 
-# Incorrect - will use fallback defaults (INFRA_DEV_PKG_NAME=appinfra)
+# Incorrect - will use fallback defaults (APPINFRA_DEV_PKG_NAME=appinfra)
 ./scripts/check.sh
 ```
+
+`make check.ci` runs what `make check` runs, fail-fast, and applies the same warning policy, but
+prints plain text without cursor movement: use it wherever output goes to a file or CI log. Its
+checks run one after another, so their output stays in order, with pytest on its xdist workers
+within each; that makes it slower than `make check`, which also runs the checks alongside each
+other. `make check.raw` runs every tool with its output untouched and pytest in one
+process with every test listed; it applies no warning policy, so comparing it with `make check`
+shows whether `check.sh` itself changed an outcome.
 
 With fail-fast (`make check`), the summary of a failed run shows only the failed test ids and
 their first `E` lines; `make check.all` shows only which checks failed. The full output of each
@@ -188,11 +208,11 @@ included, empties the directory first, so copy a log elsewhere before running it
 directory carries its own `.gitignore`. A failed example's whole stdout and stderr are in the
 Examples log: `make check` runs the examples with `run_examples.py --full-output`.
 
-A test still running after `INFRA_PYTEST_HANG_DUMP_SECONDS` (default 120) gets a row below the
+A test still running after `APPINFRA_PYTEST_HANG_DUMP_SECONDS` (default 120) gets a row below the
 checklist, after a blank line:
 
 ```text
-[⚠]  Unit & E2E & Coverage tests: tests/test_server.py::test_shutdown running >120s
+[⚠] Unit & E2E & Coverage tests: tests/test_server.py::test_shutdown running >120s
 ```
 
 The row changes to `took 131.4s` if the test ends; a row still saying `running` when the run
@@ -201,6 +221,51 @@ process go to the check's log, which is kept in `.build/check/` and named in the
 test is neither stopped nor failed, so a slow machine only gets more rows. In a terminal the
 node id is shortened from the start to fit the width; without one (CI) it is printed whole, and
 the CI log keeps the rows even when the job is killed by its timeout.
+
+A non-daemon thread a test starts and leaves running holds up its process's exit; a
+pytest-xdist worker in that state waits for it up to a 10s timeout, which the check's time
+includes. The test that started such a thread gets a row below the checklist, and the thread's
+name and stack go to the kept log:
+
+```text
+[⚠] Unit & E2E & Coverage tests: tests/test_proc.py::test_stream thread left running
+```
+
+A warning in a check that passed gets a row below the checklist, each distinct one once, with
+how often it repeated:
+
+```text
+[⚠] Unit & E2E & Coverage tests: DeprecationWarning: old api (src/pkg/api.py:12) in tests (4×)
+[⚠] Unit & E2E & Coverage tests: ResourceWarning: unclosed file tests/data/sample.csv at exit
+[⚠] Examples: client.py: DeprecationWarning: old api (src/pkg/api.py:12)
+[⚠] Linting: The top-level linter settings are deprecated in favour of `lint`.
+```
+
+- **In tests:** an entry of pytest's warnings summary.
+- **At exit:** a warning, or an exception a finalizer raised ("Exception ignored in: ..."),
+  printed when the interpreter exits, after pytest has removed its warning filters. Under
+  Python's default filters ResourceWarning and DeprecationWarning would not print at all; in a
+  test check they do, from the main process and every pytest-xdist worker. A resource still
+  open at exit (a file, socket or database connection held by a module global or a cache) shows
+  up here. Python 3.14 drops a warning that a finalizer raises late in shutdown.
+- **Examples:** a warning in a passing example's stderr; examples run with every warning shown.
+- **Tools:** a tool's own `warning:` line, about the tool or its configuration.
+
+When the project's pytest `filterwarnings` has a bare `error` entry, which makes every warning an
+error, a warning fails the check that printed it (`[✗]`), a tool's own line included; otherwise
+the check passes with a warning and its log is kept in `.build/check/`. A check a tool itself
+fails (an unformatted file, a type error) fails in either mode. Rows show paths relative to the
+project and a file by its name; the kept log has the full message. `make check.ci` lists each
+check's warnings under its passed or failed line, with the same policy; `make check.raw` collects
+none and fails on none, and shows them only as the tools print them. Warnings in interpreters a
+test starts belong to that test and are not collected.
+
+A warning at exit comes after the last test, so it names no test. Narrow it down with `-k` in a
+pytest run that loads the plugin (the `make test.*` targets do not), until the line is gone:
+
+```bash
+PYTHONPATH=<appinfra scripts>/check_pytest python -m pytest tests/ -p pytest_exit_warnings -k <expression>
+```
 
 Interrupting `make check` (Ctrl-C, `TERM`, a closed terminal), or a fail-fast stop, kills every
 process it started at once: pytest and its workers, the tools and the examples runner.
@@ -221,12 +286,12 @@ test categories implemented yet.
 
 ```makefile
 # Wrong - too late
-include $(infra)/make/Makefile.all
-INFRA_DEV_PKG_NAME := myproject
+include $(APPINFRA_SCRIPTS)/make/Makefile.all
+APPINFRA_DEV_PKG_NAME ?= myproject
 
 # Correct - before include
-INFRA_DEV_PKG_NAME := myproject
-include $(infra)/make/Makefile.all
+APPINFRA_DEV_PKG_NAME ?= myproject
+include $(APPINFRA_SCRIPTS)/make/Makefile.all
 ```
 
 ### Include Order Errors
@@ -235,11 +300,11 @@ include $(infra)/make/Makefile.all
 
 ```makefile
 # Wrong - dev requires env and utils
-include $(infra)/make/Makefile.dev
-include $(infra)/make/Makefile.env
+include $(APPINFRA_SCRIPTS)/make/Makefile.dev
+include $(APPINFRA_SCRIPTS)/make/Makefile.env
 
 # Correct - use Makefile.all or follow documented order
-include $(infra)/make/Makefile.all
+include $(APPINFRA_SCRIPTS)/make/Makefile.all
 ```
 
 ### check.sh Uses Wrong Package Name
@@ -262,11 +327,13 @@ myproject/
 
 ```makefile
 # Makefile
-infra := $(shell appinfra scripts-path)
-INFRA_DEV_PKG_NAME := myproject
-INFRA_DISABLE_GROUPS := pg.
+ifeq ($(origin APPINFRA_SCRIPTS),undefined)
+APPINFRA_SCRIPTS := $(shell appinfra scripts-path)
+endif
+APPINFRA_DEV_PKG_NAME ?= myproject
+APPINFRA_DISABLE_GROUPS ?= pg.
 
-include $(infra)/make/Makefile.all
+include $(APPINFRA_SCRIPTS)/make/Makefile.all
 
 ##@ Application
 

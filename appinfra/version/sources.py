@@ -14,11 +14,12 @@ import importlib.machinery
 import importlib.metadata
 import importlib.util
 import json
-import subprocess
 from abc import ABC, abstractmethod
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
+
+from .git import find_git_root, head_commit
 
 if TYPE_CHECKING:
     from .info import PackageVersionInfo
@@ -205,7 +206,7 @@ class BuildInfoSource(VersionSource):
         if not build_time_str:
             return None
         try:
-            return datetime.fromisoformat(build_time_str.replace("Z", "+00:00"))
+            return datetime.fromisoformat(build_time_str)
         except ValueError:
             return None
 
@@ -233,16 +234,6 @@ class GitRuntimeSource(VersionSource):
     Runs `git rev-parse HEAD` in the package's source directory.
     """
 
-    def __init__(self, check_dirty: bool = False):
-        """
-        Initialize the git runtime source.
-
-        Args:
-            check_dirty: If True, also check if the working tree is dirty.
-                         This adds overhead as it runs `git status`.
-        """
-        self._check_dirty = check_dirty
-
     def get_info(self, package_name: str) -> PackageVersionInfo | None:
         """Get version info by running git commands."""
         from .info import PackageVersionInfo
@@ -256,15 +247,15 @@ class GitRuntimeSource(VersionSource):
         if not package_path:
             return None
 
-        git_root = self._find_git_root(package_path)
+        git_root = find_git_root(package_path)
         if not git_root:
             return None
 
-        git_info = self._get_git_info(git_root)
-        if not git_info:
+        commit = head_commit(git_root)
+        if not commit:
             return None
 
-        commit_full, commit_message, commit_time = git_info
+        commit_full, commit_message, commit_time = commit
         return PackageVersionInfo(
             name=package_name,
             version=dist.metadata["Version"] or "unknown",
@@ -273,17 +264,6 @@ class GitRuntimeSource(VersionSource):
             source_type=PackageVersionInfo.SOURCE_EDITABLE_GIT,
             build_time=commit_time,
             _package_path=package_path,
-        )
-
-    def _get_git_info(self, git_root: Path) -> tuple[str, str, datetime | None] | None:
-        """Get commit hash, message, and timestamp from git."""
-        commit_full = self._get_commit_hash(git_root)
-        if not commit_full:
-            return None
-        return (
-            commit_full,
-            self._get_commit_message(git_root),
-            self._get_commit_time(git_root),
         )
 
     def _find_package_path(
@@ -312,63 +292,4 @@ class GitRuntimeSource(VersionSource):
         except Exception:
             pass
 
-        return None
-
-    def _find_git_root(self, path: Path) -> Path | None:
-        """Find the git root directory containing the given path."""
-        current = path
-        while current != current.parent:
-            if (current / ".git").exists():
-                return current
-            current = current.parent
-        return None
-
-    def _get_commit_hash(self, git_root: Path) -> str | None:
-        """Get the current commit hash from a git repository."""
-        try:
-            result = subprocess.run(
-                ["git", "rev-parse", "HEAD"],
-                cwd=git_root,
-                capture_output=True,
-                text=True,
-                timeout=5,
-            )
-            if result.returncode == 0:
-                return result.stdout.strip()
-        except (subprocess.SubprocessError, FileNotFoundError, OSError):
-            # git not available or command failed
-            pass
-        return None
-
-    def _get_commit_message(self, git_root: Path) -> str:
-        """Get the current commit message from a git repository."""
-        try:
-            result = subprocess.run(
-                ["git", "log", "-1", "--format=%s"],
-                cwd=git_root,
-                capture_output=True,
-                text=True,
-                timeout=5,
-            )
-            if result.returncode == 0:
-                return result.stdout.strip()
-        except (subprocess.SubprocessError, FileNotFoundError, OSError):
-            pass
-        return ""
-
-    def _get_commit_time(self, git_root: Path) -> datetime | None:
-        """Get the current commit timestamp from a git repository."""
-        try:
-            result = subprocess.run(
-                ["git", "log", "-1", "--format=%cI"],  # ISO 8601 format
-                cwd=git_root,
-                capture_output=True,
-                text=True,
-                timeout=5,
-            )
-            if result.returncode == 0:
-                time_str = result.stdout.strip()
-                return datetime.fromisoformat(time_str)
-        except (subprocess.SubprocessError, FileNotFoundError, OSError, ValueError):
-            pass
         return None

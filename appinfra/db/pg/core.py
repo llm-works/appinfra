@@ -11,11 +11,12 @@ initialization helper functions.
 import re
 import time
 from functools import lru_cache
-from typing import Any, cast
+from typing import Any
 
 import sqlalchemy
 import sqlalchemy.dialects.postgresql
 
+from ...envelope import Envelope
 from ...log import resolve_level
 
 
@@ -27,21 +28,22 @@ def validate_init_params(lg: Any, cfg: Any) -> None:
         raise ValueError("Configuration cannot be None")
 
 
-def create_sqlalchemy_engine(url: str) -> sqlalchemy.engine.Engine:
+def create_sqlalchemy_engine(url: str | Envelope) -> sqlalchemy.engine.Engine:
     """Create SQLAlchemy engine from URL."""
-    return sqlalchemy.create_engine(url, poolclass=sqlalchemy.pool.NullPool)
+    return sqlalchemy.create_engine(
+        Envelope(url).reveal(), poolclass=sqlalchemy.pool.NullPool
+    )
 
 
 def initialize_performance_cache(pg_instance: Any) -> None:
     """Initialize performance-related cached attributes."""
     pg_instance._dialect = pg_instance._engine.dialect
-    pg_instance._cached_regex = re.compile(r"\n\s+")
 
 
 def create_engine_and_session(cfg: Any) -> tuple[sqlalchemy.engine.Engine, Any]:
     """Create SQLAlchemy engine and session factory."""
     engine_kwargs = {"poolclass": sqlalchemy.pool.NullPool}
-    engine = sqlalchemy.create_engine(cfg.url, **engine_kwargs)
+    engine = sqlalchemy.create_engine(Envelope(cfg.url).reveal(), **engine_kwargs)
     session_cls = sqlalchemy.orm.sessionmaker(bind=engine)
     return engine, session_cls
 
@@ -131,8 +133,9 @@ class QueryLogger:
         self._query_lg_level = query_lg_level
         self._whitespace_regex = re.compile(r"\s+")
         self._dialect = sqlalchemy.dialects.postgresql.dialect()
-        self._before_cursor_listener: Any = None
-        self._after_execute_listener: Any = None
+        # Held so the listeners can be removed: event.remove needs the same function object
+        self._before_cursor_listener: Any = None  # cq: keep held for event.remove
+        self._after_execute_listener: Any = None  # cq: keep held for event.remove
 
     @lru_cache(maxsize=1000)
     def format_query_string(self, query_str: str) -> str:
@@ -149,7 +152,7 @@ class QueryLogger:
         formatted = self._whitespace_regex.sub(
             " ", query_str.replace("\n", " ").replace("\t", " ")
         )
-        return cast(str, formatted.strip())
+        return formatted.strip()
 
     def create_after_execute_hook(self) -> Any:
         """Create and return the after_execute event listener."""
@@ -235,10 +238,10 @@ class ConfigValidator:
         if not hasattr(cfg, "url") or not cfg.url:
             raise ValueError("Database URL is required")
 
-        if not isinstance(cfg.url, str):
+        if not isinstance(cfg.url, (str, Envelope)):
             raise ValueError("Database URL must be a string")
 
-        if not cfg.url.startswith(("postgresql://", "postgres://")):
+        if not Envelope(cfg.url).reveal().startswith(("postgresql://", "postgres://")):
             raise ValueError(
                 "Database URL must start with 'postgresql://' or 'postgres://'"
             )

@@ -5,7 +5,7 @@
 PostgreSQL lifecycle commands.
 
 Parent tool `pg` with per-verb sub-tools. Each sub-tool projects the
-resolved YAML config (``pgserver.*`` / ``dbs.*``) into the ``_INFRA_PG_*``
+resolved YAML config (``pgserver.*`` / ``dbs.*``) into the ``_APPINFRA_PG_*``
 wire protocol and execs ``appinfra/scripts/pg.sh <verb>``. Location of
 pg.sh is resolved from ``appinfra.__file__`` so wheel installs work
 without a repo checkout.
@@ -28,6 +28,7 @@ import appinfra
 
 from ...app.tools import Tool, ToolConfig
 from ...app.tracing.traceable import Traceable
+from ...envelope import Envelope
 
 _SUPPORTED_POSTGRES_CONF = {
     "max_connections",
@@ -89,7 +90,7 @@ def _project_postgres_conf(postgres_conf: Any) -> dict[str, str]:
 
 def _project_env(cfg: Any) -> dict[str, str]:
     """
-    Project resolved YAML config → ``_INFRA_PG_*`` wire-protocol env vars.
+    Project resolved YAML config → ``_APPINFRA_PG_*`` wire-protocol env vars.
 
     Mirrors ``appinfra/scripts/pg-config.sh`` + ``Makefile.pg`` so the CLI
     path and the Make path produce identical container state. Missing
@@ -101,18 +102,20 @@ def _project_env(cfg: Any) -> dict[str, str]:
     knobs = _project_postgres_conf(cfg.get("pgserver.postgres_conf", {}) or {})
 
     return {
-        "_INFRA_PG_CONTAINER_NAME": str(cfg.get("pgserver.name", "") or ""),
-        "_INFRA_PG_VERSION": str(version),
-        "_INFRA_PG_HOST": str(cfg.get("pgserver.host", "127.0.0.1") or "127.0.0.1"),
-        "_INFRA_PG_PORT": str(cfg.get("pgserver.port", "") or ""),
-        "_INFRA_PG_PORT_R": str(cfg.get("pgserver.replica.port", "") or ""),
-        "_INFRA_PG_USER": str(cfg.get("pgserver.user", "postgres") or "postgres"),
-        "_INFRA_PG_REPLICA_ENABLED": "true" if replica_enabled else "false",
-        "_INFRA_PG_IMAGE": resolved_image,
-        "_INFRA_PG_MAX_CONNECTIONS": knobs.get("MAX_CONNECTIONS", ""),
-        "_INFRA_PG_SHARED_PRELOAD_LIBRARIES": knobs.get("SHARED_PRELOAD_LIBRARIES", ""),
-        "_INFRA_PG_WORK_MEM": knobs.get("WORK_MEM", ""),
-        "_INFRA_PG_AUTOVACUUM": knobs.get("AUTOVACUUM", ""),
+        "_APPINFRA_PG_CONTAINER_NAME": str(cfg.get("pgserver.name", "") or ""),
+        "_APPINFRA_PG_VERSION": str(version),
+        "_APPINFRA_PG_HOST": str(cfg.get("pgserver.host", "127.0.0.1") or "127.0.0.1"),
+        "_APPINFRA_PG_PORT": str(cfg.get("pgserver.port", "") or ""),
+        "_APPINFRA_PG_PORT_R": str(cfg.get("pgserver.replica.port", "") or ""),
+        "_APPINFRA_PG_USER": str(cfg.get("pgserver.user", "postgres") or "postgres"),
+        "_APPINFRA_PG_REPLICA_ENABLED": "true" if replica_enabled else "false",
+        "_APPINFRA_PG_IMAGE": resolved_image,
+        "_APPINFRA_PG_MAX_CONNECTIONS": knobs.get("MAX_CONNECTIONS", ""),
+        "_APPINFRA_PG_SHARED_PRELOAD_LIBRARIES": knobs.get(
+            "SHARED_PRELOAD_LIBRARIES", ""
+        ),
+        "_APPINFRA_PG_WORK_MEM": knobs.get("WORK_MEM", ""),
+        "_APPINFRA_PG_AUTOVACUUM": knobs.get("AUTOVACUUM", ""),
     }
 
 
@@ -120,9 +123,9 @@ def _detect_runtime_env() -> dict[str, str]:
     """
     Auto-detect a container runtime for pg.sh when the caller didn't set one.
 
-    Precedence: honor an explicit ``INFRA_CONTAINER_CMD`` (Makefile.config
+    Precedence: honor an explicit ``APPINFRA_CONTAINER_CMD`` (Makefile.config
     does this); else prefer ``podman`` if on PATH; else ``docker``. Sets
-    ``INFRA_COMPOSE_CMD`` to a matching ``<runtime> compose`` when
+    ``APPINFRA_COMPOSE_CMD`` to a matching ``<runtime> compose`` when
     unset. Falls through empty if neither is present — pg.sh will then
     report its own missing-runtime error.
 
@@ -131,16 +134,16 @@ def _detect_runtime_env() -> dict[str, str]:
     provider <<<<`` banner stays out of the user's output. The shim was
     only going to invoke ``podman-compose`` anyway.
     """
-    if os.environ.get("INFRA_CONTAINER_CMD"):
+    if os.environ.get("APPINFRA_CONTAINER_CMD"):
         return {}
     for runtime in ("podman", "docker"):
         if shutil.which(runtime):
-            env = {"INFRA_CONTAINER_CMD": runtime}
-            if not os.environ.get("INFRA_COMPOSE_CMD"):
+            env = {"APPINFRA_CONTAINER_CMD": runtime}
+            if not os.environ.get("APPINFRA_COMPOSE_CMD"):
                 if runtime == "podman" and shutil.which("podman-compose"):
-                    env["INFRA_COMPOSE_CMD"] = "podman-compose"
+                    env["APPINFRA_COMPOSE_CMD"] = "podman-compose"
                 else:
-                    env["INFRA_COMPOSE_CMD"] = f"{runtime} compose"
+                    env["APPINFRA_COMPOSE_CMD"] = f"{runtime} compose"
             return env
     return {}
 
@@ -148,7 +151,7 @@ def _detect_runtime_env() -> dict[str, str]:
 # Verbs that are safe no-ops when the resolved config carries no
 # ``pgserver.name`` — nothing to stop, inspect, or tail. The rest need a
 # configured server and refuse with a hint instead of leaking pg.sh's
-# ``_INFRA_PG_CONTAINER_NAME required`` guard error.
+# ``_APPINFRA_PG_CONTAINER_NAME required`` guard error.
 _NO_CONFIG_NOOP_VERBS = frozenset({"down", "info", "logs"})
 
 
@@ -246,13 +249,13 @@ class PgUpTool(_PgVerbTool):
         )
 
     def _extra_env(self) -> dict[str, str]:
-        """Set _INFRA_PG_MODE, _INFRA_PG_WAIT, and _INFRA_PG_WAIT_TIMEOUT from flags."""
+        """Set _APPINFRA_PG_MODE, _APPINFRA_PG_WAIT, and _APPINFRA_PG_WAIT_TIMEOUT from flags."""
         env = {
-            "_INFRA_PG_MODE": "repl" if self.args.repl else "single",
-            "_INFRA_PG_WAIT": "0" if self.args.no_wait else "1",
+            "_APPINFRA_PG_MODE": "repl" if self.args.repl else "single",
+            "_APPINFRA_PG_WAIT": "0" if self.args.no_wait else "1",
         }
         if self.args.timeout is not None:
-            env["_INFRA_PG_WAIT_TIMEOUT"] = str(self.args.timeout)
+            env["_APPINFRA_PG_WAIT_TIMEOUT"] = str(self.args.timeout)
         return env
 
 
@@ -278,10 +281,10 @@ class PgDownTool(_PgVerbTool):
         )
 
     def _extra_env(self) -> dict[str, str]:
-        """Set _INFRA_PG_WAIT and _INFRA_PG_WAIT_TIMEOUT from flags."""
-        env = {"_INFRA_PG_WAIT": "0" if self.args.no_wait else "1"}
+        """Set _APPINFRA_PG_WAIT and _APPINFRA_PG_WAIT_TIMEOUT from flags."""
+        env = {"_APPINFRA_PG_WAIT": "0" if self.args.no_wait else "1"}
         if self.args.timeout is not None:
-            env["_INFRA_PG_WAIT_TIMEOUT"] = str(self.args.timeout)
+            env["_APPINFRA_PG_WAIT_TIMEOUT"] = str(self.args.timeout)
         return env
 
 
@@ -307,10 +310,10 @@ class PgRebootTool(_PgVerbTool):
         )
 
     def _extra_env(self) -> dict[str, str]:
-        """Set _INFRA_PG_WAIT and _INFRA_PG_WAIT_TIMEOUT from flags."""
-        env = {"_INFRA_PG_WAIT": "0" if self.args.no_wait else "1"}
+        """Set _APPINFRA_PG_WAIT and _APPINFRA_PG_WAIT_TIMEOUT from flags."""
+        env = {"_APPINFRA_PG_WAIT": "0" if self.args.no_wait else "1"}
         if self.args.timeout is not None:
-            env["_INFRA_PG_WAIT_TIMEOUT"] = str(self.args.timeout)
+            env["_APPINFRA_PG_WAIT_TIMEOUT"] = str(self.args.timeout)
         return env
 
 
@@ -372,8 +375,8 @@ class PgCleanTool(_PgVerbTool):
         )
 
     def _extra_env(self) -> dict[str, str]:
-        """Project --db list into the _INFRA_PG_DATABASES allowlist."""
-        return {"_INFRA_PG_DATABASES": " ".join(self.args.db)}
+        """Project --db list into the _APPINFRA_PG_DATABASES allowlist."""
+        return {"_APPINFRA_PG_DATABASES": " ".join(self.args.db)}
 
 
 # Exact resource names touched by `pg erase` for a given pgserver.name.
@@ -387,7 +390,7 @@ _ERASE_NETWORK_SUFFIXES = ("_default",)
 def _resolve_preview_runtime() -> str | None:
     """Runtime binary to use for the pre-erase inventory query. None means
     the check is skipped and pg.sh's own runtime pre-flight will fire."""
-    explicit = os.environ.get("INFRA_CONTAINER_CMD", "").strip()
+    explicit = os.environ.get("APPINFRA_CONTAINER_CMD", "").strip()
     if explicit:
         return explicit if shutil.which(explicit) else None
     for r in ("podman", "docker"):
@@ -505,8 +508,7 @@ def _append_group(lines: list[str], label: str, items: list[str]) -> None:
         lines.append(f"    {label} (none)")
         return
     lines.append(f"    {label} {items[0]}")
-    for extra in items[1:]:
-        lines.append(f"{pad}{extra}")
+    lines.extend(f"{pad}{extra}" for extra in items[1:])
 
 
 def _prompt_erase_confirm() -> int | None:
@@ -677,11 +679,10 @@ class PgUrlTool(Tool):
         if self.args.db:
             url = cfg.get(f"dbs.{self.args.db}.url")
             if not url:
-                self.lg.error(  # type: ignore[union-attr]
-                    "no dbs entry found", extra={"name": self.args.db}
-                )
+                self.lg.error("no dbs entry found", extra={"name": self.args.db})
                 return 1
-            print(url)
+            # Printing the URL is this command's purpose: open a secret one
+            print(Envelope(url).reveal())
             return 0
 
         host = cfg.get("pgserver.host", "127.0.0.1") or "127.0.0.1"
@@ -689,12 +690,12 @@ class PgUrlTool(Tool):
         if self.args.target == "standby":
             port = cfg.get("pgserver.replica.port")
             if not port:
-                self.lg.error("pgserver.replica.port not set")  # type: ignore[union-attr]
+                self.lg.error("pgserver.replica.port not set")
                 return 1
         else:
             port = cfg.get("pgserver.port")
             if not port:
-                self.lg.error("pgserver.port not set")  # type: ignore[union-attr]
+                self.lg.error("pgserver.port not set")
                 return 1
         url_host = f"[{host}]" if ":" in host and not host.startswith("[") else host
         print(f"postgresql://{quote(str(user), safe='')}@{url_host}:{port}")
@@ -707,7 +708,7 @@ class PgTool(Tool):
 
     Grouping-only; requires an explicit subcommand. Each subcommand reads
     the resolved YAML config and execs ``appinfra/scripts/pg.sh`` under the
-    ``_INFRA_PG_*`` wire protocol.
+    ``_APPINFRA_PG_*`` wire protocol.
     """
 
     def __init__(self, parent: Traceable | None = None):

@@ -32,7 +32,7 @@ except ImportError:
     LoggingConfig: type[Any] | None = None  # type: ignore[no-redef]
     DatabaseConfig: type[Any] | None = None  # type: ignore[no-redef]
 
-    def validate_config(config_dict: dict[str, Any]) -> dict[str, Any]:  # type: ignore[no-redef,misc]
+    def validate_config(config_dict: dict[str, Any]) -> dict[str, Any]:  # type: ignore[misc]
         """No-op validation when pydantic is not installed."""
         return config_dict
 

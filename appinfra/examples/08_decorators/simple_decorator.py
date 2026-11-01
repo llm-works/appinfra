@@ -21,7 +21,7 @@ from pathlib import Path
 # Allow running from a source checkout without installing the package.
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
-from appinfra.app import App
+from appinfra.app import App, Tool
 from appinfra.dot_dict import DotDict
 
 # Create app with simple config
@@ -41,7 +41,7 @@ greet = app.argument("--enthusiastic", action="store_true", help="Add excitement
 )
 
 
-def analyze_func(self):
+def analyze_func(self: Tool) -> int:
     """Analyze a data file."""
     if self.args.verbose:
         self.lg.info(f"Analyzing file: {self.args.file}")
@@ -67,7 +67,7 @@ analyze = app.argument("--verbose", action="store_true", help="Verbose output")(
 @app.argument("--input", required=True, help="Input file")
 @app.argument("--output", required=True, help="Output file")
 @app.argument("--workers", type=int, default=4, help="Number of workers")
-def process(self):
+def process(self: Tool) -> int:
     """Process data with multiple workers."""
     self.lg.info(f"Processing {self.args.input} -> {self.args.output}")
     self.lg.info(f"Using {self.args.workers} workers")

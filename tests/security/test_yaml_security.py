@@ -3,12 +3,13 @@
 
 """Security tests for YAML module (infra/yaml.py)."""
 
+from io import StringIO
 from pathlib import Path
 
 import pytest
 import yaml
 
-from appinfra.yaml import Loader
+from appinfra.yaml import Loader, load
 from tests.security.payloads.injection import YAML_CODE_EXECUTION
 from tests.security.payloads.resource_exhaustion import (
     BILLION_LAUGHS_YAML,
@@ -22,8 +23,6 @@ from tests.security.payloads.traversal import (
 )
 
 
-@pytest.mark.security
-@pytest.mark.unit
 @pytest.mark.parametrize("payload", YAML_CODE_EXECUTION)
 def test_yaml_code_execution_blocked(payload: str):
     """
@@ -49,8 +48,6 @@ def test_yaml_code_execution_blocked(payload: str):
         pass
 
 
-@pytest.mark.security
-@pytest.mark.integration
 @pytest.mark.parametrize("traversal_path", CLASSIC_TRAVERSAL + ABSOLUTE_PATH_ESCAPE)
 def test_yaml_include_path_traversal(
     traversal_path: str, secure_temp_project: Path, write_yaml_files
@@ -98,8 +95,6 @@ def test_yaml_include_path_traversal(
             ), f"Expected include/traversal error, got: {excinfo.value}"
 
 
-@pytest.mark.security
-@pytest.mark.integration
 @pytest.mark.expected_skip  # Skips on Windows (no /etc/passwd)
 def test_yaml_include_symlink_attack(secure_temp_project: Path):
     """
@@ -143,8 +138,6 @@ def test_yaml_include_symlink_attack(secure_temp_project: Path):
             loader.get_single_data()
 
 
-@pytest.mark.security
-@pytest.mark.integration
 def test_yaml_include_depth_bomb(secure_temp_project: Path):
     """
     Verify max_include_depth limit prevents stack exhaustion.
@@ -177,8 +170,6 @@ def test_yaml_include_depth_bomb(secure_temp_project: Path):
             loader.get_single_data()
 
 
-@pytest.mark.security
-@pytest.mark.integration
 def test_yaml_billion_laughs_attack(secure_temp_project: Path):
     """
     Verify SafeLoader prevents YAML bomb (billion laughs) attacks.
@@ -208,8 +199,6 @@ def test_yaml_billion_laughs_attack(secure_temp_project: Path):
         assert data is not None
 
 
-@pytest.mark.security
-@pytest.mark.integration
 def test_yaml_circular_include_detection(secure_temp_project: Path):
     """
     Verify circular include detection prevents infinite loops.
@@ -242,8 +231,6 @@ def test_yaml_circular_include_detection(secure_temp_project: Path):
             loader.get_single_data()
 
 
-@pytest.mark.security
-@pytest.mark.unit
 @pytest.mark.parametrize("payload", NULL_BYTE_BYPASS)
 def test_yaml_null_byte_in_include_path(payload: str, secure_temp_project: Path):
     """
@@ -262,25 +249,23 @@ def test_yaml_null_byte_in_include_path(payload: str, secure_temp_project: Path)
     config_path.write_text(malicious_config)
 
     # Attempt to load - should fail (null byte rejected by YAML reader)
-    with open(config_path) as f:
-        with pytest.raises(
-            (yaml.YAMLError, yaml.reader.ReaderError, ValueError, OSError)
-        ):
-            # Various possible errors depending on how null byte is handled:
-            # - yaml.reader.ReaderError: Null byte rejected by YAML reader during parsing (most common)
-            # - YAMLError: Include file not found
-            # - ValueError: Invalid path
-            # - OSError: Path contains null byte
-            loader = Loader(
-                f,
-                current_file=config_path,
-                origin=secure_temp_project,
-            )
-            loader.get_single_data()
+    with (
+        open(config_path) as f,
+        pytest.raises((yaml.YAMLError, yaml.reader.ReaderError, ValueError, OSError)),
+    ):
+        # Various possible errors depending on how null byte is handled:
+        # - yaml.reader.ReaderError: Null byte rejected by YAML reader during parsing (most common)
+        # - YAMLError: Include file not found
+        # - ValueError: Invalid path
+        # - OSError: Path contains null byte
+        loader = Loader(
+            f,
+            current_file=config_path,
+            origin=secure_temp_project,
+        )
+        loader.get_single_data()
 
 
-@pytest.mark.security
-@pytest.mark.integration
 def test_allowed_paths_does_not_broaden_beyond_listed_entries(
     secure_temp_project: Path, tmp_path: Path
 ):
@@ -317,8 +302,6 @@ def test_allowed_paths_does_not_broaden_beyond_listed_entries(
             loader.get_single_data()
 
 
-@pytest.mark.security
-@pytest.mark.integration
 def test_config_outside_project_marker_bounds_to_config_parent(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
@@ -348,8 +331,6 @@ def test_config_outside_project_marker_bounds_to_config_parent(
         Config(str(config_path), allowed_paths=["~/.does-not-match.yaml"])
 
 
-@pytest.mark.security
-@pytest.mark.integration
 def test_load_file_no_origin_denies_unlisted_absolute(tmp_path: Path):
     """
     load_file(origin=None, allowed_paths=[...]) treats the allowlist
@@ -378,8 +359,6 @@ def test_load_file_no_origin_denies_unlisted_absolute(tmp_path: Path):
     assert result == {"x": {"ok": True}}
 
 
-@pytest.mark.security
-@pytest.mark.integration
 def test_relative_include_permitted_without_origin(tmp_path: Path):
     """
     Relative includes are permitted when origin is not set — the
@@ -396,8 +375,6 @@ def test_relative_include_permitted_without_origin(tmp_path: Path):
     assert result == {"x": {"ok": True}}
 
 
-@pytest.mark.security
-@pytest.mark.integration
 def test_relative_include_bounded_by_origin_when_set(tmp_path: Path):
     """
     Regression guard: when origin is set, a relative include using
@@ -418,8 +395,6 @@ def test_relative_include_bounded_by_origin_when_set(tmp_path: Path):
         load_file(str(base), origin=project)
 
 
-@pytest.mark.security
-@pytest.mark.integration
 def test_absolute_inside_origin_with_allowed_paths_set(tmp_path: Path):
     """
     Regression guard: an absolute include that resolves inside origin
@@ -441,3 +416,179 @@ def test_absolute_inside_origin_with_allowed_paths_set(tmp_path: Path):
 
     result = load_file(str(main), origin=proj, allowed_paths=["~/.other.yaml"])
     assert result == {"x": {"ok": True}}
+
+
+@pytest.fixture
+def malformed_yaml():
+    """Provide malformed YAML content."""
+    return """
+app:
+  name: test
+  invalid: [unclosed list
+  another: value
+"""
+
+
+class TestSecurityValidation:
+    """Test security aspects of YAML parsing."""
+
+    @pytest.mark.parametrize(
+        "payload",
+        [
+            "../../../nonexistent_file.yaml",
+            "....//....//nonexistent.yaml",
+            "/nonexistent/path/file.yaml",
+        ],
+    )
+    def test_path_traversal_to_nonexistent_files(self, yaml_files_dir, payload):
+        """Test that path traversal to non-existent files fails gracefully.
+
+        Both outcomes are acceptable: a relative path may fall through to
+        the existence check ("Include file not found"), while an absolute
+        path fails at the authorization check before existence is probed
+        ("is not authorized"). Either way the loader must raise, not crash.
+        """
+        yaml_content = f"""
+data: !include "{payload}"
+"""
+        with pytest.raises(
+            yaml.YAMLError, match="Include file not found|is not authorized"
+        ):
+            load(StringIO(yaml_content), current_file=yaml_files_dir / "test.yaml")
+
+    def test_absolute_path_to_nonexistent_file(self, yaml_files_dir):
+        """Test absolute paths to non-existent files fail."""
+        yaml_content = """
+data: !include "/nonexistent/absolute/path/config.yaml"
+"""
+        with pytest.raises(yaml.YAMLError, match="Include file not found"):
+            load(StringIO(yaml_content), current_file=yaml_files_dir / "test.yaml")
+
+    def test_malformed_yaml_raises_error(self, malformed_yaml):
+        """Test malformed YAML raises appropriate error."""
+        with pytest.raises(yaml.YAMLError):
+            load(StringIO(malformed_yaml))
+
+    def test_yaml_bomb_protection(self):
+        """Test protection against YAML bombs (SafeLoader)."""
+        # YAML bomb attempt (billion laughs attack)
+        yaml_bomb = """
+a: &a ["lol","lol","lol","lol","lol","lol","lol","lol","lol"]
+b: &b [*a,*a,*a,*a,*a,*a,*a,*a,*a]
+c: &c [*b,*b,*b,*b,*b,*b,*b,*b,*b]
+d: &d [*c,*c,*c,*c,*c,*c,*c,*c,*c]
+"""
+        # SafeLoader should handle this gracefully (might be slow but won't crash)
+        data = load(StringIO(yaml_bomb))
+        assert data is not None
+
+    def test_arbitrary_code_execution_prevented(self):
+        """Test that arbitrary code execution is prevented."""
+        # Attempt to use !!python/object to execute code
+        malicious_yaml = """
+data: !!python/object/apply:os.system ["echo pwned"]
+"""
+        # SafeLoader should reject this
+        with pytest.raises(yaml.YAMLError):
+            load(StringIO(malicious_yaml))
+
+    def test_path_traversal_protection_with_origin(self, tmp_path):
+        """Test that path traversal is blocked when origin is set."""
+        # Create project structure
+        origin = tmp_path / "project"
+        origin.mkdir()
+        config_dir = origin / "config"
+        config_dir.mkdir()
+
+        # Create a file outside origin
+        outside_file = tmp_path / "outside.yaml"
+        outside_file.write_text("secret: password")
+
+        # Create main config that tries to include file outside origin
+        main_config = config_dir / "main.yaml"
+        main_config.write_text(
+            """
+data: !include "../../outside.yaml"
+"""
+        )
+
+        # Should raise security error
+        with (
+            open(main_config) as f,
+            pytest.raises(yaml.YAMLError, match="Security.*outside origin"),
+        ):
+            load(f, current_file=main_config, origin=origin)
+
+    def test_path_traversal_protection_allows_within_root(self, tmp_path):
+        """Test that includes within the origin work when origin is set."""
+        # Create project structure
+        origin = tmp_path / "project"
+        origin.mkdir()
+        config_dir = origin / "config"
+        config_dir.mkdir()
+
+        # Create included file within the origin
+        included_file = origin / "shared.yaml"
+        included_file.write_text("shared_value: 42")
+
+        # Create main config that includes file within the origin
+        main_config = config_dir / "main.yaml"
+        main_config.write_text(
+            """
+data: !include "../shared.yaml"
+"""
+        )
+
+        # Should work fine
+        with open(main_config) as f:
+            result = load(f, current_file=main_config, origin=origin)
+
+        assert result["data"]["shared_value"] == 42
+
+    def test_path_traversal_without_origin_unrestricted(self, tmp_path):
+        """Test that includes work normally when origin is not set."""
+        # Create files outside the config directory
+        parent_dir = tmp_path / "parent"
+        parent_dir.mkdir()
+        included_file = parent_dir / "included.yaml"
+        included_file.write_text("value: 123")
+
+        config_dir = parent_dir / "config"
+        config_dir.mkdir()
+        main_config = config_dir / "main.yaml"
+        main_config.write_text(
+            """
+data: !include "../included.yaml"
+"""
+        )
+
+        # Without origin, traversal should work (backward compatibility)
+        with open(main_config) as f:
+            result = load(f, current_file=main_config)
+
+        assert result["data"]["value"] == 123
+
+    def test_absolute_path_outside_origin_blocked(self, tmp_path):
+        """Test that absolute paths outside origin are blocked."""
+        # Create project structure
+        origin = tmp_path / "project"
+        origin.mkdir()
+
+        # Create file outside origin with absolute path
+        outside_file = tmp_path / "secrets.yaml"
+        outside_file.write_text("password: secret123")
+
+        # Create main config with absolute path to outside file
+        main_config = origin / "config.yaml"
+        main_config.write_text(
+            f"""
+data: !include "{outside_file}"
+"""
+        )
+
+        # Should raise security error
+        with (
+            open(main_config) as f,
+            pytest.raises(yaml.YAMLError, match="Security.*outside origin"),
+        ):
+            load(f, current_file=main_config, origin=origin)

@@ -19,7 +19,7 @@ What This Example Shows:
 Running the Example:
     # From the project root
     # From the infra project root
-    ~/.venv/bin/python examples/pg_test_helper_custom_config.py
+    ~/.venv/bin/python examples/05_database/pg_test_helper_custom_config.py
 
 Example Tests:
 
@@ -99,6 +99,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 import sqlalchemy
+import sqlalchemy.orm
 
 try:
     from tests.helpers.pg.helper import PGTestCaseHelper
@@ -113,7 +114,7 @@ class TestPGHelperCustomConfig(PGTestCaseHelper):
     """Example tests using PGTestCaseHelper with custom config."""
 
     @classmethod
-    def setUpClass(cls):
+    def setUpClass(cls) -> None:
         """Set up with custom config file."""
         # Set custom config path (in this case, appinfra's own config for demo)
         # In real usage, you would point to your custom config file
@@ -123,7 +124,9 @@ class TestPGHelperCustomConfig(PGTestCaseHelper):
         cls.set_config_path(str(spec.resolve().path))
         super().setUpClass()
 
-    def _create_config_test_table(self, session, table_name):
+    def _create_config_test_table(
+        self, session: sqlalchemy.orm.Session, table_name: str
+    ) -> None:
         """Create config test table."""
         session.execute(
             sqlalchemy.text(
@@ -137,7 +140,13 @@ class TestPGHelperCustomConfig(PGTestCaseHelper):
             )
         )
 
-    def _insert_config_data(self, session, table_name, config_source, test_data):
+    def _insert_config_data(
+        self,
+        session: sqlalchemy.orm.Session,
+        table_name: str,
+        config_source: str,
+        test_data: str,
+    ) -> None:
         """Insert config test data."""
         session.execute(
             sqlalchemy.text(
@@ -149,17 +158,22 @@ class TestPGHelperCustomConfig(PGTestCaseHelper):
         )
         session.commit()
 
-    def _verify_config_data(self, session, table_name, expected_config_source):
+    def _verify_config_data(
+        self,
+        session: sqlalchemy.orm.Session,
+        table_name: str,
+        expected_config_source: str,
+    ) -> None:
         """Verify config test data."""
         result = session.execute(sqlalchemy.text(f"SELECT COUNT(*) FROM {table_name}"))
-        self.assertEqual(result.fetchone()[0], 1)
+        self.assertEqual(result.scalar_one(), 1)
 
         result = session.execute(
             sqlalchemy.text(f"SELECT config_source FROM {table_name}")
         )
-        self.assertEqual(result.fetchone()[0], expected_config_source)
+        self.assertEqual(result.scalar_one(), expected_config_source)
 
-    def test_with_custom_config(self):
+    def test_with_custom_config(self) -> None:
         """Test using custom configuration."""
         print("\n=== Running test with custom config ===")
 
@@ -192,7 +206,9 @@ class TestPGHelperCustomConfig(PGTestCaseHelper):
 class TestPGHelperDefaultConfig(PGTestCaseHelper):
     """Example tests using PGTestCaseHelper with default config (no custom path)."""
 
-    def _create_config_test_table(self, session, table_name):
+    def _create_config_test_table(
+        self, session: sqlalchemy.orm.Session, table_name: str
+    ) -> None:
         """Create config test table."""
         session.execute(
             sqlalchemy.text(
@@ -206,7 +222,13 @@ class TestPGHelperDefaultConfig(PGTestCaseHelper):
             )
         )
 
-    def _insert_config_data(self, session, table_name, config_source, test_data):
+    def _insert_config_data(
+        self,
+        session: sqlalchemy.orm.Session,
+        table_name: str,
+        config_source: str,
+        test_data: str,
+    ) -> None:
         """Insert config test data."""
         session.execute(
             sqlalchemy.text(
@@ -218,17 +240,22 @@ class TestPGHelperDefaultConfig(PGTestCaseHelper):
         )
         session.commit()
 
-    def _verify_config_data(self, session, table_name, expected_config_source):
+    def _verify_config_data(
+        self,
+        session: sqlalchemy.orm.Session,
+        table_name: str,
+        expected_config_source: str,
+    ) -> None:
         """Verify config test data."""
         result = session.execute(sqlalchemy.text(f"SELECT COUNT(*) FROM {table_name}"))
-        self.assertEqual(result.fetchone()[0], 1)
+        self.assertEqual(result.scalar_one(), 1)
 
         result = session.execute(
             sqlalchemy.text(f"SELECT config_source FROM {table_name}")
         )
-        self.assertEqual(result.fetchone()[0], expected_config_source)
+        self.assertEqual(result.scalar_one(), expected_config_source)
 
-    def test_with_default_config(self):
+    def test_with_default_config(self) -> None:
         """Test using default configuration (no custom config path set)."""
         print("\n=== Running test with default config ===")
 

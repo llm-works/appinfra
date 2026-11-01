@@ -18,7 +18,7 @@ Key Features Demonstrated:
 - Fallback to console when database fails
 
 Usage:
-    python examples/critical_flush_demo.py
+    python examples/05_database/advanced_critical_flush.py
 
 Requirements:
     - PostgreSQL database running
@@ -28,18 +28,19 @@ Requirements:
 # ci-timeout: 20
 # ci-requires: pg
 
-import logging
 import sys
-import time
 from datetime import datetime
 from pathlib import Path
+from typing import Any
+from unittest.mock import patch
 
 import sqlalchemy
 
 # Allow running from a source checkout without installing the package.
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
-from appinfra.config import Config
+from appinfra.db.pg import PG
+from appinfra.log import Logger
 from appinfra.log.builder.database import DatabaseLoggingBuilder
 
 try:
@@ -54,15 +55,14 @@ except ImportError:
 class CriticalFlushDemo:
     """Demonstration of critical flush functionality."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize the demo application."""
-        self.config = Config("etc/infra.yaml")
-        self.db_interface = None
-        self.logger = None
+        self.db_interface: PG
+        self.logger: Logger
         self.setup_database()
         self.setup_logging()
 
-    def setup_database(self):
+    def setup_database(self) -> None:
         """Set up the database connection and create required tables."""
         print("🔧 Setting up database...")
 
@@ -79,7 +79,7 @@ class CriticalFlushDemo:
         self.create_error_logs_table()
         print("✅ Database setup complete")
 
-    def create_error_logs_table(self):
+    def create_error_logs_table(self) -> None:
         """Create the error_logs table for demonstration."""
         create_table_sql = """
         CREATE TABLE IF NOT EXISTS error_logs (
@@ -103,56 +103,52 @@ class CriticalFlushDemo:
             session.execute(sqlalchemy.text(create_table_sql))
             session.commit()
 
-    def drop_error_logs_table(self):
+    def drop_error_logs_table(self) -> None:
         """Drop the demonstration table so repeated runs start clean."""
         with self.db_interface.session() as session:
             session.execute(sqlalchemy.text("DROP TABLE IF EXISTS error_logs"))
             session.commit()
 
-    def _add_console_handler(self):
-        """Add console handler to logger for immediate feedback."""
-        console_handler = logging.StreamHandler()
-        console_handler.setLevel(logging.INFO)
-        console_formatter = logging.Formatter(
-            "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-        )
-        console_handler.setFormatter(console_formatter)
-        self.logger.addHandler(console_handler)
-
-    def setup_logging(self):
-        """Set up logging with database handler and critical flush."""
+    def setup_logging(self) -> None:
+        """Set up logging with database handler, critical flush and console output."""
         print("🔧 Setting up logging with critical flush...")
 
-        builder = DatabaseLoggingBuilder("critical_flush_demo")
-        builder.with_database_table(
-            table_name="error_logs",
-            db_interface=self.db_interface,
-            level=logging.DEBUG,
-            batch_size=5,
-            flush_interval=10.0,
-        ).with_critical_error_flush(
-            enabled=True,
-            trigger_fields=["exception", "critical", "fatal"],
-            timeout=5.0,
-            fallback_to_console=True,
+        self.logger = (
+            DatabaseLoggingBuilder("critical_flush_demo")
+            .with_database_table(
+                table_name="error_logs",
+                db_interface=self.db_interface,
+                level="debug",
+                batch_size=5,
+                flush_interval=10.0,
+            )
+            .with_critical_error_flush(
+                enabled=True,
+                trigger_fields=["exception", "critical", "fatal"],
+                timeout=5.0,
+                fallback_to_console=True,
+            )
+            # Console output for immediate feedback
+            .with_console_handler(level="info")
+            .build()
         )
-
-        self.logger = builder.build()
-        self._add_console_handler()
 
         print("✅ Logging setup complete")
 
-    def demonstrate_normal_logging(self):
+    def demonstrate_normal_logging(self) -> None:
         """Demonstrate normal logging (batched)."""
         print("\n📝 Demonstrating normal logging (batched)...")
 
         for i in range(8):
             self.logger.info(f"Normal log message {i + 1} - this will be batched")
-            time.sleep(0.5)  # Small delay to show batching
 
-        print("✅ Normal logging complete - check database for batched entries")
+        print(
+            "✅ Normal logging complete - messages 1-5 were written as one batch; "
+            "6-8 wait until the batch fills or the handler closes (the flush "
+            "interval is checked only when another record arrives)"
+        )
 
-    def demonstrate_critical_error_with_exception(self):
+    def demonstrate_critical_error_with_exception(self) -> None:
         """Demonstrate critical error logging with exception (immediate flush)."""
         print("\n🚨 Demonstrating critical error with exception (immediate flush)...")
 
@@ -175,7 +171,7 @@ class CriticalFlushDemo:
 
         print("✅ Critical error logged - should be immediately flushed to database")
 
-    def demonstrate_critical_error_with_trigger_field(self):
+    def demonstrate_critical_error_with_trigger_field(self) -> None:
         """Demonstrate critical error logging with trigger field (immediate flush)."""
         print(
             "\n🚨 Demonstrating critical error with trigger field (immediate flush)..."
@@ -194,7 +190,7 @@ class CriticalFlushDemo:
 
         print("✅ Critical warning logged - should be immediately flushed to database")
 
-    def demonstrate_fatal_error(self):
+    def demonstrate_fatal_error(self) -> None:
         """Demonstrate fatal error logging (immediate flush)."""
         print("\n💀 Demonstrating fatal error (immediate flush)...")
 
@@ -211,32 +207,29 @@ class CriticalFlushDemo:
 
         print("✅ Fatal error logged - should be immediately flushed to database")
 
-    def demonstrate_database_failure_fallback(self):
+    def demonstrate_database_failure_fallback(self) -> None:
         """Demonstrate fallback to console when database fails."""
         print("\n🔄 Demonstrating database failure fallback...")
 
-        # Temporarily break the database connection
-        original_session = self.db_interface.session
-        self.db_interface.session = lambda: (_ for _ in ()).throw(
-            Exception("Database connection failed")
-        )
-
-        try:
-            # Try to log a critical error - should fallback to console
-            self.logger.error(
-                "Critical error during database failure",
-                exc_info=True,
-                extra={"critical": "database_connection_lost", "retry_count": 3},
-            )
-        except Exception as e:
-            print(f"Expected exception during database failure: {e}")
-        finally:
-            # Restore the database connection
-            self.db_interface.session = original_session
+        # Temporarily break the database connection; restored when the block exits
+        with patch.object(
+            self.db_interface,
+            "session",
+            side_effect=Exception("Database connection failed"),
+        ):
+            try:
+                # Try to log a critical error - should fallback to console
+                self.logger.error(
+                    "Critical error during database failure",
+                    exc_info=True,
+                    extra={"critical": "database_connection_lost", "retry_count": 3},
+                )
+            except Exception as e:
+                print(f"Expected exception during database failure: {e}")
 
         print("✅ Database failure fallback demonstrated")
 
-    def _display_log_row(self, row):
+    def _display_log_row(self, row: sqlalchemy.Row[Any]) -> None:
         """Display a single log row."""
         print(f"ID: {row.id}")
         print(f"Timestamp: {row.timestamp}")
@@ -250,7 +243,7 @@ class CriticalFlushDemo:
         print(f"Created At: {row.created_at}")
         print("-" * 80)
 
-    def query_database_logs(self):
+    def query_database_logs(self) -> None:
         """Query and display logs from the database."""
         print("\n📊 Querying database logs...")
 
@@ -276,28 +269,19 @@ class CriticalFlushDemo:
             for row in rows:
                 self._display_log_row(row)
 
-    def _run_all_demonstrations(self):
+    def _run_all_demonstrations(self) -> None:
         """Execute all demonstration scenarios."""
         # Demonstrate different types of logging
         self.demonstrate_normal_logging()
-        time.sleep(2)  # Wait for any pending flushes
-
         self.demonstrate_critical_error_with_exception()
-        time.sleep(1)
-
         self.demonstrate_critical_error_with_trigger_field()
-        time.sleep(1)
-
         self.demonstrate_fatal_error()
-        time.sleep(1)
-
         self.demonstrate_database_failure_fallback()
-        time.sleep(2)
 
         # Query the database to show results
         self.query_database_logs()
 
-    def _print_demo_summary(self):
+    def _print_demo_summary(self) -> None:
         """Print demo completion summary and key takeaways."""
         print("\n🎉 Critical Flush Demo Complete!")
         print("\nKey Takeaways:")
@@ -308,7 +292,7 @@ class CriticalFlushDemo:
         print("- Fallback to console occurs when database is unavailable")
         print("- Critical flush ensures important errors are not lost during crashes")
 
-    def run_demo(self):
+    def run_demo(self) -> None:
         """Run the complete demonstration."""
         print("🚀 Starting Critical Flush Demo")
         print("=" * 50)
@@ -329,7 +313,7 @@ class CriticalFlushDemo:
                 self.pg_helper.tearDown()
 
 
-def main():
+def main() -> int:
     """Main entry point for the demo."""
     print("Critical Flush Functionality Demo")
     print("This demo shows how critical errors are immediately flushed to the database")

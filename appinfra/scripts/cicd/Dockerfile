@@ -15,17 +15,16 @@ ENV PYTHONUNBUFFERED=1 \
 
 # Install system dependencies
 # - postgresql-client: Required for integration tests
-# - gcc, libpq-dev: Required for building psycopg2-binary
 # - make: Required for Makefile targets
 # - jq: Required for YAML parsing scripts
 # - bc: Required for elapsed time calculations in check.sh
+# - procps: Required for ps, which check.sh uses to stop its process tree
 RUN apt-get update && apt-get install -y \
-    gcc \
-    libpq-dev \
     postgresql-client \
     make \
     jq \
     bc \
+    procps \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /workspace
@@ -35,18 +34,17 @@ WORKDIR /workspace
 # ========================================
 FROM base AS dependencies
 
-# Copy dependency specification and minimal package structure for editable install
-COPY pyproject.toml ./
-COPY appinfra/__init__.py ./appinfra/
+# make setup installs every dependency, not the project: the source tree is
+# mounted at run time. It needs the Makefile and the make framework it includes
+COPY pyproject.toml Makefile ./
+COPY appinfra/scripts/ ./scripts/
+COPY appinfra/etc/ ./etc/
 
-# Create virtual environment at ~/.venv (matches Makefile expectation)
-# This allows the Makefile PYTHON variable to work correctly
-RUN python -m venv /root/.venv && \
-    /root/.venv/bin/pip install --upgrade pip setuptools wheel && \
-    /root/.venv/bin/pip install ".[all]"
-
-# Add venv to PATH so python/pip commands use the venv
+# The venv first on PATH, as if activated: the Makefile takes python3 from PATH
 ENV PATH="/root/.venv/bin:$PATH"
+RUN python -m venv /root/.venv && \
+    /root/.venv/bin/python -m pip install --upgrade pip && \
+    make setup
 
 # ========================================
 # Stage 3: Runtime image

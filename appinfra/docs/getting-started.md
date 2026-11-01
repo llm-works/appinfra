@@ -40,13 +40,13 @@ make setup
 make install
 
 # Install with optional extras
-make install INFRA_DEV_INSTALL_EXTRAS=ui           # Rich terminal UI
-make install INFRA_DEV_INSTALL_EXTRAS=ui,fastapi   # Multiple extras
-make install INFRA_DEV_INSTALL_EXTRAS=dev          # All dev dependencies
+make install APPINFRA_DEV_INSTALL_EXTRAS=ui           # Rich terminal UI
+make install APPINFRA_DEV_INSTALL_EXTRAS=ui,fastapi   # Multiple extras
+make install APPINFRA_DEV_INSTALL_EXTRAS=dev          # All dev dependencies
 
 # For development (editable mode - changes reflect without reinstall)
 make install.e
-make install.e INFRA_DEV_INSTALL_EXTRAS=ui,dev     # Editable with extras
+make install.e APPINFRA_DEV_INSTALL_EXTRAS=ui,dev     # Editable with extras
 
 # Uninstall
 make uninstall
@@ -57,12 +57,13 @@ make uninstall
 **Wheel artifact:** `make install` also drops the built wheel into
 `$VENV/share/appinfra/wheels/` for each env it installs to (byte-identical to what's installed).
 Container builds and ops handoff can pull from there instead of the dev checkout's `dist/`.
+In a virtualenv a missing `share/` is created; any other prefix must already have one.
 
 Alternatively, install directly with pip:
 
 ```bash
 pip install .                  # Base package
-pip install ".[sql]"           # Database support (sqlalchemy, psycopg2)
+pip install ".[sql]"           # Database support (sqlalchemy, psycopg)
 pip install ".[dev]"           # Development tools
 pip install ".[ui]"            # Rich terminal UI
 pip install ".[all]"           # Everything (dev + all optional features)
@@ -367,8 +368,8 @@ make fmt
 # Run all checks (format, lint, type, tests)
 make check
 
-# Preview what checks would run without executing
-INFRA_DRY_RUN=1 make check
+# Preview the commands fmt / lint / type would run, without running them
+APPINFRA_DRY_RUN=1 make lint
 ```
 
 ### Database
@@ -415,17 +416,18 @@ appinfra version --json
 ## Custom Python Environments
 
 Make targets automatically detect Python in this order:
-1. `PYTHON` environment variable (highest priority)
+1. `PYTHON` on the command line or in the environment (highest priority)
 2. `Makefile.local` file (project-local override, gitignored)
-3. `~/.venv/bin/python` (default virtualenv)
+3. `PYTHON` in the project Makefile
+4. `python3` on `PATH`: an activated venv, conda environment or pyenv version
 
 To use a different environment (e.g., conda with CUDA), create a `Makefile.local`:
 
 ```bash
-echo 'PYTHON ?= /path/to/your/python' > Makefile.local
+echo 'PYTHON := /path/to/your/python' > Makefile.local
 ```
 
-Note: Use `?=` (conditional assignment) so environment variables can still override when needed.
+A `PYTHON` from the command line or the environment still overrides it.
 
 All Make commands will then use your custom Python:
 
@@ -440,10 +442,10 @@ Or use the `PYTHON=` prefix for one-off commands:
 PYTHON=/path/to/your/python make install
 ```
 
-To see your current environment configuration:
+To see the interpreter in use, its source and every framework setting:
 
 ```bash
-make env
+make config
 ```
 
 ## Running Scripts Directly

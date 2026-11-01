@@ -5,9 +5,13 @@
 
 from __future__ import annotations
 
+import contextlib
 import multiprocessing as mp
+import sys
 import threading
 import time
+from multiprocessing.context import BaseContext
+from multiprocessing.process import BaseProcess
 from multiprocessing.synchronize import Event as MPEvent
 from typing import Any
 
@@ -63,6 +67,7 @@ class ProcessRunner(Runner):
         service: Service,
         policy: RestartPolicy | None = None,
         stop_timeout: float = 5.0,
+        start_method: str | None = None,
     ) -> None:
         """Initialize process runner.
 
@@ -70,10 +75,16 @@ class ProcessRunner(Runner):
             service: Service to run (must be picklable).
             policy: Restart policy.
             stop_timeout: Seconds to wait for graceful stop.
+            start_method: multiprocessing start method ("fork", "spawn",
+                "forkserver") for the service process and its queues and events;
+                None uses multiprocessing's default. Under fork, a restart forks
+                from the monitor thread, which Python 3.12+ warns may deadlock the
+                child; spawn or forkserver avoids it.
         """
         super().__init__(service, policy)
         self.stop_timeout = stop_timeout
-        self._process: mp.Process | None = None
+        self._start_method = start_method
+        self._process: BaseProcess | None = None
         self._shutdown_event: MPEvent | None = None
         self._healthy_event: MPEvent | None = None
         self._error_queue: mp.Queue[BaseException] | None = None
@@ -92,13 +103,34 @@ class ProcessRunner(Runner):
         self._transition(State.STARTING)
 
         try:
-            log_config = self._create_log_infrastructure()
-            self._create_ipc_primitives()
-            self._spawn_process(log_config)
+            # One context for the process and every queue and event it uses:
+            # multiprocessing refuses a lock from another context in the child
+            ctx = mp.get_context(self._start_method)
+            log_config, listener = self._create_log_infrastructure(ctx)
+            self._create_ipc_primitives(ctx)
+            self._spawn_process(ctx, log_config)
+            # After the fork, so its thread is not running while the child is
+            # forked; the queue holds any records the child sends before then
+            listener.start()
         except Exception:
-            self._cleanup_ipc()
+            self._reap_spawned()
+            # As in stop(): keep the handles of a child that survived, so a
+            # later stop() can retry
+            if not self.is_alive():
+                self._cleanup_ipc()
             self._transition(State.FAILED)
             raise
+
+    def _reap_spawned(self) -> None:
+        """End a child that start() forked before failing, so none is left running."""
+        proc = self._process
+        if proc is None or not proc.is_alive():
+            return
+        proc.terminate()
+        proc.join(timeout=2.0)
+        if proc.is_alive():
+            proc.kill()
+            proc.join(timeout=1.0)
 
     def _run_setup(self) -> None:
         """Run service setup, transition to FAILED on error."""
@@ -110,21 +142,22 @@ class ProcessRunner(Runner):
                 raise
             raise SetupError(self.name, str(e)) from e
 
-    def _create_log_infrastructure(self) -> dict[str, Any]:
-        """Create logging infrastructure for subprocess."""
-        self._log_queue = mp.Queue()
+    def _create_log_infrastructure(
+        self, ctx: BaseContext
+    ) -> tuple[dict[str, Any], LogQueueListener]:
+        """Create the subprocess log queue and its listener, not yet started."""
+        self._log_queue = ctx.Queue()
         log_config = self.service.lg.queue_config(self._log_queue)
         self._log_listener = LogQueueListener(self._log_queue, self.service.lg)
-        self._log_listener.start()
-        return log_config
+        return log_config, self._log_listener
 
-    def _create_ipc_primitives(self) -> None:
+    def _create_ipc_primitives(self, ctx: BaseContext) -> None:
         """Create IPC primitives for subprocess communication."""
-        self._shutdown_event = mp.Event()
-        self._healthy_event = mp.Event()
-        self._error_queue = mp.Queue()
+        self._shutdown_event = ctx.Event()
+        self._healthy_event = ctx.Event()
+        self._error_queue = ctx.Queue()
 
-    def _spawn_process(self, log_config: dict[str, Any]) -> None:
+    def _spawn_process(self, ctx: BaseContext, log_config: dict[str, Any]) -> None:
         """Spawn the subprocess."""
         # Temporarily nullify logger to make service picklable on macOS.
         # macOS uses spawn (not fork), requiring all subprocess args to be
@@ -135,7 +168,8 @@ class ProcessRunner(Runner):
             setattr(self.service, "_lg", None)
 
         try:
-            self._process = mp.Process(
+            # typeshed declares Process on each concrete context, not BaseContext
+            self._process = ctx.Process(  # type: ignore[attr-defined]
                 target=_process_entry,
                 args=(
                     self.service,
@@ -160,7 +194,15 @@ class ProcessRunner(Runner):
 
         # Stop monitor thread first
         self.stop_monitor()
+        self._stop_process(timeout)
 
+    def _stop_for_restart(self) -> None:
+        """Stop the failed process only: a restart runs on the monitor thread,
+        which keeps watching the restarted process."""
+        self._stop_process(None)
+
+    def _stop_process(self, timeout: float | None) -> None:
+        """Signal the subprocess to stop, escalating to terminate and kill."""
         self._transition(State.STOPPING)
         timeout = timeout or self.stop_timeout
 
@@ -207,6 +249,12 @@ class ProcessRunner(Runner):
         )
         self._monitor_thread.start()
 
+    @property
+    def monitoring(self) -> bool:
+        """True while the start_monitor() thread is running."""
+        thread = self._monitor_thread
+        return thread is not None and thread.is_alive()
+
     def stop_monitor(self, timeout: float = 2.0) -> None:
         """Stop the monitor thread.
 
@@ -214,8 +262,15 @@ class ProcessRunner(Runner):
             timeout: Seconds to wait for thread to stop.
         """
         self._stop_monitor_event.set()
-        if self._monitor_thread is not None and self._monitor_thread.is_alive():
-            self._monitor_thread.join(timeout=timeout)
+        thread = self._monitor_thread
+        # Called from the monitor thread itself (e.g. a state hook), there is
+        # nothing to join: the set event ends its loop
+        if (
+            thread is not None
+            and thread.is_alive()
+            and thread is not threading.current_thread()
+        ):
+            thread.join(timeout=timeout)
         self._monitor_thread = None
 
     def _monitor_loop(self, interval: float) -> None:
@@ -233,7 +288,16 @@ class ProcessRunner(Runner):
                     break
 
             # check() handles failure detection and restart
-            self.check()
+            restarted = self.check()
+            # A dead process the policy won't restart again: nothing left to watch. Still
+            # RUNNING means it died after check() looked; the next pass records how it ended.
+            if (
+                not restarted
+                and not self.is_alive()
+                and not self.restart_pending
+                and self._state != State.RUNNING
+            ):
+                break
 
             # Wait for interval or stop signal
             self._stop_monitor_event.wait(timeout=interval)
@@ -252,10 +316,8 @@ class ProcessRunner(Runner):
             self._error_queue = None
         # Stop log listener
         if self._log_listener is not None:
-            try:
+            with contextlib.suppress(Exception):
                 self._log_listener.stop()
-            except Exception:
-                pass
             self._log_listener = None
         if self._log_queue is not None:
             try:
@@ -314,7 +376,7 @@ class ProcessRunner(Runner):
         return None
 
     @property
-    def process(self) -> mp.Process | None:
+    def process(self) -> BaseProcess | None:
         """Underlying process, or None if not started."""
         return self._process
 
@@ -348,7 +410,11 @@ def _process_entry(
     Injects runtime dependencies into the service:
     - ``_lg``: Logger configured to forward to parent via queue
     - ``_shutdown_event``: Event signaled when parent requests shutdown
+
+    The process exits non-zero when the service failed, so the parent's monitor
+    restarts it; exit code 0 means a clean shutdown.
     """
+    exit_code = 0
     try:
         lg = Logger.from_queue_config(log_config, name=f"svc/{service.name}")
         # Inject runtime dependencies (services must have these attributes)
@@ -360,12 +426,26 @@ def _process_entry(
         _start_health_poller(service, shutdown_event, healthy_event)
         service.execute()
     except BaseException as e:
-        try:
+        exit_code = _exit_code(e)
+        with contextlib.suppress(Exception):
             error_queue.put(e)
-        except Exception:
-            pass
     finally:
-        try:
+        with contextlib.suppress(Exception):
             service.teardown()
-        except Exception:
-            pass
+    if exit_code:
+        sys.exit(exit_code)
+
+
+def _exit_code(exc: BaseException) -> int:
+    """Exit code for a service that ended with *exc*.
+
+    KeyboardInterrupt (Ctrl-C reaching the process group) is a shutdown and
+    SystemExit keeps its own code; any other exception is a failure.
+    """
+    if isinstance(exc, KeyboardInterrupt):
+        return 0
+    if isinstance(exc, SystemExit):
+        if exc.code is None:
+            return 0
+        return exc.code if isinstance(exc.code, int) else 1
+    return 1

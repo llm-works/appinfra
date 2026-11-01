@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from .errors import CallbackError
 
@@ -44,9 +44,11 @@ class CallbackRegistry:
 
     def __init__(self) -> None:
         """Initialize the callback registry."""
-        self._callbacks: dict[int, list[tuple[Callable, bool]]] = {}
+        self._callbacks: dict[int, list[tuple[Callable[..., Any], bool]]] = {}
 
-    def register(self, level: int, callback: Callable, inherit: bool = False) -> None:
+    def register(
+        self, level: int, callback: Callable[..., Any], inherit: bool = False
+    ) -> None:
         """
         Register a callback for a specific level.
 
@@ -75,7 +77,12 @@ class CallbackRegistry:
         self._callbacks[level].append((callback, inherit))
 
     def trigger(
-        self, level: int, logger: Logger, msg: str, args: tuple, kwargs: dict
+        self,
+        level: int,
+        logger: Logger,
+        msg: str,
+        args: tuple[Any, ...],
+        kwargs: dict[str, Any],
     ) -> None:
         """
         Trigger callbacks for a specific level.
@@ -148,7 +155,7 @@ class CallbackRegistry:
         """Clear all registered callbacks."""
         self._callbacks.clear()
 
-    def remove_callback(self, level: int, callback: Callable) -> bool:
+    def remove_callback(self, level: int, callback: Callable[..., Any]) -> bool:
         """
         Remove a specific callback from a level.
 
@@ -173,7 +180,9 @@ class CallbackRegistry:
         return False
 
 
-def listens_for(logger: Logger, level: int, inherit: bool = False) -> Callable:
+def listens_for(
+    logger: Logger, level: int, inherit: bool = False
+) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """
     Decorator for registering callbacks with a logger.
 
@@ -186,7 +195,7 @@ def listens_for(logger: Logger, level: int, inherit: bool = False) -> Callable:
         Decorator function
     """
 
-    def decorator(func: Callable) -> Callable:
+    def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
         """Register the decorated function as a callback."""
         if not callable(func):
             raise CallbackError(

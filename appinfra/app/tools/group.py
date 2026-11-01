@@ -41,7 +41,7 @@ class ToolGroup:
         self._cmd_var = cmd_var
         self._default = default
         self._tools: dict[str, Tool] = {}
-        self._funcs: dict[str, Callable] = {}
+        self._funcs: dict[str, Callable[..., Any]] = {}
 
     @property
     def lg(self) -> Any:
@@ -52,7 +52,7 @@ class ToolGroup:
         """Register a tool in the group."""
         self._tools[tool.name] = tool
 
-    def _set_func(self, key: str, func: Callable) -> None:
+    def _set_func(self, key: str, func: Callable[..., Any]) -> None:
         """Register a command function."""
         self._funcs[key] = func
 
@@ -79,7 +79,7 @@ class ToolGroup:
         kwargs = {self._cmd_var: self._default}
         parser.set_defaults(**kwargs)
 
-    def add_tool(self, tool: Tool, run_func: Callable | None = None) -> Tool:
+    def add_tool(self, tool: Tool, run_func: Callable[..., Any] | None = None) -> Tool:
         """
         Add a tool to the group with optional custom run function.
 

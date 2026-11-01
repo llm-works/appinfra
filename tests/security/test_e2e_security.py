@@ -13,8 +13,6 @@ from appinfra.yaml import Loader
 from tests.security.payloads.injection import SHELL_INJECTION, YAML_CODE_EXECUTION
 
 
-@pytest.mark.security
-@pytest.mark.e2e
 def test_traversal_to_code_execution_chain(secure_temp_project: Path):
     """
     Verify defense-in-depth prevents traversal -> YAML load -> code execution.
@@ -109,8 +107,6 @@ malicious_include: !include {malicious_yaml}
         # this attack. For now, we've verified the YAML loader itself blocks it.
 
 
-@pytest.mark.security
-@pytest.mark.e2e
 def test_env_override_to_command_injection_chain(
     secure_temp_project: Path, monkeypatch, clean_env
 ):
@@ -214,8 +210,6 @@ tools:
 
 
 # Integration test: Verify security measures don't break normal workflows
-@pytest.mark.security
-@pytest.mark.e2e
 def test_legitimate_config_workflow(secure_temp_project: Path):
     """
     Verify legitimate multi-module workflows work correctly.

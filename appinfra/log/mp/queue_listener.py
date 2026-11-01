@@ -11,6 +11,7 @@ parent's logging handlers.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import queue
 import threading
@@ -93,11 +94,9 @@ class LogQueueListener:
         """
         self._stop_event.set()
 
-        # Send sentinel to unblock queue.get()
-        try:
+        # Send sentinel to unblock queue.get(); the queue might be full or closed
+        with contextlib.suppress(Exception):
             self._queue.put_nowait(None)
-        except Exception:
-            pass  # Queue might be full or closed
 
         if self._thread is not None:
             self._thread.join(timeout)
@@ -141,9 +140,8 @@ class LogQueueListener:
         # But we want to use the logger's handlers directly to avoid level filtering
         # since the record was already filtered in the subprocess
         for handler in self._get_handlers():
-            if self._respect_handler_level:
-                if record.levelno < handler.level:
-                    continue
+            if self._respect_handler_level and record.levelno < handler.level:
+                continue
             try:
                 handler.handle(record)
             except Exception:

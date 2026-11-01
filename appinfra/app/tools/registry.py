@@ -40,7 +40,7 @@ def _validate_tool_name(tool_name: str) -> None:
         )
 
 
-def _check_tool_count_limit(tools_dict: dict, tool_name: str) -> None:
+def _check_tool_count_limit(tools_dict: dict[str, Tool], tool_name: str) -> None:
     """Check maximum tool count limit."""
     if len(tools_dict) >= MAX_TOOL_COUNT:
         raise ToolRegistrationError(
@@ -50,7 +50,7 @@ def _check_tool_count_limit(tools_dict: dict, tool_name: str) -> None:
 
 
 def _validate_and_register_aliases(
-    tool_name: str, aliases: list, aliases_dict: dict
+    tool_name: str, aliases: list[str], aliases_dict: dict[str, str]
 ) -> None:
     """Validate and register tool aliases."""
     if len(aliases) > MAX_ALIAS_COUNT:

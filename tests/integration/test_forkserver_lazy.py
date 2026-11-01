@@ -83,11 +83,11 @@ def _build_startup_callback(_cfg: Any = None) -> Any:
 def _child_verify_lifecycle(adapter: FastAPIAdapter, result_q: mp.Queue[str]) -> None:
     """Child-process entry for lifecycle callback verification."""
     try:
-        assert isinstance(adapter._startup_callbacks[0].callback, Lazy), (
+        assert isinstance(adapter._defs.startup_callbacks[0].callback, Lazy), (
             "expected Lazy pre-resolve"
         )
         adapter._resolve_lazy()
-        assert callable(adapter._startup_callbacks[0].callback), (
+        assert callable(adapter._defs.startup_callbacks[0].callback), (
             "expected callable post-resolve"
         )
         result_q.put("ok")
@@ -104,18 +104,22 @@ def _child_verify(adapter: FastAPIAdapter, result_q: mp.Queue[str]) -> None:
     ``.start()`` and the child receives them via its own unpickle.
     """
     try:
-        assert isinstance(adapter._routes[0].handler, Lazy), "expected Lazy pre-resolve"
+        assert isinstance(adapter._defs.routes[0].handler, Lazy), (
+            "expected Lazy pre-resolve"
+        )
         adapter._resolve_lazy()
-        assert callable(adapter._routes[0].handler), "expected callable post-resolve"
+        assert callable(adapter._defs.routes[0].handler), (
+            "expected callable post-resolve"
+        )
         result_q.put("ok")
     except BaseException as e:  # noqa: BLE001 — surface any failure to parent
         result_q.put(f"fail: {type(e).__name__}: {e}")
 
 
-@pytest.mark.integration
 class TestForkserverPickleBoundary:
     """Regression for pm ticket #151."""
 
+    @pytest.mark.unit
     def test_nested_closure_handler_fails_pickle(self):
         """Baseline: nested closure inside a RouteDefinition cannot pickle.
 
@@ -130,6 +134,7 @@ class TestForkserverPickleBoundary:
         with pytest.raises((AttributeError, pickle.PicklingError)):
             pickle.dumps(adapter)
 
+    @pytest.mark.unit
     def test_lazy_handler_survives_pickle(self):
         """Lazy pickles as a plain dataclass; resolves to real callable after."""
         adapter = FastAPIAdapter(ApiConfig())
@@ -139,9 +144,9 @@ class TestForkserverPickleBoundary:
 
         restored = pickle.loads(pickle.dumps(adapter))
 
-        assert isinstance(restored._routes[0].handler, Lazy)
+        assert isinstance(restored._defs.routes[0].handler, Lazy)
         restored._resolve_lazy()
-        assert callable(restored._routes[0].handler)
+        assert callable(restored._defs.routes[0].handler)
 
     def test_nested_closure_adapter_fails_forkserver_spawn(self):
         """Reproduce #151: passing an adapter with a nested-closure handler

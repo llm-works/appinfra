@@ -46,12 +46,12 @@ services:
       # examples run with --network host and use the default 127.0.0.1:25432)
       - INFRA_PGSERVER_HOST=postgres
       # pytest-xdist workers for lanes that override the command with make test.*
-      # targets (test.all, test.coverage). check.summary goes through check.sh,
+      # targets (test.all, test.coverage). check.ci goes through check.sh,
       # which has its own per-suite worker heuristic. test.perf always runs serial.
-      - INFRA_PYTEST_WORKERS=auto
+      - APPINFRA_PYTEST_WORKERS=auto
 
-    # Default command: run complete CI checks with summary output (summaries + failures only)
-    command: make check.summary
+    # Default command: the checks of make check as plain text
+    command: make check.ci
 
     networks:
       - infra-test

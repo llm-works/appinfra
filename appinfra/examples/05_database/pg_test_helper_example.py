@@ -21,7 +21,7 @@ What This Example Demonstrates:
 Running the Example:
     # From the project root
     # From the infra project root
-    ~/.venv/bin/python examples/pg_test_helper_example.py
+    ~/.venv/bin/python examples/05_database/pg_test_helper_example.py
 
 Example Tests:
 
@@ -157,7 +157,7 @@ Option 1: Using the @debug_table Decorator (RECOMMENDED!)
 
             # Test assertions
             result = self.session.execute(sqlalchemy.text(f"SELECT COUNT(*) FROM {self.table_name}"))
-            count = result.fetchone()[0]
+            count = result.scalar_one()
             self.assertEqual(count, 1)
 
             # No cleanup needed - decorator handles it automatically!
@@ -233,6 +233,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 import sqlalchemy
+import sqlalchemy.orm
 
 try:
     from tests.helpers.pg.helper import PGTestCaseHelper
@@ -246,7 +247,7 @@ except ImportError:
 class TestPGHelperExample(PGTestCaseHelper):
     """Comprehensive example tests demonstrating PGTestCaseHelper usage."""
 
-    def _create_decorator_test_table(self):
+    def _create_decorator_test_table(self) -> None:
         """Create test table for decorator example."""
         self.session.execute(
             sqlalchemy.text(
@@ -260,7 +261,7 @@ class TestPGHelperExample(PGTestCaseHelper):
             )
         )
 
-    def _insert_decorator_test_data(self):
+    def _insert_decorator_test_data(self) -> None:
         """Insert test data for decorator example."""
         self.session.execute(
             sqlalchemy.text(
@@ -275,7 +276,7 @@ class TestPGHelperExample(PGTestCaseHelper):
         self.session.commit()
 
     @PGTestCaseHelper.debug_table("example_success")
-    def test_simple_decorator_example(self):
+    def test_simple_decorator_example(self) -> None:
         """Example using the new debug_table decorator - much cleaner!"""
         print("\n=== Running decorator example ===")
 
@@ -285,14 +286,14 @@ class TestPGHelperExample(PGTestCaseHelper):
         result = self.session.execute(
             sqlalchemy.text(f"SELECT COUNT(*) FROM {self.table_name}")
         )
-        count = result.fetchone()[0]
+        count = result.scalar_one()
         self.assertEqual(count, 3)
 
         print(
             f"[OK] Decorator example passed! Table '{self.table_name}' will be cleaned up automatically."
         )
 
-    def _create_failure_test_table(self):
+    def _create_failure_test_table(self) -> None:
         """Create table for failure example."""
         self.session.execute(
             sqlalchemy.text(
@@ -306,7 +307,7 @@ class TestPGHelperExample(PGTestCaseHelper):
             )
         )
 
-    def _insert_failure_test_data(self):
+    def _insert_failure_test_data(self) -> None:
         """Insert test data for failure example."""
         self.session.execute(
             sqlalchemy.text(
@@ -321,7 +322,7 @@ class TestPGHelperExample(PGTestCaseHelper):
         self.session.commit()
 
     @PGTestCaseHelper.debug_table("example_failure")
-    def test_decorator_failure_example(self):
+    def test_decorator_failure_example(self) -> None:
         """Example using decorator with a failing test."""
         print("\n=== Running decorator failure example ===")
 
@@ -331,7 +332,7 @@ class TestPGHelperExample(PGTestCaseHelper):
         result = self.session.execute(
             sqlalchemy.text(f"SELECT COUNT(*) FROM {self.table_name}")
         )
-        count = result.fetchone()[0]
+        count = result.scalar_one()
         self.assertEqual(count, 2)
 
     @PGTestCaseHelper.debug_table(
@@ -346,7 +347,7 @@ class TestPGHelperExample(PGTestCaseHelper):
             )
         """,
     )
-    def test_decorator_custom_schema_example(self):
+    def test_decorator_custom_schema_example(self) -> None:
         """Example using decorator with custom schema."""
         print("\n=== Running decorator custom schema example ===")
 
@@ -368,14 +369,16 @@ class TestPGHelperExample(PGTestCaseHelper):
         result = self.session.execute(
             sqlalchemy.text(f"SELECT COUNT(*) FROM {self.table_name}")
         )
-        count = result.fetchone()[0]
+        count = result.scalar_one()
         self.assertEqual(count, 3)
 
         print(
             f"[OK] Decorator custom schema example passed! Table '{self.table_name}' will be cleaned up automatically."
         )
 
-    def _create_simple_table(self, session, table_name):
+    def _create_simple_table(
+        self, session: sqlalchemy.orm.Session, table_name: str
+    ) -> None:
         """Create simple test table."""
         session.execute(
             sqlalchemy.text(
@@ -389,7 +392,9 @@ class TestPGHelperExample(PGTestCaseHelper):
             )
         )
 
-    def _insert_simple_data(self, session, table_name):
+    def _insert_simple_data(
+        self, session: sqlalchemy.orm.Session, table_name: str
+    ) -> None:
         """Insert simple test data."""
         session.execute(
             sqlalchemy.text(
@@ -403,17 +408,19 @@ class TestPGHelperExample(PGTestCaseHelper):
         )
         session.commit()
 
-    def _verify_simple_data(self, session, table_name):
+    def _verify_simple_data(
+        self, session: sqlalchemy.orm.Session, table_name: str
+    ) -> None:
         """Verify simple test data."""
         result = session.execute(sqlalchemy.text(f"SELECT COUNT(*) FROM {table_name}"))
-        self.assertEqual(result.fetchone()[0], 3)
+        self.assertEqual(result.scalar_one(), 3)
 
         result = session.execute(
             sqlalchemy.text(f"SELECT value FROM {table_name} WHERE name = 'Alice'")
         )
-        self.assertEqual(result.fetchone()[0], 100)
+        self.assertEqual(result.scalar_one(), 100)
 
-    def test_successful_operation(self):
+    def test_successful_operation(self) -> None:
         """Example test that succeeds - table will be cleaned up."""
         print("\n=== Running successful test ===")
 
@@ -439,7 +446,9 @@ class TestPGHelperExample(PGTestCaseHelper):
         finally:
             self.test_helper.cleanup_debug_table(session, table_name, cleanup_needed)
 
-    def _create_product_table(self, session, table_name):
+    def _create_product_table(
+        self, session: sqlalchemy.orm.Session, table_name: str
+    ) -> None:
         """Create product table for failing test."""
         session.execute(
             sqlalchemy.text(
@@ -453,7 +462,9 @@ class TestPGHelperExample(PGTestCaseHelper):
             )
         )
 
-    def _insert_product_data(self, session, table_name):
+    def _insert_product_data(
+        self, session: sqlalchemy.orm.Session, table_name: str
+    ) -> None:
         """Insert product test data."""
         session.execute(
             sqlalchemy.text(
@@ -467,14 +478,16 @@ class TestPGHelperExample(PGTestCaseHelper):
         )
         session.commit()
 
-    def _verify_failing_condition(self, session, table_name):
+    def _verify_failing_condition(
+        self, session: sqlalchemy.orm.Session, table_name: str
+    ) -> int:
         """Verify failing condition (expects 2 rows, gets 3)."""
         result = session.execute(sqlalchemy.text(f"SELECT COUNT(*) FROM {table_name}"))
-        count = result.fetchone()[0]
+        count: int = result.scalar_one()
         self.assertEqual(count, 2)  # This will fail!
         return count
 
-    def test_failing_operation(self):
+    def test_failing_operation(self) -> None:
         """Example test that fails - table will be kept for debugging."""
         print("\n=== Running failing test ===")
 
@@ -500,7 +513,7 @@ class TestPGHelperExample(PGTestCaseHelper):
         finally:
             self.test_helper.cleanup_debug_table(session, table_name, cleanup_needed)
 
-    def _get_user_actions_schema(self):
+    def _get_user_actions_schema(self) -> str:
         """Get schema for user actions table."""
         return """
             CREATE TABLE {table_name} (
@@ -512,7 +525,9 @@ class TestPGHelperExample(PGTestCaseHelper):
             )
         """
 
-    def _insert_user_actions_data(self, session, table_name):
+    def _insert_user_actions_data(
+        self, session: sqlalchemy.orm.Session, table_name: str
+    ) -> None:
         """Insert user actions test data."""
         session.execute(
             sqlalchemy.text(
@@ -526,17 +541,19 @@ class TestPGHelperExample(PGTestCaseHelper):
         )
         session.commit()
 
-    def _verify_user_actions_data(self, session, table_name):
+    def _verify_user_actions_data(
+        self, session: sqlalchemy.orm.Session, table_name: str
+    ) -> None:
         """Verify user actions data."""
         result = session.execute(sqlalchemy.text(f"SELECT COUNT(*) FROM {table_name}"))
-        self.assertEqual(result.fetchone()[0], 3)
+        self.assertEqual(result.scalar_one(), 3)
 
         result = session.execute(
             sqlalchemy.text(f"SELECT COUNT(*) FROM {table_name} WHERE user_id = 1")
         )
-        self.assertEqual(result.fetchone()[0], 2)
+        self.assertEqual(result.scalar_one(), 2)
 
-    def test_custom_schema(self):
+    def test_custom_schema(self) -> None:
         """Example test using custom table schema."""
         print("\n=== Running custom schema test ===")
 
@@ -566,7 +583,9 @@ class TestPGHelperExample(PGTestCaseHelper):
         finally:
             self.test_helper.cleanup_debug_table(session, table_name, cleanup_needed)
 
-    def _create_employee_table(self, session, table_name):
+    def _create_employee_table(
+        self, session: sqlalchemy.orm.Session, table_name: str
+    ) -> None:
         """Create employee table for inspection test."""
         session.execute(
             sqlalchemy.text(
@@ -582,7 +601,9 @@ class TestPGHelperExample(PGTestCaseHelper):
             )
         )
 
-    def _insert_employee_data(self, session, table_name):
+    def _insert_employee_data(
+        self, session: sqlalchemy.orm.Session, table_name: str
+    ) -> None:
         """Insert employee test data."""
         session.execute(
             sqlalchemy.text(
@@ -597,10 +618,13 @@ class TestPGHelperExample(PGTestCaseHelper):
         )
         session.commit()
 
-    def _verify_table_inspection(self, session, table_name):
+    def _verify_table_inspection(
+        self, session: sqlalchemy.orm.Session, table_name: str
+    ) -> None:
         """Verify table inspection capabilities."""
         table_info = self.test_helper.inspect_debug_table(table_name)
-        self.assertIsNotNone(table_info)
+        if table_info is None:
+            self.fail(f"debug table '{table_name}' not found")
         self.assertEqual(table_info["table_name"], table_name)
         self.assertEqual(table_info["row_count"], 4)
         self.assertEqual(len(table_info["columns"]), 5)
@@ -611,9 +635,9 @@ class TestPGHelperExample(PGTestCaseHelper):
         result = session.execute(
             sqlalchemy.text(f"SELECT COUNT(*) FROM {table_name} WHERE active = TRUE")
         )
-        self.assertEqual(result.fetchone()[0], 3)
+        self.assertEqual(result.scalar_one(), 3)
 
-    def _print_inspection_debug_info(self, table_name):
+    def _print_inspection_debug_info(self, table_name: str) -> None:
         """Print inspection debug information on failure."""
         print(f"\n[CHART] Inspecting table '{table_name}':")
         table_info = self.test_helper.inspect_debug_table(table_name)
@@ -631,7 +655,7 @@ class TestPGHelperExample(PGTestCaseHelper):
                 f"   Could not inspect table '{table_name}' - check database connection"
             )
 
-    def test_table_inspection(self):
+    def test_table_inspection(self) -> None:
         """Example test demonstrating table inspection capabilities."""
         print("\n=== Running table inspection test ===")
 
@@ -658,7 +682,9 @@ class TestPGHelperExample(PGTestCaseHelper):
         finally:
             self.test_helper.cleanup_debug_table(session, table_name, cleanup_needed)
 
-    def _create_orders_table(self, session, table_name):
+    def _create_orders_table(
+        self, session: sqlalchemy.orm.Session, table_name: str
+    ) -> None:
         """Create orders table for complex scenario."""
         session.execute(
             sqlalchemy.text(
@@ -677,7 +703,9 @@ class TestPGHelperExample(PGTestCaseHelper):
             )
         )
 
-    def _insert_test_orders(self, session, table_name):
+    def _insert_test_orders(
+        self, session: sqlalchemy.orm.Session, table_name: str
+    ) -> None:
         """Insert test order data."""
         session.execute(
             sqlalchemy.text(
@@ -692,11 +720,13 @@ class TestPGHelperExample(PGTestCaseHelper):
         )
         session.commit()
 
-    def _verify_order_business_logic(self, session, table_name):
+    def _verify_order_business_logic(
+        self, session: sqlalchemy.orm.Session, table_name: str
+    ) -> None:
         """Verify business logic for orders."""
         # Total orders count
         result = session.execute(sqlalchemy.text(f"SELECT COUNT(*) FROM {table_name}"))
-        self.assertEqual(result.fetchone()[0], 4)
+        self.assertEqual(result.scalar_one(), 4)
 
         # Orders by customer
         result = session.execute(
@@ -704,7 +734,7 @@ class TestPGHelperExample(PGTestCaseHelper):
                 f"SELECT COUNT(*) FROM {table_name} WHERE customer_id = 1001"
             )
         )
-        self.assertEqual(result.fetchone()[0], 2)
+        self.assertEqual(result.scalar_one(), 2)
 
         # Total revenue
         result = session.execute(
@@ -712,7 +742,7 @@ class TestPGHelperExample(PGTestCaseHelper):
                 f"SELECT SUM(total_amount) FROM {table_name} WHERE status != 'cancelled'"
             )
         )
-        self.assertEqual(float(result.fetchone()[0]), 539.48)
+        self.assertEqual(float(result.scalar_one()), 539.48)
 
         # Orders by status
         result = session.execute(
@@ -720,9 +750,9 @@ class TestPGHelperExample(PGTestCaseHelper):
                 f"SELECT COUNT(*) FROM {table_name} WHERE status = 'pending'"
             )
         )
-        self.assertEqual(result.fetchone()[0], 1)
+        self.assertEqual(result.scalar_one(), 1)
 
-    def test_complex_scenario(self):
+    def test_complex_scenario(self) -> None:
         """Example of a more complex testing scenario."""
         print("\n=== Running complex scenario test ===")
 
@@ -752,7 +782,7 @@ class TestPGHelperExample(PGTestCaseHelper):
             self.test_helper.cleanup_debug_table(session, table_name, cleanup_needed)
 
 
-def _print_demo_summary(result):
+def _print_demo_summary(result: unittest.TestResult) -> None:
     """Print test execution summary."""
     print("\n" + "=" * 60)
     print("Example Summary:")
@@ -771,7 +801,7 @@ def _print_demo_summary(result):
             print(f"  - {test}: {traceback}")
 
 
-def _print_key_features():
+def _print_key_features() -> None:
     """Print key features demonstrated by examples."""
     print("\n" + "=" * 60)
     print("Key Features Demonstrated:")
@@ -783,7 +813,7 @@ def _print_key_features():
     print("[OK] Automatic cleanup of previous debug tables")
 
 
-def run_examples():
+def run_examples() -> None:
     """Run the example tests with detailed output."""
     print("PGTestCaseHelper Comprehensive Example")
     print("=" * 60)

@@ -24,9 +24,9 @@ import appinfra
 
 # Use absolute imports since this module is designed to run as a script
 from appinfra.app import App, AppBuilder
-from appinfra.cli.tools.code_quality import CodeQualityTool
 from appinfra.cli.tools.completion_tool import CompletionTool
 from appinfra.cli.tools.config_tool import ConfigTool
+from appinfra.cli.tools.cq import CodeQualityTool
 from appinfra.cli.tools.docs_tool import DocsTool
 from appinfra.cli.tools.doctor_tool import DoctorTool
 from appinfra.cli.tools.etc_path_tool import EtcPathTool

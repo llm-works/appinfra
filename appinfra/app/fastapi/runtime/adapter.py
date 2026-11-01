@@ -162,6 +162,24 @@ class ExceptionCallbackDefinition:
     name: str | None = None
 
 
+@dataclass
+class ServerDefinitions:
+    """Everything registered for a server: ServerBuilder collects it, FastAPIAdapter builds it."""
+
+    routes: list[RouteDefinition] = field(default_factory=list)
+    routers: list[RouterDefinition] = field(default_factory=list)
+    middleware: list[MiddlewareDefinition] = field(default_factory=list)
+    exception_handlers: list[ExceptionHandlerDefinition] = field(default_factory=list)
+    cors: CORSDefinition | None = None
+    startup_callbacks: list[LifecycleCallbackDefinition] = field(default_factory=list)
+    shutdown_callbacks: list[LifecycleCallbackDefinition] = field(default_factory=list)
+    lifespan: LifespanDefinition | None = None
+    request_callbacks: list[RequestCallbackDefinition] = field(default_factory=list)
+    response_callbacks: list[ResponseCallbackDefinition] = field(default_factory=list)
+    exception_callbacks: list[ExceptionCallbackDefinition] = field(default_factory=list)
+    rate_limiters: list[RateLimitDefinition] = field(default_factory=list)
+
+
 async def _run_exception_callbacks(
     exception_callbacks: list[ExceptionCallbackDefinition],
     request: Request,
@@ -278,7 +296,6 @@ def _create_callback_middleware(
 ) -> type:
     """Create a middleware class for request/response/exception callbacks."""
     from starlette.middleware.base import BaseHTTPMiddleware
-    from starlette.responses import Response as ResponseType
 
     class CallbackMiddleware(BaseHTTPMiddleware):
         async def dispatch(self, request: Request, call_next: Any) -> Response:
@@ -288,10 +305,7 @@ def _create_callback_middleware(
             except Exception as exc:
                 await _run_exception_callbacks(exception_callbacks, request, exc)
                 raise
-            response = await _run_response_callbacks(
-                response_callbacks, request, response
-            )
-            return cast(ResponseType, response)
+            return await _run_response_callbacks(response_callbacks, request, response)
 
     return CallbackMiddleware
 
@@ -324,73 +338,58 @@ class FastAPIAdapter:
             )
 
         self._config = config
-        self._routes: list[RouteDefinition] = []
-        self._routers: list[RouterDefinition] = []
-        self._middleware: list[MiddlewareDefinition] = []
-        self._exception_handlers: list[ExceptionHandlerDefinition] = []
-        self._cors: CORSDefinition | None = None
-
-        # Lifecycle callbacks
-        self._startup_callbacks: list[LifecycleCallbackDefinition] = []
-        self._shutdown_callbacks: list[LifecycleCallbackDefinition] = []
-        self._lifespan: LifespanDefinition | None = None
-        self._request_callbacks: list[RequestCallbackDefinition] = []
-        self._response_callbacks: list[ResponseCallbackDefinition] = []
-        self._exception_callbacks: list[ExceptionCallbackDefinition] = []
-
-        # Rate limiting
-        self._rate_limiters: list[RateLimitDefinition] = []
+        self._defs = ServerDefinitions()
 
         # Subprocess logger (injected after unpickling in subprocess mode)
         self._subprocess_lg: Logger | None = None
 
     def add_route(self, route: RouteDefinition) -> None:
         """Add a route definition."""
-        self._routes.append(route)
+        self._defs.routes.append(route)
 
     def add_router(self, router: RouterDefinition) -> None:
         """Add a router definition."""
-        self._routers.append(router)
+        self._defs.routers.append(router)
 
     def add_middleware(self, middleware: MiddlewareDefinition) -> None:
         """Add a middleware definition."""
-        self._middleware.append(middleware)
+        self._defs.middleware.append(middleware)
 
     def add_exception_handler(self, handler: ExceptionHandlerDefinition) -> None:
         """Add an exception handler definition."""
-        self._exception_handlers.append(handler)
+        self._defs.exception_handlers.append(handler)
 
     def set_cors(self, cors: CORSDefinition) -> None:
         """Set CORS configuration."""
-        self._cors = cors
+        self._defs.cors = cors
 
     def add_rate_limiter(self, definition: RateLimitDefinition) -> None:
         """Add a rate limiter configuration."""
-        self._rate_limiters.append(definition)
+        self._defs.rate_limiters.append(definition)
 
     def add_startup_callback(self, callback: LifecycleCallbackDefinition) -> None:
         """Add a startup callback."""
-        self._startup_callbacks.append(callback)
+        self._defs.startup_callbacks.append(callback)
 
     def add_shutdown_callback(self, callback: LifecycleCallbackDefinition) -> None:
         """Add a shutdown callback."""
-        self._shutdown_callbacks.append(callback)
+        self._defs.shutdown_callbacks.append(callback)
 
     def set_lifespan(self, lifespan: LifespanDefinition) -> None:
         """Set the lifespan context manager."""
-        self._lifespan = lifespan
+        self._defs.lifespan = lifespan
 
     def add_request_callback(self, callback: RequestCallbackDefinition) -> None:
         """Add a request callback (runs before each request)."""
-        self._request_callbacks.append(callback)
+        self._defs.request_callbacks.append(callback)
 
     def add_response_callback(self, callback: ResponseCallbackDefinition) -> None:
         """Add a response callback (runs after each request)."""
-        self._response_callbacks.append(callback)
+        self._defs.response_callbacks.append(callback)
 
     def add_exception_callback(self, callback: ExceptionCallbackDefinition) -> None:
         """Add an exception callback (runs when unhandled exceptions occur)."""
-        self._exception_callbacks.append(callback)
+        self._defs.exception_callbacks.append(callback)
 
     def build(self, ipc_channel: IPCChannel | None = None) -> FastAPI:
         """
@@ -474,11 +473,11 @@ class FastAPIAdapter:
         # Start with user-provided lifespan (may be None).
         # Post-``_resolve_lazy`` invariant: ``.lifespan`` is a real callable.
         result: LifespanCallable | None = None
-        if self._lifespan is not None:
-            result = cast(LifespanCallable, self._lifespan.lifespan)
+        if self._defs.lifespan is not None:
+            result = cast(LifespanCallable, self._defs.lifespan.lifespan)
 
         # Wrap with startup/shutdown callbacks if any
-        if self._startup_callbacks or self._shutdown_callbacks:
+        if self._defs.startup_callbacks or self._defs.shutdown_callbacks:
             result = self._wrap_lifespan_with_callbacks(result)
 
         # Wrap with IPC lifecycle if channel provided
@@ -499,9 +498,9 @@ class FastAPIAdapter:
         This ensures callbacks like "server started" log after user
         dependencies (e.g., database, message queues) are initialized.
         """
-        pre_startup = [c for c in self._startup_callbacks if not c.after_lifespan]
-        post_startup = [c for c in self._startup_callbacks if c.after_lifespan]
-        shutdown_callbacks = self._shutdown_callbacks
+        pre_startup = [c for c in self._defs.startup_callbacks if not c.after_lifespan]
+        post_startup = [c for c in self._defs.startup_callbacks if c.after_lifespan]
+        shutdown_callbacks = self._defs.shutdown_callbacks
         lg = self._subprocess_lg
 
         @asynccontextmanager
@@ -551,34 +550,34 @@ class FastAPIAdapter:
     def _configure_request_response_middleware(self, app: FastAPI) -> None:
         """Configure request/response/exception callback middleware."""
         has_callbacks = (
-            self._request_callbacks
-            or self._response_callbacks
-            or self._exception_callbacks
+            self._defs.request_callbacks
+            or self._defs.response_callbacks
+            or self._defs.exception_callbacks
         )
         if not has_callbacks:
             return
 
         middleware_cls = _create_callback_middleware(
-            self._request_callbacks,
-            self._response_callbacks,
-            self._exception_callbacks,
+            self._defs.request_callbacks,
+            self._defs.response_callbacks,
+            self._defs.exception_callbacks,
         )
         app.add_middleware(middleware_cls)  # type: ignore[arg-type]
 
     def _configure_middleware(self, app: FastAPI) -> None:
         """Configure middleware on the app."""
         # Add CORS middleware first (order matters for middleware)
-        if self._cors:
+        if self._defs.cors:
             app.add_middleware(
                 CORSMiddleware,
-                allow_origins=self._cors.origins,
-                allow_credentials=self._cors.allow_credentials,
-                allow_methods=self._cors.allow_methods,
-                allow_headers=self._cors.allow_headers,
+                allow_origins=self._defs.cors.origins,
+                allow_credentials=self._defs.cors.allow_credentials,
+                allow_methods=self._defs.cors.allow_methods,
+                allow_headers=self._defs.cors.allow_headers,
             )
 
         # Add other middleware
-        for mw in self._middleware:
+        for mw in self._defs.middleware:
             # Post-``_resolve_lazy`` invariant: ``middleware_class`` is a real type.
             app.add_middleware(cast(type, mw.middleware_class), **mw.options)  # type: ignore[arg-type]
 
@@ -590,11 +589,11 @@ class FastAPIAdapter:
         add_middleware calls). Multiple limiters are checked independently -
         the first one to deny a request wins.
         """
-        if not self._rate_limiters:
+        if not self._defs.rate_limiters:
             return
         from ..ratelimit.middleware import RateLimitMiddleware
 
-        for rl in self._rate_limiters:
+        for rl in self._defs.rate_limiters:
             # Post-``_resolve_lazy`` invariant: ``limiter`` is a real RateLimiter.
             app.add_middleware(
                 RateLimitMiddleware,
@@ -605,7 +604,7 @@ class FastAPIAdapter:
 
     def _configure_exception_handlers(self, app: FastAPI) -> None:
         """Configure exception handlers on the app."""
-        for handler in self._exception_handlers:
+        for handler in self._defs.exception_handlers:
             # Post-``_resolve_lazy`` invariant: ``handler`` is a real callable.
             app.add_exception_handler(
                 handler.exc_class, cast(Callable[..., Any], handler.handler)
@@ -613,7 +612,7 @@ class FastAPIAdapter:
 
     def _configure_routes(self, app: FastAPI) -> None:
         """Configure individual routes on the app."""
-        for route in self._routes:
+        for route in self._defs.routes:
             # Post-``_resolve_lazy`` invariant: ``handler`` is a real callable.
             app.add_api_route(
                 route.path,
@@ -626,7 +625,7 @@ class FastAPIAdapter:
 
     def _configure_routers(self, app: FastAPI) -> None:
         """Configure routers on the app."""
-        for router_def in self._routers:
+        for router_def in self._defs.routers:
             # Post-``_resolve_lazy`` invariant: ``router`` is a real APIRouter.
             app.include_router(
                 cast(APIRouter, router_def.router),
@@ -667,28 +666,22 @@ class FastAPIAdapter:
         Adding a new callable-carrying definition type? Extend this walker.
         See the module docstring's invariant.
         """
-        for r in self._routes:
-            _resolve_field(r, "handler")
-        for rd in self._routers:
-            _resolve_field(rd, "router")
-        for mw in self._middleware:
-            _resolve_field(mw, "middleware_class")
-        for eh in self._exception_handlers:
-            _resolve_field(eh, "handler")
-        for su_cb in self._startup_callbacks:
-            _resolve_field(su_cb, "callback")
-        for sd_cb in self._shutdown_callbacks:
-            _resolve_field(sd_cb, "callback")
-        if self._lifespan is not None:
-            _resolve_field(self._lifespan, "lifespan")
-        for req_cb in self._request_callbacks:
-            _resolve_field(req_cb, "callback")
-        for resp_cb in self._response_callbacks:
-            _resolve_field(resp_cb, "callback")
-        for exc_cb in self._exception_callbacks:
-            _resolve_field(exc_cb, "callback")
-        for rl in self._rate_limiters:
-            _resolve_field(rl, "limiter")
+        definitions: list[tuple[list[Any], str]] = [
+            (self._defs.routes, "handler"),
+            (self._defs.routers, "router"),
+            (self._defs.middleware, "middleware_class"),
+            (self._defs.exception_handlers, "handler"),
+            (self._defs.startup_callbacks, "callback"),
+            (self._defs.shutdown_callbacks, "callback"),
+            ([self._defs.lifespan] if self._defs.lifespan else [], "lifespan"),
+            (self._defs.request_callbacks, "callback"),
+            (self._defs.response_callbacks, "callback"),
+            (self._defs.exception_callbacks, "callback"),
+            (self._defs.rate_limiters, "limiter"),
+        ]
+        for items, field_name in definitions:
+            for item in items:
+                _resolve_field(item, field_name)
 
     def inject_subprocess_logger(self, lg: Logger) -> None:
         """Inject subprocess logger into adapter and LoggerInjectable handlers.
@@ -716,6 +709,6 @@ class FastAPIAdapter:
         # Inject into exception handlers
         from ..handlers import LoggerInjectable
 
-        for handler_def in self._exception_handlers:
+        for handler_def in self._defs.exception_handlers:
             if isinstance(handler_def.handler, LoggerInjectable):
                 handler_def.handler.set_logger(lg)

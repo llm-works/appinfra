@@ -7,10 +7,12 @@
 # Requires: areyousure (from Makefile.utils)
 #
 # Configuration variables (set in Makefile before include):
-#   INFRA_CLEAN_PRESERVE - Space-separated list of files/dirs to preserve (default: .data .logs .GRADING.md)
+#   APPINFRA_CLEAN_PRESERVE - Space-separated list of files/dirs to preserve (default: .data .logs .GRADING.md)
 
-# Configuration
-INFRA_CLEAN_PRESERVE ?= .data .logs .GRADING.md
+# Defaults are declared in Makefile.config; load it when the project has not
+ifndef _APPINFRA_CONFIG_LOADED
+include $(dir $(lastword $(MAKEFILE_LIST)))Makefile.config
+endif
 
 ##@ Cleanup
 
@@ -37,7 +39,7 @@ clean:: areyousure ## restores project to original post-clone state (preserves .
 .PHONY: clean
 
 clean.full:: clean ## Complete cleanup: local files + Docker resources (if available)
-ifdef PG_INCLUDED
+ifdef _APPINFRA_PG_INCLUDED
 	@$(MAKE) pg.server.clean.internal
 	@echo "* full cleanup complete - all files and Docker resources removed"
 else

@@ -3,32 +3,33 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright 2026 The appinfra Authors
 
+# ci-run: greet
 # ci-run: --etc-dir appinfra/examples/04_configuration/etc greet
 
 """
---etc-dir without a config spec
+The etc directory next to the script, overridable with --etc-dir
 
 Demonstrates the pattern for apps that:
-- Opt into the `--etc-dir` CLI flag via `.cli(etc_dir=True)`.
-- Manage their own YAML files (no config spec declared).
+- Ship their YAML in an etc/ directory beside the script.
+- Let the operator point at another directory with `--etc-dir`.
 - Need the etc directory inside `Tool.configure()`.
 
-The framework validates `--etc-dir` during `app.setup()` (after parse_args, before
-any `Tool.setup()` runs) and exposes it on `app.etc_dir`. There is no need to
-read `args.etc_dir` from inside the tool or override the property.
+The config spec locates etc/etc_dir_only_greeter.yaml beside this script, from
+whatever directory the script runs in. `--etc-dir` replaces that directory; the
+framework validates it during `app.setup()` (after parse_args, before any
+`Tool.setup()` runs). Either way the directory is exposed on `app.etc_dir`, so
+the tool never reads `args.etc_dir` itself.
 
 Running:
+    ~/.venv/bin/python examples/04_configuration/etc_dir_only_example.py greet
     ~/.venv/bin/python examples/04_configuration/etc_dir_only_example.py \\
         --etc-dir examples/04_configuration/etc greet
 
 Key points:
-- `.cli(etc_dir=True)` is the single opt-in.
+- `.config.with_spec(...)` with no origin anchors on this script's directory.
+- `.cli(etc_dir=True)` adds the `--etc-dir` override.
 - Read `self.app.etc_dir` inside `Tool.configure()` — populated by the framework.
 - A bad `--etc-dir /missing` raises `FileNotFoundError` at setup (fail-fast).
-- Without a spec there is no default directory: omit the flag and `app.etc_dir`
-  is `None`. Apps that ship a config file declare a spec instead
-  (`.config.with_spec(...)`), and `app.etc_dir` becomes the directory of the
-  file the spec resolved to.
 """
 
 from __future__ import annotations
@@ -87,6 +88,12 @@ def main() -> int:
     app = (
         AppBuilder("etc-dir-only-demo")
         .with_description("Tool reads its own YAML from app.etc_dir")
+        # No module is named after the config, so its base is located beside
+        # this script: ./etc/etc_dir_only_greeter.yaml.
+        .config.with_spec(
+            "example-org", "etc-dir-only-demo", filename="etc_dir_only_greeter.yaml"
+        )
+        .done()
         .cli(etc_dir=True)
         .tools.with_tool(GreetTool())
         .done()

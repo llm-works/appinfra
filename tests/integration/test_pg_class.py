@@ -16,14 +16,14 @@ import sqlalchemy
 from sqlalchemy import text
 from sqlalchemy.orm import declarative_base
 
-from appinfra.db.pg.pg import PG
+from appinfra.db.pg import PG
+from appinfra.envelope import Envelope
 
 # All tests in this module exercise a real PG instance; skip the whole module
 # with the sentinel reason if PG is unreachable.
 pytestmark = pytest.mark.require_pg
 
 
-@pytest.mark.integration
 class TestPGConnection:
     """Test PG connection and session management."""
 
@@ -58,14 +58,13 @@ class TestPGConnection:
 
     def test_pg_multiple_sessions(self, pg_connection):
         """Test that multiple sessions can be created from same PG instance."""
-        with pg_connection.session() as session1:
-            with pg_connection.session() as session2:
-                # Both should work independently
-                result1 = session1.execute(text("SELECT 1"))
-                result2 = session2.execute(text("SELECT 2"))
+        with pg_connection.session() as session1, pg_connection.session() as session2:
+            # Both should work independently
+            result1 = session1.execute(text("SELECT 1"))
+            result2 = session2.execute(text("SELECT 2"))
 
-                assert result1.fetchone()[0] == 1
-                assert result2.fetchone()[0] == 2
+            assert result1.fetchone()[0] == 1
+            assert result2.fetchone()[0] == 2
 
     def test_pg_autocommit_session(self, pg_connection):
         """Test session(autocommit=True) with AUTOCOMMIT isolation."""
@@ -75,7 +74,18 @@ class TestPGConnection:
             assert row[0] == "read_test"
 
 
-@pytest.mark.integration
+class TestPGSecretUrl:
+    """A URL built from a secret arrives as an Envelope; PG connects with it."""
+
+    def test_connects_with_a_secret_url(self, pg_config, pg_logger):
+        pg = PG(pg_logger, {"url": Envelope(pg_config.url)})
+        try:
+            with pg.connect() as conn:
+                assert conn.execute(text("SELECT 1")).scalar() == 1
+        finally:
+            pg.dispose()
+
+
 class TestPGHealthCheck:
     """Test PG health check functionality."""
 
@@ -97,7 +107,6 @@ class TestPGHealthCheck:
         assert result["response_time_ms"] > 0
 
 
-@pytest.mark.integration
 class TestPGPoolStatus:
     """Test connection pool status monitoring."""
 
@@ -113,7 +122,6 @@ class TestPGPoolStatus:
         assert "total_connections" in status
 
 
-@pytest.mark.integration
 class TestPGQueryExecution:
     """Test query execution and transaction handling."""
 
@@ -219,7 +227,6 @@ class TestPGQueryExecution:
         assert count == 1
 
 
-@pytest.mark.integration
 class TestPGMigration:
     """Test database migration functionality."""
 
@@ -330,10 +337,10 @@ class TestPGMigration:
         name = result.fetchone()[0]
         assert name == "seeded"
 
-    def test_migrate_runs_hooks_in_order(self, pg_config, pg_logger, pg_debug_table):
+    def test_migrate_runs_hooks_in_order(self, pg_config, make_pg, pg_debug_table):
         """Test that migrate() runs hooks in correct order: before -> tables -> after."""
         # Use fresh PG instance to avoid hook pollution from other tests
-        pg = PG(pg_logger, pg_config)
+        pg = make_pg(pg_config)
         execution_order = []
 
         @pg.on_before_migrate
@@ -356,13 +363,12 @@ class TestPGMigration:
         assert execution_order == ["before", "after"]
 
 
-@pytest.mark.integration
 class TestPGConfigValidation:
     """Test configuration validation."""
 
-    def test_pg_initialization_with_valid_config(self, pg_config, pg_logger):
+    def test_pg_initialization_with_valid_config(self, pg_config, make_pg):
         """Test PG initialization with valid configuration."""
-        pg = PG(pg_logger, pg_config)
+        pg = make_pg(pg_config)
         assert pg is not None
 
         # Verify we can create a session
@@ -384,7 +390,6 @@ class TestPGConfigValidation:
         assert isinstance(engine, sqlalchemy.engine.Engine)
 
 
-@pytest.mark.integration
 class TestPGComplexQueries:
     """Test complex query scenarios."""
 

@@ -135,11 +135,9 @@ class ConfigConfigurer:
             builder._config = DotDict()
         config = builder._config
         if not hasattr(config, "logging"):
-            config.logging = DotDict()  # type: ignore[attr-defined]
+            config.logging = DotDict()
         # LifecycleManager reads logging.hot_reload from the merged config.
-        config.logging.hot_reload = DotDict(  # type: ignore[attr-defined]
-            enabled=enabled, debounce_ms=debounce_ms
-        )
+        config.logging.hot_reload = DotDict(enabled=enabled, debounce_ms=debounce_ms)
         return self
 
     def done(self) -> AppBuilder:

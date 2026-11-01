@@ -578,13 +578,12 @@ class DecoratorAPI:
                 # Applied to ToolFunction (functional chaining)
                 obj.argument(*args, **kwargs)
                 return obj
-            else:
-                # Applied to regular function (natural decorator order)
-                # Store argument metadata on the function
-                if not hasattr(obj, "_tool_arguments"):
-                    obj._tool_arguments = []
-                obj._tool_arguments.append((args, kwargs))
-                return obj
+            # Applied to regular function (natural decorator order)
+            # Store argument metadata on the function
+            if not hasattr(obj, "_tool_arguments"):
+                obj._tool_arguments = []
+            obj._tool_arguments.append((args, kwargs))
+            return obj
 
         return decorator
 

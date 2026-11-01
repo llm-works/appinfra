@@ -12,8 +12,6 @@ import pytest
 pytestmark = pytest.mark.require_pg
 
 
-@pytest.mark.performance
-@pytest.mark.integration  # Requires actual DB
 class TestConnectionPoolPerformance:
     def test_connection_checkout_time(self, pg_connection):
         """Measure average connection checkout time from pool."""

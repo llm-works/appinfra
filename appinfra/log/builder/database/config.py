@@ -17,6 +17,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from ...config import LogConfig
+from ...serialize import record_traceback, sanitize_extra
 from ..interface import HandlerConfig
 
 if TYPE_CHECKING:
@@ -37,7 +38,7 @@ class DatabaseHandlerConfig(HandlerConfig):
         db_interface: Any,
         level: str | int | None = None,
         columns: dict[str, str] | None = None,
-        data_mapper: Callable | None = None,
+        data_mapper: Callable[..., Any] | None = None,
         batch_size: int = 1,
         flush_interval: float = 0.0,
         # Critical flush parameters
@@ -108,13 +109,10 @@ class DatabaseHandlerConfig(HandlerConfig):
     def _map_exception_info(
         self, record: logging.LogRecord, data: dict[str, Any]
     ) -> None:
-        """Map exception info from log record to data dict."""
-        if record.exc_info:
-            import traceback
-
-            data[self.columns["exception"]] = "".join(
-                traceback.format_exception(*record.exc_info)
-            )
+        """Map the exception traceback if the record carries one."""
+        text = record_traceback(record)
+        if text is not None:
+            data[self.columns["exception"]] = text
 
     def _default_data_mapper(self, record: logging.LogRecord) -> dict[str, Any]:
         """Default data mapper for log records."""
@@ -132,7 +130,7 @@ class DatabaseHandlerConfig(HandlerConfig):
         # Extra fields
         extra = getattr(record, "__infra__extra", None)
         if extra:
-            data[self.columns["extra"]] = json.dumps(extra)
+            data[self.columns["extra"]] = json.dumps(sanitize_extra(extra))
 
         # Exception info
         self._map_exception_info(record, data)

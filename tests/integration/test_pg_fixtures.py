@@ -21,7 +21,6 @@ import sqlalchemy
 pytestmark = pytest.mark.require_pg
 
 
-@pytest.mark.integration
 class TestPGFixtures:
     """Test PostgreSQL integration fixtures."""
 
@@ -236,7 +235,6 @@ class TestPGFixtures:
             assert re.search(r"_\d{10}_", table), f"Table {table} missing timestamp"
 
 
-@pytest.mark.integration
 class TestPGDebugTableCleanup:
     """Test debug table cleanup behavior on test failure/success."""
 
@@ -259,7 +257,6 @@ class TestPGDebugTableCleanup:
         assert True
 
 
-@pytest.mark.integration
 class TestPGComplexScenarios:
     """Test complex real-world database scenarios."""
 
@@ -407,7 +404,6 @@ class TestPGComplexScenarios:
         # Child table cleaned up via CASCADE when parent debug table is dropped
 
 
-@pytest.mark.integration
 class TestPGStaleTableCleanup:
     """Test that stale debug tables are cleaned at session start."""
 

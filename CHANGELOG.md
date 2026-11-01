@@ -10,6 +10,175 @@ For API stability guarantees and deprecation policy, see
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-11-01
+
+### Added
+- `make deps` reports each dependency's installed version against the version a fresh install
+  (CI) gets and the newest release outside its range, then `pip check`'s conflicts;
+  `make deps.deep` shows the whole dependency tree. The `check` extra now includes `packaging`.
+- `appinfra.pytest_suites`, an opt-in pytest plugin (`pytest_plugins = ["appinfra.pytest_suites"]`)
+  that gives each test the suite of its nearest marker or its `tests/<suite>/` directory, and stops
+  collection on a test with no suite or two. See the test suites guide.
+- `make check` shows a Test structure health line when `APPINFRA_DEV_TEST_HEALTH` is `warn` or
+  `strict` (default `false`) in a project that loads `appinfra.pytest_suites`: the share of tests in
+  their directory's suite, classes holding too many tests of another suite, and leaking unit tests.
+- `start_method=` on `ProcessRunner`, `RunnerFactory`, the process channel factories and the FastAPI
+  subprocess builder (`with_start_method()`); spawn or forkserver keeps restarts from forking off
+  the monitor thread. `ProcessRunner.process` and `start_subprocess()` are typed `BaseProcess`.
+- `appinfra cq dup` reports duplicated code blocks (pylint's duplicate-code; pylint joins the
+  `check` extra). `appinfra cq dead` reports private definitions nothing refers to. `# cq: keep
+  <reason>` exempts a finding, on the definition line or within every copy of a block. `make
+  check` runs them per `APPINFRA_DEV_CQ_DUP` / `APPINFRA_DEV_CQ_DEAD`:
+  `false`, `warn` (default) or `strict`.
+- `APPINFRA_DEV_CQ_LINT_SELECT`: extra ruff rule codes that `make check` reports under Linting as
+  warnings, without failing (default `C90,SIM,RET,PIE,PERF,FURB,C4`).
+- `make check` names, in a row below its checklist, a test that left a non-daemon thread running
+  at exit; the thread's stack goes to the kept log. Such a thread holds a pytest-xdist worker
+  until it ends, for up to 10s.
+- `make check` shows the warnings of checks that passed in rows below its checklist: in tests, at
+  interpreter exit (any category, and exceptions finalizers raise), in examples, and tools' own
+  warning lines. With a bare `error` in the project's `filterwarnings` they fail the check.
+- `APPINFRA_PYTEST_PERF_DIR`: the directory `make check` and `make test.perf` collect
+  performance tests from (default `tests`).
+- `PG.dispose()` closes the pooled connections of a `PG` and of its cached `ScopedPG`s.
+
+### Changed
+- `make test.all` (and `make test`, now the same) runs every suite but performance in one parallel
+  pytest run, then the performance tests serially; additions to `test.unit::` and the other suite
+  targets no longer run as part of it. `make test` no longer runs performance tests in parallel.
+- `APPINFRA_PYTEST_WORKERS` defaults to `auto`, so the `make test*` targets run on pytest-xdist as
+  `make check` does; an empty value in `Makefile.local` runs pytest in-process.
+- `make install` creates a missing `share/` (0755) in a virtualenv; other prefixes still need one.
+- **Breaking:** `appinfra.yaml.SecretStr` is now `appinfra.envelope.Envelope`, also exported as
+  `appinfra.Envelope`; `!secret` loads as an `Envelope`. No alias is kept. `Envelope(e)` returns
+  `e`, replacing `ensure()`, but raises on `None`; `Envelope.optional(x)` passes `None` through.
+- **Breaking:** `appinfra.security` is removed (`SecretMasker`, `SecretMaskingFilter`,
+  `get_masker`). Declare secrets with `!secret`, or wrap them in an `Envelope` where they enter
+  the program.
+- **Breaking:** a `${path}` reference to a secret now carries its `Envelope` instead of `'***'`;
+  text a secret is spliced into, such as a database URL, is an `Envelope` as a whole. `PG`, the db
+  manager, SQLite and `appinfra pg url --db` accept such a URL.
+- `make check` prints its result last, after the failures, kept logs, skips and `[i]` notes.
+  Warnings show in bright yellow, failures in red.
+- **Breaking:** `make check.summary` is now `make check.ci`: `make check`'s checks and warning
+  policy as plain text, with pytest running in parallel. `make check.raw` applies no warning policy.
+- `make check` runs the Performance group on one pytest-xdist worker instead of several.
+- `make check`: the "Function size check" row is now "Code quality check" and also runs
+  `cq dup` and `cq dead` when enabled; the "Running code quality checks..." banner is gone. A
+  cq tool that fails to run only warns, unless that tool is set to strict.
+- A bare `make` shows the help screen instead of `make config`'s output.
+- **Breaking:** `make env` is removed. `make config` shows the interpreter and its source, and
+  every `APPINFRA_*` setting with its value and source, read from make's own variables.
+- `make setup` installs the tools `make check` runs (the new `check` extra of appinfra 0.14.0 or
+  later: ruff, mypy, pytest, coverage, interrogate, pylint) in every project, not only those its
+  own dependencies list.
+- The `check` extra requires ruff 0.16 or later, the first release whose `ruff format --check`
+  also checks the Python code blocks in Markdown files.
+- The package type-checks under `mypy --strict`, which `make check` enforces. `App.tool` and
+  `App.argument` return precisely typed decorators.
+- **Breaking:** `appinfra.cli.tools.code_quality`, `check_functions` and `check_spdx` moved to
+  `appinfra.cli.tools.cq` (`tool`, `functions`, `spdx`).
+- **Breaking:** `GitRuntimeSource()` no longer takes `check_dirty`; the parameter had no effect.
+- **Breaking:** the framework's Make and tooling variables are renamed from `INFRA_*` to
+  `APPINFRA_*` (`APPINFRA_DEV_PKG_NAME`, `APPINFRA_PYTEST_WORKERS`, ...); every `INFRA_*` variable
+  is now a config override. Old names are not read: set in a Makefile they are ignored;
+  exported, they fail the config load as undeclared overrides. `Config` rejects an `env_prefix`
+  that overlaps `APPINFRA_`.
+- **Breaking:** every other framework name moves into `APPINFRA_*` (settings) or `_APPINFRA_*`
+  (internal): `ETC_DIR` → `APPINFRA_ETC_DIR`, `PYTHON_ENVS` → `APPINFRA_PYTHON_ENVS`,
+  `run_pytest(_serial)` → `APPINFRA_RUN_PYTEST(_SERIAL)`, and the scaffold's `INFRA_ROOT` →
+  `APPINFRA_SCRIPTS` (the scripts directory). The Postgres module's `PG_*` variables (`PG_PORT`,
+  `PG_HOST`, `PG_INCLUDED`, ...) become internal `_APPINFRA_PG_*`. The interpreter is `PYTHON`
+  alone; `INFRA_ENV_PYTHON` is removed. Old names are ignored.
+- **Breaking:** without `PYTHON` set, make uses `python3` on `PATH` (an activated venv, conda or
+  pyenv), not `~/.venv/bin/python`. To keep that interpreter, set
+  `PYTHON := $(HOME)/.venv/bin/python` in `Makefile.local`.
+- **Breaking:** a make of one appinfra project run inside another's make (e.g. a submodule's
+  `test.all`) stops, since the inherited settings would replace its own; run it with a clean
+  environment: `env -i HOME="$$HOME" PATH="$$PATH" $(MAKE) -C <dir> <target>`.
+- **Breaking:** `INFRA_NO_CONFIRM` is removed; `APPINFRA_YES` answers every confirmation, the
+  `areyousure` prompt of destructive Make targets included.
+- **Breaking:** every on/off setting (`APPINFRA_DRY_RUN`, `APPINFRA_DEV_CQ_STRICT`, `APPINFRA_YES`,
+  ...) takes `true`, `1`, `y`, `yes` or `false`, `0`, `n`, `no`, in any case; any other value is
+  an error. Dry run used to take only `1`, the others only `true`.
+- **Breaking:** make checks every setting's value against its type (mode, percent, integer,
+  worker count), and an `APPINFRA_*` name that is not an appinfra setting stops make (from the
+  environment, it warns).
+- **Breaking:** settings follow one precedence: command line, environment, `Makefile.local`
+  (assigned with `:=`), project Makefile (with `?=`), defaults. An environment value now
+  outranks a `Makefile.local` assignment; a `:=` in the project Makefile pins its value.
+- **Breaking:** an `APPINFRA_*` or `PYTHON` that the environment or the command line sets empty
+  stops make; it used to run the setting empty, hiding `Makefile.local` and the default.
+- A `Ticker.stop()` while the ticker is not running is kept: the next `run()` returns at once,
+  without calling the handler. A `stop()` right after starting the `run()` thread used to be lost.
+- **Breaking:** the `sql` extra requires SQLAlchemy 2.1 and installs psycopg 3 (`psycopg[binary]`)
+  instead of psycopg2; SQLAlchemy 2.1 maps `postgresql://` URLs to psycopg 3. Code that imports
+  psycopg2 itself must depend on it directly.
+- The `check` extra requires mypy 2, whose stricter checks can report new errors in a project.
+- The `fastapi` extra caps fastapi below 0.163 and uvicorn below 0.55 (both were below 1.0): both
+  break APIs in minor releases.
+- The `dev` extra installs `httpx2` in place of `httpx`, and Starlette 1.2 or later, whose test
+  client uses `httpx2`.
+- **Breaking:** the database `Interface` declares `dispose()` as abstract; a subclass must
+  implement it to be instantiated.
+
+### Fixed
+- `Sched` keeps daily and weekly runs on their local time across DST changes and monthly runs on
+  the 1st; they moved by an hour at each change and by days each month. A schedule set up in the
+  repeated fall-back hour no longer fires in a burst, and one that falls behind runs once.
+- `make install` and `make reinstall` check every environment before changing any: an environment
+  that cannot take the wheel no longer leaves the others uninstalled or half installed.
+  `make reinstall` asks for confirmation once.
+- `password(confirm=True)` accepts a matching confirmation; with questionary installed it always
+  reported a mismatch and prompted again.
+- `JSONLoggingBuilder` and `DatabaseLoggingBuilder` apply the location color; a database handler
+  that fails to build raises `LogConfigError`, as with the other builders.
+- The database log handler's critical flush fires on its trigger fields in a `Logger` call's
+  `extra`; such records used to wait in the batch, and only exceptions were written at once.
+- `StoreConformance`'s racing-prune test no longer stalls for seconds under load, and it races
+  writers against prune in every run.
+- `Ticker.stop()` ends a scheduled `run()` right away; it used to return only when the current
+  interval ran out.
+- `Ticker` calls the handler's `ticker_stop()` once per run; a repeated `stop()` during a run
+  called it again.
+- JSON and database log output include the traceback of an exception logged as
+  `extra={"exception": e}` or sent through the multiprocess queue; the database handler used to
+  drop a record with an exception in `extra`.
+- `INFRA_TEST_LOGGING_LEVEL` overrides `test.logging.level`; `Config` used to skip it.
+- A project from `appinfra scaffold` passes its own `make lint` and `make check`, and the
+  framework style finds an installed appinfra; it used to look in the wrong directory.
+- `make` no longer prints a docs config error on every call when the docs config is missing.
+- `make help`, and a bare `make`, work with the make 3.81 that macOS ships; they failed with an
+  awk syntax error.
+- `TCPServer` in single-process mode refuses a `Ticker` handler at startup with a message pointing
+  to `ticker=`; it failed with an `AttributeError`, calling a `Ticker.start()` that does not exist.
+- A `Ticker` can be pickled, so `TCPServer(..., ticker=)` starts its ticker process under the spawn
+  and forkserver start methods (macOS, Python 3.14 on Linux); it failed on the ticker's lock.
+- A process service can hold its end of the channel from `create_process_runner_with_channel()`
+  under the spawn and forkserver start methods; `ProcessRunner` failed to pickle the channel's lock.
+- A process using `create_process_runner_with_channel()` exits when requests to its service are
+  still unread; it used to hang at exit, waiting to deliver them to the already stopped service.
+- `ProcessRunner`'s monitor restarts a service that raised or exited non-zero, as the FastAPI
+  subprocess server relies on; it used to end the runner in `DONE` or `FAILED` without a restart.
+  A service process that raised now exits with code 1, and a failed restart logs a warning.
+  The FastAPI server's blocking `start()` waits through restarts; `max_restarts=0` is unlimited.
+- The `appinfra.db.pg.testing` fixtures (`pg_isolated`, `pg_migrate_factory`,
+  `make_migrate_fixture`) close their pooled connections at teardown; psycopg used to report each
+  one with a `ResourceWarning` at garbage collection.
+- `pg_migrate_factory` and `make_migrate_fixture` work in a schema of their own
+  (`<pg_test_schema>_m<n>`); they used to reset and drop the worker schema `pg_isolated` relies
+  on, so its later tables landed in `public`.
+- A schema or extension name longer than 63 characters is refused; PostgreSQL truncated it
+  silently, so two long schema names could share one schema.
+- `Manager.close_all()` also closes the connections of each `PG`'s cached `ScopedPG`s.
+- `SubprocessContext` puts back the SIGTERM and SIGINT handlers it replaced; a reused worker
+  process that had run a task in one no longer ended on SIGTERM.
+- The database log handler writes a critical record logged from a worker thread; it used to lose
+  it. Its critical-flush timeout and the shutdown phase timeouts honour sub-second values.
+- `safe_compile`, `safe_match`, `safe_search` and `safe_findall` work from a worker thread, without
+  a timeout, and honour a sub-second timeout. Off the main thread they failed with
+  `UnboundLocalError`, and they left their own SIGALRM handler installed.
+
 ## [0.13.0] - 2026-10-25
 
 ### Added
@@ -1071,7 +1240,8 @@ as config. Affected: `ConfigValidator`, `PG.readonly`, `PG.migrate()`,
 ### Changed
 - Package renamed to `appinfra` (install and import both use `appinfra`)
 
-[Unreleased]: https://github.com/llm-works/appinfra/compare/v0.13.0...HEAD
+[Unreleased]: https://github.com/llm-works/appinfra/compare/v0.14.0...HEAD
+[0.14.0]: https://github.com/llm-works/appinfra/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/llm-works/appinfra/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/llm-works/appinfra/compare/v0.11.1...v0.12.0
 [0.11.1]: https://github.com/llm-works/appinfra/compare/v0.11.0...v0.11.1

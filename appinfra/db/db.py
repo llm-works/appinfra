@@ -10,6 +10,7 @@ connections of different types, supporting PostgreSQL and SQLite.
 
 from typing import Any
 
+from ..envelope import Envelope
 from ..log import Logger, LoggerFactory
 from . import pg, sqlite
 
@@ -17,9 +18,6 @@ from . import pg, sqlite
 class UnknownDBTypeException(Exception):
     """
     Exception raised when an unsupported database type is encountered.
-
-    Attributes:
-        _url: The database URL that caused the exception
     """
 
     def __init__(self, url: str) -> None:
@@ -30,27 +28,30 @@ class UnknownDBTypeException(Exception):
             url (str): Database URL that is not supported
         """
         super().__init__(f"Unknown database type: {url}")
-        self._url = url
 
 
 # Helper functions for Manager.setup()
 
 
 def _setup_postgresql_database(
-    name: str, db_cfg: Any, lg: Any, lg_level: Any, dbs_dict: dict
+    name: str, db_cfg: Any, lg: Any, lg_level: Any, dbs_dict: dict[str, Any]
 ) -> None:
     """Set up a PostgreSQL database connection."""
     dbs_dict[name] = pg.PG(lg, db_cfg, query_lg_level=lg_level)
     lg.debug("registered pg", extra={"db": name} | db_cfg.dict())
 
 
-def _setup_sqlite_database(name: str, db_cfg: Any, lg: Any, dbs_dict: dict) -> None:
+def _setup_sqlite_database(
+    name: str, db_cfg: Any, lg: Any, dbs_dict: dict[str, Any]
+) -> None:
     """Set up a SQLite database connection."""
     dbs_dict[name] = sqlite.SQLite(lg, db_cfg)
     lg.debug("registered sqlite", extra={"db": name, "url": db_cfg.url})
 
 
-def _handle_unknown_db_type(name: str, url: str, lg: Any, setup_errors: dict) -> None:
+def _handle_unknown_db_type(
+    name: str, url: str, lg: Any, setup_errors: dict[str, Exception]
+) -> None:
     """Handle unsupported database types."""
     error_msg = f"unsupported database type in URL: {url}"
     lg.error(error_msg, extra={"db": name, "url": url})
@@ -58,22 +59,31 @@ def _handle_unknown_db_type(name: str, url: str, lg: Any, setup_errors: dict) ->
 
 
 def _setup_single_database(
-    name: str, cfg: Any, lg: Any, lg_level: Any, dbs: dict, errors: dict
+    name: str,
+    cfg: Any,
+    lg: Any,
+    lg_level: Any,
+    dbs: dict[str, Any],
+    errors: dict[str, Exception],
 ) -> bool:
     """Set up a single database connection based on URL type."""
     url = cfg.url
-    if url.startswith("postgresql") or url.startswith("postgres://"):
+    # A URL a secret was spliced into is an Envelope; open it for the scheme
+    # check only, so the error path logs the masked value
+    text = Envelope(url).reveal()
+    if text.startswith(("postgresql", "postgres://")):
         _setup_postgresql_database(name, cfg, lg, lg_level, dbs)
         return True
-    elif url.startswith("sqlite"):
+    if text.startswith("sqlite"):
         _setup_sqlite_database(name, cfg, lg, dbs)
         return True
-    else:
-        _handle_unknown_db_type(name, url, lg, errors)
-        return False
+    _handle_unknown_db_type(name, url, lg, errors)
+    return False
 
 
-def _check_setup_results(successful_count: int, setup_errors: dict, lg: Any) -> None:
+def _check_setup_results(
+    successful_count: int, setup_errors: dict[str, Exception], lg: Any
+) -> None:
     """Check setup results and log summary."""
     if successful_count == 0:
         raise RuntimeError("Failed to setup any database connections")
@@ -174,12 +184,12 @@ class Manager:
         if not hasattr(cfg, "url") or not cfg.url:
             raise ValueError(f"Database '{name}' missing required 'url' field")
 
-        if not isinstance(cfg.url, str):
+        if not isinstance(cfg.url, (str, Envelope)):
             raise ValueError(f"Database '{name}' URL must be a string")
 
         # Validate URL format - accept PostgreSQL or SQLite
         valid_prefixes = ("postgresql://", "postgres://", "sqlite://", "sqlite:///")
-        if not cfg.url.startswith(valid_prefixes):
+        if not Envelope(cfg.url).reveal().startswith(valid_prefixes):
             raise ValueError(
                 f"Database '{name}' URL must start with a supported prefix: "
                 f"postgresql://, postgres://, or sqlite://"
@@ -204,8 +214,7 @@ class Manager:
                 raise RuntimeError(
                     f"Database '{name}' setup failed: {self._setup_errors[name]}"
                 )
-            else:
-                raise KeyError(f"Database connection '{name}' not found")
+            raise KeyError(f"Database connection '{name}' not found")
 
         return self._dbs[name]
 
@@ -218,7 +227,7 @@ class Manager:
         """
         return list(self._dbs.keys())
 
-    def get_setup_errors(self) -> dict:
+    def get_setup_errors(self) -> dict[str, Exception]:
         """
         Get setup errors for failed database connections.
 
@@ -227,7 +236,7 @@ class Manager:
         """
         return self._setup_errors.copy()
 
-    def health_check(self, name: str | None = None) -> dict:
+    def health_check(self, name: str | None = None) -> dict[str, Any]:
         """
         Perform health check on database connection(s).
 
@@ -269,8 +278,7 @@ class Manager:
         """
         for name, db in self._dbs.items():
             try:
-                if hasattr(db, "engine") and hasattr(db.engine, "dispose"):
-                    db.engine.dispose()
+                db.dispose()
                 self._lg.debug("closed database connection", extra={"db": name})
             except Exception as e:
                 self._lg.error(
@@ -281,7 +289,7 @@ class Manager:
         self._dbs.clear()
         self._lg.info("closed all database connections")
 
-    def get_stats(self) -> dict:
+    def get_stats(self) -> dict[str, Any]:
         """
         Get statistics about database connections.
 

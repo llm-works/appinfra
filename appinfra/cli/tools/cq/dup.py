@@ -1,0 +1,283 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The appinfra Authors
+
+"""
+Duplicated code check.
+
+Runs pylint's duplicate-code checker (``R0801``) over the selected files and
+reports each group of similar blocks as ``path:first-last`` locations. Comments,
+docstrings, imports and function signatures are ignored when comparing, so
+blocks that differ only in those still count as duplicates. A group is kept,
+not reported, when one of its reported copies has ``# cq: keep`` on a line
+within the reported range, followed by the reason. pylint may report only two
+copies of a block found in three or more places, so the directive goes on every
+copy. pylint runs with ``pylint_plugin``, which turns off attribute inference the
+check does not use. pylint must be installed; it is part of the ``check`` extra.
+
+Exit Codes:
+    0: No duplicates
+    1: Duplicates (in strict mode), or pylint failed to run
+    42: Duplicates but non-strict mode (warning)
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import re
+import subprocess
+import sys
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+from ....app.tools import Tool, ToolConfig
+from .common import (
+    EXIT_CODE_WARNING,
+    collect_python_files,
+    has_keep,
+    keep_lines,
+    read_source,
+)
+
+DEFAULT_MIN_LINES = 8
+# pylint processes: about half the single-process time; more buys little and takes the CPU
+# make check gives its other checks
+DEFAULT_JOBS = 4
+
+# One location line in an R0801 message: ==<module>:[<start>:<end>], 0-based, end exclusive
+_LOCATION = re.compile(r"^==(?P<module>[^:\s]+):\[(?P<start>\d+):(?P<end>\d+)\]$")
+
+# pylint exit status bits that mean it did not complete (fatal, usage error)
+_PYLINT_FAILED = 1 | 32
+
+# Skips astroid's attribute inference, which can import large dependencies whole
+_PLUGIN = f"{__package__}.pylint_plugin"
+
+# Directory holding the appinfra package this module belongs to: a checkout's root or
+# site-packages. pylint drops the working directory from sys.path, so a checkout's
+# appinfra is not importable there unless this is on PYTHONPATH.
+_PACKAGE_ROOT = Path(__file__).resolve().parents[len(__name__.split(".")) - 1]
+
+
+@dataclass(frozen=True)
+class Block:
+    """One occurrence of a duplicated block, 1-based inclusive lines."""
+
+    location: str
+    first_line: int
+    last_line: int
+
+    @property
+    def size(self) -> int:
+        """Lines the block spans, including comments and docstrings."""
+        return self.last_line - self.first_line + 1
+
+
+def pylint_command(files: list[Path], min_lines: int, jobs: int) -> list[str]:
+    """Build the pylint invocation that reports only duplicate-code."""
+    return [
+        sys.executable,
+        "-m",
+        "pylint",
+        f"--jobs={jobs}",
+        f"--load-plugins={_PLUGIN}",
+        "--disable=all",
+        "--enable=duplicate-code",
+        "--output-format=json2",
+        "--score=n",
+        f"--min-similarity-lines={min_lines}",
+        "--ignore-comments=y",
+        "--ignore-docstrings=y",
+        "--ignore-imports=y",
+        "--ignore-signatures=y",
+        *(str(f) for f in files),
+    ]
+
+
+def pylint_env() -> dict[str, str]:
+    """Return the environment for pylint, with this appinfra first on PYTHONPATH.
+
+    pylint then loads the plugin from the same appinfra that runs cq dup.
+    """
+    env = dict(os.environ)
+    paths = [str(_PACKAGE_ROOT), env.get("PYTHONPATH", "")]
+    env["PYTHONPATH"] = os.pathsep.join(p for p in paths if p)
+    return env
+
+
+def module_paths(files: list[Path]) -> dict[str, Path]:
+    """Map each file's dotted module suffixes to the file, for resolving pylint's names."""
+    paths: dict[str, Path] = {}
+    for f in files:
+        parts = f.with_suffix("").parts
+        for i in range(len(parts)):
+            paths.setdefault(".".join(parts[i:]), f)
+    return paths
+
+
+def parse_message(message: str, paths: dict[str, Path]) -> list[Block]:
+    """Parse the location lines of one R0801 message into blocks, sorted by location.
+
+    With several pylint jobs the order of the locations in a message varies between runs.
+    """
+    blocks = []
+    for line in message.splitlines():
+        match = _LOCATION.match(line)
+        if match is None:
+            continue
+        path = paths.get(match["module"])
+        location = str(path) if path else match["module"]
+        blocks.append(Block(location, int(match["start"]) + 1, int(match["end"])))
+    return sorted(blocks, key=lambda b: (b.location, b.first_line))
+
+
+def parse_groups(output: str, paths: dict[str, Path]) -> list[list[Block]]:
+    """Parse pylint json2 output into groups of duplicated blocks."""
+    messages = json.loads(output).get("messages", [])
+    groups = [
+        parse_message(m["message"], paths)
+        for m in messages
+        if m.get("symbol") == "duplicate-code"
+    ]
+    return [g for g in groups if g]
+
+
+def plugin_errors(output: str) -> list[str]:
+    """Return pylint's messages for plugins it could not load; it still exits 0 then.
+
+    Each pylint process reports the failure, so a message repeats once per job.
+    """
+    messages = json.loads(output).get("messages", [])
+    errors = [m["message"] for m in messages if m.get("symbol") == "bad-plugin-value"]
+    return list(dict.fromkeys(errors))
+
+
+def _kept_lines(location: str, cache: dict[str, set[int]]) -> set[int]:
+    """Return a block's file's keep-directive lines, read once; an unreadable file has none."""
+    if location not in cache:
+        try:
+            cache[location] = keep_lines(read_source(Path(location)))
+        except (OSError, UnicodeDecodeError, SyntaxError):
+            cache[location] = set()
+    return cache[location]
+
+
+def drop_kept(groups: list[list[Block]]) -> list[list[Block]]:
+    """Drop the groups that have a keep directive within one of their blocks."""
+    cache: dict[str, set[int]] = {}
+    return [
+        group
+        for group in groups
+        if not any(
+            has_keep(_kept_lines(b.location, cache), b.first_line, b.last_line)
+            for b in group
+        )
+    ]
+
+
+def format_report(groups: list[list[Block]], files_checked: int) -> str:
+    """Render each group as its locations, largest first, plus totals.
+
+    Copies of one block can span different line counts, since comments and docstrings are
+    ignored when comparing. The duplicated total counts the smallest copy once per extra copy.
+    """
+    lines = []
+    for group in sorted(groups, key=lambda g: min(b.size for b in g), reverse=True):
+        lines.append(f"duplicate block in {len(group)} places:")
+        lines.extend(
+            f"  {b.location}:{b.first_line}-{b.last_line} ({b.size} lines)"
+            for b in group
+        )
+    duplicated = sum(min(b.size for b in g) * (len(g) - 1) for g in groups)
+    lines.append(f"Files checked: {files_checked}")
+    lines.append(f"Duplicated lines: {duplicated}")
+    lines.append(f"Violations: {len(groups)}")
+    return "\n".join(lines)
+
+
+class CheckDupTool(Tool):
+    """Tool for reporting duplicated code blocks."""
+
+    def __init__(self, parent: Any = None):
+        """Initialize the duplicated code check tool."""
+        config = ToolConfig(
+            name="check-dup",
+            aliases=["dup"],
+            help_text="Report duplicated code blocks (pylint duplicate-code)",
+            description=(
+                "Report blocks of similar lines found in more than one place, "
+                "using pylint's duplicate-code checker. Comments, docstrings, "
+                "imports and signatures are ignored when comparing. Mark intended "
+                "ones with '# cq: keep <reason>' within every copy."
+            ),
+        )
+        super().__init__(parent, config)
+
+    def add_args(self, parser: argparse.ArgumentParser) -> None:
+        """Add CLI arguments."""
+        parser.add_argument(
+            "dir",
+            nargs="?",
+            default=".",
+            help="Directory to analyze (default: current directory)",
+        )
+        parser.add_argument(
+            "--min-lines",
+            type=int,
+            default=DEFAULT_MIN_LINES,
+            help=f"Minimum similar lines to report (default: {DEFAULT_MIN_LINES})",
+        )
+        parser.add_argument(
+            "--jobs",
+            type=int,
+            default=DEFAULT_JOBS,
+            help=f"pylint processes; 0 uses every CPU (default: {DEFAULT_JOBS})",
+        )
+        parser.add_argument(
+            "--strict",
+            action="store_true",
+            help="Exit with code 1 if duplicates exist (for CI)",
+        )
+        parser.add_argument(
+            "--exclude",
+            action="append",
+            help="Patterns to exclude (can be used multiple times)",
+        )
+
+    def run(self, **kwargs: Any) -> int:
+        """Run pylint over the selected files and print the report."""
+        files = collect_python_files(
+            self.lg, [self.args.dir], self.args.exclude or [], include_tests=False
+        )
+        if not files:
+            self.lg.warning("no Python files found to analyze")
+            return 0
+        result = self._run_pylint(files)
+        if result is None:
+            return 1
+        groups = drop_kept(parse_groups(result.stdout, module_paths(files)))
+        sys.stdout.write(format_report(groups, len(files)) + "\n")
+        if not groups:
+            return 0
+        return 1 if self.args.strict else EXIT_CODE_WARNING
+
+    def _run_pylint(self, files: list[Path]) -> subprocess.CompletedProcess[str] | None:
+        """Run pylint; log and return None if it did not complete or ran without its plugin."""
+        cmd = pylint_command(files, self.args.min_lines, self.args.jobs)
+        result = subprocess.run(cmd, capture_output=True, text=True, env=pylint_env())
+        if result.returncode & _PYLINT_FAILED or not result.stdout:
+            self.lg.error(
+                "pylint did not complete (is it installed?)",
+                extra={
+                    "returncode": result.returncode,
+                    "stderr": result.stderr[-2000:],
+                },
+            )
+            return None
+        errors = plugin_errors(result.stdout)
+        if errors:
+            self.lg.error("pylint could not load its plugin", extra={"errors": errors})
+            return None
+        return result

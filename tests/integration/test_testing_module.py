@@ -11,6 +11,31 @@ import pytest
 from sqlalchemy import Column, Integer, String, text
 from sqlalchemy.orm import declarative_base
 
+from appinfra.db.pg.testing import make_migrate_fixture
+
+MigrateBase = declarative_base()
+
+
+class MigrateFixtureModel(MigrateBase):
+    __tablename__ = "migrate_fixture_test"
+    id = Column(Integer, primary_key=True)
+    name = Column(String(50))
+
+
+pg_migrated = make_migrate_fixture(MigrateBase)
+
+
+def _schema_exists(pg, schema: str) -> bool:
+    with pg.engine.connect() as conn:
+        result = conn.execute(
+            text(
+                "SELECT COUNT(*) FROM information_schema.schemata "
+                "WHERE schema_name = :schema"
+            ),
+            {"schema": schema},
+        )
+        return result.scalar() == 1
+
 
 # Override the default fixtures to use our test config
 @pytest.fixture(scope="session")
@@ -25,15 +50,13 @@ def pg_test_logger(pg_logger):
     return pg_logger
 
 
-# Now import the testing fixtures
-pytest_plugins = ["appinfra.db.pg.testing"]
+# The appinfra.db.pg.testing fixtures come from tests/conftest.py
 
 # All classes here exercise PG-backed fixtures from appinfra.db.pg.testing;
 # skip the whole module with the sentinel reason if PG is unreachable.
 pytestmark = pytest.mark.require_pg
 
 
-@pytest.mark.integration
 class TestPgIsolatedFixture:
     """Test the pg_isolated fixture."""
 
@@ -54,7 +77,6 @@ class TestPgIsolatedFixture:
             assert row[0] == 1
 
 
-@pytest.mark.integration
 class TestPgSessionIsolatedFixture:
     """Test the pg_session_isolated fixture."""
 
@@ -88,7 +110,6 @@ class TestPgSessionIsolatedFixture:
         assert result.scalar() == 1
 
 
-@pytest.mark.integration
 class TestSchemaIsolationRobustness:
     """Regression tests for schema isolation under pool-state stress.
 
@@ -130,51 +151,31 @@ class TestSchemaIsolationRobustness:
                 )
 
 
-@pytest.mark.integration
 class TestMakeMigrateFixture:
     """Test the make_migrate_fixture factory."""
 
-    def test_creates_tables_from_base(
-        self, pg_test_config, pg_test_logger, pg_test_schema
-    ):
-        """Test that make_migrate_fixture creates tables in the schema."""
-        from appinfra.db.pg import PG
+    def test_creates_tables_from_base(self, pg_migrated):
+        """Test that make_migrate_fixture creates tables in its schema."""
+        with pg_migrated.engine.connect() as conn:
+            result = conn.execute(
+                text(
+                    """
+                    SELECT COUNT(*)
+                    FROM information_schema.tables
+                    WHERE table_schema = :schema
+                    AND table_name = 'migrate_fixture_test'
+                    """
+                ),
+                {"schema": pg_migrated.schema},
+            )
+            assert result.scalar() == 1
 
-        Base = declarative_base()
-
-        class MigrateTestModel(Base):
-            __tablename__ = "migrate_fixture_test"
-            id = Column(Integer, primary_key=True)
-            name = Column(String(50))
-
-        # Manually invoke what the fixture would do
-        pg = PG(pg_test_logger, pg_test_config, schema=pg_test_schema)
-
-        try:
-            if pg._schema_mgr:
-                pg._schema_mgr.reset_schema()
-            pg.migrate(Base)
-
-            # Verify table exists in correct schema
-            with pg.engine.connect() as conn:
-                result = conn.execute(
-                    text(
-                        """
-                        SELECT COUNT(*)
-                        FROM information_schema.tables
-                        WHERE table_schema = :schema
-                        AND table_name = 'migrate_fixture_test'
-                        """
-                    ),
-                    {"schema": pg_test_schema},
-                )
-                assert result.scalar() == 1
-        finally:
-            if pg._schema_mgr:
-                pg._schema_mgr.drop_schema(cascade=True)
+    def test_uses_a_schema_of_its_own(self, pg_isolated, pg_migrated):
+        """The fixture's schema is not the worker schema pg_isolated uses."""
+        assert pg_migrated.schema != pg_isolated.schema
+        assert _schema_exists(pg_isolated, pg_isolated.schema)
 
 
-@pytest.mark.integration
 class TestPgMigrateFactory:
     """Test the pg_migrate_factory fixture."""
 
@@ -187,21 +188,20 @@ class TestPgMigrateFactory:
             id = Column(Integer, primary_key=True)
             name = Column(String(50))
 
-        with pg_migrate_factory(Base) as pg:
-            # Verify table exists in correct schema
-            with pg.engine.connect() as conn:
-                result = conn.execute(
-                    text(
-                        """
-                        SELECT COUNT(*)
-                        FROM information_schema.tables
-                        WHERE table_schema = :schema
-                        AND table_name = 'factory_test_table'
-                        """
-                    ),
-                    {"schema": pg.schema},
-                )
-                assert result.scalar() == 1
+        # Verify table exists in correct schema
+        with pg_migrate_factory(Base) as pg, pg.engine.connect() as conn:
+            result = conn.execute(
+                text(
+                    """
+                    SELECT COUNT(*)
+                    FROM information_schema.tables
+                    WHERE table_schema = :schema
+                    AND table_name = 'factory_test_table'
+                    """
+                ),
+                {"schema": pg.schema},
+            )
+            assert result.scalar() == 1
 
     def test_factory_cleans_up_on_exit(self, pg_migrate_factory, pg_test_schema):
         """Test that pg_migrate_factory cleans up schema on context exit."""
@@ -216,21 +216,36 @@ class TestPgMigrateFactory:
             engine = pg.engine
             schema = pg.schema
 
-        # After context exit, schema should be dropped
-        # We need a new connection to check (the old PG is cleaned up)
-        # The schema should not exist anymore
-        with engine.connect() as conn:
-            result = conn.execute(
-                text(
-                    """
-                    SELECT COUNT(*)
-                    FROM information_schema.schemata
-                    WHERE schema_name = :schema
-                    """
-                ),
-                {"schema": schema},
-            )
-            assert result.scalar() == 0
+        # After context exit, schema should be dropped. The factory disposed the
+        # engine's pool; this query opens a new one, closed again below.
+        try:
+            with engine.connect() as conn:
+                result = conn.execute(
+                    text(
+                        """
+                        SELECT COUNT(*)
+                        FROM information_schema.schemata
+                        WHERE schema_name = :schema
+                        """
+                    ),
+                    {"schema": schema},
+                )
+                assert result.scalar() == 0
+        finally:
+            engine.dispose()
+
+    def test_factory_leaves_the_worker_schema(self, pg_isolated, pg_migrate_factory):
+        """Entering and leaving the factory keeps pg_isolated's schema."""
+        Base = declarative_base()
+
+        class WorkerSchemaTestModel(Base):
+            __tablename__ = "worker_schema_test_table"
+            id = Column(Integer, primary_key=True)
+
+        with pg_migrate_factory(Base) as pg:
+            assert pg.schema != pg_isolated.schema
+
+        assert _schema_exists(pg_isolated, pg_isolated.schema)
 
     def test_factory_accepts_extensions(self, pg_migrate_factory):
         """Test that pg_migrate_factory accepts extensions parameter."""
@@ -246,7 +261,6 @@ class TestPgMigrateFactory:
             assert pg.schema is not None
 
 
-@pytest.mark.integration
 class TestPgCleanSchemaFixture:
     """Test the pg_clean_schema fixture."""
 

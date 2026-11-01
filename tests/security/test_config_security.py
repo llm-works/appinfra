@@ -3,6 +3,7 @@
 
 """Security tests for Config module (infra/app/cfg.py)."""
 
+import importlib
 import os
 from pathlib import Path
 
@@ -10,66 +11,55 @@ import pytest
 
 from appinfra.config import MAX_CONFIG_SIZE_BYTES, Config
 from tests.security.payloads.injection import ENV_VAR_INJECTION
-from tests.security.payloads.resource_exhaustion import generate_large_config
 from tests.security.payloads.traversal import (
     ABSOLUTE_PATH_ESCAPE,
     CLASSIC_TRAVERSAL,
 )
 
 
-@pytest.mark.security
-@pytest.mark.integration
-def test_config_file_size_limit(secure_temp_project: Path):
+def test_config_file_size_limit_default():
+    """The limit guarding YAML parsing against resource exhaustion is 10 MB."""
+    assert MAX_CONFIG_SIZE_BYTES == 10 * 1024 * 1024
+
+
+def test_config_file_size_limit(
+    secure_temp_project: Path, monkeypatch: pytest.MonkeyPatch
+):
     """
     Verify MAX_CONFIG_SIZE_BYTES enforcement prevents DoS attacks.
 
     Attack Vector: Resource exhaustion via oversized config files
-    Module: infra/app/cfg.py:43-51 (_check_file_size)
+    Module: appinfra/config/config.py (_check_file_size)
     OWASP: A05:2021 - Security Misconfiguration
 
-    Security Concern: Extremely large config files can exhaust memory and
-    processing time during YAML parsing. The 10MB limit should prevent
-    resource exhaustion attacks.
+    The check compares the file size with the limit before parsing; the limit is
+    lowered to 4 KB so the files stay small (a 10 MB YAML takes seconds to parse).
     """
-    # Test 1: Config file slightly under limit should succeed
-    max_size_mb = MAX_CONFIG_SIZE_BYTES // (1024 * 1024)
-    # Generate config slightly smaller to account for YAML overhead
-    config_under_limit = generate_large_config(max_size_mb - 1)
-    valid_path = secure_temp_project / "configs" / "valid_size.yaml"
-    valid_path.write_text(config_under_limit)
+    limit = 4096
+    # The module from sys.modules, not the package attribute: a test that re-imports
+    # appinfra.config leaves the fresh package without its config submodule attribute
+    config_module = importlib.import_module("appinfra.config.config")
+    monkeypatch.setattr(config_module, "MAX_CONFIG_SIZE_BYTES", limit)
+    configs = secure_temp_project / "configs"
 
-    # Should load without error
-    config = Config(str(valid_path), enable_env_overrides=False)
-    assert config is not None
+    # At the limit: loads
+    at_limit = configs / "at_limit.yaml"
+    body = "key: value\n"
+    at_limit.write_text(body + "#" * (limit - len(body) - 1) + "\n")
+    assert at_limit.stat().st_size == limit
+    assert Config(str(at_limit), enable_env_overrides=False) is not None
 
-    # Test 2: Config file exceeding limit should fail
-    # Generate 11MB config (exceeds 10MB limit)
-    oversized_config = generate_large_config(max_size_mb + 1)
-    oversized_path = secure_temp_project / "configs" / "oversized.yaml"
-    oversized_path.write_text(oversized_config)
-
-    # Verify file is actually oversized
-    assert oversized_path.stat().st_size > MAX_CONFIG_SIZE_BYTES
-
-    # Should raise ValueError for exceeding size limit
+    # One byte over: refused before parsing, naming the file and its size
+    oversized = configs / "oversized.yaml"
+    oversized.write_text(at_limit.read_text() + "\n")
     with pytest.raises(
-        ValueError,
-        match=f"exceeding maximum size of {MAX_CONFIG_SIZE_BYTES} bytes",
-    ):
-        Config(str(oversized_path), enable_env_overrides=False)
-
-    # Test 3: Verify error message includes actual file size
-    try:
-        Config(str(oversized_path), enable_env_overrides=False)
-        pytest.fail("Expected ValueError for oversized config")
-    except ValueError as e:
-        error_msg = str(e)
-        assert str(oversized_path) in error_msg
-        assert "bytes" in error_msg
+        ValueError, match=f"exceeding maximum size of {limit} bytes"
+    ) as e:
+        Config(str(oversized), enable_env_overrides=False)
+    assert str(oversized) in str(e.value)
+    assert f"is {limit + 1} bytes" in str(e.value)
 
 
-@pytest.mark.security
-@pytest.mark.integration
 @pytest.mark.parametrize("payload", ENV_VAR_INJECTION[:3])  # Test first 3 payloads
 def test_variable_substitution_injection(payload: str, secure_temp_project: Path):
     """
@@ -104,8 +94,6 @@ malicious: "{payload}"
     # The presence of the string is OK - it's execution that's bad
 
 
-@pytest.mark.security
-@pytest.mark.integration
 def test_variable_substitution_recursion(secure_temp_project: Path):
     """
     Verify circular variable references don't cause infinite loops.
@@ -137,8 +125,6 @@ var_b: "${var_a}"
     # Verify we didn't enter infinite loop (test completes)
 
 
-@pytest.mark.security
-@pytest.mark.integration
 @pytest.mark.parametrize("payload", ENV_VAR_INJECTION)
 def test_environment_variable_injection(
     payload: str, secure_temp_project: Path, clean_env
@@ -197,8 +183,6 @@ app:
             del os.environ[env_key]
 
 
-@pytest.mark.security
-@pytest.mark.unit
 @pytest.mark.parametrize(
     "env_value,expected_type,expected_value",
     [
@@ -266,8 +250,6 @@ test:
             del os.environ[env_key]
 
 
-@pytest.mark.security
-@pytest.mark.integration
 @pytest.mark.expected_skip  # Skips non-relative paths (absolute, Windows, etc.)
 @pytest.mark.parametrize("traversal_path", CLASSIC_TRAVERSAL + ABSOLUTE_PATH_ESCAPE)
 def test_config_path_resolution_traversal(
@@ -288,7 +270,7 @@ def test_config_path_resolution_traversal(
     """
     # Create config with !path tag for path resolution
     # Note: Only paths with !path tag are resolved
-    if not (traversal_path.startswith("./") or traversal_path.startswith("../")):
+    if not traversal_path.startswith(("./", "../")):
         pytest.skip(f"Path {traversal_path} not a relative path (not ./ or ../)")
 
     config_content = f"""
@@ -313,8 +295,6 @@ paths:
         assert resolved_path.is_absolute()
 
 
-@pytest.mark.security
-@pytest.mark.integration
 @pytest.mark.expected_skip  # Skips on Windows (no /etc/passwd)
 def test_config_path_symlink_attack(secure_temp_project: Path):
     """
@@ -365,8 +345,6 @@ paths:
     assert resolved.is_absolute()
 
 
-@pytest.mark.security
-@pytest.mark.unit
 @pytest.mark.parametrize(
     "null_byte_key", ["key\x00name", "section\x00field", "data\x00"]
 )
@@ -401,7 +379,7 @@ normal_key: "normal_value"
         config_dict = config.dict()
 
         # Check that null byte didn't truncate the key
-        for key in config_dict.keys():
+        for key in config_dict:
             if "\x00" in key:
                 # Null byte preserved - verify full key is there
                 assert key == null_byte_key
@@ -419,8 +397,6 @@ normal_key: "normal_value"
 
 
 # Positive test: Verify legitimate config operations work
-@pytest.mark.security
-@pytest.mark.integration
 def test_legitimate_config_operations(secure_temp_project: Path, clean_env):
     """
     Verify legitimate config operations are not blocked by security measures.

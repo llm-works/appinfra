@@ -37,7 +37,7 @@ class DoctorTool(Tool):
     Performs checks for:
     - Python version compatibility
     - Required tools (ruff, pytest, mypy)
-    - Package configuration (INFRA_DEV_PKG_NAME validity)
+    - Package configuration (APPINFRA_DEV_PKG_NAME validity)
     - Project structure (tests/ directory)
     - Config file syntax (Makefile.local)
     """
@@ -61,7 +61,7 @@ class DoctorTool(Tool):
         parser.add_argument(
             "--pkg-name",
             default=None,
-            help="Package name to validate (default: from INFRA_DEV_PKG_NAME env var)",
+            help="Package name to validate (default: from APPINFRA_DEV_PKG_NAME env var)",
         )
         parser.add_argument(
             "--project-root",
@@ -88,8 +88,7 @@ class DoctorTool(Tool):
         # Output results
         if getattr(self.args, "json", False):
             return self._output_json(results)
-        else:
-            return self._output_pretty(results)
+        return self._output_pretty(results)
 
     def _check_python_version(self) -> CheckResult:
         """Check Python version >= 3.11."""
@@ -102,13 +101,12 @@ class DoctorTool(Tool):
                 passed=True,
                 message=f"{version_str} (>= 3.11 required)",
             )
-        else:
-            return CheckResult(
-                name="Python version",
-                passed=False,
-                message=f"{version_str} (>= 3.11 required)",
-                suggestion="Upgrade to Python 3.11 or later",
-            )
+        return CheckResult(
+            name="Python version",
+            passed=False,
+            message=f"{version_str} (>= 3.11 required)",
+            suggestion="Upgrade to Python 3.11 or later",
+        )
 
     def _check_required_tools(self) -> list[CheckResult]:
         """Check for ruff, pytest, mypy."""
@@ -173,16 +171,16 @@ class DoctorTool(Tool):
         return "installed"
 
     def _check_package_name(self) -> CheckResult:
-        """Validate INFRA_DEV_PKG_NAME."""
+        """Validate APPINFRA_DEV_PKG_NAME."""
         pkg_name = getattr(self.args, "pkg_name", None) or os.environ.get(
-            "INFRA_DEV_PKG_NAME"
+            "APPINFRA_DEV_PKG_NAME"
         )
         if not pkg_name:
             return CheckResult(
                 name="Package name",
                 passed=False,
-                message="INFRA_DEV_PKG_NAME not set",
-                suggestion="Set INFRA_DEV_PKG_NAME in your Makefile or environment",
+                message="APPINFRA_DEV_PKG_NAME not set",
+                suggestion="Set APPINFRA_DEV_PKG_NAME in your Makefile or environment",
             )
 
         project_root = Path(getattr(self.args, "project_root", "."))
@@ -199,7 +197,7 @@ class DoctorTool(Tool):
                 name="Package name",
                 passed=False,
                 message=f"Directory '{pkg_name}/' does not exist",
-                suggestion=f"Create {pkg_name}/ directory or fix INFRA_DEV_PKG_NAME",
+                suggestion=f"Create {pkg_name}/ directory or fix APPINFRA_DEV_PKG_NAME",
             )
 
         if not (pkg_dir / "__init__.py").exists():
@@ -338,9 +336,8 @@ class DoctorTool(Tool):
         if all_passed:
             print("All checks passed!")
             return 0
-        else:
-            print("Some checks failed. See suggestions above.")
-            return 1
+        print("Some checks failed. See suggestions above.")
+        return 1
 
     def _output_json(self, results: list[CheckResult]) -> int:
         """Output as JSON."""

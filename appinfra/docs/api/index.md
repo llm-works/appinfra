@@ -14,7 +14,6 @@ The Infra framework is organized into several major modules, each providing spec
 | [CLI Framework](cli.md) | Output abstractions and built-in CLI tools |
 | [Configuration](config.md) | Config loading, environment overrides, hot-reload watching |
 | [Logging System](logging.md) | Advanced logging with structured output, builders, and handlers |
-| [Security](security.md) | Secret masking for logs and console output |
 | [UI Components](ui.md) | Rich terminal output, progress bars, spinners, and prompts |
 | [Database Layer](database.md) | PostgreSQL interface with connection pooling and query monitoring |
 | [Content-Addressed Store](cas.md) | Blobs, trees and commits with compare-and-set refs |
@@ -57,7 +56,6 @@ appinfra/
 │   └── builder/     # Logging builders
 ├── net/              # TCP/HTTP server components
 ├── observability/    # Monitoring hooks
-├── security/         # Secret masking
 ├── service/          # Service execution and orchestration
 ├── subprocess/       # Subprocess lifecycle management
 ├── time/             # Time and scheduling
@@ -97,7 +95,7 @@ appinfra/
 - [`DotDict`](utilities.md#dotdict) - Dot-notation dictionary
 
 **Security & Observability:**
-- [`SecretMasker`](security.md#secretmasker) - Secret detection and masking
+- [`Envelope`](utilities.md#custom-tags) - A secret that masks itself until revealed
 - [`ObservabilityHooks`](observability.md#observabilityhooks) - Event callbacks
 
 ## Naming Conventions
@@ -160,9 +158,8 @@ def get(self, path: str, default: Any = None) -> Any:
 - [Database Layer](database.md) - PostgreSQL interface
 - [Content-Addressed Store](cas.md) - Blobs, trees, commits and refs
 
-### Logging & Security
+### Logging & Observability
 - [Logging System](logging.md) - Advanced logging
-- [Security](security.md) - Secret masking
 - [Observability](observability.md) - Monitoring hooks
 
 ### Network & UI

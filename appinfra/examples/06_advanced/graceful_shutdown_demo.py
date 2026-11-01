@@ -33,7 +33,9 @@ Expected behavior:
 
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 # Allow running from a source checkout without installing the package.
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
@@ -47,11 +49,11 @@ from appinfra.app.builder.plugin import Plugin
 class TickerPlugin(Plugin):
     """Plugin that manages ticker lifecycle."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__("TickerPlugin")
-        self.ticker = None
+        self.ticker: appinfra.time.Ticker | None = None
 
-    def configure(self, builder) -> None:
+    def configure(self, builder: AppBuilder) -> None:
         """Configure the plugin."""
         pass
 
@@ -60,7 +62,7 @@ class TickerPlugin(Plugin):
         # Ticker will be set by the tool
         pass
 
-    def set_ticker(self, ticker):
+    def set_ticker(self, ticker: appinfra.time.Ticker) -> None:
         """Set the ticker instance to manage."""
         self.ticker = ticker
 
@@ -75,11 +77,11 @@ class TickerPlugin(Plugin):
 class ShutdownDemoPlugin(Plugin):
     """Demo plugin that shows cleanup during shutdown."""
 
-    def __init__(self, name: str):
+    def __init__(self, name: str) -> None:
         super().__init__(name)
         self.resources_allocated = False
 
-    def configure(self, builder) -> None:
+    def configure(self, builder: AppBuilder) -> None:
         """Configure the plugin."""
         # Add a startup hook to simulate resource allocation
         builder.lifecycle.with_hook_builder(
@@ -102,7 +104,7 @@ class ShutdownDemoPlugin(Plugin):
                 f"[{self.name}] plugin cleanup - no resources to release"
             )
 
-    def _allocate_resources(self, context: HookContext):
+    def _allocate_resources(self, context: HookContext) -> None:
         """Allocate resources on startup."""
         if context.application:
             context.application.lg.info(
@@ -113,10 +115,10 @@ class ShutdownDemoPlugin(Plugin):
 class TickerApp(App, appinfra.time.TickerHandler):
     """Application with ticker that demonstrates graceful shutdown."""
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self._tick_count = 0
-        self._last_t = None
+        self._last_t = time.monotonic()
 
     def _run(self) -> int:
         """Override _run to run ticker directly."""
@@ -150,7 +152,7 @@ class TickerApp(App, appinfra.time.TickerHandler):
 
         return 0
 
-    def ticker_start(self):
+    def ticker_start(self) -> None:
         """Called when the ticker starts."""
         self.lg.info(
             "ticker started",
@@ -158,7 +160,7 @@ class TickerApp(App, appinfra.time.TickerHandler):
         )
         self._last_t = time.monotonic()
 
-    def ticker_tick(self):
+    def ticker_tick(self) -> None:
         """Called on each tick execution."""
         self._tick_count += 1
         self.lg.info(
@@ -167,7 +169,7 @@ class TickerApp(App, appinfra.time.TickerHandler):
         )
         self._last_t = time.monotonic()
 
-    def ticker_stop(self):
+    def ticker_stop(self) -> None:
         """Called when the ticker stops."""
         self.lg.info(
             f"ticker stopped after {self._tick_count} ticks",
@@ -175,10 +177,10 @@ class TickerApp(App, appinfra.time.TickerHandler):
         )
 
 
-def create_shutdown_hook(hook_name: str):
+def create_shutdown_hook(hook_name: str) -> Callable[[HookContext], None]:
     """Create a shutdown hook with the given name."""
 
-    def shutdown_hook(context: HookContext):
+    def shutdown_hook(context: HookContext) -> None:
         if context.application:
             context.application.lg.info(
                 f"[{hook_name}] shutdown hook triggered - performing cleanup"
@@ -188,7 +190,7 @@ def create_shutdown_hook(hook_name: str):
     return shutdown_hook
 
 
-def create_application():
+def create_application() -> App:
     """Create the application with plugins and hooks to demonstrate shutdown."""
 
     # Configuration will be auto-loaded from etc directory during app.setup()
@@ -220,7 +222,7 @@ def create_application():
     return app
 
 
-def main():
+def main() -> int:
     """Main function."""
     app = create_application()
     return app.main()

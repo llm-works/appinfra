@@ -4,7 +4,7 @@
 # SPDX-FileCopyrightText: Copyright 2026 The appinfra Authors
 
 # ci-run: --help
-# ci-run: all
+# ci-run: all --fast
 # ci-timeout: 25
 
 """
@@ -24,11 +24,14 @@ Run:
     python examples/09_ui/progress_logger_example.py justified    # Right-justified demo
     python examples/09_ui/progress_logger_example.py switch       # Mode switching demo
     python examples/09_ui/progress_logger_example.py all          # Run all demos
+    python examples/09_ui/progress_logger_example.py all --fast   # All demos, no pauses
 """
 
+import argparse
 import sys
 import time
 from pathlib import Path
+from typing import Any
 
 # Allow running from a source checkout without installing the package.
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
@@ -36,6 +39,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from appinfra.app import AppBuilder
 from appinfra.app.tools import Tool, ToolConfig
 from appinfra.ui import ProgressLogger
+
+
+def pause(args: argparse.Namespace, seconds: float) -> None:
+    """Sleep so the demo can be watched; ``all --fast`` skips the pause."""
+    if not getattr(args, "fast", False):
+        time.sleep(seconds)
 
 
 class SpinnerDemo(Tool):
@@ -47,13 +56,13 @@ class SpinnerDemo(Tool):
             help_text="Spinner mode demo - unknown duration with periodic logs",
         )
 
-    def run(self, **kwargs) -> int:
+    def run(self, **kwargs: Any) -> int:
         self.lg.info("Starting spinner demo...")
 
         # Spinner mode - no total specified
         with ProgressLogger(self.lg, "Processing items...") as pl:
             for i in range(10):
-                time.sleep(0.3)
+                pause(self.args, 0.3)
                 # Log every 3 items - spinner pauses, logs, resumes
                 if (i + 1) % 3 == 0:
                     pl.info(f"Processed {i + 1} items so far")
@@ -71,7 +80,7 @@ class ProgressDemo(Tool):
             help_text="Progress bar mode demo - known total with periodic logs",
         )
 
-    def run(self, **kwargs) -> int:
+    def run(self, **kwargs: Any) -> int:
         self.lg.info("Starting progress bar demo...")
 
         total_items = 20
@@ -79,7 +88,7 @@ class ProgressDemo(Tool):
         # Progress bar mode - shows: spinner, message, bar, count, elapsed, ETA
         with ProgressLogger(self.lg, "Downloading files...", total=total_items) as pl:
             for i in range(total_items):
-                time.sleep(0.15)
+                pause(self.args, 0.15)
                 pl.update(advance=1)
                 # Log every 5 items
                 if (i + 1) % 5 == 0:
@@ -98,14 +107,14 @@ class SwitchDemo(Tool):
             help_text="Mode switching demo - spinner to progress bar",
         )
 
-    def run(self, **kwargs) -> int:
+    def run(self, **kwargs: Any) -> int:
         self.lg.info("Starting mode switch demo...")
 
         with ProgressLogger(self.lg, "Scanning directory...") as pl:
             # Phase 1: Spinner while "scanning"
             pl.info("Phase 1: Scanning (spinner mode)")
             for _ in range(5):
-                time.sleep(0.2)
+                pause(self.args, 0.2)
 
             # "Found" some items - switch to progress bar
             found_items = 15
@@ -115,7 +124,7 @@ class SwitchDemo(Tool):
             # Phase 2: Progress bar while "processing"
             pl.update(message="Processing items...")
             for i in range(found_items):
-                time.sleep(0.1)
+                pause(self.args, 0.1)
                 pl.update(advance=1)
                 if (i + 1) % 5 == 0:
                     pl.info(f"Processed {i + 1}/{found_items} items")
@@ -133,7 +142,7 @@ class JustifiedDemo(Tool):
             help_text="Right-justified progress bar demo - stable bar position",
         )
 
-    def run(self, **kwargs) -> int:
+    def run(self, **kwargs: Any) -> int:
         self.lg.info("Starting right-justified demo...")
         self.lg.info("Notice how the progress bar stays anchored to the right edge:\n")
 
@@ -152,7 +161,7 @@ class JustifiedDemo(Tool):
         ) as pl:
             for i, pkg in enumerate(packages):
                 pl.update(message=f"Syncing {pkg}...")
-                time.sleep(1.0)
+                pause(self.args, 1.0)
 
         self.lg.info("\nRight-justified demo complete!")
         return 0
@@ -167,7 +176,12 @@ class AllDemo(Tool):
             help_text="Run all demos sequentially",
         )
 
-    def run(self, **kwargs) -> int:
+    def add_args(self, parser: argparse.ArgumentParser) -> None:
+        parser.add_argument(
+            "--fast", action="store_true", help="run without the demo pauses"
+        )
+
+    def run(self, **kwargs: Any) -> int:
         self.lg.info("Running all demos...\n")
 
         # Get other tools from registry
@@ -184,7 +198,7 @@ class AllDemo(Tool):
                 # set them up; do it here before running them.
                 app.lifecycle.setup_tool(tool)
                 tool.run()
-            time.sleep(0.5)
+            pause(self.args, 0.5)
 
         self.lg.info("\nAll demos complete!")
         return 0

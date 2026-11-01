@@ -16,6 +16,7 @@ This module provides:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import multiprocessing as mp
 import queue
 import time
@@ -224,7 +225,7 @@ class AsyncBufferedChannel(Generic[TRequest, TResponse]):
         if not hasattr(request, "id"):
             raise ValueError("Request must have an 'id' attribute")
 
-        request_id = request.id  # type: ignore[union-attr]
+        request_id = request.id
         effective_timeout = timeout if timeout is not None else self._response_timeout
         deadline = time.monotonic() + effective_timeout
 
@@ -245,7 +246,7 @@ class AsyncBufferedChannel(Generic[TRequest, TResponse]):
         if not hasattr(request, "id"):
             raise ValueError("Request must have an 'id' attribute")
 
-        request_id = request.id  # type: ignore[union-attr]
+        request_id = request.id
         effective_timeout = timeout if timeout is not None else self._response_timeout
 
         await self.send(request, effective_timeout)
@@ -483,14 +484,10 @@ class AsyncProcessQueueTransport(Generic[TRequest, TResponse]):
     async def close(self) -> None:
         """Close both multiprocessing queues."""
         self._closed = True
-        try:
+        with contextlib.suppress(Exception):
             self._outbound.close()
-        except Exception:
-            pass
-        try:
+        with contextlib.suppress(Exception):
             self._inbound.close()
-        except Exception:
-            pass
 
     @property
     def is_closed(self) -> bool:

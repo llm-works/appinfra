@@ -59,6 +59,11 @@ def yellow(text: str, stream: TextIO | None = None) -> str:
     return _wrap("0;33", text, stream if stream is not None else sys.stdout)
 
 
+def bright_yellow(text: str, stream: TextIO | None = None) -> str:
+    """Wrap ``text`` in bright yellow, the text of a warning (no-op on non-TTY streams)."""
+    return _wrap("0;93", text, stream if stream is not None else sys.stdout)
+
+
 def blue(text: str, stream: TextIO | None = None) -> str:
     """Wrap ``text`` in blue (no-op on non-TTY streams)."""
     return _wrap("0;34", text, stream if stream is not None else sys.stdout)
@@ -74,7 +79,7 @@ def gray(text: str, stream: TextIO | None = None) -> str:
     return _wrap("0;90", text, stream if stream is not None else sys.stdout)
 
 
-# Status marks — the canonical five. Every progress/status line in appinfra
+# Status marks — the canonical six. Every progress/status line in appinfra
 # uses one of these; anything outside the set is a design decision.
 def mark_pending(stream: TextIO | None = None) -> str:
     """Gray ``[ ]`` — queued or skipped item that will not run."""
@@ -92,13 +97,18 @@ def mark_ok(stream: TextIO | None = None) -> str:
 
 
 def mark_warn(stream: TextIO | None = None) -> str:
-    """Yellow ``[⚠]`` — completed with warnings the caller should notice."""
-    return yellow("[⚠]", stream)
+    """Bright yellow ``[⚠]`` — completed with warnings the caller should notice."""
+    return bright_yellow("[⚠]", stream)
 
 
 def mark_fail(stream: TextIO | None = None) -> str:
     """Red ``[✗]`` — failure the caller must act on."""
     return red("[✗]", stream)
+
+
+def mark_info(stream: TextIO | None = None) -> str:
+    """Cyan ``[i]`` — information that is neither a result nor a warning."""
+    return cyan("[i]", stream)
 
 
 # Convenience printers. ui_fail goes to stderr; the others to stdout.

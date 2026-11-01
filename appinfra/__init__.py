@@ -15,6 +15,7 @@ from .config import Config
 from .deprecation import deprecated
 from .dict import DictInterface
 from .dot_dict import DotDict
+from .envelope import Envelope
 from .errors import (
     ConfigError,
     DatabaseError,
@@ -63,6 +64,7 @@ __all__ = [
     "EWMA",
     "RateLimiter",
     "Config",
+    "Envelope",
     # Utils
     "pretty",
     "is_int",

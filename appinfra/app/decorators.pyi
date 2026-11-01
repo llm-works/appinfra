@@ -128,34 +128,34 @@ class ToolContextProtocol(Protocol):
 class ToolFunction:
     """Container for decorated function metadata."""
 
-    func: Callable
+    func: Callable[..., Any]
     name: str
     help_text: str
     description: str
     aliases: list[str]
-    arguments: list[tuple]
-    setup_hook: Callable | None
-    configure_hook: Callable | None
+    arguments: list[tuple[tuple[Any, ...], dict[str, Any]]]
+    setup_hook: Callable[..., Any] | None
+    configure_hook: Callable[..., Any] | None
     subtools: list[ToolFunction]
     default_subtool: str | None
 
     def __init__(
         self,
-        func: Callable,
+        func: Callable[..., Any],
         name: str | None = ...,
         help_text: str = ...,
         description: str = ...,
         aliases: list[str] | None = ...,
     ) -> None: ...
     def argument(self, *args: Any, **kwargs: Any) -> ToolFunction: ...
-    def on_setup(self, func: Callable) -> ToolFunction: ...
-    def on_configure(self, func: Callable) -> ToolFunction: ...
+    def on_setup(self, func: Callable[..., Any]) -> ToolFunction: ...
+    def on_configure(self, func: Callable[..., Any]) -> ToolFunction: ...
     def subtool(
         self,
         name: str | None = ...,
         help: str = ...,
         aliases: list[str] | None = ...,
-    ) -> Callable[[Callable], ToolFunction]: ...
+    ) -> Callable[[Callable[..., Any]], ToolFunction]: ...
     def to_tool_class(self) -> type: ...
 
 class DecoratorAPI:
@@ -168,8 +168,6 @@ class DecoratorAPI:
         help: str = ...,
         description: str = ...,
         aliases: list[str] | None = ...,
-    ) -> Callable[[Callable], ToolFunction]: ...
-    def argument(
-        self, *args: Any, **kwargs: Any
-    ) -> Callable[[ToolFunction], ToolFunction]: ...
+    ) -> Callable[[Callable[..., Any]], ToolFunction]: ...
+    def argument(self, *args: Any, **kwargs: Any) -> Callable[[T], T]: ...
     def get_tool_functions(self) -> list[ToolFunction]: ...

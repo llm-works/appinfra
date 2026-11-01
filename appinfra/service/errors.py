@@ -11,8 +11,6 @@ from appinfra.errors import InfraError
 class Error(InfraError):
     """Base error for service operations."""
 
-    pass
-
 
 class CycleError(Error):
     """Dependency cycle detected in service graph."""

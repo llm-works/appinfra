@@ -34,21 +34,32 @@ Repository = "https://github.com/llm-works/appinfra"
 Issues = "https://github.com/llm-works/appinfra/issues"
 
 [project.optional-dependencies]
-dev = [
-    "setuptools>=68.0",
+# The tools the Makefile framework's checks run; `make setup` installs them in every project
+check = [
     "coverage>=7.4.0,<8.0.0",
-    "ruff>=0.1.0,<1.0.0",
-    "mypy>=1.9.0,<2.0.0",
-    "types-PyYAML>=6.0.0,<7.0.0",
-    "types-setuptools>=80.0.0,<85.0.0",
-    "pytest>=8.0.0,<10.0.0",
-    "pytest-asyncio>=0.21.0,<2.0.0",
+    "ruff>=0.16.0,<1.0.0",  # 0.16 is the first to format-check the Python blocks in .md files
+    "mypy>=2.0.0,<3.0.0",
+    "pytest>=8.3.0,<10.0.0",  # 8.3 adds MarkMatcher.from_markers, which appinfra.pytest_suites uses
     "pytest-cov>=4.0.0,<8.0.0",
     "pytest-xdist>=3.2.0,<4.0.0",
+    "interrogate>=1.5.0,<2.0.0",
+    # deps_report.py (make deps): requirements, ranges and versions; 22 drops legacy versions
+    "packaging>=22.0,<27.0",
+    # 4.1 made duplicate-code fast on large trees. Capped at the tested minor: cq dup's plugin
+    # patches astroid, whose version pylint pins.
+    "pylint>=4.1.0,<4.2",
+]
+dev = [
+    "appinfra[check]",
+    "setuptools>=68.0",
+    "types-PyYAML>=6.0.0,<7.0.0",
+    "types-setuptools>=80.0.0,<85.0.0",
+    "pytest-asyncio>=0.24.0,<2.0.0",  # 0.24 adds asyncio_default_fixture_loop_scope
     "hypothesis>=6.0.0,<7.0.0",
     "pip-audit>=2.0.0,<3.0.0",
-    "interrogate>=1.5.0,<2.0.0",
-    "httpx>=0.24.0,<1.0.0",
+    # starlette.testclient takes httpx2 from Starlette 1.2 on and warns when it falls back to httpx
+    "httpx2>=2.0.0,<3.0.0",
+    "starlette>=1.2.0,<2.0.0",
 ]
 validation = [
     "pydantic>=2.0.0,<3.0.0",
@@ -60,8 +71,10 @@ docs = [
     "mkdocs-autorefs>=1.4.0,<2.0.0",
 ]
 fastapi = [
-    "fastapi>=0.100.0,<1.0.0",
-    "uvicorn[standard]>=0.23.0,<1.0.0",
+    # Both are 0.x and break APIs in minor releases: capped one minor past the newest
+    # tested version, raised after testing a newer one
+    "fastapi>=0.100.0,<0.163",
+    "uvicorn[standard]>=0.23.0,<0.55",
 ]
 hotreload = [
     "watchdog>=3.0.0,<5.0.0",
@@ -72,9 +85,11 @@ ui = [
     "InquirerPy>=0.3.0,<1.0.0",
 ]
 sql = [
-    "sqlalchemy>=2.0.0,<2.1.0",
-    "sqlalchemy-utils>=0.42.0,<1.0.0",
-    "psycopg2-binary>=2.9.0,<3.0.0",
+    # 2.1 maps postgresql:// URLs to psycopg 3; 2.0 maps them to psycopg2
+    "sqlalchemy>=2.1.0,<3.0.0",
+    # 0.43 no longer subclasses ScalarAttributeImpl, which SQLAlchemy 2.1 made private
+    "sqlalchemy-utils>=0.43.0,<1.0.0",
+    "psycopg[binary]>=3.2.0,<4.0.0",
 ]
 service = [
     # No additional dependencies - service module uses stdlib only
@@ -110,10 +125,20 @@ select = [
     "N",     # pep8-naming
     "UP",    # pyupgrade
     "UP037", # Remove quotes from annotations (explicit for policy enforcement)
+    "C90",   # mccabe complexity
+    "SIM",   # flake8-simplify
+    "RET",   # flake8-return
+    "PIE",   # flake8-pie
+    "PERF",  # perflint
+    "FURB",  # refurb
+    "C4",    # flake8-comprehensions
 ]
 ignore = [
     "E501",  # line too long (handled by formatter)
 ]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
 
 [tool.ruff.lint.isort]
 known-first-party = ["appinfra"]
@@ -123,6 +148,7 @@ known-first-party = ["appinfra"]
     "E402",  # Module import not at top (examples modify sys.path)
     "F841",  # Unused variables (demonstration code)
     "F821",  # Undefined names (examples may use forward references)
+    "C90", "SIM", "RET", "PIE", "PERF", "FURB", "C4",  # code-quality rules: core code only
 ]
 "tests/**/*.py" = [
     "N806",  # Variable name should be lowercase (Mock classes in tests)
@@ -153,16 +179,19 @@ line-ending = "auto"
 
 [tool.mypy]
 python_version = "3.11"
-warn_return_any = true
-warn_unused_configs = true
-disallow_untyped_defs = true
+strict = true
+# Calls into methods the library stubs leave unannotated: Loader inherits dispose, resolve and
+# add_multi_constructor from yaml.SafeLoader; sqlalchemy.dialects.postgresql.dialect (the
+# psycopg dialect) has an unannotated __init__.
+untyped_calls_exclude = ["appinfra.yaml.loader.Loader", "sqlalchemy.dialects.postgresql"]
 exclude = ["tests/", "scripts/", ".build/", ".dist/", ".cover/", ".htmlcov/", ".site/"]
 
 # No usable type information. sqlalchemy_utils has no py.typed, and its only stub package
 # (types-sqlalchemy-utils) is built on the SQLAlchemy 1.4 stubs, not SQLAlchemy 2.0's own types.
 # pgvector has no py.typed or stubs; it is in no extra (db/pg/vector.py imports it lazily).
+# astroid has no py.typed or stubs; cq's pylint plugin imports it.
 [[tool.mypy.overrides]]
-module = ["sqlalchemy_utils", "pgvector.*"]
+module = ["sqlalchemy_utils", "pgvector.*", "astroid.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
@@ -170,19 +199,14 @@ testpaths = ["tests"]
 python_files = ["test_*.py", "*_test.py"]
 addopts = "-v --tb=short"
 pythonpath = ["."]
-# Suppress passlib deprecation warning for 'crypt' module (Python 3.13+)
-# See: https://github.com/pyca/passlib/issues/148 - remove when passlib releases a fix
-filterwarnings = [
-    "ignore:'crypt' is deprecated:DeprecationWarning:passlib",
-]
+# Set explicitly: unset, pytest-asyncio warns in every pytest process
+asyncio_default_fixture_loop_scope = "function"
+# Any warning fails the test that raises it. A known one is ignored per test, with the reason
+# beside the mark (tests/helpers/fork.py), never here for the whole suite.
+filterwarnings = ["error"]
+# The suite markers (unit, integration, e2e, security, performance) are registered by
+# appinfra.pytest_suites, loaded from tests/conftest.py.
 markers = [
-    "unit: Unit tests (fast, isolated, no external dependencies)",
-    "integration: Integration tests (may use DB, network, filesystem)",
-    "performance: Performance/benchmark tests",
-    "security: Security-focused tests (injection, validation, etc.)",
-    "e2e: End-to-end tests (full system integration)",
-    "slow: Tests that take >1 second to run",
-    "property: property-based tests using Hypothesis",
     "require_pg: Test requires a running PostgreSQL server (skipped with a single banner if unavailable)",
 ]
 

@@ -30,11 +30,12 @@ from pathlib import Path
 # Allow running from a source checkout without installing the package.
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
+from appinfra.app import App
 from appinfra.app.builder import AppBuilder
-from appinfra.log import LogConfig, LoggerFactory
+from appinfra.log import LogConfig, Logger, LoggerFactory
 
 
-def _print_yaml_config_instructions():
+def _print_yaml_config_instructions() -> None:
     """Print YAML configuration instructions."""
     print("\n" + "=" * 70)
     print("Example 1: YAML Configuration")
@@ -48,7 +49,7 @@ def _print_yaml_config_instructions():
     print("\nSee topic_logging_config.yaml for YAML configuration examples.")
 
 
-def _create_topic_loggers():
+def _create_topic_loggers() -> tuple[Logger, Logger, Logger]:
     """Create loggers with topic-based configuration."""
     print("\nFor this example, using programmatic API (equivalent to YAML):")
     app = (
@@ -72,7 +73,9 @@ def _create_topic_loggers():
     return db_logger, api_logger, app_logger
 
 
-def _test_topic_loggers(db_logger, api_logger, app_logger):
+def _test_topic_loggers(
+    db_logger: Logger, api_logger: Logger, app_logger: Logger
+) -> None:
     """Test loggers at different levels."""
     print("\nLogger levels from configuration:")
     print(f"  /infra/db/queries  → {logging.getLevelName(db_logger.level)}")
@@ -98,14 +101,14 @@ def _test_topic_loggers(db_logger, api_logger, app_logger):
     app_logger.error("This ERROR message SHOULD appear")
 
 
-def example_1_yaml_configuration():
+def example_1_yaml_configuration() -> None:
     """Example 1: Configure topic levels via YAML."""
     _print_yaml_config_instructions()
     db_logger, api_logger, app_logger = _create_topic_loggers()
     _test_topic_loggers(db_logger, api_logger, app_logger)
 
 
-def example_2_cli_override():
+def example_2_cli_override() -> None:
     """Example 2: Override YAML configuration with CLI arguments."""
     print("\n" + "=" * 70)
     print("Example 2: CLI Arguments Override YAML")
@@ -125,7 +128,7 @@ def example_2_cli_override():
     print("\nCLI arguments have priority 5, overriding YAML (priority 1)")
 
 
-def _create_api_configured_app():
+def _create_api_configured_app() -> App:
     """Create app with programmatically configured topic levels."""
     return (
         AppBuilder("api-example")
@@ -142,7 +145,7 @@ def _create_api_configured_app():
     )
 
 
-def _create_and_display_api_loggers():
+def _create_and_display_api_loggers() -> tuple[Logger, Logger, Logger]:
     """Create loggers and display their configured levels."""
     log_config = LogConfig.from_params("info", location=0, micros=False)
     db_logger = LoggerFactory.create("/infra/db/connection", log_config)
@@ -157,7 +160,9 @@ def _create_and_display_api_loggers():
     return db_logger, api_logger, app_logger
 
 
-def _test_api_loggers(db_logger, api_logger, app_logger):
+def _test_api_loggers(
+    db_logger: Logger, api_logger: Logger, app_logger: Logger
+) -> None:
     """Test loggers at different configured levels."""
     print("\nTesting /infra/db/connection logger:")
     db_logger.debug("DEBUG: Connection pool initialized")
@@ -171,7 +176,7 @@ def _test_api_loggers(db_logger, api_logger, app_logger):
     app_logger.error("ERROR: Business rule violation detected")
 
 
-def example_3_programmatic_api():
+def example_3_programmatic_api() -> None:
     """Example 3: Configure topic levels via AppBuilder API."""
     print("\n" + "=" * 70)
     print("Example 3: Programmatic API Configuration")
@@ -182,7 +187,7 @@ def example_3_programmatic_api():
     _test_api_loggers(db_logger, api_logger, app_logger)
 
 
-def _create_specificity_app():
+def _create_specificity_app() -> App:
     """Create app with overlapping pattern configurations."""
     return (
         AppBuilder("specificity-example")
@@ -199,7 +204,7 @@ def _create_specificity_app():
     )
 
 
-def _demonstrate_pattern_matching():
+def _demonstrate_pattern_matching() -> None:
     """Create loggers and demonstrate pattern specificity matching."""
     log_config = LogConfig.from_params("info", location=0, micros=False)
     # Earlier examples in this script created some of these names; replace them so
@@ -219,7 +224,7 @@ def _demonstrate_pattern_matching():
     )
 
 
-def _print_specificity_rules():
+def _print_specificity_rules() -> None:
     """Print specificity scoring rules."""
     print("\nSpecificity scoring:")
     print("  - Exact segment = 10 points")
@@ -227,7 +232,7 @@ def _print_specificity_rules():
     print("  - '**' wildcard = 0 points")
 
 
-def example_4_pattern_specificity():
+def example_4_pattern_specificity() -> None:
     """Example 4: Pattern specificity - more specific patterns win."""
     print("\n" + "=" * 70)
     print("Example 4: Pattern Specificity")
@@ -238,7 +243,7 @@ def example_4_pattern_specificity():
     _print_specificity_rules()
 
 
-def _create_runtime_update_app():
+def _create_runtime_update_app() -> App:
     """Create app with runtime updates enabled."""
     return (
         AppBuilder("runtime-example")
@@ -250,14 +255,14 @@ def _create_runtime_update_app():
     )
 
 
-def _demonstrate_initial_logging(logger):
+def _demonstrate_initial_logging(logger: Logger) -> None:
     """Demonstrate logging before runtime level change."""
     print(f"\nInitial logger level: {logging.getLevelName(logger.level)}")
     logger.debug("This DEBUG message should NOT appear")
     logger.info("This INFO message SHOULD appear")
 
 
-def _update_runtime_level(logger):
+def _update_runtime_level(logger: Logger) -> None:
     """Change logger level at runtime and demonstrate."""
     print("\nChanging /myapp/** level to DEBUG at runtime...")
     from appinfra.log.level_manager import LogLevelManager
@@ -270,7 +275,7 @@ def _update_runtime_level(logger):
     logger.info("This INFO message still appears")
 
 
-def example_5_runtime_updates():
+def example_5_runtime_updates() -> None:
     """Example 5: Runtime updates to existing loggers."""
     print("\n" + "=" * 70)
     print("Example 5: Runtime Updates (Opt-in)")
@@ -287,7 +292,7 @@ def example_5_runtime_updates():
     print("Use .with_runtime_updates(True) to enable.")
 
 
-def example_6_priority_demonstration():
+def example_6_priority_demonstration() -> None:
     """Example 6: Priority system - API > CLI > YAML."""
     print("\n" + "=" * 70)
     print("Example 6: Priority System")
@@ -320,7 +325,7 @@ def example_6_priority_demonstration():
     print("   1 = YAML (configuration files)")
 
 
-def main():
+def main() -> None:
     """Run all examples."""
     print("\n" + "=" * 70)
     print("Topic-Based Logging Examples")

@@ -71,7 +71,7 @@ def destroy_test_loggers() -> Generator[None, None, None]:
 
 @pytest.hookimpl(wrapper=True)
 def pytest_runtest_makereport(
-    item: Item, call: CallInfo
+    item: Item, call: CallInfo[None]
 ) -> Generator[None, TestReport, TestReport]:
     """
     Modify skip reason for tests marked with expected_skip.
@@ -83,9 +83,12 @@ def pytest_runtest_makereport(
     report: TestReport = yield
 
     # Process skipped tests in call or setup phase (not teardown - rare and typically fixture failures)
-    if report.skipped and call.when in ("call", "setup"):
-        if item.get_closest_marker("expected_skip"):
-            _prefix_skip_reason(report)
+    if (
+        report.skipped
+        and call.when in ("call", "setup")
+        and item.get_closest_marker("expected_skip")
+    ):
+        _prefix_skip_reason(report)
 
     return report
 

@@ -42,7 +42,7 @@ class Logger(logging.Logger):
         name: str,
         config: ConfigLike | None = None,
         callback_registry: CallbackRegistry | None = None,
-        extra: dict[str, Any] | collections.OrderedDict | None = None,
+        extra: dict[str, Any] | collections.OrderedDict[str, Any] | None = None,
         suppress_format_errors: bool = False,
     ):
         """
@@ -159,7 +159,9 @@ class Logger(logging.Logger):
         # Explicitly clear our own cache since we may not be in loggerDict
         self._cache.clear()  # type: ignore[attr-defined]
 
-    def set_extra(self, extra: dict[str, Any] | collections.OrderedDict) -> None:
+    def set_extra(
+        self, extra: dict[str, Any] | collections.OrderedDict[str, Any]
+    ) -> None:
         """Replace the pre-populated extra fields included in every record.
 
         Raises:
@@ -182,11 +184,11 @@ class Logger(logging.Logger):
             raise ReservedKeyError(conflicts)
 
     def _merge_extra(
-        self, extra: dict[str, Any] | collections.OrderedDict | None
-    ) -> dict[str, Any] | collections.OrderedDict:
+        self, extra: dict[str, Any] | collections.OrderedDict[str, Any] | None
+    ) -> dict[str, Any] | collections.OrderedDict[str, Any]:
         """Merge pre-populated extra fields with per-call extra fields."""
         # Use OrderedDict if either source is OrderedDict to preserve key ordering
-        merged: dict[str, Any] | collections.OrderedDict
+        merged: dict[str, Any] | collections.OrderedDict[str, Any]
         if isinstance(self._extra, collections.OrderedDict) or isinstance(
             extra, collections.OrderedDict
         ):
@@ -219,10 +221,10 @@ class Logger(logging.Logger):
         fn: str,
         lno: int,
         msg: str,
-        args: tuple,
+        args: tuple[Any, ...],
         exc_info: Any | None,
         func: str | None = None,
-        extra: dict[str, Any] | collections.OrderedDict | None = None,
+        extra: dict[str, Any] | collections.OrderedDict[str, Any] | None = None,
         sinfo: str | None = None,
     ) -> logging.LogRecord:
         """Create log record with extra field handling."""
@@ -274,7 +276,7 @@ class Logger(logging.Logger):
         if self.isEnabledFor(trace2_level):
             self._log(trace2_level, msg, args, **kwargs)
 
-    def _log(self, level: int, msg: str, args: tuple, **kwargs: Any) -> None:  # type: ignore[override]
+    def _log(self, level: int, msg: str, args: tuple[Any, ...], **kwargs: Any) -> None:  # type: ignore[override]
         """Enhanced logging with callback support."""
         if self._logging_disabled:
             return

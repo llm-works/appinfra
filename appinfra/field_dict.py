@@ -56,9 +56,7 @@ def _is_skippable_field(name: str, type_hint: Any) -> bool:
     if get_origin(type_hint) is ClassVar:
         return True
     # Handle postponed annotations (strings like "ClassVar[str]" or "typing.ClassVar")
-    if isinstance(type_hint, str) and "ClassVar" in type_hint:
-        return True
-    return False
+    return isinstance(type_hint, str) and "ClassVar" in type_hint
 
 
 def _process_field(

@@ -17,27 +17,27 @@ from appinfra.log import LogConfig, LoggerFactory
 
 
 class Ticker(appinfra.time.Ticker, appinfra.time.TickerHandler):
-    def __init__(self):
+    def __init__(self) -> None:
         config = LogConfig.from_params(level="info", location=1, micros=True)
         lg = LoggerFactory.create_root(config)
         super().__init__(lg, self, secs=1)
         self._last_t = time.monotonic()
 
-    def ticker_start(self):
+    def ticker_start(self) -> None:
         self._lg.info(
             "start",
             extra={"after": appinfra.time.since_str(self._last_t, precise=True)},
         )
         self._last_t = time.monotonic()
 
-    def ticker_tick(self):
+    def ticker_tick(self) -> None:
         self._lg.info(
             "tick", extra={"after": appinfra.time.since_str(self._last_t, precise=True)}
         )
         self._last_t = time.monotonic()
 
 
-def main():
+def main() -> int:
     Ticker().run()
     return 0
 

@@ -4,7 +4,7 @@
 """
 Tests for cli/tools/pg_tool.py.
 
-Covers the YAML → ``_INFRA_PG_*`` wire-protocol projection, per-verb env
+Covers the YAML → ``_APPINFRA_PG_*`` wire-protocol projection, per-verb env
 and arg mapping, PgUrlTool URL computation, and PgTool subtool
 registration.
 """
@@ -39,6 +39,7 @@ from appinfra.cli.tools.pg_tool import (
     _resolve_image,
 )
 from appinfra.dot_dict import DotDict
+from appinfra.envelope import Envelope
 
 # =============================================================================
 # _render_conf_value — postgres_conf value serialization
@@ -128,7 +129,7 @@ class TestProjectPostgresConf:
 
 @pytest.mark.unit
 class TestProjectEnv:
-    """Test config → _INFRA_PG_* env projection."""
+    """Test config → _APPINFRA_PG_* env projection."""
 
     def _cfg(self, **overrides):
         base = {
@@ -146,35 +147,35 @@ class TestProjectEnv:
 
     def test_minimal_projection(self):
         env = _project_env(self._cfg())
-        assert env["_INFRA_PG_CONTAINER_NAME"] == "test-pg"
-        assert env["_INFRA_PG_VERSION"] == "18"
-        assert env["_INFRA_PG_PORT"] == "25432"
-        assert env["_INFRA_PG_HOST"] == "127.0.0.1"
-        assert env["_INFRA_PG_USER"] == "postgres"
-        assert env["_INFRA_PG_REPLICA_ENABLED"] == "false"
-        assert env["_INFRA_PG_IMAGE"] == "docker.io/postgres:18"
+        assert env["_APPINFRA_PG_CONTAINER_NAME"] == "test-pg"
+        assert env["_APPINFRA_PG_VERSION"] == "18"
+        assert env["_APPINFRA_PG_PORT"] == "25432"
+        assert env["_APPINFRA_PG_HOST"] == "127.0.0.1"
+        assert env["_APPINFRA_PG_USER"] == "postgres"
+        assert env["_APPINFRA_PG_REPLICA_ENABLED"] == "false"
+        assert env["_APPINFRA_PG_IMAGE"] == "docker.io/postgres:18"
 
     def test_replica_enabled(self):
         env = _project_env(self._cfg(replica={"enabled": True, "port": 25433}))
-        assert env["_INFRA_PG_REPLICA_ENABLED"] == "true"
-        assert env["_INFRA_PG_PORT_R"] == "25433"
+        assert env["_APPINFRA_PG_REPLICA_ENABLED"] == "true"
+        assert env["_APPINFRA_PG_PORT_R"] == "25433"
 
     def test_explicit_image_overrides_version(self):
         env = _project_env(self._cfg(image="pgvector/pgvector:pg18"))
-        assert env["_INFRA_PG_IMAGE"] == "pgvector/pgvector:pg18"
+        assert env["_APPINFRA_PG_IMAGE"] == "pgvector/pgvector:pg18"
 
     def test_postgres_conf_flows_through(self):
         env = _project_env(
             self._cfg(postgres_conf={"max_connections": 500, "work_mem": "16MB"})
         )
-        assert env["_INFRA_PG_MAX_CONNECTIONS"] == "max_connections=500"
-        assert env["_INFRA_PG_WORK_MEM"] == "work_mem=16MB"
+        assert env["_APPINFRA_PG_MAX_CONNECTIONS"] == "max_connections=500"
+        assert env["_APPINFRA_PG_WORK_MEM"] == "work_mem=16MB"
 
     def test_host_defaults_when_missing(self):
         cfg = self._cfg()
         del cfg["pgserver"]["host"]
         env = _project_env(cfg)
-        assert env["_INFRA_PG_HOST"] == "127.0.0.1"
+        assert env["_APPINFRA_PG_HOST"] == "127.0.0.1"
 
 
 # =============================================================================
@@ -193,35 +194,35 @@ class TestExec:
         assert p.exists()
 
     def test_detect_runtime_honors_explicit_env(self, monkeypatch):
-        monkeypatch.setenv("INFRA_CONTAINER_CMD", "docker")
+        monkeypatch.setenv("APPINFRA_CONTAINER_CMD", "docker")
         assert _detect_runtime_env() == {}
 
     def test_detect_runtime_prefers_podman(self, monkeypatch):
-        monkeypatch.delenv("INFRA_CONTAINER_CMD", raising=False)
-        monkeypatch.delenv("INFRA_COMPOSE_CMD", raising=False)
+        monkeypatch.delenv("APPINFRA_CONTAINER_CMD", raising=False)
+        monkeypatch.delenv("APPINFRA_COMPOSE_CMD", raising=False)
         with patch(
             "appinfra.cli.tools.pg_tool.shutil.which",
             side_effect=lambda name: f"/usr/bin/{name}" if name == "podman" else None,
         ):
             env = _detect_runtime_env()
         assert env == {
-            "INFRA_CONTAINER_CMD": "podman",
-            "INFRA_COMPOSE_CMD": "podman compose",
+            "APPINFRA_CONTAINER_CMD": "podman",
+            "APPINFRA_COMPOSE_CMD": "podman compose",
         }
 
     def test_detect_runtime_falls_back_to_docker(self, monkeypatch):
-        monkeypatch.delenv("INFRA_CONTAINER_CMD", raising=False)
-        monkeypatch.delenv("INFRA_COMPOSE_CMD", raising=False)
+        monkeypatch.delenv("APPINFRA_CONTAINER_CMD", raising=False)
+        monkeypatch.delenv("APPINFRA_COMPOSE_CMD", raising=False)
         with patch(
             "appinfra.cli.tools.pg_tool.shutil.which",
             side_effect=lambda name: f"/usr/bin/{name}" if name == "docker" else None,
         ):
             env = _detect_runtime_env()
-        assert env["INFRA_CONTAINER_CMD"] == "docker"
-        assert env["INFRA_COMPOSE_CMD"] == "docker compose"
+        assert env["APPINFRA_CONTAINER_CMD"] == "docker"
+        assert env["APPINFRA_COMPOSE_CMD"] == "docker compose"
 
     def test_detect_runtime_empty_when_neither_present(self, monkeypatch):
-        monkeypatch.delenv("INFRA_CONTAINER_CMD", raising=False)
+        monkeypatch.delenv("APPINFRA_CONTAINER_CMD", raising=False)
         with patch("appinfra.cli.tools.pg_tool.shutil.which", return_value=None):
             assert _detect_runtime_env() == {}
 
@@ -241,7 +242,7 @@ class TestExec:
         with patch("appinfra.cli.tools.pg_tool.subprocess.call") as mock_call:
             mock_call.return_value = 0
             rc = _exec_pg(
-                cfg, "up", extra_args=["-x"], extra_env={"_INFRA_PG_MODE": "single"}
+                cfg, "up", extra_args=["-x"], extra_env={"_APPINFRA_PG_MODE": "single"}
             )
         assert rc == 0
         args, kwargs = mock_call.call_args
@@ -249,14 +250,14 @@ class TestExec:
         assert cmd[1] == "up"
         assert cmd[2] == "-x"
         env = kwargs["env"]
-        assert env["_INFRA_PG_CONTAINER_NAME"] == "n"
-        assert env["_INFRA_PG_MODE"] == "single"
+        assert env["_APPINFRA_PG_CONTAINER_NAME"] == "n"
+        assert env["_APPINFRA_PG_MODE"] == "single"
 
     def test_detect_runtime_prefers_podman_compose_binary(self, monkeypatch):
         """When podman-compose is on PATH, use it directly so the
         ``podman compose`` shim's banner stays out of user output."""
-        monkeypatch.delenv("INFRA_CONTAINER_CMD", raising=False)
-        monkeypatch.delenv("INFRA_COMPOSE_CMD", raising=False)
+        monkeypatch.delenv("APPINFRA_CONTAINER_CMD", raising=False)
+        monkeypatch.delenv("APPINFRA_COMPOSE_CMD", raising=False)
         with patch(
             "appinfra.cli.tools.pg_tool.shutil.which",
             side_effect=lambda name: (
@@ -265,20 +266,20 @@ class TestExec:
         ):
             env = _detect_runtime_env()
         assert env == {
-            "INFRA_CONTAINER_CMD": "podman",
-            "INFRA_COMPOSE_CMD": "podman-compose",
+            "APPINFRA_CONTAINER_CMD": "podman",
+            "APPINFRA_COMPOSE_CMD": "podman-compose",
         }
 
     def test_detect_runtime_falls_back_to_podman_compose_shim(self, monkeypatch):
         """Without ``podman-compose`` on PATH, fall back to the shim."""
-        monkeypatch.delenv("INFRA_CONTAINER_CMD", raising=False)
-        monkeypatch.delenv("INFRA_COMPOSE_CMD", raising=False)
+        monkeypatch.delenv("APPINFRA_CONTAINER_CMD", raising=False)
+        monkeypatch.delenv("APPINFRA_COMPOSE_CMD", raising=False)
         with patch(
             "appinfra.cli.tools.pg_tool.shutil.which",
             side_effect=lambda name: f"/usr/bin/{name}" if name == "podman" else None,
         ):
             env = _detect_runtime_env()
-        assert env["INFRA_COMPOSE_CMD"] == "podman compose"
+        assert env["APPINFRA_COMPOSE_CMD"] == "podman compose"
 
 
 # =============================================================================
@@ -289,7 +290,7 @@ class TestExec:
 @pytest.mark.unit
 class TestNoPgserverPrecheck:
     """Verify verbs on an unconfigured pgserver print a friendly message
-    instead of leaking ``_INFRA_PG_CONTAINER_NAME required`` from pg.sh."""
+    instead of leaking ``_APPINFRA_PG_CONTAINER_NAME required`` from pg.sh."""
 
     def _no_pgserver_cfg(self):
         return DotDict({"other": {"key": "value"}})
@@ -363,40 +364,43 @@ class TestVerbTools:
     def test_up_default_env(self):
         t = PgUpTool()
         t._parsed_args = Namespace(repl=False, no_wait=False, timeout=None)
-        assert t._extra_env() == {"_INFRA_PG_MODE": "single", "_INFRA_PG_WAIT": "1"}
+        assert t._extra_env() == {
+            "_APPINFRA_PG_MODE": "single",
+            "_APPINFRA_PG_WAIT": "1",
+        }
 
     def test_up_repl_and_no_wait(self):
         t = PgUpTool()
         t._parsed_args = Namespace(repl=True, no_wait=True, timeout=None)
-        assert t._extra_env() == {"_INFRA_PG_MODE": "repl", "_INFRA_PG_WAIT": "0"}
+        assert t._extra_env() == {"_APPINFRA_PG_MODE": "repl", "_APPINFRA_PG_WAIT": "0"}
 
     def test_up_with_timeout(self):
         t = PgUpTool()
         t._parsed_args = Namespace(repl=False, no_wait=False, timeout=60)
         env = t._extra_env()
-        assert env["_INFRA_PG_WAIT_TIMEOUT"] == "60"
+        assert env["_APPINFRA_PG_WAIT_TIMEOUT"] == "60"
 
     def test_down_no_wait(self):
         t = PgDownTool()
         t._parsed_args = Namespace(no_wait=True, timeout=None)
-        assert t._extra_env() == {"_INFRA_PG_WAIT": "0"}
+        assert t._extra_env() == {"_APPINFRA_PG_WAIT": "0"}
 
     def test_down_with_timeout(self):
         t = PgDownTool()
         t._parsed_args = Namespace(no_wait=False, timeout=45)
         env = t._extra_env()
-        assert env["_INFRA_PG_WAIT_TIMEOUT"] == "45"
+        assert env["_APPINFRA_PG_WAIT_TIMEOUT"] == "45"
 
     def test_reboot_wait_default(self):
         t = PgRebootTool()
         t._parsed_args = Namespace(no_wait=False, timeout=None)
-        assert t._extra_env() == {"_INFRA_PG_WAIT": "1"}
+        assert t._extra_env() == {"_APPINFRA_PG_WAIT": "1"}
 
     def test_reboot_with_timeout(self):
         t = PgRebootTool()
         t._parsed_args = Namespace(no_wait=False, timeout=90)
         env = t._extra_env()
-        assert env["_INFRA_PG_WAIT_TIMEOUT"] == "90"
+        assert env["_APPINFRA_PG_WAIT_TIMEOUT"] == "90"
 
     def test_info_short_flag(self):
         t = PgInfoTool()
@@ -415,7 +419,7 @@ class TestVerbTools:
     def test_clean_projects_db_list(self):
         t = PgCleanTool()
         t._parsed_args = Namespace(db=["a", "b"])
-        assert t._extra_env() == {"_INFRA_PG_DATABASES": "a b"}
+        assert t._extra_env() == {"_APPINFRA_PG_DATABASES": "a b"}
 
     def test_psql_target_primary_by_default(self):
         t = PgPsqlTool()
@@ -789,6 +793,13 @@ class TestPgUrlTool:
         rc = self._run(cfg, db="main")
         assert rc == 0
         assert capsys.readouterr().out.strip() == "postgresql://x/main"
+
+    def test_db_url_lookup_prints_a_secret_url(self, capsys):
+        """Printing the URL is the command's purpose, so a secret one is revealed."""
+        cfg = {"dbs": {"main": {"url": Envelope("postgresql://u:pw@x/main")}}}
+        rc = self._run(cfg, db="main")
+        assert rc == 0
+        assert capsys.readouterr().out.strip() == "postgresql://u:pw@x/main"
 
     def test_db_url_missing_returns_1(self):
         assert self._run({"dbs": {}}, db="nope") == 1

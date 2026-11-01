@@ -65,7 +65,6 @@ class Plugin(ABC):
         Args:
             builder: Application builder to configure
         """
-        pass
 
     def initialize(self, application: App) -> None:
         """
@@ -74,7 +73,6 @@ class Plugin(ABC):
         Args:
             application: Application instance
         """
-        pass
 
     def cleanup(self, application: App) -> None:
         """
@@ -83,7 +81,6 @@ class Plugin(ABC):
         Args:
             application: Application instance
         """
-        pass
 
 
 class PluginManager:

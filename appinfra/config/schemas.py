@@ -14,6 +14,8 @@ try:
 
     from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+    from ..envelope import Envelope
+
     PYDANTIC_AVAILABLE = True
 
     class HandlerConfig(BaseModel):
@@ -82,7 +84,9 @@ try:
         name: str = Field(default="llm-works-pg", description="Server name")
         port: int = Field(default=25432, ge=1, le=65535, description="Server port")
         user: str = Field(default="postgres", description="Username")
-        password: str = Field(default="", alias="pass", description="Password")
+        password: str | Envelope = Field(
+            default="", alias="pass", description="Password"
+        )
         image: str | None = Field(
             default=None,
             description="Docker image (e.g., pgvector/pgvector:pg18). Defaults to postgres:VERSION",
@@ -102,12 +106,16 @@ try:
         model_config = ConfigDict(
             populate_by_name=True,  # Allow both 'password' and 'pass'
             extra="allow",
+            arbitrary_types_allowed=True,  # Envelope
         )
 
     class DatabaseConfig(BaseModel):
         """Configuration for a database connection."""
 
-        url: str = Field(..., description="Database connection URL")
+        url: str | Envelope = Field(
+            ...,
+            description="Database connection URL; an Envelope if built from a secret",
+        )
         pool_size: int = Field(default=5, ge=1, description="Connection pool size")
         max_overflow: int = Field(
             default=10, ge=0, description="Max overflow connections"
@@ -150,7 +158,7 @@ try:
         @classmethod
         def validate_url(cls, v: Any) -> Any:
             """Validate database URL format."""
-            if not v.startswith(("postgresql://", "postgres://")):
+            if not Envelope(v).reveal().startswith(("postgresql://", "postgres://")):
                 raise ValueError(
                     "Database URL must start with 'postgresql://' or 'postgres://'"
                 )
@@ -160,13 +168,14 @@ try:
         @classmethod
         def validate_extensions(cls, v: list[str]) -> list[str]:
             """Validate extension names are safe SQL identifiers."""
-            pattern = re.compile(r"^[a-z][a-z0-9_-]*$")
+            # PostgreSQL truncates identifiers past 63 bytes
+            pattern = re.compile(r"^[a-z][a-z0-9_-]{0,62}$")
             for ext in v:
-                if not pattern.match(ext):
+                if not pattern.fullmatch(ext):
                     raise ValueError(
                         f"Invalid extension name '{ext}'. Must start with lowercase "
-                        "letter and contain only lowercase letters, numbers, "
-                        "underscores, and hyphens."
+                        "letter, contain only lowercase letters, numbers, "
+                        "underscores, and hyphens, and be at most 63 characters."
                     )
             return v
 
@@ -176,15 +185,18 @@ try:
             """Validate schema name is a safe SQL identifier."""
             if v is None:
                 return v
-            pattern = re.compile(r"^[a-z][a-z0-9_]*$")
-            if not pattern.match(v):
+            # Same rule as appinfra.db.pg.schema, which needs the sql extra and
+            # so is not imported here; PostgreSQL truncates identifiers past 63 bytes
+            pattern = re.compile(r"^[a-z][a-z0-9_]{0,62}$")
+            if not pattern.fullmatch(v):
                 raise ValueError(
-                    f"Invalid schema name '{v}'. Must start with lowercase letter "
-                    "and contain only lowercase letters, numbers, and underscores."
+                    f"Invalid schema name '{v}'. Must start with lowercase letter, "
+                    "contain only lowercase letters, numbers, and underscores, "
+                    "and be at most 63 characters."
                 )
             return v
 
-        model_config = ConfigDict(extra="allow")
+        model_config = ConfigDict(extra="allow", arbitrary_types_allowed=True)
 
     class TestConfig(BaseModel):
         """Configuration for testing."""
@@ -254,18 +266,12 @@ except ImportError:
     class InfraConfig:  # type: ignore[no-redef]
         """Dummy config class when pydantic not available."""
 
-        pass
-
     class LoggingConfig:  # type: ignore[no-redef]
         """Dummy logging config class."""
-
-        pass
 
     class DatabaseConfig:  # type: ignore[no-redef]
         """Dummy database config class."""
 
-        pass
-
-    def validate_config(config_dict: dict[str, Any]) -> dict[str, Any]:  # type: ignore[no-redef,misc]
+    def validate_config(config_dict: dict[str, Any]) -> dict[str, Any]:  # type: ignore[misc]
         """No-op validation when pydantic not installed."""
         return config_dict

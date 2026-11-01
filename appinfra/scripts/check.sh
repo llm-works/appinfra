@@ -7,7 +7,7 @@
 # Supports parallel execution, coverage checking, and fail-fast mode
 #
 # IMPORTANT: Run via 'make check', not directly. The Makefile exports required
-# variables (PYTHON, INFRA_DEV_PKG_NAME, INFRA_DEV_CQ_STRICT, INFRA_DEV_PROJECT_ROOT).
+# variables (PYTHON, APPINFRA_DEV_PKG_NAME, APPINFRA_DEV_CQ_STRICT, APPINFRA_DEV_PROJECT_ROOT).
 # Direct execution uses fallback defaults that may not match your project configuration.
 
 set -euo pipefail
@@ -67,23 +67,27 @@ done
 
 # shellcheck source=./_ui.sh
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_ui.sh"
+# shellcheck source=./_settings.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_settings.sh"
+appinfra_trim_settings
 
 # Exit code for "warnings but ok" from cq tool (violations in non-strict mode)
 EXIT_CODE_WARNING=42
 
-PYTHON="${PYTHON:-~/.venv/bin/python}"
-PKG_NAME="${INFRA_DEV_PKG_NAME:-appinfra}"
-CQ_STRICT="${INFRA_DEV_CQ_STRICT:-false}"
-CHECK_EXAMPLES="${INFRA_DEV_CHECK_EXAMPLES:-false}"
+PYTHON="${PYTHON:-$(command -v python3)}"
+PKG_NAME="${APPINFRA_DEV_PKG_NAME:-appinfra}"
+CQ_STRICT="$(appinfra_bool APPINFRA_DEV_CQ_STRICT false)" || exit 2
+CHECK_EXAMPLES="$(appinfra_bool APPINFRA_DEV_CHECK_EXAMPLES false)" || exit 2
+CQ_SPDX="$(appinfra_bool APPINFRA_DEV_CQ_SPDX false)" || exit 2
 # HOST:PORT for run_examples.py --pg; Makefile.dev derives it from Makefile.pg.
-EXAMPLES_PG="${_INFRA_DEV_EXAMPLES_PG:-}"
-COVERAGE_MARKERS="${INFRA_PYTEST_COVERAGE_MARKERS:-unit}"
+EXAMPLES_PG="${_APPINFRA_DEV_EXAMPLES_PG:-}"
+COVERAGE_MARKERS="${APPINFRA_PYTEST_COVERAGE_MARKERS:-unit}"
 
 # Coverage threshold precedence: CLI arg > env var > default (80)
 # Set to 0 to disable coverage checking entirely
-DEFAULT_COVERAGE_TARGET="${INFRA_PYTEST_COVERAGE_THRESHOLD:-80}"
+DEFAULT_COVERAGE_TARGET="${APPINFRA_PYTEST_COVERAGE_THRESHOLD:-80}"
 COVERAGE_TARGET="${COVERAGE_TARGET:-$DEFAULT_COVERAGE_TARGET}"
-if ! echo "$COVERAGE_TARGET" | grep -qE '^[0-9]+\.?[0-9]*$'; then
+if ! echo "$COVERAGE_TARGET" | grep -qE '^[0-9]+(\.[0-9]+)?$'; then
     echo "Error: Invalid coverage target: $COVERAGE_TARGET" >&2
     exit 1
 fi
@@ -137,9 +141,9 @@ for _m in unit integration e2e security; do
     esac
 done
 COVERAGE_LABEL="${_cov_prefix}Coverage tests"
-MYPY_FLAGS="${INFRA_DEV_MYPY_FLAGS:-}"
+MYPY_FLAGS="${APPINFRA_DEV_MYPY_FLAGS:-}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="${INFRA_DEV_PROJECT_ROOT:-$(dirname "$SCRIPT_DIR")}"
+PROJECT_ROOT="${APPINFRA_DEV_PROJECT_ROOT:-$(dirname "$SCRIPT_DIR")}"
 
 MAIN_PID=$$
 DISPLAY_LOCK="/tmp/infra-check-display-lock-${MAIN_PID}"
@@ -158,18 +162,31 @@ DISPLAY_ROWS="${STATUS_DIR}/display-rows"
 # node id and the stacks of its process go to the check's log, and the check gets a row below
 # the checklist. The test is neither stopped nor failed, so on a slow machine this only adds
 # rows. 0 disables it.
-HANG_DUMP_SECONDS="${INFRA_PYTEST_HANG_DUMP_SECONDS:-120}"
+HANG_DUMP_SECONDS="${APPINFRA_PYTEST_HANG_DUMP_SECONDS:-120}"
 if ! [[ "$HANG_DUMP_SECONDS" =~ ^[0-9]+$ ]]; then
-    echo "Error: Invalid INFRA_PYTEST_HANG_DUMP_SECONDS: $HANG_DUMP_SECONDS" >&2
+    echo "Error: Invalid APPINFRA_PYTEST_HANG_DUMP_SECONDS: $HANG_DUMP_SECONDS" >&2
     exit 1
 fi
-export INFRA_PYTEST_HANG_DUMP_SECONDS="$HANG_DUMP_SECONDS"
-# Prefix for the pytest commands. The plugin is a file of its own next to this script, not part
-# of the appinfra package: -p imports a plugin before pytest-cov starts, and importing anything
-# under appinfra that early would leave the package's module-level lines unmeasured. Its
-# directory holds only the plugin, so nothing else becomes importable in the tests.
-PYTEST_HANG="PYTHONPATH=$(printf '%q' "${SCRIPT_DIR}/check_pytest${PYTHONPATH:+:${PYTHONPATH}}") "
-PYTEST_HANG_FLAG="-p pytest_hang"
+export APPINFRA_PYTEST_HANG_DUMP_SECONDS="$HANG_DUMP_SECONDS"
+# Prefix and flags for the pytest commands: check_pytest/pytest_hang.py (above) and
+# check_pytest/pytest_exit_warnings.py, which makes warnings raised at interpreter exit print
+# (see check_warnings). The plugins are files of their own next to this script, not part of the
+# appinfra package: -p imports a plugin before pytest-cov starts, and importing anything under
+# appinfra that early would leave the package's module-level lines unmeasured. Their directory
+# holds only the plugins, so nothing else becomes importable in the tests.
+PYTEST_PLUGIN_PATH="PYTHONPATH=$(printf '%q' "${SCRIPT_DIR}/check_pytest${PYTHONPATH:+:${PYTHONPATH}}") "
+PYTEST_PLUGINS="-p pytest_hang -p pytest_exit_warnings"
+
+# How a warning in a passing check ends, whichever check printed it (tests, examples, a tool's
+# own "warning:" line): strict when the project's pytest filterwarnings has a bare "error" (every
+# warning an error), so the check fails; warn otherwise, so the check passes with a warning.
+# Asked once from pytest_exit_warnings, in a run that only reads the configuration.
+WARNINGS_MODE=$({ cd "$PROJECT_ROOT" && eval "COVERAGE_FILE=${STATUS_DIR}/probe.coverage ${PYTEST_PLUGIN_PATH}${PYTHON} -m pytest -p pytest_exit_warnings --collect-only -q --noconftest --ignore-glob='*'" 2>&1 || true; } \
+    | sed -nE 's/^=== exit warnings: (strict|warn) ===$/\1/p' | tail -1)
+if [ -z "$WARNINGS_MODE" ]; then
+    echo "check.sh: pytest could not read the project's configuration (run: ${PYTHON} -m pytest --collect-only)" >&2
+    exit 1
+fi
 
 # Terminal width for fit_slow_row, read here because stdout is the terminal only at the top
 # level: inside $(...) it is a pipe. Empty without a terminal (CI), where rows are not cut.
@@ -190,13 +207,23 @@ if ${PYTHON} -c "import sys; sys.exit(0 if sys.version_info >= (3, 12) else 1)" 
 fi
 
 # Docstring coverage threshold (0 to disable)
-DOCSTRING_THRESHOLD="${INFRA_DEV_DOCSTRING_THRESHOLD:-80}"
+DOCSTRING_THRESHOLD="${APPINFRA_DEV_DOCSTRING_THRESHOLD:-80}"
 MAX_INLINE_LINES=30
 
-# Check definitions: "Name|Make Target|Command|Fix Target"
-declare -a CHECKS=(
+# Check definitions: "Name|Make Target|Command|Fix Target", listed from a file's outside in
+# (license header, layout, lint, types, docstrings), then the slow ones: code quality, tests
+declare -a CHECKS=()
+
+# SPDX header check only if opted in (APPINFRA_DEV_CQ_SPDX=true).
+# Off by default so closed-source repos that reuse this framework don't
+# fail on files without SPDX-License-Identifier headers.
+if [ "$CQ_SPDX" = "true" ]; then
+    CHECKS+=("SPDX header check|cq.spdx|${PYTHON} -m appinfra.cli.cli -l error cq spdx|")
+fi
+
+CHECKS+=(
     "Formatting check|fmt.check|${PYTHON} -m ruff format --check .|fmt"
-    "Linting|lint|${PYTHON} -m ruff check .|lint.fix"
+    "Linting|lint|lint_check|lint.fix"
     "Type checking|type|${PYTHON} -m mypy ${PKG_NAME}/ --exclude 'examples/' --cache-dir .mypy_cache/pkg ${MYPY_FLAGS}|"
 )
 
@@ -211,50 +238,136 @@ if [ -n "$EXAMPLES_DIR" ]; then
     CHECKS+=("Type checking (examples)|type|${PYTHON} -m mypy ${EXAMPLES_DIR}/ --disable-error-code=no-untyped-def --disable-error-code=import-untyped --ignore-missing-imports --cache-dir .mypy_cache/examples ${MYPY_FLAGS}|")
 fi
 
-# Build exclude flags from INFRA_DEV_CQ_EXCLUDE (subshell contains set -f scope)
+# Build exclude flags from APPINFRA_DEV_CQ_EXCLUDE (subshell contains set -f scope)
 CQ_EXCLUDE_FLAGS=""
-if [ -n "${INFRA_DEV_CQ_EXCLUDE:-}" ]; then
+if [ -n "${APPINFRA_DEV_CQ_EXCLUDE:-}" ]; then
     CQ_EXCLUDE_FLAGS=$(
         set -f  # Disable glob expansion to preserve patterns like "examples/*"
         sep=""
-        for pat in ${INFRA_DEV_CQ_EXCLUDE}; do
+        for pat in ${APPINFRA_DEV_CQ_EXCLUDE}; do
             printf '%s--exclude "%s"' "$sep" "$pat"
             sep=" "
         done
     )
 fi
 
-# Build CQ command and label based on strictness setting
-if [ "$CQ_STRICT" = "true" ]; then
-    CQ_CMD="${PYTHON} -m appinfra.cli.cli -l error cq cf --strict ${CQ_EXCLUDE_FLAGS}"
-    CQ_LABEL="Function size check (strict)"
-    CQ_TARGET="cq.strict"
-else
-    CQ_CMD="${PYTHON} -m appinfra.cli.cli -l error cq cf ${CQ_EXCLUDE_FLAGS}"
-    CQ_LABEL="Function size check (non-strict)"
-    CQ_TARGET="cq"
+# Extra ruff rules reported over the package as warnings, never failing: a comma-separated list
+# of rule codes (empty or false = off; "-" not ":-" keeps an empty value). Rules that should fail
+# the build belong in the project's ruff config.
+CQ_LINT_SELECT="${APPINFRA_DEV_CQ_LINT_SELECT-C90,SIM,RET,PIE,PERF,FURB,C4}"
+
+# Duplicated code (pylint) and dead private code checks over the package. Each takes false (off),
+# warn (default: report the count, never fail) or strict (fail on findings); any case.
+CQ_DUP="$(printf '%s' "${APPINFRA_DEV_CQ_DUP:-warn}" | tr '[:upper:]' '[:lower:]')"
+CQ_DEAD="$(printf '%s' "${APPINFRA_DEV_CQ_DEAD:-warn}" | tr '[:upper:]' '[:lower:]')"
+for _cq_var in APPINFRA_DEV_CQ_DUP:"$CQ_DUP" APPINFRA_DEV_CQ_DEAD:"$CQ_DEAD"; do
+    case "${_cq_var#*:}" in
+        false|warn|strict) ;;
+        *) echo "Error: ${_cq_var%%:*} must be false, warn or strict, got: ${_cq_var#*:}" >&2; exit 1 ;;
+    esac
+done
+
+# Test structure health (check_suite_health.py): how the tests keep to the suite rules, from the
+# reports appinfra.pytest_suites writes into HEALTH_DIR while the pytest checks run. Same modes as
+# above; off unless the project turns it on.
+TEST_HEALTH="$(printf '%s' "${APPINFRA_DEV_TEST_HEALTH:-false}" | tr '[:upper:]' '[:lower:]')"
+case "$TEST_HEALTH" in
+    false|warn|strict) ;;
+    *) echo "Error: APPINFRA_DEV_TEST_HEALTH must be false, warn or strict, got: $TEST_HEALTH" >&2; exit 1 ;;
+esac
+# The share of a class's tests that may be of another suite before it is a finding, and the count
+# of such tests any class may hold
+TEST_HEALTH_THRESHOLD="${APPINFRA_DEV_TEST_HEALTH_THRESHOLD:-15}"
+TEST_HEALTH_OUTLIERS="${APPINFRA_DEV_TEST_HEALTH_OUTLIERS:-3}"
+if ! [[ "$TEST_HEALTH_THRESHOLD" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+    echo "Error: Invalid APPINFRA_DEV_TEST_HEALTH_THRESHOLD: $TEST_HEALTH_THRESHOLD" >&2
+    exit 1
 fi
+if ! [[ "$TEST_HEALTH_OUTLIERS" =~ ^[0-9]+$ ]]; then
+    echo "Error: Invalid APPINFRA_DEV_TEST_HEALTH_OUTLIERS: $TEST_HEALTH_OUTLIERS" >&2
+    exit 1
+fi
+HEALTH_DIR="${STATUS_DIR}/suite-health"
+HEALTH_ENV=""
+if [ "$TEST_HEALTH" != false ]; then
+    HEALTH_ENV="_APPINFRA_CHECK_SUITE_HEALTH_DIR=$(printf '%q' "$HEALTH_DIR") "
+fi
+# Only the run that executes the unit tests writes the reports: every run collects the same
+# tests, and only unit tests are watched for leaks. That is the coverage run when it folds the
+# unit suite, the Unit tests run otherwise; the Test structure health line follows it.
+HEALTH_TARGET="test.unit"
+case " $FOLDED_MARKERS " in
+    *" unit "*) HEALTH_TARGET="test.coverage" ;;
+esac
+
+# A check that warns ends its output with "Warnings: <summary>", which its line shows.
+
+# Linting: the project's ruff rules fail the check; the CQ_LINT_SELECT rules only warn.
+lint_check() {
+    eval "${PYTHON} -m ruff check ." || return 1
+    [ -n "$CQ_LINT_SELECT" ] && [ "$CQ_LINT_SELECT" != false ] || return 0
+    local out count
+    out=$(eval "${PYTHON} -m ruff check ${PKG_NAME}/ --select ${CQ_LINT_SELECT} --no-fix --exit-zero --output-format concise") || return 1
+    count=$(printf '%s\n' "$out" | grep -cE '^[^ ].*:[0-9]+:[0-9]+: ' || true)
+    [ "$count" -gt 0 ] || return 0
+    printf '%s\n' "$out"
+    echo "Warnings: ${count} warnings"
+    return "$EXIT_CODE_WARNING"
+}
+
+# --strict for a cq tool whose mode is strict (true for APPINFRA_DEV_CQ_STRICT)
+cq_strict_flag() {
+    case "$1" in strict|true) echo "--strict" ;; esac
+}
+
+# Run one cq subcommand: a warning adds "<count> <label>" to CQ_SUMMARY, a failure sets CQ_FAILED.
+# Without --strict, findings exit with EXIT_CODE_WARNING, so another nonzero exit is the tool
+# failing; that only warns too, so a broken tool does not fail make check.
+cq_tool() {
+    local label="$1" strict="$2" args="$3" out rc=0 count
+    out=$(eval "${PYTHON} -m appinfra.cli.cli -l error cq ${args} ${strict}" 2>&1) || rc=$?
+    printf '%s\n' "$out"
+    if [ "$rc" -eq "$EXIT_CODE_WARNING" ]; then
+        count=$(printf '%s\n' "$out" | sed -nE 's/.*Violations( found)?: ([0-9]+).*/\2/p' | head -1)
+        CQ_SUMMARY+=("${count:-?} ${label}")
+    elif [ "$rc" -ne 0 ] && [ -z "$strict" ]; then
+        CQ_SUMMARY+=("${label} did not run")
+    elif [ "$rc" -ne 0 ]; then
+        CQ_FAILED=true
+    fi
+}
+
+# Code quality: function size (cq cf), plus duplicated and dead code when enabled. Every enabled
+# tool runs; the check fails if one failed, and otherwise warns with a count per tool.
+cq_check() {
+    CQ_SUMMARY=()
+    CQ_FAILED=false
+    cq_tool size "$(cq_strict_flag "$CQ_STRICT")" "cf ${CQ_EXCLUDE_FLAGS}"
+    [ "$CQ_DUP" = "false" ] || cq_tool dup "$(cq_strict_flag "$CQ_DUP")" "dup ${PKG_NAME}/ ${CQ_EXCLUDE_FLAGS}"
+    [ "$CQ_DEAD" = "false" ] || cq_tool dead "$(cq_strict_flag "$CQ_DEAD")" "dead ${PKG_NAME}/ ${CQ_EXCLUDE_FLAGS}"
+    [ "$CQ_FAILED" = false ] || return 1
+    [ "${#CQ_SUMMARY[@]}" -gt 0 ] || return 0
+    local summary
+    printf -v summary '%s, ' "${CQ_SUMMARY[@]}"
+    echo "Warnings: ${summary%, }"
+    return "$EXIT_CODE_WARNING"
+}
+
+CQ_TARGET="cq"
+[ "$CQ_STRICT" = "true" ] && CQ_TARGET="cq.strict"
 
 # Docstring coverage check command (only if threshold > 0)
 DOCSTRING_CMD="${PYTHON} -m interrogate -v ${PKG_NAME}/ --ignore-init-module --ignore-init-method --fail-under=${DOCSTRING_THRESHOLD}"
-
-# Add remaining checks
-CHECKS+=(
-    "${CQ_LABEL}|${CQ_TARGET}|${CQ_CMD}|"
-)
-
-# Add SPDX header check only if opted in (INFRA_DEV_CQ_SPDX=true).
-# Off by default so closed-source repos that reuse this framework don't
-# fail on files without SPDX-License-Identifier headers.
-CQ_SPDX="${INFRA_DEV_CQ_SPDX:-false}"
-if [ "$CQ_SPDX" = "true" ]; then
-    CHECKS+=("SPDX header check|cq.spdx|${PYTHON} -m appinfra.cli.cli -l error cq spdx|")
-fi
 
 # Add docstring check only if threshold > 0
 if awk "BEGIN {exit !($DOCSTRING_THRESHOLD > 0)}" 2>/dev/null; then
     CHECKS+=("Docstring coverage|cq.docstring.strict|${DOCSTRING_CMD}|docstring:${DOCSTRING_THRESHOLD}")
 fi
+
+# The slowest checks last: the rows above finish first, top down
+CHECKS+=(
+    "Code quality check|${CQ_TARGET}|cq_check|"
+)
 
 # Add test suite check only if not skipped
 if [ "$SKIP_TESTS" = false ]; then
@@ -277,25 +390,24 @@ fi
 #
 # Recognizes ``pytest.mark.<name>`` — the substring shared by decorator
 # usage (`@pytest.mark.X`) and module-level `pytestmark = pytest.mark.X`
-# (including lists). Dynamic markers applied by
-# ``pytest_collection_modifyitems`` hooks are missed; standard patterns
-# are not.
-_MARKERS_FOUND=$(
-    grep -rhoE 'pytest\.mark\.[a-z_][a-z0-9_]*' tests/ --include='*.py' 2>/dev/null \
-        | cut -d. -f3 | sort -u | tr '\n' ' ' || true
-)
+# (including lists) — and suite directories (tests/<suite>/), whose tests
+# take the suite's marker without naming it (_settings.sh).
+PERF_DIR="${APPINFRA_PYTEST_PERF_DIR:-tests}"
+_MARKERS_FOUND=$(appinfra_suite_markers "$PERF_DIR" | tr '\n' ' ')
 
 # Emit the pytest command for a marker if any test uses it; otherwise a
 # fast `(exit 5)` subshell that hits run_check's "no tests" branch
 # without paying pytest's discovery cost. The subshell parens matter:
 # bare `exit 5` under ``eval`` would kill run_check's own subshell
 # before it could inspect the exit code, so ``wait -n`` in the parent
-# would count the check as a failure.
+# would count the check as a failure. The optional fourth argument is the
+# directory to collect from (default tests/).
 _pytest_cmd_for() {
-    local suite="$1" marker="$2" flags="$3"
+    local suite="$1" marker="$2" flags="$3" path="${4:-tests/}" health_env=""
+    [ "$marker" = unit ] && health_env="$HEALTH_ENV"
     case " $_MARKERS_FOUND " in
         *" $marker "*)
-            echo "${PYTEST_HANG}INFRA_CHECK_PYTEST_SUITE=$suite ${PYTHON} -m pytest tests/ -m $marker ${PYTEST_HANG_FLAG} $flags"
+            echo "${PYTEST_PLUGIN_PATH}${health_env}_APPINFRA_CHECK_PYTEST_SUITE=$suite ${PYTHON} -m pytest $path -m $marker ${PYTEST_PLUGINS} $flags"
             ;;
         *)
             echo "(exit 5)"
@@ -303,7 +415,7 @@ _pytest_cmd_for() {
     esac
 }
 
-# INFRA_CHECK_PYTEST_SUITE prevents schema collisions when test suites run in parallel.
+# _APPINFRA_CHECK_PYTEST_SUITE prevents schema collisions when test suites run in parallel.
 # Each suite gets unique schema names: unit_gw0, integ_gw0, e2e_gw0, etc.
 #
 # Standalone suites are skipped when coverage subsumes their marker (see
@@ -323,23 +435,33 @@ declare -a TEST_SUBCHECKS_RAW=()
 # suite (see FOLDED_MARKERS above) and stays alive longest in the
 # parallel group; leading the list keeps its running/completed state
 # obvious. Uses NPROC/2 workers (see PYTEST_PARALLEL_COVERAGE above).
+# make check compares the coverage with the target in run_check; check.ci (--raw --summary)
+# runs the suite through run_raw, so pytest-cov applies the target there
+COVERAGE_FAIL_UNDER=""
+if [ "$RAW" = true ] && [ "$SUMMARY" = true ]; then
+    COVERAGE_FAIL_UNDER=" --cov-fail-under=${COVERAGE_TARGET}"
+fi
+COVERAGE_HEALTH_ENV=""
+[ "$HEALTH_TARGET" = test.coverage ] && COVERAGE_HEALTH_ENV="$HEALTH_ENV"
 if awk "BEGIN {exit !($COVERAGE_TARGET > 0)}" 2>/dev/null; then
-    TEST_SUBCHECKS+=("${COVERAGE_LABEL}|test.coverage|${PYTEST_HANG}${COVERAGE_CORE_ENV}INFRA_CHECK_PYTEST_SUITE=cov ${PYTHON} -m pytest tests/ ${COVERAGE_MARKER_ARG} ${PYTEST_HANG_FLAG} --cov=${PKG_NAME} --cov-report=term -q -rEfs ${PYTEST_PARALLEL_COVERAGE}|${COVERAGE_TARGET}")
-    TEST_SUBCHECKS_RAW+=("${COVERAGE_LABEL}|test.coverage|${PYTEST_HANG}${COVERAGE_CORE_ENV}INFRA_CHECK_PYTEST_SUITE=cov ${PYTHON} -m pytest tests/ ${COVERAGE_MARKER_ARG} ${PYTEST_HANG_FLAG} --cov=${PKG_NAME} --cov-report=term-missing -rEfs ${PYTEST_PARALLEL_COVERAGE}|${COVERAGE_TARGET}")
+    TEST_SUBCHECKS+=("${COVERAGE_LABEL}|test.coverage|${PYTEST_PLUGIN_PATH}${COVERAGE_CORE_ENV}${COVERAGE_HEALTH_ENV}_APPINFRA_CHECK_PYTEST_SUITE=cov ${PYTHON} -m pytest tests/ ${COVERAGE_MARKER_ARG} ${PYTEST_PLUGINS} --cov=${PKG_NAME} --cov-report=term${COVERAGE_FAIL_UNDER} -q -rEfs ${PYTEST_PARALLEL_COVERAGE}|${COVERAGE_TARGET}")
+    TEST_SUBCHECKS_RAW+=("${COVERAGE_LABEL}|test.coverage|${PYTEST_PLUGIN_PATH}${COVERAGE_CORE_ENV}${COVERAGE_HEALTH_ENV}_APPINFRA_CHECK_PYTEST_SUITE=cov ${PYTHON} -m pytest tests/ ${COVERAGE_MARKER_ARG} ${PYTEST_PLUGINS} --cov=${PKG_NAME} --cov-report=term-missing -rEfs ${PYTEST_PARALLEL_COVERAGE}|${COVERAGE_TARGET}")
 fi
 
 _standalone_suite unit        "Unit tests"        test.unit        unit
 _standalone_suite integration "Integration tests" test.integration integ
 _standalone_suite e2e         "E2E tests"         test.e2e         e2e
 _standalone_suite security    "Security tests"    test.security    sec
-# Performance tests skip --dist=worksteal — the work-stealing overhead and
-# contention skews throughput measurements. Plain -n keeps parallelism for
-# multi-test discovery but distributes tests up front, not mid-run.
-TEST_SUBCHECKS+=("Performance tests|test.perf|$(_pytest_cmd_for perf performance "--tb=short --no-header -q -rEfs -n ${PYTEST_JOBS}")|")
-TEST_SUBCHECKS_RAW+=("Performance tests|test.perf.v|$(_pytest_cmd_for perf performance "-v --tb=short -rEfs -n ${PYTEST_JOBS}")|")
+# Performance tests run on one worker: timing tests measure against one quiet
+# process rather than sibling workers, and only one process re-imports the test
+# tree. A worker rather than in-process: a test that leaves a non-daemon thread
+# running costs the controller's 10s exit timeout instead of hanging the run.
+# APPINFRA_PYTEST_PERF_DIR narrows collection to where the performance tests live.
+TEST_SUBCHECKS+=("Performance tests|test.perf|$(_pytest_cmd_for perf performance "--tb=short --no-header -q -rEfs -n 1" "${PERF_DIR}/")|")
+TEST_SUBCHECKS_RAW+=("Performance tests|test.perf.v|$(_pytest_cmd_for perf performance "-v --tb=short -rEfs -n 1" "${PERF_DIR}/")|")
 
 # Run the example scripts as the last test subcheck when opted in
-# (INFRA_DEV_CHECK_EXAMPLES=true) and an examples directory exists. Same
+# (APPINFRA_DEV_CHECK_EXAMPLES=true) and an examples directory exists. Same
 # runner and flags as `make examples.check`; raw mode adds -v.
 if [ "$CHECK_EXAMPLES" = "true" ] && [ -n "$EXAMPLES_DIR" ]; then
     # --full-output: the runner prints a failed example's whole output, so the kept log has it
@@ -404,7 +526,7 @@ check_interrupted() {
         close_display
         tput cnorm 2>/dev/null || printf "\033[?25h"
         echo ""
-        echo -e "${UI_MARK_FAIL} Interrupted by user"
+        echo -e "${UI_MARK_FAIL} ${UI_RED}Interrupted by user${UI_RESET}"
         display_slow_logs
         cleanup
         exit 130
@@ -455,8 +577,26 @@ close_display() {
     } 200>"$DISPLAY_LOCK"
 }
 
+# A line's text in the color of its mark: bright yellow under a warning, red under a failure. The
+# detail after it keeps its own color.
+status_tint() {
+    local status="$1" text="$2" color=""
+    case "$status" in
+        "$UI_MARK_WARN") color="$UI_BRIGHT_YELLOW" ;;
+        "$UI_MARK_FAIL") color="$UI_RED" ;;
+    esac
+    if [ -n "$color" ]; then
+        printf '%s%s%s' "$color" "$text" "$UI_RESET"
+    else
+        printf '%s' "$text"
+    fi
+}
+
+# The optional fifth argument separates the mark from the text: two spaces on the checklist
+# (the default), one on the report rows below it (add_display_row)
 update_line() {
-    local line_num=$1 status=$2 name=$3 extra=$4
+    local line_num=$1 status=$2 name=$3 extra=$4 sep=${5:-  }
+    name=$(status_tint "$status" "$name")
     {
         lock_display
         if display_open; then
@@ -464,7 +604,7 @@ update_line() {
             added=$(cat "$DISPLAY_ROWS" 2>/dev/null) || added=0
             local lines_up=$((TOTAL_LINES + added - line_num))
             [ $lines_up -gt 0 ] && printf "\033[${lines_up}A"
-            printf "\r%b%s  %s%b\n" "$UI_CLEAR" "$status" "$name" "$extra"
+            printf "\r%b%s%s%s%b\n" "$UI_CLEAR" "$status" "$sep" "$name" "$extra"
             [ $lines_up -gt 1 ] && printf "\033[$((lines_up - 1))B"
             printf "\r"
         fi
@@ -473,9 +613,11 @@ update_line() {
 }
 
 # Add a row below the checklist, the first after a blank line that sets the rows apart, and set
-# ADDED_ROW to its line number for update_line (0 if the display is closed)
+# ADDED_ROW to its line number for update_line (0 if the display is closed). A report row has
+# one space after its mark, where the checklist has two.
 add_display_row() {
     local status=$1 text=$2 extra=$3
+    text=$(status_tint "$status" "$text")
     ADDED_ROW=0
     {
         lock_display
@@ -486,7 +628,7 @@ add_display_row() {
                 printf "\r%b\n" "$UI_CLEAR"
                 added=1
             fi
-            printf "\r%b%s  %s%b\n" "$UI_CLEAR" "$status" "$text" "$extra"
+            printf "\r%b%s %s%b\n" "$UI_CLEAR" "$status" "$text" "$extra"
             ADDED_ROW=$((TOTAL_LINES + added))
             echo "$((added + 1))" > "$DISPLAY_ROWS"
         fi
@@ -541,8 +683,8 @@ keep_log() {
 fit_slow_row() {
     local name="$1" test_id="$2" extra_len="$3"
     if [ -n "$DISPLAY_COLS" ]; then
-        # 5: "[⚠]  "; 2: ": "; 1: margin, so the row never touches the last column
-        local room=$((DISPLAY_COLS - 5 - ${#name} - 2 - extra_len - 1))
+        # 4: "[⚠] "; 2: ": "; 1: margin, so the row never touches the last column
+        local room=$((DISPLAY_COLS - 4 - ${#name} - 2 - extra_len - 1))
         if [ "${#test_id}" -gt "$room" ] && [ "$room" -gt 3 ]; then
             test_id="...${test_id: -$((room - 3))}"
         fi
@@ -550,36 +692,65 @@ fit_slow_row() {
     echo "${name}: ${test_id}"
 }
 
+# Fit a warning row to the terminal, like fit_slow_row, but the message loses its middle: its
+# start says what was raised, its end where (the source location, a connection's dbname). Without
+# a terminal (CI) the row is kept whole.
+fit_warning_row() {
+    local name="$1" message="$2" extra_len="$3"
+    if [ -n "$DISPLAY_COLS" ]; then
+        # 4: "[⚠] "; 2: ": "; 1: margin, so the row never touches the last column
+        local room=$((DISPLAY_COLS - 4 - ${#name} - 2 - extra_len - 1))
+        if [ "${#message}" -gt "$room" ] && [ "$room" -gt 3 ]; then
+            # The start up to the object's repr ("connection "), the rest of the room to the end
+            local head=$(((room - 3) / 2))
+            if [[ "$message" == *" <"* ]]; then
+                local lead="${message%% <*} "
+                if [ "${#lead}" -lt "$head" ]; then
+                    head=${#lead}
+                fi
+            fi
+            local tail=$((room - 3 - head))
+            message="${message:0:$head}...${message: -$tail}"
+        fi
+    fi
+    echo "${name}: ${message}"
+}
+
 # While a pytest check runs, turn the lines pytest_hang writes to its log into rows below the
 # checklist: a row for each test reported running past HANG_DUMP_SECONDS, rewritten once the
-# test ends. A check with a report has its log, which holds the stacks, kept and recorded for
-# display_slow_logs. run_check's TERM means the command ended: one last pass reads what it
-# wrote last.
+# test ends, and one for each test that left a thread running at exit. A check with a report
+# has its log, which holds the stacks, kept and recorded for display_slow_logs. run_check's
+# TERM means the command ended: one last pass reads what it wrote last.
 watch_slow_tests() {
     local logfile="$1" name="$2"
     local stop=0 seen=0 line test_id took text kept=""
     local -A rows=()
     # The node id runs to the closing " ===": parametrized ids can contain spaces
     local report_re='=== test running >[0-9.]+s: (.+) ===' done_re='=== test done after ([0-9.]+s): (.+) ==='
+    local thread_re='=== thread left running by (.+) ==='
     trap 'stop=1' TERM
     while :; do
         sleep 1 &
         wait $! 2>/dev/null || true
         display_open || return 0
         local lines=()
-        mapfile -t lines < <(grep -oE "${report_re}|${done_re}" "$logfile" 2>/dev/null)
+        mapfile -t lines < <(grep -oE "${report_re}|${done_re}|${thread_re}" "$logfile" 2>/dev/null)
         for line in "${lines[@]:$seen}"; do
-            if [[ "$line" =~ $report_re ]]; then
+            if [[ "$line" =~ $thread_re ]]; then
+                # 20: room for " thread left running"
+                text=$(fit_slow_row "$name" "${BASH_REMATCH[1]}" 20)
+                add_display_row "${UI_MARK_WARN}" "$text" " ${UI_BRIGHT_YELLOW}thread left running${UI_RESET}"
+            elif [[ "$line" =~ $report_re ]]; then
                 test_id="${BASH_REMATCH[1]}"
                 # 16: room for the longer note, " running >NNNNs" or " took NNNN.Ns"
                 text=$(fit_slow_row "$name" "$test_id" 16)
-                add_display_row "${UI_MARK_WARN}" "$text" " ${UI_YELLOW}running >${HANG_DUMP_SECONDS}s${UI_RESET}"
+                add_display_row "${UI_MARK_WARN}" "$text" " ${UI_BRIGHT_YELLOW}running >${HANG_DUMP_SECONDS}s${UI_RESET}"
                 rows["$test_id"]=$ADDED_ROW
             elif [[ "$line" =~ $done_re ]] && [ -n "${rows[${BASH_REMATCH[2]}]:-}" ]; then
                 took="${BASH_REMATCH[1]}"
                 test_id="${BASH_REMATCH[2]}"
                 text=$(fit_slow_row "$name" "$test_id" 16)
-                update_line "${rows[$test_id]}" "${UI_MARK_WARN}" "$text" " ${UI_GRAY}took ${took}${UI_RESET}"
+                update_line "${rows[$test_id]}" "${UI_MARK_WARN}" "$text" " ${UI_GRAY}took ${took}${UI_RESET}" " "
             fi
         done
         # Copy on news, and once more at the end for the complete log; record the first copy
@@ -597,13 +768,15 @@ watch_slow_tests() {
     done
 }
 
-# Name the kept logs of the checks that had slow tests; their rows are on the display above
+# Name the kept logs of the checks that had slow tests, threads left running or leaks at exit;
+# all are marked on the display above. A line's third field says what the log holds.
 display_slow_logs() {
     [ -f "${STATUS_DIR}/slow" ] || return 0
-    local name kept
-    while IFS='|' read -r name kept; do
-        echo -e "→ ${name}: stacks of the slow tests in ${UI_YELLOW}${kept}${UI_RESET}"
+    local name kept what
+    while IFS='|' read -r name kept what; do
+        echo -e "→ ${name}: ${what:-stacks} in ${UI_YELLOW}${kept}${UI_RESET}"
     done < "${STATUS_DIR}/slow"
+    echo ""
 }
 
 display_failures() {
@@ -669,6 +842,23 @@ record_warning() {
     echo "$name|$count" >> "${STATUS_DIR}/warnings"
 }
 
+# A status note: an [i] line in the report below the checklist, for something worth knowing that
+# is neither a failure nor a warning (where a passing check left its findings)
+record_note() {
+    local name="$1" text="$2"
+    echo "${name}: ${text}" >> "${STATUS_DIR}/notes"
+}
+
+# The status notes, muted, as one block of the report
+display_notes() {
+    [ -f "${STATUS_DIR}/notes" ] || return 0
+    local note
+    while IFS= read -r note; do
+        echo -e "${UI_MARK_INFO} ${UI_GRAY}${note}${UI_RESET}"
+    done < "${STATUS_DIR}/notes"
+    echo ""
+}
+
 record_skips() {
     local name="$1" logfile="$2"
     [ -d "$STATUS_DIR" ] || return 0
@@ -716,8 +906,7 @@ display_skips() {
 
     local word="${noun}"
     [ $total_skipped -eq 1 ] && word="${noun%s}"
-    echo ""
-    echo -e "${UI_MARK_WARN} Warning: ${total_skipped} ${word} skipped"
+    echo -e "${UI_MARK_WARN} ${UI_BRIGHT_YELLOW}Warning: ${total_skipped} ${word} skipped${UI_RESET}"
 
     # Tab delimiter keeps reasons with spaces or colons intact
     for reason in "${!skip_reasons[@]}"; do
@@ -725,11 +914,196 @@ display_skips() {
     done | sort -t$'\t' -k1 -rn | while IFS=$'\t' read -r count reason; do
         printf "  ${UI_GRAY}- %s skipped: %s${UI_RESET}\n" "$count" "$reason"
     done
+    echo ""
 }
 
 display_skip_summary() {
     display_skips "${STATUS_DIR}/skips" "tests"
     display_skips "${STATUS_DIR}/example_skips" "examples"
+}
+
+# The distinct warnings check_warnings.py finds in a log, as "count<TAB>kind<TAB>message". Run
+# through eval like every check command: PYTHON may hold "~/..." or arguments. A scan that fails
+# is a warning of its own, never "no warnings".
+found_warnings() {
+    local out rc=0
+    out=$(eval "${PYTHON} $(printf '%q ' "${SCRIPT_DIR}/check_warnings.py" "$1" --root "$PROJECT_ROOT")" 2>&1) || rc=$?
+    if [ "$rc" -ne 0 ]; then
+        printf '1\ttool\tcheck_warnings.py failed (exit %s): %s\n' "$rc" "$(tail -1 <<< "$out")"
+        return 0
+    fi
+    [ -z "$out" ] || printf '%s\n' "$out"
+}
+
+# What a warning row says after its message: where the warning was raised (nothing for a tool's
+# own line), and how often when it repeats
+warning_note() {
+    local kind="$1" count="$2" note=""
+    case "$kind" in
+        session) note="in tests" ;;
+        exit) note="at exit" ;;
+    esac
+    if [ "$count" -gt 1 ]; then
+        note="${note:+${note} }(${count}×)"
+    fi
+    echo "$note"
+}
+
+# A passing check's warnings: a row below the checklist for each distinct one, like the
+# slow-test rows, and the check's own line left to the caller. Warn records a warning and keeps
+# the log for display_slow_logs. Strict returns 1 and sets warning_failure, a local of the
+# caller, to the reason, so the caller records one failure even when coverage fails the check too.
+check_warnings() {
+    local name="$1" make_target="$2" logfile="$3" mode="$4"
+    local found
+    found=$(found_warnings "$logfile")
+    [ -n "$found" ] || return 0
+    local mark="${UI_MARK_WARN}"
+    if [ "$mode" = strict ]; then
+        mark="${UI_MARK_FAIL}"
+    fi
+    local count kind message note total=0
+    while IFS=$'\t' read -r count kind message; do
+        note=$(warning_note "$kind" "$count")
+        add_display_row "$mark" "$(fit_warning_row "$name" "$message" "$((${#note} ? ${#note} + 1 : 0))")" \
+            "${note:+ ${UI_GRAY}${note}${UI_RESET}}"
+        total=$((total + count))
+    done <<< "$found"
+    local text="${total} warning"
+    if [ "$total" -gt 1 ]; then
+        text="${text}s"
+    fi
+    if [ "$mode" = strict ]; then
+        warning_failure="${text}: filterwarnings makes every warning an error"
+        return 1
+    fi
+    record_warning "$name" "$text"
+    local kept
+    if kept=$(keep_log "$logfile" "$name"); then
+        echo "${name}|${kept}|warnings" >> "${STATUS_DIR}/slow"
+    fi
+    return 0
+}
+
+# check_suite_health.py over the reports the pytest checks wrote: "kind<TAB>where<TAB>detail" per
+# finding; exit 3 when there is no report, as in a project that does not load
+# appinfra.pytest_suites
+suite_health_report() {
+    eval "${PYTHON} $(printf '%q ' "${SCRIPT_DIR}/check_suite_health.py" "$HEALTH_DIR" --root "$PROJECT_ROOT" --threshold "$TEST_HEALTH_THRESHOLD" --outliers "$TEST_HEALTH_OUTLIERS")"
+}
+
+# The line's name, and the findings shown as rows below the checklist; the rest are in the kept log
+HEALTH_NAME="Test structure health"
+HEALTH_ROWS=10
+
+# A test subcheck. The one that runs the unit tests (HEALTH_TARGET) then brings the Test structure
+# health line up to date from the reports it wrote, so the line does not wait for the other
+# subchecks.
+run_test_subcheck() {
+    local rc=0
+    run_check "$@" || rc=$?
+    if [ "$7" = "$HEALTH_TARGET" ]; then
+        run_test_structure || rc=1
+    fi
+    return "$rc"
+}
+
+# The Test structure health summary from the share of tests in their directory's suite and the
+# count of findings: "98.2%, clean", "95.1%, 1 finding" or "90.4%, 17 findings"
+health_summary() {
+    case "$2" in
+        0) echo "$1%, clean" ;;
+        1) echo "$1%, 1 finding" ;;
+        *) echo "$1%, $2 findings" ;;
+    esac
+}
+
+# The Test structure health line: it passes with no finding. Each finding gets a row below the
+# checklist; warn records a warning, strict a failure. No report: the project does not load
+# appinfra.pytest_suites, or has no unit tests.
+run_test_structure() {
+    [ "$TEST_HEALTH" != false ] && [ -d "$STATUS_DIR" ] || return 0
+    local name="$HEALTH_NAME" line_num=${SUBCHECK_LINES["$HEALTH_NAME"]}
+    local log="${STATUS_DIR}/check-test-structure.log" rc=0
+    suite_health_report > "$log" 2>&1 || rc=$?
+    if [ "$rc" -eq 3 ]; then
+        update_line "$line_num" "${UI_MARK_PENDING}" "  ${name}" " ${UI_GRAY}(no report: is appinfra.pytest_suites loaded?)${UI_RESET}"
+        return 0
+    elif [ "$rc" -ne 0 ]; then
+        update_line "$line_num" "${UI_MARK_FAIL}" "  ${name}" ""
+        record_failure "$name" "" "" "$log"
+        return 1
+    fi
+    local percent count summary kept=""
+    read -r percent < "$log"
+    # Arithmetic drops the padding BSD wc puts before the number
+    count=$(($(wc -l < "$log") - 1))
+    summary=$(health_summary "$percent" "$count")
+    if [ "$count" -eq 0 ]; then
+        update_line "$line_num" "${UI_MARK_OK}" "  ${name}" " ${UI_GRAY}(${summary})${UI_RESET}"
+        return 0
+    fi
+    kept=$(keep_log "$log" "$name") || kept=""
+    local mark="${UI_MARK_WARN}" kind where detail
+    [ "$TEST_HEALTH" = strict ] && mark="${UI_MARK_FAIL}"
+    update_line "$line_num" "$mark" "  ${name}" " ${UI_GRAY}(${summary})${UI_RESET}"
+    while IFS=$'\t' read -r kind where detail; do
+        add_display_row "$mark" "$(fit_warning_row "$name" "${where}: ${detail}" 0)" ""
+    done < <(sed -n "2,$((HEALTH_ROWS + 1))p" "$log")
+    if [ "$count" -gt "$HEALTH_ROWS" ]; then
+        add_display_row "$mark" "${name}: $((count - HEALTH_ROWS)) more in ${kept}" ""
+    fi
+    if [ "$TEST_HEALTH" = strict ]; then
+        record_failure "$name" "" "" "$log" "$summary"
+        return 1
+    fi
+    record_warning "$name" "$summary"
+    [ -z "$kept" ] || echo "${name}|${kept}|warnings" >> "${STATUS_DIR}/slow"
+    return 0
+}
+
+# run_raw's Test structure health: the summary and every finding. Returns 0 with no finding,
+# otherwise EXIT_CODE_WARNING in warn mode or 1 in strict mode.
+run_raw_test_structure() {
+    [ "$TEST_HEALTH" != false ] || return 0
+    echo "  → ${HEALTH_NAME}"
+    echo ""
+    local out rc=0
+    out=$(suite_health_report 2>&1) || rc=$?
+    if [ "$rc" -eq 3 ]; then
+        echo "  ${UI_GRAY}[ ]${UI_RESET} ${HEALTH_NAME} ${UI_GRAY}(no report: is appinfra.pytest_suites loaded?)${UI_RESET}"
+        return 0
+    elif [ "$rc" -ne 0 ]; then
+        printf '%s\n' "$out"
+        echo "  ${UI_MARK_FAIL} ${HEALTH_NAME} failed"
+        return 1
+    fi
+    local percent count summary
+    read -r percent <<< "$out"
+    count=$(($(wc -l <<< "$out") - 1))
+    summary=$(health_summary "$percent" "$count")
+    if [ "$count" -eq 0 ]; then
+        echo "  ${UI_MARK_OK} ${HEALTH_NAME} (${summary})"
+        return 0
+    fi
+    rc=$EXIT_CODE_WARNING
+    local mark="${UI_MARK_WARN}"
+    if [ "$TEST_HEALTH" = strict ]; then
+        rc=1
+        mark="${UI_MARK_FAIL}"
+    fi
+    echo "  ${mark} ${HEALTH_NAME} (${summary})"
+    raw_health_findings "$out"
+    return "$rc"
+}
+
+# run_raw's list of the Test structure health findings, muted, one "where: detail" line each
+raw_health_findings() {
+    local kind where detail
+    while IFS=$'\t' read -r kind where detail; do
+        # printf, not echo -e: a node id holds pytest's escapes (\n) as literal text
+        printf '    %s- %s: %s%s\n' "$UI_GRAY" "$where" "$detail" "$UI_RESET"
+    done < <(tail -n +2 <<< "$1")
 }
 
 # The examples runner's summary ends with "N unmet (reason[, reason])" when
@@ -765,10 +1139,11 @@ run_check() {
     # For test subchecks, check if required directory exists first
     # This prevents hangs from pytest-xdist or unittest on non-existent directories
     if [ "$is_subcheck" = true ]; then
-        if [[ "$cmd" == *"tests/e2e"* ]] && [ ! -d "tests/e2e" ]; then
+        # The leading space matches tests/ as a whole argument, not the tail of perf_tests/
+        if [[ "$cmd" == *" tests/e2e"* ]] && [ ! -d "tests/e2e" ]; then
             update_line "$line_num" "${UI_MARK_PENDING}" "${prefix}${name}" " ${UI_GRAY}(no tests)${UI_RESET}"
             return 0
-        elif [[ "$cmd" == *"tests/"* ]] && [ ! -d "tests" ]; then
+        elif [[ "$cmd" == *" tests/"* ]] && [ ! -d "tests" ]; then
             update_line "$line_num" "${UI_MARK_PENDING}" "${prefix}${name}" " ${UI_GRAY}(no tests)${UI_RESET}"
             return 0
         fi
@@ -810,7 +1185,15 @@ run_check() {
                 record_skips "$name" "$tmpfile"
             fi
 
-            if [[ "$name" == "Examples" ]] && mark_examples_unmet "$line_num" "${prefix}${name}" "$tmpfile" "$timing_suffix"; then
+            # Warnings get rows below the checklist; in strict mode they also fail the check,
+            # whose line then shows its usual text with the failure mark
+            local warning_failure="" pass_mark="${UI_MARK_OK}"
+            if ! check_warnings "$name" "$make_target" "$tmpfile" "$WARNINGS_MODE"; then
+                pass_mark="${UI_MARK_FAIL}"
+            fi
+
+            # A failed Examples check takes the failure line below, not the unmet warning line
+            if [[ "$name" == "Examples" ]] && [ -z "$warning_failure" ] && mark_examples_unmet "$line_num" "${prefix}${name}" "$tmpfile" "$timing_suffix"; then
                 :  # line carries the warning mark and skip count
             elif [ -n "$coverage_target" ]; then
                 # Use appropriate parser based on check type
@@ -823,14 +1206,18 @@ run_check() {
                 # Format target to 1 decimal for consistent display
                 local target_display=$(awk "BEGIN {printf \"%.1f\", int($coverage_target * 10) / 10}")
                 if check_coverage_threshold "$actual" "$coverage_target"; then
-                    update_line "$line_num" "${UI_MARK_OK}" "${prefix}${name}" " ${UI_GRAY}(${actual}% ≥ ${target_display}%)${UI_RESET}${timing_suffix}"
+                    update_line "$line_num" "$pass_mark" "${prefix}${name}" " ${UI_GRAY}(${actual}% ≥ ${target_display}%)${UI_RESET}${timing_suffix}"
                 else
                     update_line "$line_num" "${UI_MARK_FAIL}" "${prefix}${name}" " ${UI_GRAY}(${actual}% < ${target_display}%)${UI_RESET}${timing_suffix}"
-                    record_failure "$name" "$make_target" "" "$tmpfile" "Coverage: ${actual}% (target: ${target_display}%)"
+                    record_failure "$name" "$make_target" "" "$tmpfile" "Coverage: ${actual}% (target: ${target_display}%)${warning_failure:+; ${warning_failure}}"
                     return 1
                 fi
             else
-                update_line "$line_num" "${UI_MARK_OK}" "${prefix}${name}" "${timing_suffix}"
+                update_line "$line_num" "$pass_mark" "${prefix}${name}" "${timing_suffix}"
+            fi
+            if [ -n "$warning_failure" ]; then
+                record_failure "$name" "$make_target" "" "$tmpfile" "$warning_failure"
+                return 1
             fi
             rm -f "$tmpfile"
             ;;
@@ -852,14 +1239,14 @@ run_check() {
             update_line "$line_num" "${UI_MARK_PENDING}" "${prefix}${name}" " ${UI_GRAY}(no tests)${UI_RESET}${timing_suffix}"
             rm -f "$tmpfile"
             ;;
-        42)  # Warning: violations found but non-strict mode (EXIT_CODE_WARNING)
-            # Extract violation count from output if available
-            local warning_count=$(grep -oP '(?<=Violations found: )\d+|(?<=Violations: )\d+' "$tmpfile" 2>/dev/null | head -1)
-            if [ -n "$warning_count" ]; then
-                update_line "$line_num" "${UI_MARK_WARN}" "${prefix}${name}" " ${UI_GRAY}(${warning_count} violations, run make cq)${UI_RESET}${timing_suffix}"
-                record_warning "$name" "$warning_count"
+        42)  # Warning: findings that do not fail the build (EXIT_CODE_WARNING)
+            # The check's "Warnings: <summary>" line, e.g. "9 dup, 22 dead"
+            local warning_summary=$(sed -n 's/^Warnings: //p' "$tmpfile" 2>/dev/null | tail -1)
+            if [ -n "$warning_summary" ]; then
+                update_line "$line_num" "${UI_MARK_WARN}" "${prefix}${name}" " ${UI_GRAY}(${warning_summary}, run make ${make_target})${UI_RESET}${timing_suffix}"
+                record_warning "$name" "$warning_summary"
             else
-                update_line "$line_num" "${UI_MARK_WARN}" "${prefix}${name}" " ${UI_GRAY}(run make cq)${UI_RESET}${timing_suffix}"
+                update_line "$line_num" "${UI_MARK_WARN}" "${prefix}${name}" " ${UI_GRAY}(run make ${make_target})${UI_RESET}${timing_suffix}"
                 record_warning "$name"
             fi
             rm -f "$tmpfile"
@@ -913,7 +1300,7 @@ run_test_suite() {
                 continue
             fi
             local subline=${SUBCHECK_LINES["$subname"]}
-            run_check "$subname" "$subcmd" "$subline" true "$coverage_target" "" "$submake" &
+            run_test_subcheck "$subname" "$subcmd" "$subline" true "$coverage_target" "" "$submake" &
             pids+=($!)
         done
         monitor_jobs "${pids[@]}" || true
@@ -922,14 +1309,14 @@ run_test_suite() {
         if [ -n "$perf_subcheck" ]; then
             IFS='|' read -r subname submake subcmd coverage_target <<< "$perf_subcheck"
             local subline=${SUBCHECK_LINES["$subname"]}
-            run_check "$subname" "$subcmd" "$subline" true "$coverage_target" "" "$submake" || true
+            run_test_subcheck "$subname" "$subcmd" "$subline" true "$coverage_target" "" "$submake" || true
         fi
     else
         # Run test subchecks sequentially
         for subcheck_def in "${TEST_SUBCHECKS[@]}"; do
             IFS='|' read -r subname submake subcmd coverage_target <<< "$subcheck_def"
             local subline=${SUBCHECK_LINES["$subname"]}
-            if ! run_check "$subname" "$subcmd" "$subline" true "$coverage_target" "" "$submake"; then
+            if ! run_test_subcheck "$subname" "$subcmd" "$subline" true "$coverage_target" "" "$submake"; then
                 [ "$FAIL_FAST" = true ] && { update_line "$line_num" "${UI_MARK_FAIL}" "Test suite" ""; return 1; }
             fi
         done
@@ -979,7 +1366,7 @@ run_checks() {
                     continue
                 fi
                 local subline=${SUBCHECK_LINES["$subname"]}
-                run_check "$subname" "$subcmd" "$subline" true "$coverage_target" "" "$submake" &
+                run_test_subcheck "$subname" "$subcmd" "$subline" true "$coverage_target" "" "$submake" &
                 pids+=($!)
             done
         fi
@@ -995,7 +1382,7 @@ run_checks() {
             }
             IFS='|' read -r subname submake subcmd coverage_target <<< "$perf_subcheck"
             local subline=${SUBCHECK_LINES["$subname"]}
-            run_check "$subname" "$subcmd" "$subline" true "$coverage_target" "" "$submake" || any_failed=true
+            run_test_subcheck "$subname" "$subcmd" "$subline" true "$coverage_target" "" "$submake" || any_failed=true
         fi
 
         # Update test suite status - only if tests enabled
@@ -1030,8 +1417,6 @@ run_checks() {
 
 run_raw() {
     cd "$PROJECT_ROOT"
-    echo "Running code quality checks (raw mode)..."
-    echo ""
 
     local start_time=$(date +%s.%N)
     local failed=false
@@ -1039,6 +1424,13 @@ run_raw() {
 
     local subchecks=()
     [ "$SUMMARY" = true ] && subchecks=("${TEST_SUBCHECKS[@]}") || subchecks=("${TEST_SUBCHECKS_RAW[@]}")
+
+    # check.ci (--summary) applies make check's warning policy and coverage threshold;
+    # check.raw runs every command plain
+    local scan=plain
+    if [ "$SUMMARY" = true ]; then
+        scan=scan
+    fi
 
     for check_def in "${CHECKS[@]}"; do
         IFS='|' read -r name make_target cmd fix_target <<< "$check_def"
@@ -1054,17 +1446,22 @@ run_raw() {
                 echo ""
 
                 local sub_exit_code=0
-                eval "$subcmd" || sub_exit_code=$?
-                # pytest exit 5 = no tests collected; treat as gray-skip to match
-                # run_check's classification (see case 5 in run_check above).
-                if [ $sub_exit_code -eq 0 ]; then
-                    echo "  ${UI_MARK_OK} $subname passed"
-                elif [ $sub_exit_code -eq 5 ]; then
-                    echo "  ${UI_GRAY}[ ]${UI_RESET} $subname ${UI_GRAY}(no tests)${UI_RESET}"
-                else
-                    echo "  ${UI_MARK_FAIL} $subname failed"
+                run_raw_check "$subname" "$subcmd" "$scan" "  " "" "" || sub_exit_code=$?
+                if [ $sub_exit_code -eq "$EXIT_CODE_WARNING" ]; then
+                    has_warnings=true
+                elif [ $sub_exit_code -ne 0 ] && [ $sub_exit_code -ne 5 ]; then
                     failed=true
                     [ "$FAIL_FAST" = true ] && break 2
+                fi
+                echo ""
+                # The raw unit target is test.unit.v
+                [ "${submake%.v}" = "$HEALTH_TARGET" ] || continue
+                local health_exit_code=0
+                run_raw_test_structure || health_exit_code=$?
+                if [ $health_exit_code -eq "$EXIT_CODE_WARNING" ]; then
+                    has_warnings=true
+                elif [ $health_exit_code -ne 0 ]; then
+                    failed=true
                 fi
                 echo ""
             done
@@ -1074,17 +1471,10 @@ run_raw() {
             local actual_fix_target="${parsed#*|}"
 
             local cmd_exit_code=0
-            eval "$cmd" || cmd_exit_code=$?
-
-            if [ $cmd_exit_code -eq 0 ]; then
-                echo "${UI_MARK_OK} $name passed"
-            elif [ $cmd_exit_code -eq 42 ]; then  # EXIT_CODE_WARNING
-                echo "${UI_MARK_WARN} $name (warnings, run make cq)"
+            run_raw_check "$name" "$cmd" "$scan" "" "$make_target" "$actual_fix_target" || cmd_exit_code=$?
+            if [ $cmd_exit_code -eq "$EXIT_CODE_WARNING" ]; then
                 has_warnings=true
-                # Don't fail on warnings in non-strict mode
-            else
-                echo "${UI_MARK_FAIL} $name failed"
-                [ -n "$actual_fix_target" ] && echo "  To fix: make $actual_fix_target"
+            elif [ $cmd_exit_code -ne 0 ]; then
                 failed=true
                 [ "$FAIL_FAST" = true ] && break
             fi
@@ -1104,6 +1494,62 @@ run_raw() {
     fi
 }
 
+# Run one check for run_raw and print its result: a check (indent "") or a test subcheck (indent
+# "  "). With scan (check.ci), a copy of its output goes to a log; its warnings (see
+# check_warnings) follow the result and, in strict mode (WARNINGS_MODE), fail the check. Without
+# (check.raw), the plain command runs, so the outcome is the tools' own. Returns 0, 5 (a subcheck
+# with no tests collected), EXIT_CODE_WARNING (passed with warnings, or a tool's own warning
+# exit) or a failing code.
+run_raw_check() {
+    local name="$1" cmd="$2" scan="$3" indent="$4" make_target="$5" fix_target="$6"
+    local log="${STATUS_DIR}/raw-check.log"
+    local rc=0
+    if [ "$scan" = scan ]; then
+        set +e
+        # -i: on Ctrl-C tee keeps passing output until the check closes the pipe, so what pytest
+        # prints on its way out still reaches the terminal; stop_children ends the rest
+        eval "$cmd" 2>&1 | tee -i "$log"
+        rc=${PIPESTATUS[0]}
+        set -e
+    else
+        eval "$cmd" || rc=$?
+    fi
+
+    local found="" note=""
+    if [ "$scan" = scan ] && [ "$rc" -eq 0 ]; then
+        found=$(found_warnings "$log")
+    fi
+    if [ -n "$found" ]; then
+        note=" ($(awk -F'\t' '{ n += $1 } END { print n }' <<< "$found") warnings)"
+        rc=$EXIT_CODE_WARNING
+        if [ "$WARNINGS_MODE" = strict ]; then
+            rc=1
+        fi
+    fi
+    if [ "$rc" -eq 5 ] && [ -n "$indent" ]; then
+        echo "${indent}${UI_GRAY}[ ]${UI_RESET} $name ${UI_GRAY}(no tests)${UI_RESET}"
+    elif [ "$rc" -eq 0 ]; then
+        echo "${indent}${UI_MARK_OK} $name passed"
+    elif [ "$rc" -eq "$EXIT_CODE_WARNING" ] && [ -z "$found" ]; then
+        # A tool's own warning exit (cq in warn mode)
+        echo "${indent}${UI_MARK_WARN} $name (warnings, run make ${make_target})"
+    elif [ "$rc" -eq "$EXIT_CODE_WARNING" ]; then
+        echo "${indent}${UI_MARK_WARN} $name passed${note}"
+    else
+        echo "${indent}${UI_MARK_FAIL} $name failed${note}"
+        if [ -n "$fix_target" ]; then
+            echo "${indent}  To fix: make $fix_target"
+        fi
+    fi
+    local count kind message line_note
+    while IFS=$'\t' read -r count kind message; do
+        [ -n "$message" ] || continue
+        line_note=$(warning_note "$kind" "$count")
+        echo "${indent}  - ${message}${line_note:+ ${line_note}}"
+    done <<< "$found"
+    return "$rc"
+}
+
 # === MAIN ===
 
 main() {
@@ -1112,19 +1558,29 @@ main() {
 
     [ "$RAW" = true ] && { run_raw; return $?; }
 
-    echo "Running code quality checks..."
-    echo ""
+    # The lines under Test suite: the subchecks, with Test structure health after the pytest
+    # ones, before Examples
+    local subline_names=() subname
+    for subcheck_def in "${TEST_SUBCHECKS[@]}"; do
+        IFS='|' read -r subname _ _ _ <<< "$subcheck_def"
+        if [ "$subname" = "Examples" ] && [ "$TEST_HEALTH" != false ]; then
+            subline_names+=("$HEALTH_NAME")
+        fi
+        subline_names+=("$subname")
+    done
+    if [ "$TEST_HEALTH" != false ] && [[ " ${subline_names[*]} " != *" ${HEALTH_NAME} "* ]]; then
+        subline_names+=("$HEALTH_NAME")
+    fi
 
     # Calculate line numbers for cursor positioning
-    local current_line=3
+    local current_line=1
     for check_def in "${CHECKS[@]}"; do
         IFS='|' read -r name _ _ _ <<< "$check_def"
         CHECK_LINES["$name"]=$current_line
         current_line=$((current_line + 1))
 
         if [[ "$name" == "Test suite" ]]; then
-            for subcheck_def in "${TEST_SUBCHECKS[@]}"; do
-                IFS='|' read -r subname _ _ _ <<< "$subcheck_def"
+            for subname in "${subline_names[@]}"; do
                 SUBCHECK_LINES["$subname"]=$current_line
                 current_line=$((current_line + 1))
             done
@@ -1138,8 +1594,7 @@ main() {
         printf "%b  %s\n" "$UI_MARK_PENDING" "$name"
 
         if [[ "$name" == "Test suite" ]]; then
-            for subcheck_def in "${TEST_SUBCHECKS[@]}"; do
-                IFS='|' read -r subname _ _ _ <<< "$subcheck_def"
+            for subname in "${subline_names[@]}"; do
                 printf "%b    %s\n" "$UI_MARK_PENDING" "$subname"
             done
         fi
@@ -1160,25 +1615,22 @@ main() {
     tput cnorm 2>/dev/null || printf "\033[?25h"
     local elapsed=$(printf "%.1f" $(echo "$(date +%s.%N) - $start_time" | bc))
 
+    # The report below the checklist, each block ending in a blank line, then the result: the
+    # result is always the last line
     echo ""
+    display_failures
+    display_slow_logs
+    display_skip_summary
+    display_notes
     if [ "$success" = false ]; then
         local failure_count=$(wc -l < "${STATUS_DIR}/failures" 2>/dev/null || echo "1")
-        echo -e "${UI_MARK_FAIL} ${failure_count} check(s) failed ${UI_GRAY}after ${elapsed}s${UI_RESET}"
-        echo ""
-        display_failures
-        display_slow_logs
-        display_skip_summary
+        echo -e "${UI_MARK_FAIL} ${UI_RED}${failure_count} check(s) failed${UI_RESET} ${UI_GRAY}after ${elapsed}s${UI_RESET}"
         exit 1
+    elif [ -f "${STATUS_DIR}/warnings" ]; then
+        local warning_count=$(wc -l < "${STATUS_DIR}/warnings")
+        echo -e "${UI_MARK_WARN} ${UI_BRIGHT_YELLOW}All checks passed with ${warning_count} warning(s)${UI_RESET} ${UI_GRAY}in ${elapsed}s${UI_RESET}"
     else
-        # Check for warnings
-        if [ -f "${STATUS_DIR}/warnings" ]; then
-            local warning_count=$(wc -l < "${STATUS_DIR}/warnings")
-            echo -e "${UI_MARK_WARN} All checks passed with ${warning_count} warning(s) ${UI_GRAY}in ${elapsed}s${UI_RESET}"
-        else
-            echo -e "${UI_MARK_OK} All checks passed ${UI_GRAY}in ${elapsed}s${UI_RESET}"
-        fi
-        display_slow_logs
-        display_skip_summary
+        echo -e "${UI_MARK_OK} All checks passed ${UI_GRAY}in ${elapsed}s${UI_RESET}"
     fi
 }
 

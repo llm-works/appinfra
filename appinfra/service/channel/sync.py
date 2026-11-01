@@ -29,6 +29,7 @@ Dumb transport (wrap in BufferedChannel)::
 
 from __future__ import annotations
 
+import contextlib
 import multiprocessing as mp
 import queue
 import threading
@@ -183,6 +184,23 @@ class BufferedChannel(Generic[TRequest, TResponse]):
         self._redelivery = RedeliveryBuffer()
         self._lock = threading.Lock()
 
+    def __getstate__(self) -> dict[str, Any]:
+        """State pickled when the channel is passed to a spawn or forkserver child.
+
+        The lock and the redelivery buffer stay in this process: the child gets a
+        fresh lock and an empty buffer, so a buffered message is never delivered
+        by both processes.
+        """
+        state = self.__dict__.copy()
+        del state["_lock"]
+        del state["_redelivery"]
+        return state
+
+    def __setstate__(self, state: dict[str, Any]) -> None:
+        self.__dict__.update(state)
+        self._redelivery = RedeliveryBuffer()
+        self._lock = threading.Lock()
+
     @property
     def transport(self) -> Transport:
         """The underlying wire transport."""
@@ -256,7 +274,7 @@ class BufferedChannel(Generic[TRequest, TResponse]):
         if not hasattr(request, "id"):
             raise ValueError("Request must have an 'id' attribute")
 
-        request_id = request.id  # type: ignore[union-attr]
+        request_id = request.id
         effective_timeout = timeout if timeout is not None else self._response_timeout
         deadline = time.monotonic() + effective_timeout
 
@@ -381,7 +399,7 @@ class QueueTransport(Generic[TRequest, TResponse]):
     def recv(self, timeout: float | None = None) -> TResponse:
         """Get next message from the inbound queue."""
         try:
-            return cast(TResponse, self._inbound.get(timeout=timeout))
+            return self._inbound.get(timeout=timeout)
         except queue.Empty:
             raise ChannelTimeoutError(f"Timeout waiting for message ({timeout}s)")
 
@@ -422,21 +440,27 @@ class ProcessQueueTransport(Generic[TRequest, TResponse]):
     def recv(self, timeout: float | None = None) -> TResponse:
         """Get next message from the inbound mp.Queue."""
         try:
-            return cast(TResponse, self._inbound.get(timeout=timeout))
+            return self._inbound.get(timeout=timeout)
         except queue.Empty:
             raise ChannelTimeoutError(f"Timeout waiting for message ({timeout}s)")
 
     def close(self) -> None:
         """Close both multiprocessing queues."""
         self._closed = True
-        try:
+        with contextlib.suppress(Exception):
             self._outbound.close()
-        except Exception:
-            pass
-        try:
+        with contextlib.suppress(Exception):
             self._inbound.close()
-        except Exception:
-            pass
+
+    def allow_exit_without_flush(self) -> None:
+        """Let this process exit without waiting for unsent messages to reach the pipe.
+
+        For an outbound queue whose only reader cannot outlive this process, such as
+        a daemon child: multiprocessing terminates daemon children at exit before it
+        waits for queue feeders, so that wait could only block. Messages still unsent
+        at exit are dropped. See ``multiprocessing.Queue.cancel_join_thread()``.
+        """
+        self._outbound.cancel_join_thread()
 
     @property
     def is_closed(self) -> bool:

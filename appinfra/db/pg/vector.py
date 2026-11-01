@@ -126,11 +126,10 @@ def create_vector_index(
             f"USING ivfflat ({column} {ops}) "
             f"WITH (lists = {lists})"
         )
-    elif method == "hnsw":
+    if method == "hnsw":
         return (
             f"CREATE INDEX {index_name} ON {table} "
             f"USING hnsw ({column} {ops}) "
             f"WITH (m = {m}, ef_construction = {ef_construction})"
         )
-    else:
-        raise ValueError(f"Unknown index method: {method}. Use 'ivfflat' or 'hnsw'.")
+    raise ValueError(f"Unknown index method: {method}. Use 'ivfflat' or 'hnsw'.")

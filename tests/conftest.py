@@ -31,11 +31,17 @@ from tests.helpers.pg.probe import (
 
 # Register integration test fixtures and appinfra testing utilities
 pytest_plugins = [
+    "appinfra.pytest_suites",
     "appinfra.testing",
+    # Registered here, before any test module imports it, so pytest can
+    # rewrite its asserts
+    "appinfra.db.pg.testing",
     "pytester",
+    "tests.fixtures.clock",
     "tests.fixtures.pg_integration",
     "tests.fixtures.sqlite_integration",
     "tests.fixtures.logging",
+    "tests.fixtures.yaml_files",
 ]
 
 
@@ -85,9 +91,10 @@ def clean_env():
     """Clear INFRA_* environment variables for isolated config tests.
 
     Tests loading Config from minimal yaml files with `enable_env_overrides=True`
-    will fail if CI has INFRA_* env vars for paths not in the yaml (e.g., CI sets
-    INFRA_PGSERVER_PASS but test yaml has no pgserver section). This raises
-    UndeclaredConfigPathError. Use this fixture to isolate such tests.
+    fail on an INFRA_* override for a path the yaml does not declare, with
+    UndeclaredConfigPathError: INFRA_PGSERVER_HOST, which the CI test container
+    and pytest_configure set while the yaml has no pgserver section, or any
+    override a developer exported. Use this fixture to isolate such tests.
     """
     original_env = os.environ.copy()
     for key in list(os.environ.keys()):
@@ -162,20 +169,12 @@ def sample_config_dict() -> dict:
 
 def pytest_collection_modifyitems(config, items):
     """
-    Modify test collection to add markers and skip conditions.
+    Apply skip conditions (suite markers: appinfra/pytest_suites.py).
 
     Args:
         config: Pytest config object
         items: List of collected test items
     """
-    # Add 'unit' marker to tests without other markers
-    for item in items:
-        if not any(
-            mark.name in ["integration", "performance", "security", "e2e"]
-            for mark in item.iter_markers()
-        ):
-            item.add_marker(pytest.mark.unit)
-
     # Skip @pytest.mark.require_pg tests with the uniform sentinel reason when
     # PG is unreachable. The terminal-summary banner consolidates them.
     status = config.stash.get(PG_STATUS_KEY, None)

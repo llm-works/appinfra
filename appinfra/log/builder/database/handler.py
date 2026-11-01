@@ -11,10 +11,11 @@ Requires: pip install appinfra[sql]
 """
 
 import logging
-import signal
+import threading
 from datetime import datetime
 from typing import Any
 
+from ....alarm import alarm_timeout
 from ....errors import DependencyError
 from ...config import LogConfig
 from .config import DatabaseHandlerConfig
@@ -68,9 +69,11 @@ class DatabaseHandler(logging.Handler):
         self.log_config = log_config
         self.batch: list[dict[str, Any]] = []
         self.last_flush = datetime.now()
+        # Set while emit() runs on a thread; see emit()
+        self._emitting = threading.local()
 
         # Cache INSERT statements per column set
-        self._sql_cache: dict[tuple, str] = {}
+        self._sql_cache: dict[tuple[str, ...], str] = {}
 
         # Set handler level with proper resolution
         level = handler_config.level or log_config.level
@@ -83,7 +86,16 @@ class DatabaseHandler(logging.Handler):
             lifecycle_manager.register_db_handler(self)
 
     def emit(self, record: logging.LogRecord) -> None:
-        """Emit a log record to the database."""
+        """Emit a log record to the database.
+
+        A record logged while this handler handles another on the same thread is
+        the handler's own error report, sent through the logger it is attached to.
+        Writing it would re-enter the write that just failed, so it is left to the
+        logger's other handlers.
+        """
+        if getattr(self._emitting, "active", False):
+            return
+        self._emitting.active = True
         try:
             # Map record to database row
             row_data = self.handler_config.data_mapper(record)
@@ -99,6 +111,8 @@ class DatabaseHandler(logging.Handler):
 
         except Exception:
             self.handleError(record)
+        finally:
+            self._emitting.active = False
 
     def _should_flush_batch(self) -> bool:
         """Check if the batch should be flushed based on size or time."""
@@ -117,35 +131,32 @@ class DatabaseHandler(logging.Handler):
         if hasattr(record, "exc_info") and record.exc_info:
             return True
 
-        # Check if 'extra' dict contains trigger fields
-        if hasattr(record, "extra") and record.extra:
+        # Check if the extra fields (stored by Logger, as the data mapper reads
+        # them) contain a trigger field
+        extra = getattr(record, "__infra__extra", None)
+        if extra:
             for field in self.handler_config.critical_trigger_fields:
-                if field in record.extra:
+                if field in extra:
                     return True
 
         return False
 
     def _critical_flush(self, row_data: dict[str, Any]) -> None:
-        """Immediately flush critical error to database."""
+        """Immediately flush critical error to database.
+
+        The timeout keeps a hung write from stalling a crashing app. It applies on
+        the main thread only; elsewhere the database driver's own timeouts apply.
+        """
         try:
-            # Use a timeout to prevent hanging during app crash
-
-            def timeout_handler(signum: int, frame: Any) -> None:
-                raise TimeoutError("Critical flush timeout")
-
-            # Set timeout
-            old_handler = signal.signal(signal.SIGALRM, timeout_handler)
-            signal.alarm(int(self.handler_config.critical_flush_timeout))
-
-            try:
-                # Immediate database write (session auto-commits on success)
-                with self.handler_config.db_interface.session() as session:
-                    self._insert_single_record(session, row_data)
-
-            finally:
-                # Restore signal handler
-                signal.alarm(0)
-                signal.signal(signal.SIGALRM, old_handler)
+            # Immediate database write (session auto-commits on success)
+            with (
+                alarm_timeout(
+                    self.handler_config.critical_flush_timeout,
+                    lambda: TimeoutError("Critical flush timeout"),
+                ),
+                self.handler_config.db_interface.session() as session,
+            ):
+                self._insert_single_record(session, row_data)
 
         except Exception:
             # Fallback to console if database flush fails
@@ -175,7 +186,7 @@ class DatabaseHandler(logging.Handler):
 
         return re.sub(r"[^a-zA-Z0-9_]", "_", name)
 
-    def _get_insert_sql(self, columns_tuple: tuple) -> str:
+    def _get_insert_sql(self, columns_tuple: tuple[str, ...]) -> str:
         """Get cached INSERT SQL statement for given columns."""
         if columns_tuple not in self._sql_cache:
             columns = list(columns_tuple)

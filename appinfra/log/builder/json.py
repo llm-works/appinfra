@@ -15,8 +15,8 @@ from pathlib import Path
 from typing import Any, Self
 
 from ..config import LogConfig
-from ..factory import LoggerFactory
 from ..logger import Logger
+from ..serialize import record_traceback, sanitize_extra
 from .builder import LoggingBuilder
 
 # Helper functions for JSONFormatter._record_to_dict()
@@ -70,7 +70,7 @@ def _add_extra_fields(
     """Add extra fields if present."""
     extra = getattr(record, "__infra__extra", None)
     if formatter.include_extra and formatter.should_include_field("extra") and extra:
-        data["extra"] = formatter._sanitize_extra_fields(extra)
+        data["extra"] = sanitize_extra(extra)
 
 
 def _add_location_fields(
@@ -86,20 +86,25 @@ def _add_location_fields(
 def _add_exception_fields(
     data: dict[str, Any], formatter: Any, record: logging.LogRecord
 ) -> None:
-    """Add exception information if present."""
-    if (
-        formatter.include_exception
-        and formatter.should_include_field("exception")
-        and record.exc_info
+    """Add the exception traceback if the record carries one."""
+    if not (
+        formatter.include_exception and formatter.should_include_field("exception")
     ):
-        data["exception"] = formatter._format_exception(record.exc_info)
+        return
+    text = record_traceback(record)
+    if text is not None:
+        data["exception"] = text
 
 
 def _add_custom_fields(data: dict[str, Any], formatter: Any) -> None:
     """Add custom fields defined in formatter configuration."""
-    for key, value in formatter.custom_fields.items():
-        if formatter.should_include_field(key):
-            data[key] = value
+    data.update(
+        {
+            key: value
+            for key, value in formatter.custom_fields.items()
+            if formatter.should_include_field(key)
+        }
+    )
 
 
 class JSONFormatter(logging.Formatter):
@@ -147,22 +152,6 @@ class JSONFormatter(logging.Formatter):
         self.timestamp_format = timestamp_format
         self.custom_fields = custom_fields or {}
 
-        # Standard fields that are always included unless explicitly excluded
-        self._standard_fields = {
-            "timestamp",
-            "level",
-            "logger",
-            "message",
-            "module",
-            "function",
-            "line",
-            "process_id",
-            "thread_id",
-            "extra",
-            "exception",
-            "location",
-        }
-
     def should_include_field(self, field_name: str) -> bool:
         """Check if a field should be included in JSON output."""
         # If exclude_fields is specified and field is in it, exclude
@@ -170,10 +159,7 @@ class JSONFormatter(logging.Formatter):
             return False
 
         # If include_fields is specified, only include fields in the list
-        if self.include_fields and field_name not in self.include_fields:
-            return False
-
-        return True
+        return not self.include_fields or field_name in self.include_fields
 
     def format(self, record: logging.LogRecord) -> str:
         """
@@ -220,33 +206,12 @@ class JSONFormatter(logging.Formatter):
 
         if self.timestamp_format == "iso":
             return datetime.fromtimestamp(record.created).isoformat()
-        elif self.timestamp_format == "unix":
+        if self.timestamp_format == "unix":
             return str(record.created)
-        elif self.timestamp_format == "epoch":
+        if self.timestamp_format == "epoch":
             return str(int(record.created))
-        else:
-            # Default to ISO format
-            return datetime.fromtimestamp(record.created).isoformat()
-
-    def _sanitize_extra_fields(self, extra: dict[str, Any]) -> dict[str, Any]:
-        """Sanitize extra fields to ensure JSON serializability.
-
-        Walks the value with ``coerce_tree`` first so opaque types with a
-        preferred ``__str__`` form reach the encoder as their string form
-        rather than being destructured.
-        """
-        from ..serialize import coerce_leaf, coerce_tree
-
-        sanitized = {}
-        for key, value in extra.items():
-            key = coerce_leaf(key)
-            try:
-                value = coerce_tree(value)
-                json.dumps(value)
-                sanitized[key] = value
-            except Exception:
-                sanitized[key] = str(value)
-        return sanitized
+        # Default to ISO format
+        return datetime.fromtimestamp(record.created).isoformat()
 
     def _extract_location(self, record: logging.LogRecord) -> list[str] | None:
         """Extract location information from the record."""
@@ -264,26 +229,13 @@ class JSONFormatter(logging.Formatter):
             # Fallback to standard attributes for non-appinfra loggers
             locations.append(f"{record.pathname}:{record.lineno}")
 
-        return locations if locations else None
-
-    def _format_exception(self, exc_info: Any) -> str | None:
-        """Format exception traceback as string."""
-        if not exc_info:
-            return None
-
-        try:
-            import traceback
-
-            return "".join(traceback.format_exception(*exc_info))
-        except Exception:
-            return f"Exception formatting failed: {exc_info[1]}"
+        return locations or None
 
     def _dict_to_json(self, data: dict[str, Any]) -> str:
         """Convert dictionary to JSON string."""
         if self.pretty_print:
             return json.dumps(data, indent=2, ensure_ascii=False)
-        else:
-            return json.dumps(data, ensure_ascii=False)
+        return json.dumps(data, ensure_ascii=False)
 
 
 class JSONLoggingBuilder(LoggingBuilder):
@@ -442,34 +394,6 @@ class JSONLoggingBuilder(LoggingBuilder):
         self._json_console = True
         return self
 
-    def build(self) -> Logger:
-        """
-        Build and return the configured logger.
-
-        Returns:
-            Configured logger instance
-        """
-        # Create base configuration
-        config = LogConfig.from_params(
-            level=self._level,
-            location=self._location,
-            micros=self._micros,
-            colors=self._colors,
-        )
-
-        # Create logger; raises LoggerExistsError if the name is taken
-        logger = LoggerFactory.create(
-            self._name, config, self._logger_class, self._extra
-        )
-
-        # Clear default handlers since we're configuring our own
-        logger.handlers.clear()
-
-        # Add configured handlers
-        self._add_json_handlers(logger, config)
-
-        return logger
-
     def _add_regular_console_handler(self, logger: Logger, config: LogConfig) -> None:
         """Add regular (non-JSON) console handler."""
         console_handler = logging.StreamHandler(sys.stdout)
@@ -506,9 +430,9 @@ class JSONLoggingBuilder(LoggingBuilder):
         json_file_handler.setFormatter(json_formatter)
         logger.addHandler(json_file_handler)
 
-    def _add_json_handlers(self, logger: Logger, config: LogConfig) -> None:
+    def _add_handlers(self, logger: Logger, config: LogConfig) -> None:
         """
-        Add configured JSON handlers to the logger.
+        Add configured JSON handlers to the logger; build() calls this.
 
         Args:
             logger: Logger instance

@@ -17,6 +17,10 @@ if TYPE_CHECKING:
     from ..config.api import ApiConfig
     from .adapter import FastAPIAdapter
 
+# uvicorn's exit status for a failed startup (its STARTUP_FAILURE). uvicorn moved the constant
+# from uvicorn.main to uvicorn.config, so no one import path holds it across supported versions.
+_UVICORN_STARTUP_FAILURE = 3
+
 
 class UvicornService(Service):
     """Service wrapper for running uvicorn in a subprocess.
@@ -136,8 +140,6 @@ class UvicornService(Service):
         Exits on SIGTERM/SIGINT, when the shutdown event is set, or when the
         parent process dies (see ``WatchedServer``).
         """
-        from uvicorn.main import STARTUP_FAILURE
-
         from ....subprocess import SubprocessContext
         from .watched_server import WatchedServer
 
@@ -156,11 +158,10 @@ class UvicornService(Service):
             server = WatchedServer(config, self._shutdown_event, ipc_channel)
             server.run()
             if not server.started:
-                raise SystemExit(STARTUP_FAILURE)
+                raise SystemExit(_UVICORN_STARTUP_FAILURE)
 
     def teardown(self) -> None:
         """Cleanup - uvicorn shuts itself down (see ``execute``)."""
-        pass
 
     def is_healthy(self) -> bool:
         """Check if uvicorn is accepting connections."""

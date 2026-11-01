@@ -9,6 +9,7 @@ making it easy to configure complex logging setups with clean, readable code.
 """
 
 import collections
+import contextlib
 from pathlib import Path
 from typing import Any, Self
 
@@ -88,7 +89,7 @@ class LoggingBuilder(LoggingBuilderInterface):
         self._logger_class: type[Logger] = Logger
 
         # Extra fields to pre-populate in log records
-        self._extra: dict[str, Any] | collections.OrderedDict = {}
+        self._extra: dict[str, Any] | collections.OrderedDict[str, Any] = {}
 
         # Display options set explicitly through the API, by name. A composing
         # builder (the AppBuilder logging scope) forwards only these, so an
@@ -412,11 +413,9 @@ class LoggingBuilder(LoggingBuilderInterface):
         # Serialize handler configs, skipping non-serializable ones
         handlers = []
         for handler_config in self._handlers:
-            try:
+            # Skip handlers that can't be serialized (e.g., DatabaseHandler)
+            with contextlib.suppress(NotImplementedError):
                 handlers.append(handler_config.to_dict())
-            except NotImplementedError:
-                # Skip handlers that can't be serialized (e.g., DatabaseHandler)
-                pass
 
         return {
             "name": self._name,

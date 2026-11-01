@@ -23,8 +23,9 @@ from io import StringIO
 from pathlib import Path
 from typing import Any
 
-import yaml  # type: ignore[import-untyped]
+import yaml
 
+from ..envelope import Envelope
 from ._include import _extract_section_data
 from ._utils import _file_exists, _normalize_allowed_paths
 from .types import (
@@ -33,7 +34,6 @@ from .types import (
     ErrorContext,
     IncludeContext,
     ResetValue,
-    SecretStr,
 )
 
 # Pattern to match !deep *anchor and transform to !deep anchor
@@ -105,7 +105,7 @@ def _canonical_chain_suffix(source: str, policies: list[str]) -> str:
     return "+".join([source] + sorted(policies))
 
 
-def _sub_prefix(m: re.Match) -> str:
+def _sub_prefix(m: re.Match[str]) -> str:
     """Substitution callback for prefix-form chains."""
     tags = [t[1:] for t in _TAG_TOKEN_RE.findall(m.group(1))]
     arg = m.group(2)
@@ -113,7 +113,7 @@ def _sub_prefix(m: re.Match) -> str:
     return f"!chain:{_canonical_chain_suffix(source, policies)} {arg}"
 
 
-def _sub_postfix(m: re.Match) -> str:
+def _sub_postfix(m: re.Match[str]) -> str:
     """Substitution callback for postfix-form chains."""
     source = m.group(1)[1:]
     arg = m.group(2)
@@ -135,8 +135,7 @@ def _rewrite_line(line: str) -> str:
         if close_idx is not None:
             return line
     line = _CHAIN_PREFIX_PATTERN.sub(_sub_prefix, line)
-    line = _CHAIN_POSTFIX_PATTERN.sub(_sub_postfix, line)
-    return line
+    return _CHAIN_POSTFIX_PATTERN.sub(_sub_postfix, line)
 
 
 def _find_closing_quote(s: str, quote: str) -> int | None:
@@ -176,8 +175,7 @@ def preprocess_deep_tags(content: str) -> str:
     - Tag chains (!P !SOURCE ARG or !SOURCE ARG !P) -> !chain:source+policies ARG
     """
     content = _DEEP_ANCHOR_PATTERN.sub(r"!deep \1", content)
-    content = preprocess_tag_chains(content)
-    return content
+    return preprocess_tag_chains(content)
 
 
 class Loader(yaml.SafeLoader):
@@ -261,13 +259,14 @@ class Loader(yaml.SafeLoader):
         self.env_overrides = env_overrides
         self.allowed_paths = _normalize_allowed_paths(allowed_paths)
         self.source_map: dict[str, Path | None] = {}
-        self._path_stack: list = []  # Stack to track current config path during construction
+        # Stack to track current config path during construction
+        self._path_stack: list[Any] = []
         self._pending_include_maps: dict[
             int, dict[str, Path | None]
         ] = {}  # Temp storage for include source maps
         self._anchor_nodes: dict[str, yaml.Node] = {}  # Track anchors for !deep lookup
         # Intern table for Python values whose str() is not a round-trippable
-        # form (SecretStr masks to "***"). _value_to_node parks the object here
+        # form (Envelope masks to "***"). _value_to_node parks the object here
         # under a token and emits a !__literal__ ScalarNode; literal_constructor
         # resolves the token back to the original instance.
         self._literal_values: dict[str, Any] = {}
@@ -312,13 +311,15 @@ class Loader(yaml.SafeLoader):
         Returns:
             Converted key (string if date/numeric, otherwise unchanged)
         """
-        if isinstance(key, datetime.date):
-            return str(key)
-        elif not isinstance(key, bool) and isinstance(key, (int, float)):
+        if (
+            isinstance(key, datetime.date)
+            or not isinstance(key, bool)
+            and isinstance(key, (int, float))
+        ):
             return str(key)
         return key
 
-    def _convert_mapping_keys(self, mapping: dict) -> dict:
+    def _convert_mapping_keys(self, mapping: dict[Any, Any]) -> dict[Any, Any]:
         """
         Convert all date and numeric keys in a mapping to strings.
 
@@ -369,7 +370,7 @@ class Loader(yaml.SafeLoader):
             self._path_stack.pop()
             return value
 
-        elif isinstance(value_node, yaml.SequenceNode):
+        if isinstance(value_node, yaml.SequenceNode):
             # Track list items with indexed paths
             value = self.construct_sequence(value_node, deep=True)
             for idx in range(len(value)):
@@ -377,9 +378,8 @@ class Loader(yaml.SafeLoader):
                 self.source_map[item_path] = self.current_file
             return value
 
-        else:
-            # Scalar or !include tag
-            return self.construct_object(value_node, deep=True)
+        # Scalar or !include tag
+        return self.construct_object(value_node, deep=True)
 
     def _merge_include_source_maps(self, value: Any, full_path: str) -> None:
         """
@@ -404,10 +404,7 @@ class Loader(yaml.SafeLoader):
 
         # Test data check (not real YAML nodes)
         first_item = node.value[0] if node.value else None
-        if first_item and not isinstance(first_item[0], yaml.Node):
-            return True
-
-        return False
+        return bool(first_item and not isinstance(first_item[0], yaml.Node))
 
     def _process_mapping_key_value(
         self, key_node: Any, value_node: Any
@@ -873,7 +870,7 @@ class Loader(yaml.SafeLoader):
 
         ``!secret`` only carries meaning inside a chain: ``!env VAR !secret``
         (or the reversed ``!secret !env VAR``) resolves the variable and
-        returns a ``SecretStr`` that stays masked in logs. Solo ``!secret X``
+        returns an ``Envelope`` that stays masked in logs. Solo ``!secret X``
         would silently return a plain ``str`` that leaks unmasked, so it's
         rejected at parse time.
         """
@@ -881,7 +878,7 @@ class Loader(yaml.SafeLoader):
         raise yaml.YAMLError(
             f"Solo `!secret` is not supported ({ctx.format_location()}). "
             "Use `!env VAR !secret` (or `!secret !env VAR`) to resolve VAR "
-            "and wrap the result in a SecretStr."
+            "and wrap the result in an Envelope."
         )
 
     def path_constructor(self, node: Any) -> str:
@@ -1050,11 +1047,10 @@ class Loader(yaml.SafeLoader):
                 value = self._construct_node_directly(value_node)
                 pairs.append((key, value))
             return dict(pairs)
-        elif isinstance(node, yaml.SequenceNode):
+        if isinstance(node, yaml.SequenceNode):
             return [self._construct_node_directly(item) for item in node.value]
-        else:
-            # Scalar - use normal construction
-            return self.construct_object(node, deep=False)
+        # Scalar - use normal construction
+        return self.construct_object(node, deep=False)
 
     def flatten_mapping(self, node: yaml.MappingNode) -> None:
         """
@@ -1175,9 +1171,8 @@ class Loader(yaml.SafeLoader):
             # !deep on inline mapping
             data = self._construct_node_directly(node)
             return self._wrap_deep_merge(data, node)
-        else:
-            # Regular merge - use _construct_node_directly to bypass cache
-            return self._construct_node_directly(node)
+        # Regular merge - use _construct_node_directly to bypass cache
+        return self._construct_node_directly(node)
 
     def _wrap_deep_merge(self, data: Any, node: yaml.Node) -> DeepMergeWrapper:
         """Wrap data in DeepMergeWrapper, converting TypeError to YAMLError."""
@@ -1248,9 +1243,12 @@ class Loader(yaml.SafeLoader):
         result = doc_value
 
         # First, merge with base (document wins over base)
-        if key in merge_base and isinstance(merge_base[key], dict):
-            if isinstance(result, dict):
-                result = deep_merge_func(merge_base[key], result)
+        if (
+            key in merge_base
+            and isinstance(merge_base[key], dict)
+            and isinstance(result, dict)
+        ):
+            result = deep_merge_func(merge_base[key], result)
 
         # Then, merge with override (override wins over document)
         if key in override_base and isinstance(override_base[key], dict):
@@ -1453,35 +1451,34 @@ class Loader(yaml.SafeLoader):
                 value_node = self._value_to_node(v)
                 pairs.append((key_node, value_node))
             return yaml.MappingNode(tag="tag:yaml.org,2002:map", value=pairs)
-        elif isinstance(value, list):
+        if isinstance(value, list):
             items = [self._value_to_node(item) for item in value]
             return yaml.SequenceNode(tag="tag:yaml.org,2002:seq", value=items)
-        elif isinstance(value, bool):
+        if isinstance(value, bool):
             return yaml.ScalarNode(
                 tag="tag:yaml.org,2002:bool", value=str(value).lower()
             )
-        elif isinstance(value, int):
+        if isinstance(value, int):
             return yaml.ScalarNode(tag="tag:yaml.org,2002:int", value=str(value))
-        elif isinstance(value, float):
+        if isinstance(value, float):
             return yaml.ScalarNode(tag="tag:yaml.org,2002:float", value=str(value))
-        elif value is None:
+        if value is None:
             return yaml.ScalarNode(tag="tag:yaml.org,2002:null", value="null")
-        elif isinstance(value, SecretStr):
-            # Intern SecretStr (str() masks to "***") and emit !__literal__ placeholder.
+        if isinstance(value, Envelope):
+            # Intern Envelope (str() masks to "***") and emit !__literal__ placeholder.
             token = f"lit-{len(self._literal_values)}"
             self._literal_values[token] = value
             node = yaml.ScalarNode(tag="!__literal__", value=token)
             self._literal_node_ids.add(id(node))
             return node
-        else:
-            return yaml.ScalarNode(tag="tag:yaml.org,2002:str", value=str(value))
+        return yaml.ScalarNode(tag="tag:yaml.org,2002:str", value=str(value))
 
     def literal_constructor(self, node: Any) -> Any:
         """
         Resolve a ``!__literal__`` placeholder back to the interned Python value.
 
         Placeholders are emitted by ``_value_to_node`` for Python objects whose
-        ``str()`` is not a lossless representation (SecretStr today). The tag
+        ``str()`` is not a lossless representation (Envelope today). The tag
         is internal — it is never written by users and never leaves the loader.
         """
         if id(node) not in self._literal_node_ids:
@@ -1512,27 +1509,35 @@ Loader.add_multi_constructor("!chain:", Loader.chain_constructor)
 
 
 @register_chain("include", "deep")
-def _compose_include_deep(loader: Loader, node: yaml.Node) -> DeepMergeWrapper:
+def _compose_include_deep(  # cq: keep registered by @register_chain
+    loader: Loader, node: yaml.Node
+) -> DeepMergeWrapper:
     """!deep !include "x.yaml" or !include "x.yaml" !deep — deep-merged include."""
     return loader._construct_deep_include(node, optional=False)
 
 
 @register_chain("include?", "deep")
-def _compose_include_optional_deep(loader: Loader, node: yaml.Node) -> DeepMergeWrapper:
+def _compose_include_optional_deep(  # cq: keep registered by @register_chain
+    loader: Loader, node: yaml.Node
+) -> DeepMergeWrapper:
     """!deep !include? "x.yaml" or !include? "x.yaml" !deep — optional deep include."""
     return loader._construct_deep_include(node, optional=True)
 
 
 @register_chain("env", "secret")
-def _compose_env_secret(loader: Loader, node: yaml.Node) -> SecretStr:
+def _compose_env_secret(  # cq: keep registered by @register_chain
+    loader: Loader, node: yaml.Node
+) -> Envelope:
     """!secret !env VAR or !env VAR !secret — resolve VAR, wrap masked."""
     value = loader._construct_env(node, optional=False)
     assert value is not None  # non-optional path raises otherwise
-    return SecretStr(value)
+    return Envelope(value)
 
 
 @register_chain("env?", "secret")
-def _compose_env_optional_secret(loader: Loader, node: yaml.Node) -> SecretStr | None:
+def _compose_env_optional_secret(  # cq: keep registered by @register_chain
+    loader: Loader, node: yaml.Node
+) -> Envelope | None:
     """!secret !env? VAR or !env? VAR !secret — resolve VAR, wrap masked, None if missing."""
     value = loader._construct_env(node, optional=True)
-    return SecretStr(value) if value is not None else None
+    return Envelope(value) if value is not None else None

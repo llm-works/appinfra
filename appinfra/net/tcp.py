@@ -116,7 +116,6 @@ class _Server(socketserver.TCPServer):
 
         Currently a no-op, can be overridden for periodic maintenance tasks.
         """
-        pass
 
 
 # Helper functions for Server._run_multiprocessing()
@@ -131,13 +130,6 @@ def _start_ticker_process(
     proc.start()
     lg.debug("ticker process started")
     return proc
-
-
-def _start_ticker_in_process(handler: Any, lg: Any) -> None:
-    """Start ticker in single-process mode if handler supports it."""
-    if handler is not None and isinstance(handler, Ticker):
-        handler.start()
-        lg.debug("ticker started in single-process mode")
 
 
 def _run_http_server_with_cleanup(
@@ -321,25 +313,24 @@ class Server:
         """
         Run the server in single-process mode.
 
-        Runs the HTTP server in the current process, optionally starting
-        a ticker if the handler supports it.
+        Runs the HTTP server in the current process. A ticker runs only in
+        multiprocessing mode (the ticker argument); a Ticker handler is refused.
 
         Returns:
             int: Exit code (0 for success)
 
         Raises:
-            ServerStartupError: If server fails to start
+            ServerStartupError: If server fails to start, or the handler is a Ticker
             ServerShutdownError: If server fails to shutdown gracefully
         """
         self._lg.debug("running server in process", extra={"port": self._port})
+        if isinstance(self._handler, Ticker):
+            raise ServerStartupError(
+                "single-process mode does not run a Ticker handler; pass it as "
+                "ticker= to run it in its own process"
+            )
 
         try:
-            try:
-                _start_ticker_in_process(self._handler, self._lg)
-            except Exception as e:
-                self._lg.error("failed to start ticker", extra={"exception": e})
-                raise ServerStartupError(f"Ticker startup failed: {e}") from e
-
             try:
                 _run_http_server_with_cleanup(
                     self._lg, self._handler, "0.0.0.0", self._port, mode="in_process"

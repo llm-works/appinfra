@@ -65,7 +65,6 @@ def make_pg(pg_config, pg_logger, pg_available) -> Generator[Any, None, None]:
         pg._engine.dispose()
 
 
-@pytest.mark.integration
 class TestReturnedObjects:
     """ORM objects returned from session() in each mode."""
 

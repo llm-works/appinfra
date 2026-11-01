@@ -15,7 +15,7 @@ import sys
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Protocol, TypeVar
 
 from ...config import Config, ConfigFile, ConfigSpec
 from ...dot_dict import DotDict
@@ -30,7 +30,7 @@ from ... import time
 from ...yaml import deep_merge
 from ..cli.commands import CommandHandler
 from ..cli.parser import CLIParser
-from ..decorators import DecoratorAPI
+from ..decorators import DecoratorAPI, ToolFunction
 from ..tools import ToolRegistry
 from ..tools.base import Tool
 from ..tracing.traceable import Traceable
@@ -51,6 +51,14 @@ DEFAULT_STANDARD_ARGS: dict[str, bool] = {
     "quiet": False,
     "version": False,
 }
+
+_T = TypeVar("_T")
+
+
+class _ArgumentDecorator(Protocol):
+    """``app.argument(...)``: returns its target (function or ToolFunction) unchanged."""
+
+    def __call__(self, *args: Any, **kwargs: Any) -> Callable[[_T], _T]: ...
 
 
 class App(Traceable):
@@ -87,7 +95,8 @@ class App(Traceable):
         self._standard_arg_overrides: dict[str, dict[str, Any]] = {}
 
         self._decorators: DecoratorAPI = DecoratorAPI(self)  # Decorator API support
-        self._custom_args: list[tuple] = []  # Custom args (from builder)
+        # Custom args (from builder)
+        self._custom_args: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
         self._main_tool: str | None = None  # Main tool (runs without subcommand)
         self._config_watcher: ConfigWatcher | None = None  # Hot-reload watcher
         # Config-protocol spec (set by the builder's config block); resolved
@@ -168,7 +177,6 @@ class App(Traceable):
 
         Override this method in subclasses to register application-specific tools.
         """
-        pass
 
     def create_args(self) -> None:
         """
@@ -345,7 +353,6 @@ class App(Traceable):
         Override this method in subclasses to perform custom configuration
         after command-line arguments have been parsed.
         """
-        pass
 
     def _log_setup_complete(self, start_time: float) -> None:
         """Log application setup completion."""
@@ -354,7 +361,7 @@ class App(Traceable):
             if hasattr(self.config, "to_dict")
             else dict(self.config)
         )
-        self.lg.trace(  # type: ignore[attr-defined]
+        self.lg.trace(
             "app setup complete",
             extra={"after": time.since(start_time), "config": config_dict},
         )
@@ -390,7 +397,7 @@ class App(Traceable):
 
         self._log_setup_complete(start_t)
 
-    def _load_and_merge_config(self) -> dict | None:
+    def _load_and_merge_config(self) -> dict[str, Any] | None:
         """
         Load the declared config file and merge CLI args over it.
 
@@ -413,7 +420,7 @@ class App(Traceable):
 
         return load_result
 
-    def _load_config_spec(self) -> dict:
+    def _load_config_spec(self) -> dict[str, Any]:
         """Load config via the protocol precedence chain.
 
         See ``ConfigSpec.resolve``. Populates ``self.config``,
@@ -462,7 +469,7 @@ class App(Traceable):
             raise FileNotFoundError(f"Specified etc directory does not exist: {custom}")
         self._etc_dir = str(path)
 
-    def _log_config_loading(self, load_result: dict | None) -> None:
+    def _log_config_loading(self, load_result: dict[str, Any] | None) -> None:
         """Log configuration loading results."""
         if load_result:
             self.lg.debug(
@@ -592,12 +599,14 @@ class App(Traceable):
             return_code = self.lifecycle.execute_tool(tool, args=self._parsed_args)
         else:
             # Handle case where no tool is selected
-            self.lg.trace("running in no-tool mode")  # type: ignore[attr-defined]
+            self.lg.trace("running in no-tool mode")
             return_code = self.run_no_tool()
 
         return return_code
 
-    def tool(self, *args: Any, **kwargs: Any) -> Callable:
+    def tool(
+        self, *args: Any, **kwargs: Any
+    ) -> Callable[[Callable[..., Any]], ToolFunction]:
         """
         Decorator to register a tool from a function.
 
@@ -622,7 +631,7 @@ class App(Traceable):
         return self._decorators.tool(*args, **kwargs)
 
     @property
-    def argument(self) -> Callable:
+    def argument(self) -> _ArgumentDecorator:
         """
         Decorator to add command-line arguments to a tool.
 
@@ -723,17 +732,14 @@ class App(Traceable):
         Returns:
             ConfigWatcher or None if not configured
         """
-        from typing import cast as type_cast
-
         from ...config import ConfigWatcher
-        from ...log import Logger
 
         source = self._config_source
         if source is None:
             return None
 
         watcher = ConfigWatcher(
-            lg=type_cast(Logger, self.lg),
+            lg=self.lg,
             etc_dir=source.path.parent,
             origin=self._origin,
         )

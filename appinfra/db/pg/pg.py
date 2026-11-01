@@ -20,6 +20,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from ...dot_dict import DotDict
+from ...envelope import Envelope
 from ...log import Logger, LoggerFactory
 from .connection import ConnectionManager
 from .core import (
@@ -69,17 +70,17 @@ class PG(Interface):
 
     # Type annotations for instance attributes
     _dialect: Any
-    _cached_regex: Any
     _whitespace_regex: Any
     _lg_extra: dict[str, Any]
     _query_lg_level: int | bool | None
     _auto_reconnect: bool
     _max_retries: int
     _retry_delay: float
-    # Event listener attributes (set conditionally)
-    _readonly_listener: Any
-    _after_execute_listener: Any
-    _before_cursor_listener: Any
+    # Event listener attributes (set conditionally), held so the listeners can be removed:
+    # event.remove needs the same function object
+    _readonly_listener: Any  # cq: keep held for event.remove
+    _after_execute_listener: Any  # cq: keep held for event.remove
+    _before_cursor_listener: Any  # cq: keep held for event.remove
     # Lifecycle hooks
     _before_migrate_hooks: list[Callable[[Any], None]]
     _after_migrate_hooks: list[Callable[[Any], None]]
@@ -90,7 +91,8 @@ class PG(Interface):
     _scoped_cache_lock: threading.Lock
 
     # Extension name validation pattern (defense-in-depth)
-    _EXTENSION_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_-]*$")
+    # PostgreSQL truncates identifiers past 63 bytes; the pattern is ASCII
+    _EXTENSION_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_-]{0,62}$")
 
     def __init__(
         self,
@@ -144,7 +146,8 @@ class PG(Interface):
     def _create_engine_and_session(self, cfg: Any) -> None:
         """Create SQLAlchemy engine and session maker, ensuring DB exists."""
         engine_kwargs = ConfigValidator.get_engine_kwargs(cfg)
-        self._engine = sqlalchemy.create_engine(self._cfg.url, **engine_kwargs)
+        url = Envelope(self._cfg.url).reveal()
+        self._engine = sqlalchemy.create_engine(url, **engine_kwargs)
         self._SessionCls = sqlalchemy.orm.sessionmaker(
             bind=self._engine,
             expire_on_commit=getattr(cfg, "expire_on_commit", False),
@@ -319,6 +322,25 @@ class PG(Interface):
                 scoped._pg._engine.dispose()
             self._scoped_cache.clear()
         self._lg.trace("disposed scoped cache")
+
+    def dispose(self) -> None:
+        """
+        Close every pooled connection, this instance's and its cached ScopedPGs'.
+
+        Call when done with the instance. An engine that is only dropped leaves its
+        idle connections open until garbage collection, where psycopg reports each one
+        with a ResourceWarning. A query after dispose() opens a new pool.
+
+        Example:
+            >>> pg = PG(logger, config)
+            >>> try:
+            ...     ...  # use pg
+            ... finally:
+            ...     pg.dispose()
+        """
+        self.dispose_scoped_cache()
+        self._engine.dispose()
+        self._lg.trace("disposed pg")
 
     def connect(self) -> Any:
         """
@@ -600,7 +622,7 @@ class PG(Interface):
 
         Defense-in-depth check - names should already be validated by Pydantic.
         """
-        return bool(self._EXTENSION_NAME_PATTERN.match(name))
+        return bool(self._EXTENSION_NAME_PATTERN.fullmatch(name))
 
     def _run_hooks(self, hooks: list[Callable[[Any], None]], hook_type: str) -> None:
         """Execute lifecycle hooks with a connection."""
@@ -611,10 +633,14 @@ class PG(Interface):
             for hook in hooks:
                 try:
                     hook(conn)
-                except Exception:
-                    self._lg.exception(
+                except Exception as e:
+                    self._lg.error(
                         "hook failed",
-                        extra={**self._lg_extra, "hook_type": hook_type},
+                        extra={
+                            **self._lg_extra,
+                            "hook_type": hook_type,
+                            "exception": e,
+                        },
                     )
                     raise
             conn.commit()
@@ -651,7 +677,7 @@ class ScopedPG:
         Raises:
             ValueError: If schema name is invalid
         """
-        from .schema import validate_schema_name
+        from .schema import _SCHEMA_NAME_RULE, validate_schema_name
 
         self._lg = lg
         self._parent_pg = parent_pg
@@ -659,8 +685,7 @@ class ScopedPG:
         # Validate schema name
         if not validate_schema_name(schema_name):
             raise ValueError(
-                f"Invalid schema name '{schema_name}'. Must start with lowercase letter "
-                "and contain only lowercase letters, numbers, and underscores."
+                f"Invalid schema name '{schema_name}'. {_SCHEMA_NAME_RULE}"
             )
         self._schema_name = schema_name
 
@@ -693,13 +718,13 @@ class ScopedPG:
 
     def connect(self) -> Any:
         """
-        Get a raw database connection for this schema.
+        Get a SQLAlchemy connection for this schema.
 
-        Use for operations requiring direct connection access (COPY, psycopg2).
+        Use for operations that need a connection rather than a session.
         Schema is enforced at connection level via the pool's connect listener.
 
         Returns:
-            Database connection object
+            SQLAlchemy Connection
 
         Example:
             >>> with scoped.connect() as conn:

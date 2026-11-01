@@ -27,13 +27,13 @@ class MiddlewareBuilder:
             name: Middleware name
         """
         self._name = name
-        self._request_processor: Callable | None = None
-        self._response_processor: Callable | None = None
-        self._error_handler: Callable | None = None
-        self._conditions: list[Callable] = []
+        self._request_processor: Callable[..., Any] | None = None
+        self._response_processor: Callable[..., Any] | None = None
+        self._error_handler: Callable[..., Any] | None = None
+        self._conditions: list[Callable[..., Any]] = []
         self._priority: int = 0
 
-    def process_request(self, func: Callable) -> Self:
+    def process_request(self, func: Callable[..., Any]) -> Self:
         """
         Set the request processing function.
 
@@ -44,7 +44,7 @@ class MiddlewareBuilder:
         self._request_processor = func
         return self
 
-    def process_response(self, func: Callable) -> Self:
+    def process_response(self, func: Callable[..., Any]) -> Self:
         """
         Set the response processing function.
 
@@ -55,7 +55,7 @@ class MiddlewareBuilder:
         self._response_processor = func
         return self
 
-    def handle_error(self, func: Callable) -> Self:
+    def handle_error(self, func: Callable[..., Any]) -> Self:
         """
         Set the error handling function.
 
@@ -66,7 +66,7 @@ class MiddlewareBuilder:
         self._error_handler = func
         return self
 
-    def when(self, condition: Callable) -> Self:
+    def when(self, condition: Callable[..., Any]) -> Self:
         """
         Add a condition for when this middleware should run.
 
@@ -105,10 +105,10 @@ class BuiltMiddleware(Middleware):
     def __init__(
         self,
         name: str,
-        request_processor: Callable | None = None,
-        response_processor: Callable | None = None,
-        error_handler: Callable | None = None,
-        conditions: list[Callable] | None = None,
+        request_processor: Callable[..., Any] | None = None,
+        response_processor: Callable[..., Any] | None = None,
+        error_handler: Callable[..., Any] | None = None,
+        conditions: list[Callable[..., Any]] | None = None,
         priority: int = 0,
     ) -> None:
         """

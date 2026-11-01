@@ -378,14 +378,16 @@ class TestDocsListTool:
             tool = DocsListTool()
             tool._parsed_args = Mock()
 
-            with patch(
-                "appinfra.cli.tools.docs_tool.get_docs_dir", return_value=docs_dir
-            ):
-                with patch(
+            with (
+                patch(
+                    "appinfra.cli.tools.docs_tool.get_docs_dir", return_value=docs_dir
+                ),
+                patch(
                     "appinfra.cli.tools.docs_tool.get_examples_dir",
                     return_value=Path("/nonexistent"),
-                ):
-                    tool.run()
+                ),
+            ):
+                tool.run()
 
             captured = capsys.readouterr()
             assert "GUIDES:" in captured.out
@@ -440,14 +442,16 @@ class TestDocsShowTool:
             args.topic = "logging"
             tool._parsed_args = args
 
-            with patch(
-                "appinfra.cli.tools.docs_tool.get_docs_dir", return_value=docs_dir
-            ):
-                with patch(
+            with (
+                patch(
+                    "appinfra.cli.tools.docs_tool.get_docs_dir", return_value=docs_dir
+                ),
+                patch(
                     "appinfra.cli.tools.docs_tool.get_examples_dir",
                     return_value=Path("/nonexistent"),
-                ):
-                    result = tool.run()
+                ),
+            ):
+                result = tool.run()
 
             assert result == 0
             captured = capsys.readouterr()
@@ -468,15 +472,17 @@ class TestDocsShowTool:
             args.topic = "02"
             tool._parsed_args = args
 
-            with patch(
-                "appinfra.cli.tools.docs_tool.get_docs_dir",
-                return_value=Path("/nonexistent"),
-            ):
-                with patch(
+            with (
+                patch(
+                    "appinfra.cli.tools.docs_tool.get_docs_dir",
+                    return_value=Path("/nonexistent"),
+                ),
+                patch(
                     "appinfra.cli.tools.docs_tool.get_examples_dir",
                     return_value=examples_dir,
-                ):
-                    result = tool.run()
+                ),
+            ):
+                result = tool.run()
 
             assert result == 0
             captured = capsys.readouterr()
@@ -490,15 +496,17 @@ class TestDocsShowTool:
         args.topic = "nonexistent"
         tool._parsed_args = args
 
-        with patch(
-            "appinfra.cli.tools.docs_tool.get_docs_dir",
-            return_value=Path("/nonexistent"),
-        ):
-            with patch(
+        with (
+            patch(
+                "appinfra.cli.tools.docs_tool.get_docs_dir",
+                return_value=Path("/nonexistent"),
+            ),
+            patch(
                 "appinfra.cli.tools.docs_tool.get_examples_dir",
                 return_value=Path("/nonexistent"),
-            ):
-                result = tool.run()
+            ),
+        ):
+            result = tool.run()
 
         assert result == 1
         captured = capsys.readouterr()
@@ -515,14 +523,16 @@ class TestDocsShowTool:
             args.topic = "logging.md"  # With .md suffix
             tool._parsed_args = args
 
-            with patch(
-                "appinfra.cli.tools.docs_tool.get_docs_dir", return_value=docs_dir
-            ):
-                with patch(
+            with (
+                patch(
+                    "appinfra.cli.tools.docs_tool.get_docs_dir", return_value=docs_dir
+                ),
+                patch(
                     "appinfra.cli.tools.docs_tool.get_examples_dir",
                     return_value=Path("/nonexistent"),
-                ):
-                    result = tool.run()
+                ),
+            ):
+                result = tool.run()
 
             assert result == 0
             captured = capsys.readouterr()
@@ -542,15 +552,17 @@ class TestDocsShowTool:
             args.topic = "app_with_tool"
             tool._parsed_args = args
 
-            with patch(
-                "appinfra.cli.tools.docs_tool.get_docs_dir",
-                return_value=Path("/nonexistent"),
-            ):
-                with patch(
+            with (
+                patch(
+                    "appinfra.cli.tools.docs_tool.get_docs_dir",
+                    return_value=Path("/nonexistent"),
+                ),
+                patch(
                     "appinfra.cli.tools.docs_tool.get_examples_dir",
                     return_value=examples_dir,
-                ):
-                    result = tool.run()
+                ),
+            ):
+                result = tool.run()
 
             assert result == 0
             captured = capsys.readouterr()
@@ -614,18 +626,20 @@ class TestDocsFindTool:
             args.examples_only = False
             tool._parsed_args = args
 
-            with patch(
-                "appinfra.cli.tools.docs_tool.get_package_root",
-                return_value=Path(tmpdir),
-            ):
-                with patch(
+            with (
+                patch(
+                    "appinfra.cli.tools.docs_tool.get_package_root",
+                    return_value=Path(tmpdir),
+                ),
+                patch(
                     "appinfra.cli.tools.docs_tool.get_docs_dir", return_value=docs_dir
-                ):
-                    with patch(
-                        "appinfra.cli.tools.docs_tool.get_examples_dir",
-                        return_value=Path("/nonexistent"),
-                    ):
-                        result = tool.run()
+                ),
+                patch(
+                    "appinfra.cli.tools.docs_tool.get_examples_dir",
+                    return_value=Path("/nonexistent"),
+                ),
+            ):
+                result = tool.run()
 
             assert result == 0
             captured = capsys.readouterr()
@@ -647,14 +661,16 @@ class TestDocsFindTool:
             args.examples_only = False
             tool._parsed_args = args
 
-            with patch(
-                "appinfra.cli.tools.docs_tool.get_docs_dir", return_value=docs_dir
-            ):
-                with patch(
+            with (
+                patch(
+                    "appinfra.cli.tools.docs_tool.get_docs_dir", return_value=docs_dir
+                ),
+                patch(
                     "appinfra.cli.tools.docs_tool.get_examples_dir",
                     return_value=Path("/nonexistent"),
-                ):
-                    result = tool.run()
+                ),
+            ):
+                result = tool.run()
 
             assert result == 0
             captured = capsys.readouterr()
@@ -680,18 +696,20 @@ class TestDocsFindTool:
             args.threshold = 0.6
             tool._parsed_args = args
 
-            with patch(
-                "appinfra.cli.tools.docs_tool.get_package_root",
-                return_value=Path(tmpdir),
-            ):
-                with patch(
+            with (
+                patch(
+                    "appinfra.cli.tools.docs_tool.get_package_root",
+                    return_value=Path(tmpdir),
+                ),
+                patch(
                     "appinfra.cli.tools.docs_tool.get_docs_dir", return_value=docs_dir
-                ):
-                    with patch(
-                        "appinfra.cli.tools.docs_tool.get_examples_dir",
-                        return_value=Path("/nonexistent"),
-                    ):
-                        result = tool.run()
+                ),
+                patch(
+                    "appinfra.cli.tools.docs_tool.get_examples_dir",
+                    return_value=Path("/nonexistent"),
+                ),
+            ):
+                result = tool.run()
 
             assert result == 0
             captured = capsys.readouterr()
@@ -718,18 +736,20 @@ class TestDocsFindTool:
             args.threshold = 0.6
             tool._parsed_args = args
 
-            with patch(
-                "appinfra.cli.tools.docs_tool.get_package_root",
-                return_value=Path(tmpdir),
-            ):
-                with patch(
+            with (
+                patch(
+                    "appinfra.cli.tools.docs_tool.get_package_root",
+                    return_value=Path(tmpdir),
+                ),
+                patch(
                     "appinfra.cli.tools.docs_tool.get_docs_dir", return_value=docs_dir
-                ):
-                    with patch(
-                        "appinfra.cli.tools.docs_tool.get_examples_dir",
-                        return_value=Path("/nonexistent"),
-                    ):
-                        result = tool.run()
+                ),
+                patch(
+                    "appinfra.cli.tools.docs_tool.get_examples_dir",
+                    return_value=Path("/nonexistent"),
+                ),
+            ):
+                result = tool.run()
 
             assert result == 0
             captured = capsys.readouterr()
@@ -759,18 +779,20 @@ class TestDocsFindTool:
             args.threshold = 0.6
             tool._parsed_args = args
 
-            with patch(
-                "appinfra.cli.tools.docs_tool.get_package_root",
-                return_value=Path(tmpdir),
-            ):
-                with patch(
+            with (
+                patch(
+                    "appinfra.cli.tools.docs_tool.get_package_root",
+                    return_value=Path(tmpdir),
+                ),
+                patch(
                     "appinfra.cli.tools.docs_tool.get_docs_dir", return_value=docs_dir
-                ):
-                    with patch(
-                        "appinfra.cli.tools.docs_tool.get_examples_dir",
-                        return_value=Path("/nonexistent"),
-                    ):
-                        result = tool.run()
+                ),
+                patch(
+                    "appinfra.cli.tools.docs_tool.get_examples_dir",
+                    return_value=Path("/nonexistent"),
+                ),
+            ):
+                result = tool.run()
 
             assert result == 0
             captured = capsys.readouterr()
@@ -801,18 +823,20 @@ class TestDocsFindTool:
             args.threshold = 0.6
             tool._parsed_args = args
 
-            with patch(
-                "appinfra.cli.tools.docs_tool.get_package_root",
-                return_value=Path(tmpdir),
-            ):
-                with patch(
+            with (
+                patch(
+                    "appinfra.cli.tools.docs_tool.get_package_root",
+                    return_value=Path(tmpdir),
+                ),
+                patch(
                     "appinfra.cli.tools.docs_tool.get_docs_dir", return_value=docs_dir
-                ):
-                    with patch(
-                        "appinfra.cli.tools.docs_tool.get_examples_dir",
-                        return_value=Path("/nonexistent"),
-                    ):
-                        result = tool.run()
+                ),
+                patch(
+                    "appinfra.cli.tools.docs_tool.get_examples_dir",
+                    return_value=Path("/nonexistent"),
+                ),
+            ):
+                result = tool.run()
 
             assert result == 0
             captured = capsys.readouterr()
@@ -843,18 +867,20 @@ class TestDocsFindTool:
             args.threshold = 0.6
             tool._parsed_args = args
 
-            with patch(
-                "appinfra.cli.tools.docs_tool.get_package_root",
-                return_value=Path(tmpdir),
-            ):
-                with patch(
+            with (
+                patch(
+                    "appinfra.cli.tools.docs_tool.get_package_root",
+                    return_value=Path(tmpdir),
+                ),
+                patch(
                     "appinfra.cli.tools.docs_tool.get_docs_dir", return_value=docs_dir
-                ):
-                    with patch(
-                        "appinfra.cli.tools.docs_tool.get_examples_dir",
-                        return_value=examples_dir,
-                    ):
-                        result = tool.run()
+                ),
+                patch(
+                    "appinfra.cli.tools.docs_tool.get_examples_dir",
+                    return_value=examples_dir,
+                ),
+            ):
+                result = tool.run()
 
             assert result == 0
             captured = capsys.readouterr()
@@ -885,18 +911,20 @@ class TestDocsFindTool:
             args.threshold = 0.6
             tool._parsed_args = args
 
-            with patch(
-                "appinfra.cli.tools.docs_tool.get_package_root",
-                return_value=Path(tmpdir),
-            ):
-                with patch(
+            with (
+                patch(
+                    "appinfra.cli.tools.docs_tool.get_package_root",
+                    return_value=Path(tmpdir),
+                ),
+                patch(
                     "appinfra.cli.tools.docs_tool.get_docs_dir", return_value=docs_dir
-                ):
-                    with patch(
-                        "appinfra.cli.tools.docs_tool.get_examples_dir",
-                        return_value=examples_dir,
-                    ):
-                        result = tool.run()
+                ),
+                patch(
+                    "appinfra.cli.tools.docs_tool.get_examples_dir",
+                    return_value=examples_dir,
+                ),
+            ):
+                result = tool.run()
 
             assert result == 0
             captured = capsys.readouterr()
@@ -923,18 +951,20 @@ class TestDocsFindTool:
             args.threshold = 0.6
             tool._parsed_args = args
 
-            with patch(
-                "appinfra.cli.tools.docs_tool.get_package_root",
-                return_value=Path(tmpdir),
-            ):
-                with patch(
+            with (
+                patch(
+                    "appinfra.cli.tools.docs_tool.get_package_root",
+                    return_value=Path(tmpdir),
+                ),
+                patch(
                     "appinfra.cli.tools.docs_tool.get_docs_dir", return_value=docs_dir
-                ):
-                    with patch(
-                        "appinfra.cli.tools.docs_tool.get_examples_dir",
-                        return_value=Path("/nonexistent"),
-                    ):
-                        result = tool.run()
+                ),
+                patch(
+                    "appinfra.cli.tools.docs_tool.get_examples_dir",
+                    return_value=Path("/nonexistent"),
+                ),
+            ):
+                result = tool.run()
 
             assert result == 0
             captured = capsys.readouterr()
@@ -962,18 +992,20 @@ class TestDocsFindTool:
             args.threshold = 0.6
             tool._parsed_args = args
 
-            with patch(
-                "appinfra.cli.tools.docs_tool.get_package_root",
-                return_value=Path(tmpdir),
-            ):
-                with patch(
+            with (
+                patch(
+                    "appinfra.cli.tools.docs_tool.get_package_root",
+                    return_value=Path(tmpdir),
+                ),
+                patch(
                     "appinfra.cli.tools.docs_tool.get_docs_dir", return_value=docs_dir
-                ):
-                    with patch(
-                        "appinfra.cli.tools.docs_tool.get_examples_dir",
-                        return_value=Path("/nonexistent"),
-                    ):
-                        result = tool.run()
+                ),
+                patch(
+                    "appinfra.cli.tools.docs_tool.get_examples_dir",
+                    return_value=Path("/nonexistent"),
+                ),
+            ):
+                result = tool.run()
 
             assert result == 0
             captured = capsys.readouterr()
@@ -1005,18 +1037,20 @@ class TestDocsFindTool:
             args.threshold = 0.6
             tool._parsed_args = args
 
-            with patch(
-                "appinfra.cli.tools.docs_tool.get_package_root",
-                return_value=Path(tmpdir),
-            ):
-                with patch(
+            with (
+                patch(
+                    "appinfra.cli.tools.docs_tool.get_package_root",
+                    return_value=Path(tmpdir),
+                ),
+                patch(
                     "appinfra.cli.tools.docs_tool.get_docs_dir", return_value=docs_dir
-                ):
-                    with patch(
-                        "appinfra.cli.tools.docs_tool.get_examples_dir",
-                        return_value=Path("/nonexistent"),
-                    ):
-                        result = tool.run()
+                ),
+                patch(
+                    "appinfra.cli.tools.docs_tool.get_examples_dir",
+                    return_value=Path("/nonexistent"),
+                ),
+            ):
+                result = tool.run()
 
             assert result == 0
             captured = capsys.readouterr()
@@ -1046,18 +1080,20 @@ class TestDocsFindTool:
             args.threshold = 0.6
             tool._parsed_args = args
 
-            with patch(
-                "appinfra.cli.tools.docs_tool.get_package_root",
-                return_value=Path(tmpdir),
-            ):
-                with patch(
+            with (
+                patch(
+                    "appinfra.cli.tools.docs_tool.get_package_root",
+                    return_value=Path(tmpdir),
+                ),
+                patch(
                     "appinfra.cli.tools.docs_tool.get_docs_dir", return_value=docs_dir
-                ):
-                    with patch(
-                        "appinfra.cli.tools.docs_tool.get_examples_dir",
-                        return_value=Path("/nonexistent"),
-                    ):
-                        result = tool.run()
+                ),
+                patch(
+                    "appinfra.cli.tools.docs_tool.get_examples_dir",
+                    return_value=Path("/nonexistent"),
+                ),
+            ):
+                result = tool.run()
 
             assert result == 0
             captured = capsys.readouterr()
@@ -1086,18 +1122,20 @@ class TestDocsFindTool:
             args.threshold = 0.6
             tool._parsed_args = args
 
-            with patch(
-                "appinfra.cli.tools.docs_tool.get_package_root",
-                return_value=Path(tmpdir),
-            ):
-                with patch(
+            with (
+                patch(
+                    "appinfra.cli.tools.docs_tool.get_package_root",
+                    return_value=Path(tmpdir),
+                ),
+                patch(
                     "appinfra.cli.tools.docs_tool.get_docs_dir", return_value=docs_dir
-                ):
-                    with patch(
-                        "appinfra.cli.tools.docs_tool.get_examples_dir",
-                        return_value=Path("/nonexistent"),
-                    ):
-                        result = tool.run()
+                ),
+                patch(
+                    "appinfra.cli.tools.docs_tool.get_examples_dir",
+                    return_value=Path("/nonexistent"),
+                ),
+            ):
+                result = tool.run()
 
             assert result == 0
             captured = capsys.readouterr()
@@ -1123,18 +1161,20 @@ class TestDocsFindTool:
             args.threshold = 0.7
             tool._parsed_args = args
 
-            with patch(
-                "appinfra.cli.tools.docs_tool.get_package_root",
-                return_value=Path(tmpdir),
-            ):
-                with patch(
+            with (
+                patch(
+                    "appinfra.cli.tools.docs_tool.get_package_root",
+                    return_value=Path(tmpdir),
+                ),
+                patch(
                     "appinfra.cli.tools.docs_tool.get_docs_dir", return_value=docs_dir
-                ):
-                    with patch(
-                        "appinfra.cli.tools.docs_tool.get_examples_dir",
-                        return_value=Path("/nonexistent"),
-                    ):
-                        result = tool.run()
+                ),
+                patch(
+                    "appinfra.cli.tools.docs_tool.get_examples_dir",
+                    return_value=Path("/nonexistent"),
+                ),
+            ):
+                result = tool.run()
 
             assert result == 0
             captured = capsys.readouterr()
@@ -1163,18 +1203,20 @@ class TestDocsFindTool:
             args.threshold = 0.6
             tool._parsed_args = args
 
-            with patch(
-                "appinfra.cli.tools.docs_tool.get_package_root",
-                return_value=Path(tmpdir),
-            ):
-                with patch(
+            with (
+                patch(
+                    "appinfra.cli.tools.docs_tool.get_package_root",
+                    return_value=Path(tmpdir),
+                ),
+                patch(
                     "appinfra.cli.tools.docs_tool.get_docs_dir", return_value=docs_dir
-                ):
-                    with patch(
-                        "appinfra.cli.tools.docs_tool.get_examples_dir",
-                        return_value=Path("/nonexistent"),
-                    ):
-                        result = tool.run()
+                ),
+                patch(
+                    "appinfra.cli.tools.docs_tool.get_examples_dir",
+                    return_value=Path("/nonexistent"),
+                ),
+            ):
+                result = tool.run()
 
             assert result == 0
             captured = capsys.readouterr()
@@ -1201,18 +1243,20 @@ class TestDocsFindTool:
             args.threshold = 0.6
             tool._parsed_args = args
 
-            with patch(
-                "appinfra.cli.tools.docs_tool.get_package_root",
-                return_value=Path(tmpdir),
-            ):
-                with patch(
+            with (
+                patch(
+                    "appinfra.cli.tools.docs_tool.get_package_root",
+                    return_value=Path(tmpdir),
+                ),
+                patch(
                     "appinfra.cli.tools.docs_tool.get_docs_dir", return_value=docs_dir
-                ):
-                    with patch(
-                        "appinfra.cli.tools.docs_tool.get_examples_dir",
-                        return_value=Path("/nonexistent"),
-                    ):
-                        result = tool.run()
+                ),
+                patch(
+                    "appinfra.cli.tools.docs_tool.get_examples_dir",
+                    return_value=Path("/nonexistent"),
+                ),
+            ):
+                result = tool.run()
 
             assert result == 0
             captured = capsys.readouterr()
@@ -1239,18 +1283,20 @@ class TestDocsFindTool:
             args.threshold = 0.95  # Very high threshold
             tool._parsed_args = args
 
-            with patch(
-                "appinfra.cli.tools.docs_tool.get_package_root",
-                return_value=Path(tmpdir),
-            ):
-                with patch(
+            with (
+                patch(
+                    "appinfra.cli.tools.docs_tool.get_package_root",
+                    return_value=Path(tmpdir),
+                ),
+                patch(
                     "appinfra.cli.tools.docs_tool.get_docs_dir", return_value=docs_dir
-                ):
-                    with patch(
-                        "appinfra.cli.tools.docs_tool.get_examples_dir",
-                        return_value=Path("/nonexistent"),
-                    ):
-                        result = tool.run()
+                ),
+                patch(
+                    "appinfra.cli.tools.docs_tool.get_examples_dir",
+                    return_value=Path("/nonexistent"),
+                ),
+            ):
+                result = tool.run()
 
             assert result == 0
             captured = capsys.readouterr()

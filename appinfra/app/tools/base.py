@@ -226,7 +226,7 @@ class Tool(Traceable, ToolProtocol):
                 self.name, "args (parent does not have 'args' attribute)"
             )
 
-        return cast(argparse.Namespace, self.parent.args)  # type: ignore[attr-defined]
+        return cast(argparse.Namespace, self.parent.args)
 
     @property
     def kwargs(self) -> dict[str, Any] | None:
@@ -296,7 +296,6 @@ class Tool(Traceable, ToolProtocol):
 
         Override this method in subclasses to add tool-specific arguments.
         """
-        pass
 
     def add_group_args(self, subs: Any) -> None:
         """
@@ -351,18 +350,10 @@ class Tool(Traceable, ToolProtocol):
                 self._logger = LoggerFactory.derive(self.parent.lg, self.name)
             else:
                 # Fallback to creating a standalone logger
-                import os
-
                 from ...log import LogConfig
 
-                # Respect INFRA_TEST_LOGGING_LEVEL environment variable
-                log_level_str = os.getenv("INFRA_TEST_LOGGING_LEVEL", "info")
-                log_level: str | bool = log_level_str
-                if log_level_str.lower() == "false":
-                    log_level = False
-
                 # Its own name, not the root: the root logger belongs to an app
-                config = LogConfig.from_params(log_level)
+                config = LogConfig.from_params("info")
                 self._logger = LoggerFactory.create(f"/{self.name}", config)
         except Exception as e:
             # If logger creation fails, raise a descriptive error
@@ -377,7 +368,6 @@ class Tool(Traceable, ToolProtocol):
 
         Override this method in subclasses to perform custom configuration.
         """
-        pass
 
     def create_group(self, default: str | None = None) -> ToolGroup:
         """Create a tool group for subcommands."""
@@ -389,7 +379,7 @@ class Tool(Traceable, ToolProtocol):
     def add_tool(
         self,
         tool: Tool,
-        run_func: Callable | None = None,
+        run_func: Callable[..., Any] | None = None,
         default: str | None = None,
     ) -> Tool:
         """Add a tool to the group."""
@@ -401,7 +391,7 @@ class Tool(Traceable, ToolProtocol):
     def add_cmd(
         self,
         name: str,
-        run_func: Callable,
+        run_func: Callable[..., Any],
         aliases: list[str] | None = None,
         help_text: str = "",
     ) -> None:

@@ -22,24 +22,21 @@ import pytest
 from sqlalchemy import Column, Integer, String, text
 from sqlalchemy.orm import declarative_base
 
-from appinfra.db.pg import PG
-
 # All tests in this module exercise a real PG instance; skip the whole module
 # with the sentinel reason if PG is unreachable.
 pytestmark = pytest.mark.require_pg
 
 
-@pytest.mark.integration
 class TestSchemaCreation:
     """Test schema creation and management."""
 
-    def test_create_schema_creates_new_schema(self, pg_connection, pg_logger):
+    def test_create_schema_creates_new_schema(self, pg_connection, make_pg):
         """Test create_schema creates a new PostgreSQL schema."""
         schema_name = f"test_create_{int(time.time())}_{os.getpid()}"
 
         try:
             # Create PG with schema
-            pg = PG(pg_logger, pg_connection.cfg, schema=schema_name)
+            pg = make_pg(pg_connection.cfg, schema=schema_name)
             pg.create_schema()
 
             # Verify schema exists
@@ -63,11 +60,11 @@ class TestSchemaCreation:
                 conn.execute(text(f'DROP SCHEMA IF EXISTS "{schema_name}" CASCADE'))
                 conn.commit()
 
-    def test_schema_property_returns_schema_name(self, pg_connection, pg_logger):
+    def test_schema_property_returns_schema_name(self, pg_connection, make_pg):
         """Test schema property returns the configured schema name."""
         schema_name = f"test_prop_{int(time.time())}_{os.getpid()}"
 
-        pg = PG(pg_logger, pg_connection.cfg, schema=schema_name)
+        pg = make_pg(pg_connection.cfg, schema=schema_name)
 
         assert pg.schema == schema_name
 
@@ -76,11 +73,10 @@ class TestSchemaCreation:
         assert pg_connection.schema is None
 
 
-@pytest.mark.integration
 class TestSchemaIsolation:
     """Test that queries are isolated to the configured schema."""
 
-    def test_tables_created_in_correct_schema(self, pg_connection, pg_logger):
+    def test_tables_created_in_correct_schema(self, pg_connection, make_pg):
         """Test that migrate creates tables in the configured schema."""
         schema_name = f"test_tables_{int(time.time())}_{os.getpid()}"
 
@@ -92,7 +88,7 @@ class TestSchemaIsolation:
             name = Column(String(50))
 
         try:
-            pg = PG(pg_logger, pg_connection.cfg, schema=schema_name)
+            pg = make_pg(pg_connection.cfg, schema=schema_name)
             pg.create_schema()
             pg.migrate(Base)
 
@@ -132,7 +128,7 @@ class TestSchemaIsolation:
                 conn.execute(text(f'DROP SCHEMA IF EXISTS "{schema_name}" CASCADE'))
                 conn.commit()
 
-    def test_queries_use_correct_schema(self, pg_connection, pg_logger):
+    def test_queries_use_correct_schema(self, pg_connection, make_pg):
         """Test that queries are routed to the correct schema via search_path."""
         schema_name = f"test_queries_{int(time.time())}_{os.getpid()}"
 
@@ -144,7 +140,7 @@ class TestSchemaIsolation:
             value = Column(String(50))
 
         try:
-            pg = PG(pg_logger, pg_connection.cfg, schema=schema_name)
+            pg = make_pg(pg_connection.cfg, schema=schema_name)
             pg.create_schema()
             pg.migrate(Base)
 
@@ -187,11 +183,10 @@ class TestSchemaIsolation:
                 conn.commit()
 
 
-@pytest.mark.integration
 class TestSchemaPoolBehavior:
     """Test schema isolation survives connection pool operations."""
 
-    def test_search_path_persists_after_pool_rollback(self, pg_connection, pg_logger):
+    def test_search_path_persists_after_pool_rollback(self, pg_connection, make_pg):
         """
         Test search_path persists when connection is returned to pool and reused.
 
@@ -219,7 +214,7 @@ class TestSchemaPoolBehavior:
             cfg = dict(pg_connection.cfg)
             cfg["pool_size"] = 1
             cfg["max_overflow"] = 0
-            pg = PG(pg_logger, cfg, schema=schema_name)
+            pg = make_pg(cfg, schema=schema_name)
 
             # First checkout - connect listener fires, sets search_path
             # Return to pool without committing - triggers pool reset (ROLLBACK)
@@ -249,11 +244,10 @@ class TestSchemaPoolBehavior:
                 conn.commit()
 
 
-@pytest.mark.integration
 class TestParallelSchemaIsolation:
     """Test schema isolation with multiple concurrent connections."""
 
-    def test_different_schemas_are_isolated(self, pg_connection, pg_logger):
+    def test_different_schemas_are_isolated(self, pg_connection, make_pg):
         """Test that different schemas don't interfere with each other."""
         ts = int(time.time())
         pid = os.getpid()
@@ -269,8 +263,8 @@ class TestParallelSchemaIsolation:
 
         try:
             # Create two PG instances with different schemas
-            pg1 = PG(pg_logger, pg_connection.cfg, schema=schema1)
-            pg2 = PG(pg_logger, pg_connection.cfg, schema=schema2)
+            pg1 = make_pg(pg_connection.cfg, schema=schema1)
+            pg2 = make_pg(pg_connection.cfg, schema=schema2)
 
             pg1.create_schema()
             pg2.create_schema()
@@ -314,7 +308,7 @@ class TestParallelSchemaIsolation:
                 conn.execute(text(f'DROP SCHEMA IF EXISTS "{schema2}" CASCADE'))
                 conn.commit()
 
-    def test_concurrent_inserts_to_different_schemas(self, pg_connection, pg_logger):
+    def test_concurrent_inserts_to_different_schemas(self, pg_connection, make_pg):
         """Test concurrent inserts to different schemas don't conflict."""
         ts = int(time.time())
         pid = os.getpid()
@@ -350,8 +344,8 @@ class TestParallelSchemaIsolation:
                 errors.append((schema_name, e))
 
         try:
-            pg1 = PG(pg_logger, pg_connection.cfg, schema=schema1)
-            pg2 = PG(pg_logger, pg_connection.cfg, schema=schema2)
+            pg1 = make_pg(pg_connection.cfg, schema=schema1)
+            pg2 = make_pg(pg_connection.cfg, schema=schema2)
 
             pg1.create_schema()
             pg2.create_schema()
@@ -386,11 +380,10 @@ class TestParallelSchemaIsolation:
                 conn.commit()
 
 
-@pytest.mark.integration
 class TestSchemaFromConfig:
     """Test schema configuration via config object."""
 
-    def test_schema_from_config_dict(self, pg_connection, pg_logger):
+    def test_schema_from_config_dict(self, pg_connection, make_pg):
         """Test schema can be set via config dict."""
         schema_name = f"test_cfg_{int(time.time())}_{os.getpid()}"
 
@@ -399,7 +392,7 @@ class TestSchemaFromConfig:
         config["schema"] = schema_name
 
         try:
-            pg = PG(pg_logger, config)
+            pg = make_pg(config)
 
             assert pg.schema == schema_name
 
@@ -408,7 +401,7 @@ class TestSchemaFromConfig:
                 conn.execute(text(f'DROP SCHEMA IF EXISTS "{schema_name}" CASCADE'))
                 conn.commit()
 
-    def test_schema_param_overrides_config(self, pg_connection, pg_logger):
+    def test_schema_param_overrides_config(self, pg_connection, make_pg):
         """Test schema parameter takes precedence over config."""
         config_schema = f"test_cfg_schema_{int(time.time())}_{os.getpid()}"
         param_schema = f"test_param_schema_{int(time.time())}_{os.getpid()}"
@@ -417,7 +410,7 @@ class TestSchemaFromConfig:
         config["schema"] = config_schema
 
         try:
-            pg = PG(pg_logger, config, schema=param_schema)
+            pg = make_pg(config, schema=param_schema)
 
             # Parameter should win
             assert pg.schema == param_schema
@@ -429,11 +422,10 @@ class TestSchemaFromConfig:
                 conn.commit()
 
 
-@pytest.mark.integration
 class TestSchemaReset:
     """Test schema reset functionality."""
 
-    def test_reset_schema_clears_all_tables(self, pg_connection, pg_logger):
+    def test_reset_schema_clears_all_tables(self, pg_connection, make_pg):
         """Test reset_schema drops all tables in the schema."""
         schema_name = f"test_reset_{int(time.time())}_{os.getpid()}"
 
@@ -444,7 +436,7 @@ class TestSchemaReset:
             id = Column(Integer, primary_key=True)
 
         try:
-            pg = PG(pg_logger, pg_connection.cfg, schema=schema_name)
+            pg = make_pg(pg_connection.cfg, schema=schema_name)
             pg.create_schema()
             pg.migrate(Base)
 

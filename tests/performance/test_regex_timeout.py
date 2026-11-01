@@ -10,7 +10,6 @@ import pytest
 from appinfra.regex_utils import safe_compile
 
 
-@pytest.mark.performance
 class TestRegexTimeoutPerformance:
     def test_timeout_enforcement_overhead(self):
         """Measure overhead of timeout enforcement on safe patterns."""

@@ -19,6 +19,7 @@ Run with:
 from __future__ import annotations
 
 import threading
+import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -34,6 +35,24 @@ pytestmark = pytest.mark.require_pg
 def _random_suffix() -> str:
     """Return a unique suffix for a per-test object name."""
     return uuid.uuid4().hex[:12]
+
+
+# pg_locks, not pg_stat_activity: the latter is snapshotted on first read in a
+# transaction, so a session that connects after the holder's first poll is never seen
+_BLOCKED_BEHIND_THIS_SESSION = text(
+    "SELECT count(DISTINCT pid) FROM pg_locks"
+    " WHERE NOT granted AND pg_backend_pid() = ANY(pg_blocking_pids(pid))"
+)
+
+
+def _wait_until_blocked_behind(session, count: int, timeout: float = 5.0) -> None:
+    """Wait until *count* other sessions block on a lock this session holds."""
+    deadline = time.monotonic() + timeout
+    while session.execute(_BLOCKED_BEHIND_THIS_SESSION).scalar_one() < count:
+        assert time.monotonic() < deadline, (
+            f"fewer than {count} sessions blocked on the lock within {timeout}s"
+        )
+        time.sleep(0.01)
 
 
 @pytest.fixture
@@ -60,7 +79,6 @@ def cleanup_public_object(pg_connection):
             session.execute(text(f'DROP TABLE IF EXISTS public."{name}" CASCADE'))
 
 
-@pytest.mark.integration
 class TestExistenceChecks:
     """table_exists / index_exists against a real catalog."""
 
@@ -174,7 +192,6 @@ class TestExistenceChecks:
             assert index_exists(conn, f"{idx_name}_missing") is False
 
 
-@pytest.mark.integration
 class TestEnsureObjectIdempotent:
     """ensure_object twice on the same key creates one object."""
 
@@ -216,7 +233,6 @@ class TestEnsureObjectIdempotent:
         assert create_calls == 1
 
 
-@pytest.mark.integration
 class TestEnsureObjectConcurrent:
     """Concurrent workers on the same key produce one CREATE."""
 
@@ -227,10 +243,6 @@ class TestEnsureObjectConcurrent:
         key = f"ensure:public.{ephemeral_table_name}"
         n_workers = 8
         start_barrier = threading.Barrier(n_workers)
-        # Second barrier inside create_fn forces workers to overlap while the
-        # object is absent. Without it, one fast worker could finish before
-        # others even acquire the lock, causing a false pass.
-        create_barrier = threading.Barrier(n_workers, timeout=5)
         create_calls = 0
         create_lock = threading.Lock()
 
@@ -238,32 +250,36 @@ class TestEnsureObjectConcurrent:
             # Each worker gets its own PG + connection pool → distinct sessions,
             # which is the actual production shape.
             pg = PG(pg_logger, pg_config)
-            start_barrier.wait()  # release all workers at once
-            with pg.session() as session:
-                conn = session.connection()
+            try:
+                start_barrier.wait()  # release all workers at once
+                with pg.session() as session:
+                    conn = session.connection()
 
-                def create_fn():
-                    nonlocal create_calls
-                    # Wait for all workers to reach create_fn before any
-                    # proceeds — ensures contention on the advisory lock.
-                    try:
-                        create_barrier.wait()
-                    except threading.BrokenBarrierError:
-                        pass  # Other workers already proceeded; fine.
-                    with create_lock:
-                        create_calls += 1
-                    session.execute(
-                        text(f'CREATE TABLE public."{ephemeral_table_name}" (id int)')
+                    def create_fn():
+                        nonlocal create_calls
+                        # Only the lock holder gets here. It waits until every other
+                        # worker blocks on the advisory lock, so all of them overlap
+                        # while the object is absent; without this, one fast worker
+                        # could finish before the others reach the lock, a false pass.
+                        _wait_until_blocked_behind(session, n_workers - 1)
+                        with create_lock:
+                            create_calls += 1
+                        session.execute(
+                            text(
+                                f'CREATE TABLE public."{ephemeral_table_name}" (id int)'
+                            )
+                        )
+
+                    ensure_object(
+                        session,
+                        key=key,
+                        exists_fn=lambda: table_exists(
+                            conn, ephemeral_table_name, schema="public"
+                        ),
+                        create_fn=create_fn,
                     )
-
-                ensure_object(
-                    session,
-                    key=key,
-                    exists_fn=lambda: table_exists(
-                        conn, ephemeral_table_name, schema="public"
-                    ),
-                    create_fn=create_fn,
-                )
+            finally:
+                pg.dispose()
 
         errors: list[BaseException] = []
         with ThreadPoolExecutor(max_workers=n_workers) as pool:
@@ -280,7 +296,10 @@ class TestEnsureObjectConcurrent:
         assert create_calls == 1
         # Verify the table actually exists (DDL committed).
         pg = PG(pg_logger, pg_config)
-        with pg.session() as session:
-            assert table_exists(
-                session.connection(), ephemeral_table_name, schema="public"
-            )
+        try:
+            with pg.session() as session:
+                assert table_exists(
+                    session.connection(), ephemeral_table_name, schema="public"
+                )
+        finally:
+            pg.dispose()

@@ -11,8 +11,6 @@ class CallbackError(Exception):
     after logging the error if a logger is available.
     """
 
-    pass
-
 
 class ConfigError(Exception):
     """Error raised for invalid server configuration.
@@ -20,5 +18,3 @@ class ConfigError(Exception):
     This exception is raised at build time when the server configuration
     is invalid or contains conflicting settings.
     """
-
-    pass

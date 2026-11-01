@@ -57,6 +57,7 @@ Usage::
 from __future__ import annotations
 
 import argparse
+import contextlib
 import os
 import re
 import shlex
@@ -81,6 +82,9 @@ for _ancestor in (_script_dir, *_script_dir.parents):
     if (_ancestor / "appinfra").is_dir():
         sys.path.insert(0, str(_ancestor))
         break
+
+# A sibling script: run as a script, this file's directory comes first on sys.path
+from check_warnings import distinct_warnings  # noqa: E402
 
 from appinfra.ui import status  # noqa: E402
 
@@ -133,6 +137,8 @@ class Result:
     args: str
     status: str
     detail: str = ""
+    # Distinct warnings in a passing case's stderr, as check_warnings.py words them
+    warnings: list[str] = field(default_factory=list)
 
 
 def parse_spec(path: Path, default_timeout_s: float) -> Spec:
@@ -281,8 +287,9 @@ def run_case(spec: Spec, args: str, full_output: bool) -> Result:
         shutil.rmtree(scratch, ignore_errors=True)
     if status in _FAILING:
         output = _failure_output("".join(out_chunks), "".join(err_chunks), full_output)
-        detail = f"{detail}\n{output}"
-    return Result(spec, args, status, detail)
+        return Result(spec, args, status, f"{detail}\n{output}")
+    found = distinct_warnings("".join(err_chunks), os.getcwd())
+    return Result(spec, args, status, detail, [message for _, _, message in found])
 
 
 def _failure_output(out: str, err: str, full_output: bool) -> str:
@@ -310,6 +317,11 @@ def _spawn(cmd: list[str], scratch: Path) -> subprocess.Popen[str]:
     env = os.environ.copy()
     env["PYTHONUNBUFFERED"] = "1"
     env["TMPDIR"] = str(scratch)
+    # Every warning prints, once per location: the defaults hide a library's deprecations.
+    # Filters set by the caller come later in the list, so they still win.
+    env["PYTHONWARNINGS"] = ",".join(
+        p for p in ("default", env.get("PYTHONWARNINGS")) if p
+    )
     env["PYTHONPATH"] = os.pathsep.join(
         p for p in (os.getcwd(), env.get("PYTHONPATH")) if p
     )
@@ -374,10 +386,8 @@ def _wait_case(spec: Spec, proc: subprocess.Popen[str]) -> tuple[str, str]:
 
 def _kill_group(proc: subprocess.Popen[str]) -> None:
     """SIGKILL the case's process group, if anything in it is still alive."""
-    try:
+    with contextlib.suppress(ProcessLookupError):
         os.killpg(proc.pid, signal.SIGKILL)
-    except ProcessLookupError:
-        pass
 
 
 def run_spec(
@@ -438,14 +448,20 @@ def run_all(
 
 
 def print_result(result: Result, root: Path, verbose: bool) -> None:
-    """Print one line for a case, plus details for failures."""
-    label = f"{result.spec.path.relative_to(root)} {result.args}".rstrip()
+    """Print one line for a case, plus details for failures and a line per warning.
+
+    A warning line, ``warning: <case>: <message>``, is the tool form check_warnings.py reads.
+    """
+    case = f"{result.spec.path.relative_to(root)} {result.args}".rstrip()
+    label = case
     if result.status in ("PASS", "SKIP", "UNMET") and result.detail:
         label = f"{label}  {status.gray('(' + result.detail + ')')}"
     print(f"{_MARKS[result.status]} {label}", flush=True)
     if result.status in _FAILING or (verbose and result.detail):
         for line in result.detail.splitlines():
             print(f"    {status.gray(line)}", flush=True)
+    for message in result.warnings:
+        print(f"warning: {case}: {message}", flush=True)
 
 
 def print_summary(

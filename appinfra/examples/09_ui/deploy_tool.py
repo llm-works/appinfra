@@ -12,7 +12,7 @@ Complete Deploy Tool Example
 A realistic CLI tool that combines all UI features:
 - Rich terminal output for status display
 - Interactive prompts for confirmations
-- Secret masking for credentials
+- Credentials kept in an Envelope, shown masked
 - Progress bars for deployment steps
 
 Run:
@@ -22,16 +22,19 @@ Run:
     python examples/09_ui/deploy_tool.py rollback --env production
 """
 
+import argparse
 import sys
 import time
 from pathlib import Path
+from typing import Any
 
 # Allow running from a source checkout without installing the package.
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 from appinfra.app import AppBuilder
 from appinfra.app.tools import Tool, ToolConfig
-from appinfra.security import SecretMasker
+from appinfra.app.tracing.traceable import Traceable
+from appinfra.envelope import Envelope
 from appinfra.ui import (
     RICH_AVAILABLE,
     NonInteractiveError,
@@ -63,16 +66,17 @@ DEPLOYMENT_STEPS = [
 class DeployTool(Tool):
     """Deploy the application to an environment."""
 
-    def __init__(self, parent=None):
+    def __init__(self, parent: Traceable | None = None) -> None:
         config = ToolConfig(
             name="deploy",
             aliases=["d"],
             help_text="Deploy the application to an environment",
         )
         super().__init__(parent, config)
-        self.masker = SecretMasker()
+        # Wrapped where it enters the program: it prints as *** from here on
+        self.api_key = Envelope("sk-1234567890abcdefghij")
 
-    def add_args(self, parser):
+    def add_args(self, parser: argparse.ArgumentParser) -> None:
         parser.add_argument(
             "--env",
             "-e",
@@ -111,7 +115,7 @@ class DeployTool(Tool):
             console.print_error("Environment required. Use --env or run interactively.")
             return None
 
-    def _show_plan(self, env: str, version: str, env_config: dict) -> None:
+    def _show_plan(self, env: str, version: str, env_config: dict[str, Any]) -> None:
         """Display deployment plan panel."""
         console.print()
         panel = Panel(
@@ -140,7 +144,9 @@ class DeployTool(Tool):
             )
             return False
 
-    def _execute_deployment(self, env: str, version: str, env_config: dict) -> None:
+    def _execute_deployment(
+        self, env: str, version: str, env_config: dict[str, Any]
+    ) -> None:
         """Execute deployment with progress bar."""
         console.print()
         with Progress() as progress:
@@ -155,12 +161,9 @@ class DeployTool(Tool):
         console.print_success(f"Successfully deployed {version} to {env}!")
         console.print()
         console.print("[dim]Deployment log (credentials masked):[/dim]")
-        log_msg = (
-            f"Connected with api_key=sk-1234567890abcdefghij to {env_config['url']}"
-        )
-        console.print(f"  {self.masker.mask(log_msg)}")
+        console.print(f"  Connected with api_key={self.api_key} to {env_config['url']}")
 
-    def run(self, **kwargs):
+    def run(self, **kwargs: Any) -> int:
         env = self._get_env(self.args.env)
         if not env:
             return 1
@@ -182,7 +185,7 @@ class DeployTool(Tool):
 class StatusTool(Tool):
     """Show deployment status across all environments."""
 
-    def __init__(self, parent=None):
+    def __init__(self, parent: Traceable | None = None) -> None:
         config = ToolConfig(
             name="status",
             aliases=["s"],
@@ -230,7 +233,7 @@ class StatusTool(Tool):
             table.add_row(*row)
         return table
 
-    def run(self, **kwargs):
+    def run(self, **kwargs: Any) -> int:
         console.print()
         statuses = self._get_status_data()
         table = self._build_status_table(statuses)
@@ -246,7 +249,7 @@ class StatusTool(Tool):
 class RollbackTool(Tool):
     """Rollback to a previous deployment."""
 
-    def __init__(self, parent=None):
+    def __init__(self, parent: Traceable | None = None) -> None:
         config = ToolConfig(
             name="rollback",
             aliases=["rb"],
@@ -254,7 +257,7 @@ class RollbackTool(Tool):
         )
         super().__init__(parent, config)
 
-    def add_args(self, parser):
+    def add_args(self, parser: argparse.ArgumentParser) -> None:
         parser.add_argument(
             "--env",
             "-e",
@@ -286,7 +289,7 @@ class RollbackTool(Tool):
             console.print_error("Version selection required. Run interactively.")
             return None
 
-    def run(self, **kwargs):
+    def run(self, **kwargs: Any) -> int:
         env = self.args.env
         versions = ["v2.3.0", "v2.2.1", "v2.2.0", "v2.1.5"]
         self._show_versions(env, versions)
@@ -309,7 +312,7 @@ class RollbackTool(Tool):
         return 0
 
 
-def main():
+def main() -> int:
     """Build and run the deploy tool."""
     app = (
         AppBuilder("deploy-tool")

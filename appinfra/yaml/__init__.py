@@ -14,7 +14,8 @@ Public API:
     deep_merge: Deep merge two dictionaries
     ErrorContext: Context for YAML error reporting
     IncludeContext: Extended context for !include processing
-    SecretStr: Masked-by-default wrapper for secret values
+
+A value tagged ``!secret`` loads as ``appinfra.envelope.Envelope``.
 """
 
 from dataclasses import dataclass, replace
@@ -37,7 +38,6 @@ from .types import (
     ErrorContext,
     IncludeContext,
     ResetValue,
-    SecretStr,
 )
 
 
@@ -71,7 +71,6 @@ __all__ = [
     "ResetValue",
     "ErrorContext",
     "IncludeContext",
-    "SecretStr",
 ]
 
 
@@ -180,7 +179,7 @@ def _load_include_file(
         result = _load_with_context(inner, f)
 
     if ctx.track_sources:
-        return result  # type: ignore[return-value]
+        return result
     return result, {}
 
 

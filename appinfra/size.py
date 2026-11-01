@@ -66,8 +66,6 @@ _SI_UNITS = [
 class InvalidSizeError(Exception):
     """Raised when an invalid size value or string is provided."""
 
-    pass
-
 
 def _validate_size_input(size: float | int | None) -> None:
     """
@@ -105,8 +103,7 @@ def _format_value(value: float, precise: bool) -> str:
         return str(int(value))
 
     # Show up to 1 decimal place, strip trailing zeros
-    formatted = f"{value:.1f}".rstrip("0").rstrip(".")
-    return formatted
+    return f"{value:.1f}".rstrip("0").rstrip(".")
 
 
 def size_str(
@@ -273,11 +270,8 @@ def validate_size(size: int | float) -> bool:
     if size < 0:
         return False
 
-    # Check for unreasonably large values (more than 1 exabyte)
-    if size > 1024**6:
-        return False
-
-    return True
+    # Reject unreasonably large values (more than 1 exabyte)
+    return size <= 1024**6
 
 
 # Public API

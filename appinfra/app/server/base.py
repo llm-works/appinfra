@@ -53,7 +53,7 @@ class Server(Traceable):
         return self.routes
 
     def add_route(
-        self, path: str, handler: Callable, methods: list[str] | None = None
+        self, path: str, handler: Callable[..., Any], methods: list[str] | None = None
     ) -> None:
         """
         Add a route to the server.
@@ -83,7 +83,6 @@ class Server(Traceable):
         Args:
             manager: Server manager instance
         """
-        pass
 
     def server_tick(self) -> None:
         """
@@ -91,7 +90,6 @@ class Server(Traceable):
 
         Called periodically to perform maintenance tasks or background processing.
         """
-        pass
 
     def server_do_GET(self, req: Any, **kwargs: Any) -> Any:
         """
@@ -104,7 +102,6 @@ class Server(Traceable):
         Returns:
             Response data
         """
-        pass
 
     def server_do_POST(self, req: Any, **kwargs: Any) -> Any:
         """
@@ -117,7 +114,6 @@ class Server(Traceable):
         Returns:
             Response data
         """
-        pass
 
     def server_do_PUT(self, req: Any, **kwargs: Any) -> Any:
         """
@@ -130,7 +126,6 @@ class Server(Traceable):
         Returns:
             Response data
         """
-        pass
 
     def server_do_DELETE(self, req: Any, **kwargs: Any) -> Any:
         """
@@ -143,7 +138,6 @@ class Server(Traceable):
         Returns:
             Response data
         """
-        pass
 
     async def handle_request(self, request: Any) -> Any:
         """
@@ -201,13 +195,13 @@ def lock_helper(
     """
     start_t = time.start()
     if lock.acquire(timeout=timeout):  # type: ignore[arg-type]
-        lg.trace("acquired lock", extra={"after": time.since(start_t), "where": where})  # type: ignore[attr-defined]
+        lg.trace("acquired lock", extra={"after": time.since(start_t), "where": where})
         locked_t = time.start()
         try:
             yield
         finally:
             lock.release()
-            lg.trace(  # type: ignore[attr-defined]
+            lg.trace(
                 "released lock",
                 extra={
                     "after": time.since(locked_t),

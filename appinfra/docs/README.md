@@ -35,7 +35,6 @@ appinfra/
 ├── log/          # Logging system (builders, handlers, formatters)
 ├── net/          # Network components (TCP/HTTP servers, routing)
 ├── time/         # Time utilities (ticker, scheduler, delta formatting)
-├── security/     # Security utilities (secret masking, validation)
 ├── observability/# Lightweight hooks for metrics and tracing
 ├── ui/           # Interactive UI (prompts, progress bars)
 └── (core)        # DotDict, YAML utils, type helpers, caching
@@ -102,12 +101,6 @@ TCP/HTTP server infrastructure:
 - HTTP request handling with routing
 - Graceful shutdown with signal handling
 
-### `appinfra.security` - Security Utilities
-
-- Secret masking with pattern detection (20+ formats)
-- Input validation helpers
-- Path traversal protection
-
 ### `appinfra.ui` - Interactive UI
 
 - Smart prompts (TTY-aware with fallbacks)
@@ -117,6 +110,7 @@ TCP/HTTP server infrastructure:
 ### Core Utilities
 
 - `DotDict` - Attribute-style access with dot-notation paths
+- `Envelope` - A secret that masks itself until revealed (`!secret` in yaml)
 - `rate_limit` - Operation frequency control
 - YAML utilities with type checking helpers
 
@@ -189,6 +183,8 @@ appinfra docs search <text># Search documentation (supports --fuzzy)
 appinfra scaffold <name>   # Generate a new project
 appinfra config [file]     # Show resolved configuration
 appinfra cq cf             # Check function sizes
+appinfra cq dup            # Report duplicated code blocks (pylint)
+appinfra cq dead           # Report private definitions nothing refers to
 appinfra doctor            # Run project health checks
 ```
 

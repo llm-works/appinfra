@@ -27,12 +27,14 @@ Run:
 import sys
 import time
 from pathlib import Path
+from typing import Any
 
 # Allow running from a source checkout without installing the package.
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 from appinfra.app import AppBuilder
 from appinfra.app.tools import Tool, ToolConfig
+from appinfra.app.tracing.traceable import Traceable
 from appinfra.ui import RICH_AVAILABLE, console
 
 if RICH_AVAILABLE:
@@ -45,6 +47,7 @@ if RICH_AVAILABLE:
         Progress,
         ProgressColumn,
         SpinnerColumn,
+        Task,
         TaskProgressColumn,
         TextColumn,
         TimeElapsedColumn,
@@ -87,7 +90,7 @@ if RICH_AVAILABLE:
             self.complete_color = complete_color
             self.incomplete_color = incomplete_color
 
-        def render(self, task) -> Text:
+        def render(self, task: Task) -> Text:
             """Render the progress bar."""
             if task.total is None:
                 return Text("?" * self.bar_width)
@@ -184,7 +187,7 @@ ALL_SPINNERS = [
 ]
 
 
-def demo_spinners():
+def demo_spinners() -> None:
     """Show different spinner styles."""
     console.rule("Spinner Styles")
 
@@ -202,7 +205,7 @@ def demo_spinners():
     console.print()
 
 
-def demo_basic_progress():
+def demo_basic_progress() -> None:
     """Show basic progress bar."""
     console.rule("Basic Progress Bar")
 
@@ -242,7 +245,7 @@ def _run_concurrent_downloads(files: list[tuple[str, int]]) -> None:
             time.sleep(0.1)
 
 
-def demo_multiple_progress_bars():
+def demo_multiple_progress_bars() -> None:
     """Show multiple concurrent progress bars."""
     console.rule("Multiple Progress Bars")
     if not RICH_AVAILABLE:
@@ -260,7 +263,7 @@ def demo_multiple_progress_bars():
     console.print()
 
 
-def _demo_style_minimal():
+def _demo_style_minimal() -> None:
     """Demo style 1: minimal spinner."""
     console.print("[bold]Style 1: Minimal with spinner[/]")
     with Progress(
@@ -274,7 +277,7 @@ def _demo_style_minimal():
     console.print()
 
 
-def _demo_style_detailed():
+def _demo_style_detailed() -> None:
     """Demo style 2: detailed progress."""
     console.print("[bold]Style 2: Detailed progress[/]")
     with Progress(
@@ -292,7 +295,7 @@ def _demo_style_detailed():
     console.print()
 
 
-def _demo_style_compact():
+def _demo_style_compact() -> None:
     """Demo style 3: compact percentage."""
     console.print("[bold]Style 3: Compact[/]")
     with Progress(
@@ -307,14 +310,14 @@ def _demo_style_compact():
     console.print()
 
 
-def _demo_basic_styles():
+def _demo_basic_styles() -> None:
     """Demo styles 1-3: minimal, detailed, compact."""
     _demo_style_minimal()
     _demo_style_detailed()
     _demo_style_compact()
 
 
-def _demo_style_download():
+def _demo_style_download() -> None:
     """Demo style 4: download with speed."""
     console.print("[bold]Style 4: Download with speed[/]")
     with Progress(
@@ -331,7 +334,7 @@ def _demo_style_download():
     console.print()
 
 
-def _demo_style_filesize():
+def _demo_style_filesize() -> None:
     """Demo style 5: file size display."""
     console.print("[bold]Style 5: File processing with sizes[/]")
     with Progress(
@@ -350,7 +353,7 @@ def _demo_style_filesize():
     console.print()
 
 
-def _demo_style_indeterminate():
+def _demo_style_indeterminate() -> None:
     """Demo style 6: indeterminate/pulsing progress."""
     console.print("[bold]Style 6: Indeterminate (pulsing)[/]")
     with Progress(
@@ -364,14 +367,14 @@ def _demo_style_indeterminate():
     console.print()
 
 
-def _demo_file_styles():
+def _demo_file_styles() -> None:
     """Demo styles 4-6: download, file size, indeterminate."""
     _demo_style_download()
     _demo_style_filesize()
     _demo_style_indeterminate()
 
 
-def _demo_style_colorful():
+def _demo_style_colorful() -> None:
     """Demo style 7: colorful multi-column."""
     console.print("[bold]Style 7: Colorful multi-column[/]")
     with Progress(
@@ -391,7 +394,7 @@ def _demo_style_colorful():
     console.print()
 
 
-def _demo_style_ascii_emoji():
+def _demo_style_ascii_emoji() -> None:
     """Demo styles 8-9: ASCII and emoji."""
     console.print("[bold]Style 8: ASCII style[/]")
     with Progress(
@@ -423,7 +426,7 @@ def _demo_style_ascii_emoji():
     console.print()
 
 
-def _demo_style_steps():
+def _demo_style_steps() -> None:
     """Demo style 10: step counter."""
     console.print("[bold]Style 10: Step counter[/]")
     steps = ["Initialize", "Validate", "Process", "Finalize", "Cleanup"]
@@ -441,7 +444,7 @@ def _demo_style_steps():
     console.print()
 
 
-def _demo_decorative_styles():
+def _demo_decorative_styles() -> None:
     """Demo styles 7-10: colorful, ASCII, emoji, steps."""
     _demo_style_colorful()
     _demo_style_ascii_emoji()
@@ -463,14 +466,14 @@ def _demo_width_bar(style_num: int, width: int, name: str, color: str) -> None:
     console.print()
 
 
-def _demo_width_styles():
+def _demo_width_styles() -> None:
     """Demo styles 11-13: width variations."""
     _demo_width_bar(11, 15, "Narrow", "cyan")
     _demo_width_bar(12, 40, "Standard", "green")
     _demo_width_bar(13, 80, "Wide", "magenta")
 
 
-def _demo_thickness_styles():
+def _demo_thickness_styles() -> None:
     """Demo styles 14-21: bar character thickness variations."""
     console.rule("Bar Character Styles (Thickness)")
 
@@ -499,7 +502,7 @@ def _demo_thickness_styles():
         console.print()
 
 
-def demo_custom_progress_styles():
+def demo_custom_progress_styles() -> None:
     """Show different progress bar styles."""
     console.rule("Progress Bar Styles")
 
@@ -539,7 +542,7 @@ def _run_deployment_stages() -> None:
                 time.sleep(0.05)
 
 
-def demo_deployment_simulation():
+def demo_deployment_simulation() -> None:
     """Simulate a deployment with multiple stages."""
     console.rule("Deployment Simulation")
     if not RICH_AVAILABLE:
@@ -581,7 +584,7 @@ def _generate_status_table(step: int) -> Table:
     return table
 
 
-def demo_live_table():
+def demo_live_table() -> None:
     """Show a live-updating table (like Claude Code's display)."""
     console.rule("Live Status Table")
     if not RICH_AVAILABLE:
@@ -598,7 +601,7 @@ def demo_live_table():
 class SpinnersTool(Tool):
     """Show all 73 available spinner styles."""
 
-    def __init__(self, parent=None):
+    def __init__(self, parent: Traceable | None = None) -> None:
         config = ToolConfig(
             name="spinners",
             aliases=["s"],
@@ -606,7 +609,7 @@ class SpinnersTool(Tool):
         )
         super().__init__(parent, config)
 
-    def run(self, **kwargs):
+    def run(self, **kwargs: Any) -> int:
         console.print()
         console.print("[bold blue]Spinners Demo[/bold blue]")
         console.print(f"Rich available: {RICH_AVAILABLE}")
@@ -619,7 +622,7 @@ class SpinnersTool(Tool):
 class ProgressTool(Tool):
     """Show all progress bar styles."""
 
-    def __init__(self, parent=None):
+    def __init__(self, parent: Traceable | None = None) -> None:
         config = ToolConfig(
             name="progress",
             aliases=["p"],
@@ -627,7 +630,7 @@ class ProgressTool(Tool):
         )
         super().__init__(parent, config)
 
-    def run(self, **kwargs):
+    def run(self, **kwargs: Any) -> int:
         console.print()
         console.print("[bold blue]Progress Bars Demo[/bold blue]")
         console.print(f"Rich available: {RICH_AVAILABLE}")
@@ -644,7 +647,7 @@ class ProgressTool(Tool):
 class AllTool(Tool):
     """Run all demos (spinners + progress bars)."""
 
-    def __init__(self, parent=None):
+    def __init__(self, parent: Traceable | None = None) -> None:
         config = ToolConfig(
             name="all",
             aliases=["a"],
@@ -652,7 +655,7 @@ class AllTool(Tool):
         )
         super().__init__(parent, config)
 
-    def run(self, **kwargs):
+    def run(self, **kwargs: Any) -> int:
         console.print()
         console.print("[bold blue]Spinners and Progress Bars Demo[/bold blue]")
         console.print(f"Rich available: {RICH_AVAILABLE}")
@@ -667,7 +670,7 @@ class AllTool(Tool):
         return 0
 
 
-def main():
+def main() -> int:
     """Build and run the demo app."""
     app = (
         AppBuilder("ui-demo")

@@ -19,10 +19,12 @@ class RouteManager:
     """Manages server routes and request routing with ReDoS protection."""
 
     def __init__(self) -> None:
-        self._routes: dict[str, dict[str, Callable]] = {}
-        self._patterns: list[tuple[Pattern, dict[str, Callable]]] = []
+        self._routes: dict[str, dict[str, Callable[..., Any]]] = {}
+        self._patterns: list[tuple[Pattern[str], dict[str, Callable[..., Any]]]] = []
 
-    def add_route(self, path: str, handler: Callable, methods: list[str]) -> None:
+    def add_route(
+        self, path: str, handler: Callable[..., Any], methods: list[str]
+    ) -> None:
         """
         Add a route to the manager.
 
@@ -43,7 +45,7 @@ class RouteManager:
         if "*" in path or "{" in path or "[" in path:
             # Pattern-based route with ReDoS protection
             pattern = safe_compile(path, timeout=1.0)
-            route_info = {method: handler for method in methods}
+            route_info = dict.fromkeys(methods, handler)
             self._patterns.append((pattern, route_info))
         else:
             # Simple string route
@@ -52,7 +54,7 @@ class RouteManager:
             for method in methods:
                 self._routes[path][method] = handler
 
-    def get_handler(self, path: str, method: str) -> Callable | None:
+    def get_handler(self, path: str, method: str) -> Callable[..., Any] | None:
         """
         Get handler for a path and method.
 

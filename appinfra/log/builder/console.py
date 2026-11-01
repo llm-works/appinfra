@@ -44,7 +44,7 @@ class ConsoleHandlerConfig(HandlerConfig):
 
         # Extract format-specific options (those starting with "format_")
         self.format_options = {}
-        format_keys = [key for key in kwargs.keys() if key.startswith("format_")]
+        format_keys = [key for key in kwargs if key.startswith("format_")]
         for key in format_keys:
             self.format_options[key[7:]] = kwargs[key]  # Remove "format_" prefix
 

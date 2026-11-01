@@ -14,66 +14,31 @@ import re
 from pathlib import Path
 from typing import Any, Self
 
-import yaml  # type: ignore[import-untyped]
+import yaml
 
 from ..dot_dict import DotDict
+from ..envelope import Envelope
 from ..errors import UndeclaredConfigPathError
+from ..yaml._utils import substitute_references
 from .constants import MAX_CONFIG_SIZE_BYTES
 from .spec import AUTO, Auto, ConfigFile, ConfigSpec, _resolve_origin
 
-# Inventory of `INFRA_*` env vars consumed by appinfra's own tooling (shell
-# scripts, Makefiles, pytest fixtures) rather than as yaml config overrides.
-# Listed by exact name. Excluded vars never reach `_set_nested_value`, so they
-# neither override yaml fields nor trigger `UndeclaredConfigPathError`.
-#
-# When adding a new INFRA_* env var read directly via os.environ (not through
-# Config), add it here so Config does not try to interpret it as an override.
-# Retired tooling vars are kept so stale exports don't cause override errors.
-APPINFRA_TOOLING_ENV_VARS: frozenset[str] = frozenset(
-    {
-        "INFRA_CHECK_PYTEST_SUITE",
-        "INFRA_CICD_PYTHON_VERSION",  # retired in 0.12.0; kept for stale exports
-        "INFRA_CLEAN_PRESERVE",
-        "INFRA_COMPOSE_CMD",
-        "INFRA_CONTAINER_CMD",
-        "INFRA_DEFAULT_CONFIG_FILE",
-        "INFRA_DEV_CHECK_EXAMPLES",
-        "INFRA_DEV_CHECK_SCRIPT",
-        "INFRA_DEV_CQ_EXCLUDE",
-        "INFRA_DEV_CQ_SPDX",
-        "INFRA_DEV_CQ_STRICT",
-        "INFRA_DEV_DOCSTRING_THRESHOLD",
-        "INFRA_DEV_INSTALL_EXTRAS",
-        "INFRA_DEV_MYPY_FLAGS",
-        "INFRA_DEV_PKG_NAME",
-        "INFRA_DEV_PROJECT_ROOT",
-        "INFRA_DEV_SETUP_EXTRAS",  # retired in 0.12.0; kept for stale exports
-        "INFRA_DEV_SKIP_TARGETS",
-        "INFRA_DISABLE_GROUPS",
-        "INFRA_DISABLE_TARGETS",
-        "INFRA_DOCS_CONFIG_FILE",
-        "INFRA_DOCS_OUTPUT_DIR",
-        "INFRA_DRY_RUN",
-        "INFRA_ENV_PYTHON",
-        "INFRA_NO_CONFIRM",
-        "INFRA_PG_CONFIG_FILE",
-        "INFRA_PG_CONFIG_KEY",
-        "INFRA_PG_DATABASES",
-        "INFRA_PG_HOST",
-        "INFRA_PG_USER",
-        "INFRA_PYTEST_ARGS",
-        "INFRA_PYTEST_COVERAGE_MARKERS",
-        "INFRA_PYTEST_COVERAGE_PKG",
-        "INFRA_PYTEST_COVERAGE_THRESHOLD",
-        "INFRA_PYTEST_HANG_DUMP_SECONDS",
-        "INFRA_PYTEST_TESTS_DIR",
-        "INFRA_PYTEST_WORKERS",
-        "INFRA_PYYAML_OK",
-        "INFRA_ROOT",
-        "INFRA_TEST_LOGGING_COLORS_ENABLED",
-        "INFRA_TEST_LOGGING_LEVEL",
-    }
-)
+# appinfra's own Make and tooling variables. Disjoint from the default override
+# prefix, so every INFRA_* variable is a config override.
+_APPINFRA_CONTROL_PREFIX = "APPINFRA_"
+
+
+def _check_env_prefix(env_prefix: str) -> str:
+    """Reject an override prefix that would also match APPINFRA_* variables."""
+    if _APPINFRA_CONTROL_PREFIX.startswith(env_prefix) or env_prefix.startswith(
+        _APPINFRA_CONTROL_PREFIX
+    ):
+        raise ValueError(
+            f"env_prefix {env_prefix!r} overlaps {_APPINFRA_CONTROL_PREFIX}*, "
+            "the prefix of appinfra's own control variables"
+        )
+    return env_prefix
+
 
 # Helper functions for Config._load()
 
@@ -252,7 +217,9 @@ class Config(DotDict):
                 `ConfigSpec.resolve()`. A `ConfigFile` carries its own
                 `origin`; passing both raises `ValueError`.
             enable_env_overrides: Whether to apply environment variable overrides
-            env_prefix: Prefix for environment variables (default: 'INFRA_')
+            env_prefix: Prefix for environment variables (default: 'INFRA_').
+                Must not overlap 'APPINFRA_', the prefix of appinfra's own
+                control variables.
             merge_strategy: Strategy for handling includes - "replace" or "merge" (default: "replace")
                            Note: Currently only "replace" is fully supported
             allowed_paths: Optional list of specific absolute paths (e.g. a
@@ -275,6 +242,11 @@ class Config(DotDict):
                 `ConfigFile` from `ConfigSpec.resolve()` carries its
                 origin already. `~`-expanded and resolved once.
 
+        Raises:
+            ValueError: If env_prefix overlaps 'APPINFRA_' (checked whether or
+                not env overrides are enabled), or if both a `ConfigFile` and
+                `origin` are passed.
+
         Note:
             Path resolution is handled explicitly via the !path YAML tag. Use !path for paths
             that should be resolved relative to the config file or for tilde (~) expansion.
@@ -288,7 +260,7 @@ class Config(DotDict):
             origin = fname.origin
             fname = fname.path
         self._enable_env_overrides = enable_env_overrides
-        self._env_prefix = env_prefix
+        self._env_prefix = _check_env_prefix(env_prefix)
         self._merge_strategy = merge_strategy
         self._allowed_paths = allowed_paths
         self._origin_override = (
@@ -469,24 +441,23 @@ class Config(DotDict):
         """
         if isinstance(content, dict):
             # Recursively resolve all dictionary values
-            keys = [k for k in content.keys()]
-            for k in keys:
+            for k in list(content):
                 content[k] = self._resolve(content[k])
         elif isinstance(content, str):
-            # Replace ${variable_name} patterns with actual values
-            # Restrict to valid config keys (alphanumeric + dot + underscore) to prevent ReDoS
-            return re.sub(r"\$\{([a-zA-Z0-9_.]+)\}", self._substitute_var, content)
+            # Replace ${variable_name} patterns with actual values; a whole-value
+            # reference to a secret keeps its Envelope
+            return substitute_references(content, self._reference_value)
         return content
 
-    def _substitute_var(self, match: re.Match) -> str:
+    def _reference_value(self, match: re.Match[str]) -> Any:
         """
-        Substitute a variable reference with its value.
+        Look up the value a ``${variable_name}`` reference names.
 
         Args:
             match: Regex match object containing the variable name
 
         Returns:
-            String value of the variable
+            The variable's value, as stored
 
         Raises:
             DotDictPathNotFoundError: If the variable is not defined
@@ -496,7 +467,7 @@ class Config(DotDict):
         var_name = match.group(1)
         if not self.has(var_name):
             raise DotDictPathNotFoundError(self, var_name)
-        return str(self.get(var_name))
+        return self.get(var_name)
 
     def _apply_env_overrides(self, config_data: dict[str, Any]) -> dict[str, Any]:
         """
@@ -548,20 +519,8 @@ class Config(DotDict):
         return overrides
 
     def _collect_env_vars(self) -> dict[str, str]:
-        """
-        Collect environment variables with the configured prefix, excluding
-        names registered in `APPINFRA_TOOLING_ENV_VARS` (consumed by scripts
-        and Makefiles, not as yaml overrides). The tooling exclusion only
-        applies when using the default INFRA_ prefix.
-        """
-        env_vars = {}
-        for key, value in os.environ.items():
-            if not key.startswith(self._env_prefix):
-                continue
-            if self._env_prefix == "INFRA_" and key in APPINFRA_TOOLING_ENV_VARS:
-                continue
-            env_vars[key] = value
-        return env_vars
+        """Collect environment variables with the configured prefix."""
+        return {k: v for k, v in os.environ.items() if k.startswith(self._env_prefix)}
 
     def _env_key_to_path(self, env_key: str) -> list[str]:
         """
@@ -574,10 +533,11 @@ class Config(DotDict):
             List of path components (e.g., ['logging', 'level'])
         """
         # Remove prefix and split by underscore
-        path_parts = env_key[len(self._env_prefix) :].lower().split("_")
-        return path_parts
+        return env_key[len(self._env_prefix) :].lower().split("_")
 
-    def _set_nested_value(self, data: dict, path: list[str], value: Any) -> None:
+    def _set_nested_value(
+        self, data: dict[str, Any], path: list[str], value: Any
+    ) -> None:
         """
         Set a nested value in the configuration dictionary.
 
@@ -601,7 +561,6 @@ class Config(DotDict):
         if not path:
             return
 
-        converted_value = self._convert_env_value(value)
         current = data
         i = 0
 
@@ -619,22 +578,23 @@ class Config(DotDict):
                 raise UndeclaredConfigPathError(self._env_prefix, path)
 
             if consumed == remaining:
-                self._set_final_value(current, matched_key, converted_value)
+                self._set_final_value(current, matched_key, value)
                 return
 
             current = current[matched_key]
             i += consumed
 
-    def _set_final_value(self, target: dict, key: str, value: Any) -> None:
-        """Assign a converted env value to the matched yaml key.
+    def _set_final_value(self, target: dict[str, Any], key: str, raw: str) -> None:
+        """Assign a raw env value to the matched yaml key.
 
-        When the existing yaml value is a list, a non-None scalar override
-        is wrapped into a single-element list so the declared type is
-        preserved. The comma path in `_convert_env_value` already produces
-        a list and is unaffected. A null override clears the field rather
-        than producing `[None]`.
+        The value is converted per `_override_value`. When the existing yaml
+        value is a list, a non-None scalar override is wrapped into a
+        single-element list so the declared type is preserved. The comma path
+        in `_convert_env_value` already produces a list and is unaffected. A
+        null override clears the field rather than producing `[None]`.
         """
         existing = target.get(key)
+        value = self._override_value(existing, raw)
         if (
             isinstance(existing, list)
             and value is not None
@@ -643,8 +603,34 @@ class Config(DotDict):
             value = [value]
         target[key] = value
 
+    def _override_value(self, existing: Any, raw: str) -> Any:
+        """Convert a raw env value for the yaml value it overrides.
+
+        An override of a secret replaces its value, not its Envelope, and is
+        taken verbatim: a password like ``1234`` or ``a,b`` is not a number or
+        a list.
+        """
+        if isinstance(existing, Envelope):
+            return Envelope(raw)
+        return self._convert_env_value(raw)
+
+    def _loaded_value(self, path: list[str]) -> Any:
+        """Return the loaded value an env path names, or None if it names none.
+
+        Keys are matched like `_set_nested_value` matches them.
+        """
+        current: Any = self.dict()
+        i = 0
+        while i < len(path):
+            key, consumed = self._match_key_greedy(current, path, i)
+            if key is None:
+                return None
+            current = current[key]
+            i += consumed
+        return current
+
     def _match_key_greedy(
-        self, data: dict, path: list[str], start_idx: int
+        self, data: dict[str, Any], path: list[str], start_idx: int
     ) -> tuple[str | None, int]:
         """
         Try to match a key in the dictionary by greedily combining path components.
@@ -686,7 +672,7 @@ class Config(DotDict):
         return (None, 0)
 
     def _try_multicomponent_match(
-        self, data: dict, components: list[str], num_components: int
+        self, data: dict[str, Any], components: list[str], num_components: int
     ) -> tuple[str, int] | None:
         """Try matching multi-component key with various strategies."""
         candidate_underscored = "_".join(components)
@@ -701,7 +687,7 @@ class Config(DotDict):
             return (candidate_hyphenated, num_components)
 
         # Priority 3: Normalized match (handles mixed hyphens/underscores)
-        for key in data.keys():
+        for key in data:
             if key.replace("-", "_") == candidate_underscored:
                 return (key, num_components)
 
@@ -735,8 +721,7 @@ class Config(DotDict):
         try:
             if "." in value:
                 return float(value)
-            else:
-                return int(value)
+            return int(value)
         except ValueError:
             pass
 
@@ -759,7 +744,8 @@ class Config(DotDict):
         for env_key, env_value in env_vars.items():
             config_path = self._env_key_to_path(env_key)
             path_str = ".".join(config_path)
-            overrides[path_str] = self._convert_env_value(env_value)
+            existing = self._loaded_value(config_path)
+            overrides[path_str] = self._override_value(existing, env_value)
 
         return overrides
 
@@ -806,11 +792,10 @@ class Config(DotDict):
             # Validate using pydantic schema
             if raise_on_error:
                 return validate_config(config_dict)
-            else:
-                try:
-                    return validate_config(config_dict)
-                except Exception:
-                    return False
+            try:
+                return validate_config(config_dict)
+            except Exception:
+                return False
 
         except ImportError:
             # Config schemas module not available

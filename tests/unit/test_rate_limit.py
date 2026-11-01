@@ -1,0 +1,991 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The appinfra Authors
+
+"""
+Tests for rate limiting functionality.
+
+Tests key rate limiter features including:
+- Rate limiter initialization
+- Rate limiting behavior
+- Waiting between operations
+- Exponential backoff
+"""
+
+import time
+from unittest.mock import Mock, patch
+
+import pytest
+
+from appinfra.rate_limit import Backoff, RateLimiter
+
+# =============================================================================
+# Test RateLimiter Initialization
+# =============================================================================
+
+
+class TestRateLimiterInitialization:
+    """Test RateLimiter initialization."""
+
+    def test_init_with_per_minute(self):
+        """Test initialization with per_minute parameter."""
+        mock_logger = Mock()
+        limiter = RateLimiter(mock_logger, per_minute=60)
+        assert limiter.per_minute == 60
+        assert isinstance(limiter.last_t, float)
+
+    def test_init_initial_true_slot_available(self):
+        """Test initial=True makes first slot immediately available."""
+        mock_logger = Mock()
+        limiter = RateLimiter(mock_logger, per_minute=60, initial=True)
+        # last_t should be <= now, so first call goes through
+        assert limiter.last_t <= time.monotonic()
+
+    def test_init_initial_false_slot_delayed(self):
+        """Test initial=False delays first slot by one interval."""
+        mock_logger = Mock()
+        now = time.monotonic()
+        limiter = RateLimiter(mock_logger, per_minute=60, initial=False)
+        # last_t should be ~1s in the future (60/60 = 1s)
+        assert limiter.last_t > now
+
+    def test_init_with_logger(self):
+        """Test initialization with logger."""
+        mock_logger = Mock()
+        limiter = RateLimiter(mock_logger, per_minute=60)
+        assert limiter._lg is mock_logger
+
+    def test_init_with_zero_per_minute_raises(self):
+        """Test initialization with zero per_minute raises ValueError."""
+        mock_logger = Mock()
+        with pytest.raises(ValueError, match="per_minute must be positive"):
+            RateLimiter(mock_logger, per_minute=0)
+
+    def test_init_with_negative_per_minute_raises(self):
+        """Test initialization with negative per_minute raises ValueError."""
+        mock_logger = Mock()
+        with pytest.raises(ValueError, match="per_minute must be positive"):
+            RateLimiter(mock_logger, per_minute=-10)
+
+
+# =============================================================================
+# Test RateLimiter next() Method
+# =============================================================================
+
+
+class TestRateLimiterNext:
+    """Test RateLimiter next() method."""
+
+    def test_first_call_waits_by_default(self, fake_clock):
+        """Test first call to next() waits (initial=False by default)."""
+        mock_logger = Mock()
+        limiter = RateLimiter(mock_logger, per_minute=60)
+        start = fake_clock.monotonic()
+        wait = limiter.next()
+        # First call waits one interval because last_t is initialized to future time
+        assert wait == 1.0
+        assert fake_clock.monotonic() - start == 1.0
+
+    def test_first_call_immediate_when_initial_true(self):
+        """Test first call to next() goes through immediately (initial=True)."""
+        mock_logger = Mock()
+        limiter = RateLimiter(mock_logger, per_minute=60, initial=True)
+        wait = limiter.next()
+        assert wait == 0.0
+
+    def test_rapid_calls_cause_waiting(self, fake_clock):
+        """Test rapid calls cause waiting."""
+        mock_logger = Mock()
+        limiter = RateLimiter(mock_logger, per_minute=120)  # 2 per second
+
+        # First call
+        limiter.next()
+
+        # Second call should wait one full interval
+        start = fake_clock.monotonic()
+        wait = limiter.next()
+        elapsed = fake_clock.monotonic() - start
+
+        assert wait == 0.5
+        assert elapsed == 0.5
+
+    def test_respect_max_ticks_false_no_sleep(self, fake_clock):
+        """Test respect_max_ticks=False doesn't sleep."""
+        mock_logger = Mock()
+        limiter = RateLimiter(mock_logger, per_minute=120)
+
+        # First call
+        limiter.next()
+
+        # Second call with respect_max_ticks=False should not sleep
+        start = fake_clock.monotonic()
+        wait = limiter.next(respect_max_ticks=False)
+        elapsed = fake_clock.monotonic() - start
+
+        # Should calculate wait but not actually sleep
+        assert wait == 0.5
+        assert elapsed == 0.0
+
+    def test_sufficient_delay_no_wait(self, fake_clock):
+        """Test sufficient delay between calls doesn't cause waiting."""
+        mock_logger = Mock()
+        limiter = RateLimiter(mock_logger, per_minute=60)
+
+        # First call
+        limiter.next()
+
+        # Wait for the rate limit delay
+        fake_clock.sleep(1.1)  # Slightly more than 1 second (60 per minute = 1/sec)
+
+        # Second call should not wait
+        wait = limiter.next()
+        assert wait == 0
+
+    def test_logger_called_when_waiting(self, fake_clock):
+        """Test logger is called when waiting."""
+        mock_logger = Mock()
+        limiter = RateLimiter(mock_logger, per_minute=120, initial=False)
+
+        # First call waits (and logs) because initial=False
+        limiter.next()
+
+        # Logger should have been called
+        mock_logger.trace.assert_called_once()
+        args, kwargs = mock_logger.trace.call_args
+        assert "rate limiter wait" in args
+        assert "extra" in kwargs
+        assert "wait" in kwargs["extra"]
+
+    def test_logger_not_called_when_slot_available(self, fake_clock):
+        """Test logger not called when slot is available (after waiting)."""
+        mock_logger = Mock()
+        limiter = RateLimiter(mock_logger, per_minute=60)
+
+        # First call waits
+        limiter.next()
+        mock_logger.reset_mock()
+
+        # Wait for slot to become available
+        fake_clock.sleep(1.1)
+
+        # Second call - slot available, no wait
+        limiter.next()
+
+        # Logger should not have been called for second call
+        mock_logger.trace.assert_not_called()
+
+
+# =============================================================================
+# Test RateLimiter try_next() Method
+# =============================================================================
+
+
+class TestRateLimiterTryNext:
+    """Test RateLimiter try_next() method."""
+
+    def test_first_call_returns_false_by_default(self):
+        """Test first call to try_next() returns False (initial=False by default)."""
+        mock_logger = Mock()
+        limiter = RateLimiter(mock_logger, per_minute=60)
+        # First call returns False because last_t is initialized to future time
+        assert limiter.try_next() is False
+
+    def test_first_call_returns_true_when_initial_true(self):
+        """Test first call to try_next() returns True (initial=True)."""
+        mock_logger = Mock()
+        limiter = RateLimiter(mock_logger, per_minute=60, initial=True)
+        assert limiter.try_next() is True
+
+    def test_rapid_call_returns_false(self, fake_clock):
+        """Test rapid calls return False without blocking until slot available."""
+        mock_logger = Mock()
+        limiter = RateLimiter(mock_logger, per_minute=60)  # 1 per second
+
+        # Wait for slot to become available
+        fake_clock.sleep(1.1)
+
+        # First call after wait should succeed
+        assert limiter.try_next() is True
+        first_t = limiter.last_t
+
+        # Immediate second call should fail (non-blocking)
+        start = fake_clock.monotonic()
+        assert limiter.try_next() is False
+        elapsed = fake_clock.monotonic() - start
+
+        # Should be non-blocking: any sleep would have advanced the clock
+        assert elapsed == 0.0
+        # last_t should not have changed
+        assert limiter.last_t == first_t
+
+    def test_after_delay_returns_true(self, fake_clock):
+        """Test try_next() returns True after sufficient delay."""
+        mock_logger = Mock()
+        limiter = RateLimiter(mock_logger, per_minute=120)  # 0.5 second delay
+
+        # Wait for initial slot to become available
+        fake_clock.sleep(0.55)
+
+        assert limiter.try_next() is True
+
+        # Wait for the rate limit delay
+        fake_clock.sleep(0.55)
+
+        # Should succeed now
+        assert limiter.try_next() is True
+
+    def test_does_not_modify_state_on_false(self):
+        """Test try_next() doesn't modify last_t when returning False."""
+        mock_logger = Mock()
+        limiter = RateLimiter(mock_logger, per_minute=60)
+
+        limiter.try_next()
+        original_last_t = limiter.last_t
+
+        # Multiple rapid calls should not change last_t
+        for _ in range(5):
+            limiter.try_next()
+
+        assert limiter.last_t == original_last_t
+
+    def test_updates_state_on_true(self, fake_clock):
+        """Test try_next() updates last_t when returning True."""
+        mock_logger = Mock()
+        limiter = RateLimiter(mock_logger, per_minute=120)
+
+        limiter.try_next()
+        first_t = limiter.last_t
+
+        fake_clock.sleep(0.55)
+
+        limiter.try_next()
+        second_t = limiter.last_t
+
+        assert second_t > first_t
+
+    def test_non_blocking_behavior(self):
+        """Test try_next() never blocks regardless of rate limit."""
+        mock_logger = Mock()
+        limiter = RateLimiter(mock_logger, per_minute=1)  # Very slow: 60 second delay
+
+        limiter.try_next()
+
+        # Even with 60-second delay, try_next should return immediately
+        start = time.monotonic()
+        result = limiter.try_next()
+        elapsed = time.monotonic() - start
+
+        assert result is False
+        assert elapsed < 0.01  # Should be near-instant
+
+
+# =============================================================================
+# Test RateLimiter can_proceed() Method
+# =============================================================================
+
+
+class TestRateLimiterCanProceed:
+    """Test RateLimiter can_proceed() method."""
+
+    def test_first_call_returns_false_by_default(self):
+        """Test can_proceed() returns False initially (initial=False by default)."""
+        mock_logger = Mock()
+        limiter = RateLimiter(mock_logger, per_minute=60)
+        # Initially False because last_t is set to future time
+        assert limiter.can_proceed() is False
+
+    def test_first_call_returns_true_when_initial_true(self):
+        """Test can_proceed() returns True initially (initial=True)."""
+        mock_logger = Mock()
+        limiter = RateLimiter(mock_logger, per_minute=60, initial=True)
+        assert limiter.can_proceed() is True
+
+    def test_does_not_modify_last_t_on_true(self, fake_clock):
+        """Test can_proceed() does NOT update last_t when returning True."""
+        mock_logger = Mock()
+        limiter = RateLimiter(mock_logger, per_minute=60)
+
+        # Wait for slot to become available
+        fake_clock.sleep(1.1)
+        original_last_t = limiter.last_t
+        assert limiter.can_proceed() is True
+        # last_t unchanged - slot not consumed
+        assert limiter.last_t == original_last_t
+
+    def test_does_not_modify_last_t_on_false(self):
+        """Test can_proceed() does NOT update last_t when returning False."""
+        mock_logger = Mock()
+        limiter = RateLimiter(mock_logger, per_minute=60)
+
+        # Consume a slot first
+        limiter.try_next()
+        original_last_t = limiter.last_t
+
+        # can_proceed() should return False and not modify last_t
+        assert limiter.can_proceed() is False
+        assert limiter.last_t == original_last_t
+
+    def test_rapid_call_returns_false(self):
+        """Test can_proceed() returns False immediately after try_next()."""
+        mock_logger = Mock()
+        limiter = RateLimiter(mock_logger, per_minute=60)  # 1 per second
+
+        # Consume a slot
+        limiter.try_next()
+
+        # Immediate can_proceed() should return False
+        assert limiter.can_proceed() is False
+
+    def test_after_delay_returns_true(self, fake_clock):
+        """Test can_proceed() returns True after sufficient delay."""
+        mock_logger = Mock()
+        limiter = RateLimiter(mock_logger, per_minute=120)  # 0.5 second delay
+
+        # Wait for initial slot
+        fake_clock.sleep(0.55)
+
+        limiter.try_next()
+
+        # Wait for the rate limit delay
+        fake_clock.sleep(0.55)
+
+        # Should return True now
+        assert limiter.can_proceed() is True
+
+    def test_multiple_calls_return_same_value(self, fake_clock):
+        """Test calling can_proceed() multiple times returns consistent value."""
+        mock_logger = Mock()
+        limiter = RateLimiter(mock_logger, per_minute=60)
+
+        # All should return False (initial=False by default)
+        assert limiter.can_proceed() is False
+        assert limiter.can_proceed() is False
+        assert limiter.can_proceed() is False
+
+        # Wait for slot to become available
+        fake_clock.sleep(1.1)
+
+        # Now all should return True
+        assert limiter.can_proceed() is True
+        assert limiter.can_proceed() is True
+
+        # Consume a slot
+        limiter.try_next()
+
+        # After consumption - all should return False
+        assert limiter.can_proceed() is False
+        assert limiter.can_proceed() is False
+        assert limiter.can_proceed() is False
+
+    def test_non_blocking_behavior(self):
+        """Test can_proceed() never blocks regardless of rate limit."""
+        mock_logger = Mock()
+        limiter = RateLimiter(mock_logger, per_minute=1)  # Very slow: 60 second delay
+
+        # Even with 60-second delay, can_proceed should return immediately
+        start = time.monotonic()
+        result = limiter.can_proceed()
+        elapsed = time.monotonic() - start
+
+        assert result is False  # Slot not available yet
+        assert elapsed < 0.01  # Should be near-instant
+
+    def test_consistent_with_try_next(self, fake_clock):
+        """Test can_proceed() returns True exactly when try_next() would succeed."""
+        mock_logger = Mock()
+        limiter = RateLimiter(mock_logger, per_minute=120)  # 0.5 second delay
+
+        # Initially both would fail (initial=False by default)
+        assert limiter.can_proceed() is False
+        assert limiter.try_next() is False
+
+        # Wait for slot to become available
+        fake_clock.sleep(0.55)
+
+        # Both would succeed now
+        assert limiter.can_proceed() is True
+        # Actually consume it to verify
+        assert limiter.try_next() is True
+
+        # Both would fail again
+        assert limiter.can_proceed() is False
+
+
+# =============================================================================
+# Test RateLimiter time_until_next() Method
+# =============================================================================
+
+
+class TestRateLimiterTimeUntilNext:
+    """Test RateLimiter time_until_next() method."""
+
+    def test_returns_positive_when_slot_not_available(self):
+        """Test time_until_next() returns positive value when rate limited."""
+        mock_logger = Mock()
+        limiter = RateLimiter(mock_logger, per_minute=60)  # 1 per second
+
+        # Initially, slot is not available (initial=False by default)
+        remaining = limiter.time_until_next()
+        assert remaining > 0
+        assert remaining <= 1.0  # Should be at most the interval
+
+    def test_returns_zero_when_slot_available(self):
+        """Test time_until_next() returns 0.0 when slot is available."""
+        mock_logger = Mock()
+        limiter = RateLimiter(mock_logger, per_minute=60, initial=True)
+
+        # With initial=True, slot is immediately available
+        assert limiter.time_until_next() == 0.0
+
+    def test_returns_zero_after_waiting(self, fake_clock):
+        """Test time_until_next() returns 0.0 after waiting for slot."""
+        mock_logger = Mock()
+        limiter = RateLimiter(mock_logger, per_minute=120)  # 0.5 second delay
+
+        # Wait for slot to become available
+        fake_clock.sleep(0.55)
+
+        assert limiter.time_until_next() == 0.0
+
+    def test_does_not_modify_state(self):
+        """Test time_until_next() does NOT modify last_t."""
+        mock_logger = Mock()
+        limiter = RateLimiter(mock_logger, per_minute=60)
+
+        original_last_t = limiter.last_t
+
+        # Call multiple times
+        for _ in range(5):
+            limiter.time_until_next()
+
+        # last_t should be unchanged
+        assert limiter.last_t == original_last_t
+
+    def test_accepts_now_parameter(self):
+        """Test time_until_next() accepts optional now parameter."""
+        mock_logger = Mock()
+        limiter = RateLimiter(mock_logger, per_minute=60, initial=True)
+
+        # Consume a slot
+        limiter.try_next()
+        next_slot = limiter.last_t
+
+        # Pass a specific time
+        fake_now = next_slot - 0.3  # 0.3 seconds before next slot
+        remaining = limiter.time_until_next(now=fake_now)
+        assert 0.25 < remaining < 0.35  # Should be ~0.3 seconds
+
+    def test_returns_zero_when_now_is_past_slot(self):
+        """Test time_until_next() returns 0.0 when now is past next slot."""
+        mock_logger = Mock()
+        limiter = RateLimiter(mock_logger, per_minute=60, initial=True)
+
+        # Consume a slot
+        limiter.try_next()
+        next_slot = limiter.last_t
+
+        # Pass a time past the next slot
+        fake_now = next_slot + 0.5
+        remaining = limiter.time_until_next(now=fake_now)
+        assert remaining == 0.0
+
+    def test_consistent_with_can_proceed(self, fake_clock):
+        """Test time_until_next() is consistent with can_proceed()."""
+        mock_logger = Mock()
+        limiter = RateLimiter(mock_logger, per_minute=120)
+
+        # While time_until_next() > 0, can_proceed() should be False
+        assert limiter.time_until_next() == 0.5
+        assert limiter.can_proceed() is False
+
+        # Wait for slot
+        fake_clock.sleep(0.55)
+
+        # When time_until_next() == 0, can_proceed() should be True
+        assert limiter.time_until_next() == 0.0
+        assert limiter.can_proceed() is True
+
+    def test_non_blocking_behavior(self):
+        """Test time_until_next() never blocks regardless of rate limit."""
+        mock_logger = Mock()
+        limiter = RateLimiter(mock_logger, per_minute=1)  # Very slow: 60 second delay
+
+        # Even with 60-second delay, should return immediately
+        start = time.monotonic()
+        remaining = limiter.time_until_next()
+        elapsed = time.monotonic() - start
+
+        assert remaining > 0  # Slot not available
+        assert elapsed < 0.01  # Should be near-instant
+
+    def test_decreases_over_time(self, fake_clock):
+        """Test time_until_next() value decreases as time passes."""
+        mock_logger = Mock()
+        limiter = RateLimiter(mock_logger, per_minute=60)
+
+        remaining1 = limiter.time_until_next()
+        fake_clock.sleep(0.25)
+        remaining2 = limiter.time_until_next()
+
+        assert remaining1 == 1.0
+        assert remaining2 == 0.75
+
+
+# =============================================================================
+# Test Rate Limiting Calculations
+# =============================================================================
+
+
+class TestRateLimitingCalculations:
+    """Test rate limiting calculations."""
+
+    def test_60_per_minute_delay(self):
+        """Test 60 per minute gives 1 second delay."""
+        mock_logger = Mock()
+        limiter = RateLimiter(mock_logger, per_minute=60)
+        delay = 60.0 / limiter.per_minute
+        assert delay == 1.0
+
+    def test_120_per_minute_delay(self):
+        """Test 120 per minute gives 0.5 second delay."""
+        mock_logger = Mock()
+        limiter = RateLimiter(mock_logger, per_minute=120)
+        delay = 60.0 / limiter.per_minute
+        assert delay == 0.5
+
+    def test_30_per_minute_delay(self):
+        """Test 30 per minute gives 2 second delay."""
+        mock_logger = Mock()
+        limiter = RateLimiter(mock_logger, per_minute=30)
+        delay = 60.0 / limiter.per_minute
+        assert delay == 2.0
+
+
+# =============================================================================
+# Test Integration Scenarios
+# =============================================================================
+
+
+class TestRateLimiterIntegration:
+    """Test real-world rate limiter scenarios."""
+
+    def test_rate_limiter_workflow(self, fake_clock):
+        """Test complete rate limiter workflow."""
+        mock_logger = Mock()
+        limiter = RateLimiter(mock_logger, per_minute=120)  # Fast rate for testing
+
+        # First operation - waits (initial=False by default)
+        wait1 = limiter.next()
+        assert wait1 == 0.5
+
+        # Second operation - should wait
+        wait2 = limiter.next()
+        assert wait2 == 0.5
+
+        # Third operation - should wait
+        wait3 = limiter.next()
+        assert wait3 == 0.5
+
+    def test_rate_limiter_workflow_initial_false(self, fake_clock):
+        """Test rate limiter workflow with initial=False (all calls wait)."""
+        mock_logger = Mock()
+        limiter = RateLimiter(mock_logger, per_minute=120, initial=False)
+
+        # First operation - waits (initial=False)
+        wait1 = limiter.next()
+        assert wait1 == 0.5
+
+        # Second operation - should wait
+        wait2 = limiter.next()
+        assert wait2 == 0.5
+
+    def test_rate_limiter_with_variable_delays(self):
+        """Test rate limiter with variable delays between calls."""
+        current_time = [0.0]
+
+        def mock_monotonic():
+            return current_time[0]
+
+        def mock_sleep(duration):
+            current_time[0] += duration
+
+        with (
+            patch("appinfra.rate_limit.time.monotonic", side_effect=mock_monotonic),
+            patch("appinfra.rate_limit.time.sleep", side_effect=mock_sleep),
+        ):
+            mock_logger = Mock()
+            # 60/min = 1 per second, so delay between ops is 1.0s
+            # With initial=False, first slot is at t=1.0
+            limiter = RateLimiter(mock_logger, per_minute=60)
+
+            # First next() at t=0: waits 1.0s, time advances to 1.0, _last_t=2.0
+            limiter.next()
+            # Simulate 0.3s additional delay after first call completed
+            current_time[0] += 0.3  # now at t=1.3
+
+            wait = limiter.next()  # Second call at t=1.3, _last_t=2.0
+            # Should wait for remaining 0.7s (2.0 - 1.3 = 0.7)
+            assert wait == pytest.approx(0.7, abs=0.01)
+
+    def test_multiple_operations_stay_within_rate(self):
+        """Test multiple operations stay within rate limit."""
+        current_time = [0.0]
+        total_wait = [0.0]
+
+        def mock_monotonic():
+            return current_time[0]
+
+        def mock_sleep(duration):
+            current_time[0] += duration
+            total_wait[0] += duration
+
+        with (
+            patch("appinfra.rate_limit.time.monotonic", side_effect=mock_monotonic),
+            patch("appinfra.rate_limit.time.sleep", side_effect=mock_sleep),
+        ):
+            mock_logger = Mock()
+            limiter = RateLimiter(
+                mock_logger, per_minute=120
+            )  # 2 per second = 0.5s delay
+
+            # Perform 10 operations
+            for _ in range(10):
+                limiter.next()
+
+            # 10 ops at 0.5s each = 5.0s total wait (first op waits too since initial=False)
+            assert total_wait[0] == pytest.approx(5.0, abs=0.01)
+
+
+# =============================================================================
+# Test Backoff Initialization
+# =============================================================================
+
+
+class TestBackoffInitialization:
+    """Test Backoff initialization."""
+
+    def test_init_default_values(self):
+        """Test initialization with default values."""
+        mock_logger = Mock()
+        backoff = Backoff(mock_logger)
+        assert backoff.base == 1.0
+        assert backoff.max_delay == 60.0
+        assert backoff.factor == 2.0
+        assert backoff.jitter is True
+        assert backoff._lg is mock_logger
+        assert backoff.attempts == 0
+
+    def test_init_custom_values(self):
+        """Test initialization with custom values."""
+        mock_logger = Mock()
+        backoff = Backoff(
+            mock_logger, base=0.5, max_delay=30.0, factor=3.0, jitter=False
+        )
+        assert backoff.base == 0.5
+        assert backoff.max_delay == 30.0
+        assert backoff.factor == 3.0
+        assert backoff.jitter is False
+
+    def test_init_logger_is_required(self):
+        """Test logger is required as first parameter."""
+        mock_logger = Mock()
+        backoff = Backoff(mock_logger)
+        assert backoff._lg is mock_logger
+
+    def test_init_rejects_non_positive_base(self):
+        """Test that base must be positive."""
+        mock_logger = Mock()
+        with pytest.raises(ValueError, match="base must be positive"):
+            Backoff(mock_logger, base=0)
+        with pytest.raises(ValueError, match="base must be positive"):
+            Backoff(mock_logger, base=-1.0)
+
+    def test_init_rejects_non_positive_max_delay(self):
+        """Test that max_delay must be positive."""
+        mock_logger = Mock()
+        with pytest.raises(ValueError, match="max_delay must be positive"):
+            Backoff(mock_logger, max_delay=0)
+        with pytest.raises(ValueError, match="max_delay must be positive"):
+            Backoff(mock_logger, max_delay=-10.0)
+
+    def test_init_rejects_factor_less_than_one(self):
+        """Test that factor must be >= 1."""
+        mock_logger = Mock()
+        with pytest.raises(ValueError, match="factor must be >= 1"):
+            Backoff(mock_logger, factor=0.5)
+        with pytest.raises(ValueError, match="factor must be >= 1"):
+            Backoff(mock_logger, factor=0)
+
+    def test_init_accepts_factor_of_one(self):
+        """Test that factor=1 is allowed (constant delay)."""
+        mock_logger = Mock()
+        backoff = Backoff(mock_logger, factor=1.0, jitter=False)
+        assert backoff.factor == 1.0
+        # All delays should be the same
+        delays = [backoff.next_delay() for _ in range(3)]
+        assert delays == [1.0, 1.0, 1.0]
+
+
+# =============================================================================
+# Test Backoff next_delay() Method
+# =============================================================================
+
+
+class TestBackoffNextDelay:
+    """Test Backoff next_delay() method."""
+
+    def test_exponential_growth_without_jitter(self):
+        """Test delay grows exponentially without jitter."""
+        mock_logger = Mock()
+        backoff = Backoff(mock_logger, base=1.0, factor=2.0, jitter=False)
+
+        delays = [backoff.next_delay() for _ in range(5)]
+
+        assert delays == [1.0, 2.0, 4.0, 8.0, 16.0]
+
+    def test_attempts_increment(self):
+        """Test attempts counter increments with each call."""
+        mock_logger = Mock()
+        backoff = Backoff(mock_logger, jitter=False)
+
+        assert backoff.attempts == 0
+        backoff.next_delay()
+        assert backoff.attempts == 1
+        backoff.next_delay()
+        assert backoff.attempts == 2
+        backoff.next_delay()
+        assert backoff.attempts == 3
+
+    def test_max_delay_cap(self):
+        """Test delay is capped at max_delay."""
+        mock_logger = Mock()
+        backoff = Backoff(
+            mock_logger, base=1.0, max_delay=10.0, factor=2.0, jitter=False
+        )
+
+        # 1, 2, 4, 8, 10 (capped), 10 (capped)
+        delays = [backoff.next_delay() for _ in range(6)]
+
+        assert delays == [1.0, 2.0, 4.0, 8.0, 10.0, 10.0]
+
+    def test_jitter_reduces_delay(self):
+        """Test jitter reduces delay (multiplies by 0.0-1.0)."""
+        mock_logger = Mock()
+        backoff = Backoff(mock_logger, base=10.0, factor=1.0, jitter=True)
+
+        # With full jitter, delay should be between 0.0 and 10.0
+        delays = [backoff.next_delay() for _ in range(100)]
+
+        for delay in delays:
+            assert 0.0 <= delay <= 10.0
+
+    def test_jitter_provides_randomness(self):
+        """Test jitter produces different values."""
+        mock_logger = Mock()
+        backoff = Backoff(mock_logger, base=10.0, factor=1.0, jitter=True)
+
+        delays = [backoff.next_delay() for _ in range(10)]
+        backoff.reset()
+
+        # Not all delays should be the same (statistical test)
+        unique_delays = set(delays)
+        assert len(unique_delays) > 1
+
+    def test_custom_factor(self):
+        """Test custom growth factor."""
+        mock_logger = Mock()
+        backoff = Backoff(mock_logger, base=1.0, factor=3.0, jitter=False)
+
+        delays = [backoff.next_delay() for _ in range(4)]
+
+        assert delays == [1.0, 3.0, 9.0, 27.0]
+
+
+# =============================================================================
+# Test Backoff wait() Method
+# =============================================================================
+
+
+class TestBackoffWait:
+    """Test Backoff wait() method."""
+
+    def test_wait_blocks_for_delay(self):
+        """Test wait() actually sleeps for the delay."""
+        mock_logger = Mock()
+        backoff = Backoff(mock_logger, base=0.1, jitter=False)
+
+        start = time.monotonic()
+        delay = backoff.wait()
+        elapsed = time.monotonic() - start
+
+        assert delay == 0.1
+        assert elapsed >= 0.09  # Allow small tolerance
+
+    def test_wait_returns_delay(self):
+        """Test wait() returns the delay value."""
+        mock_logger = Mock()
+        backoff = Backoff(mock_logger, base=0.05, jitter=False)
+
+        delay = backoff.wait()
+        assert delay == 0.05
+
+    def test_wait_increments_attempts(self):
+        """Test wait() increments attempt counter."""
+        mock_logger = Mock()
+        backoff = Backoff(mock_logger, base=0.01, jitter=False)
+
+        assert backoff.attempts == 0
+        backoff.wait()
+        assert backoff.attempts == 1
+
+    def test_wait_logs(self):
+        """Test wait() logs the backoff."""
+        mock_logger = Mock()
+        backoff = Backoff(mock_logger, base=0.01, jitter=False)
+
+        backoff.wait()
+
+        mock_logger.trace.assert_called_once()
+        args, kwargs = mock_logger.trace.call_args
+        assert "backoff wait" in args
+        assert "extra" in kwargs
+        assert "delay" in kwargs["extra"]
+        assert "attempt" in kwargs["extra"]
+        assert kwargs["extra"]["attempt"] == 1
+
+
+# =============================================================================
+# Test Backoff reset() Method
+# =============================================================================
+
+
+class TestBackoffReset:
+    """Test Backoff reset() method."""
+
+    def test_reset_clears_attempts(self):
+        """Test reset() sets attempts to 0."""
+        mock_logger = Mock()
+        backoff = Backoff(mock_logger, jitter=False)
+
+        backoff.next_delay()
+        backoff.next_delay()
+        backoff.next_delay()
+        assert backoff.attempts == 3
+
+        backoff.reset()
+        assert backoff.attempts == 0
+
+    def test_reset_restarts_delay_sequence(self):
+        """Test reset() restarts the delay sequence."""
+        mock_logger = Mock()
+        backoff = Backoff(mock_logger, base=1.0, factor=2.0, jitter=False)
+
+        # Progress through sequence
+        backoff.next_delay()  # 1
+        backoff.next_delay()  # 2
+        backoff.next_delay()  # 4
+
+        backoff.reset()
+
+        # Should start fresh
+        assert backoff.next_delay() == 1.0
+        assert backoff.next_delay() == 2.0
+
+
+# =============================================================================
+# Test Backoff Integration Scenarios
+# =============================================================================
+
+
+class TestBackoffIntegration:
+    """Test real-world backoff scenarios."""
+
+    def test_retry_loop_pattern(self):
+        """Test typical retry loop usage pattern."""
+        mock_logger = Mock()
+        backoff = Backoff(mock_logger, base=0.01, max_delay=0.1, jitter=False)
+        attempts = 0
+        max_attempts = 5
+
+        # Simulate retry loop
+        while attempts < max_attempts:
+            attempts += 1
+            # Simulate failure
+            if attempts < 3:
+                backoff.wait()
+            else:
+                # Success on attempt 3
+                backoff.reset()
+                break
+
+        assert attempts == 3
+        assert backoff.attempts == 0  # Reset after success
+
+    def test_success_reset_pattern(self):
+        """Test backoff reset after successful operation."""
+        mock_logger = Mock()
+        backoff = Backoff(mock_logger, base=0.01, jitter=False)
+
+        # Fail twice
+        backoff.wait()
+        backoff.wait()
+        assert backoff.attempts == 2
+
+        # Success - reset
+        backoff.reset()
+        assert backoff.attempts == 0
+
+        # Next failure starts fresh
+        delay = backoff.next_delay()
+        assert delay == 0.01  # Back to base delay
+
+    def test_delay_progression_with_jitter(self):
+        """Test delay progression with jitter stays within bounds."""
+        mock_logger = Mock()
+        backoff = Backoff(
+            mock_logger, base=1.0, max_delay=10.0, factor=2.0, jitter=True
+        )
+
+        # Expected base delays: 1, 2, 4, 8, 10, 10
+        # With full jitter (0.0-1.0 multiplier), bounds are:
+        expected_bounds = [
+            (0.0, 1.0),  # attempt 0: base=1
+            (0.0, 2.0),  # attempt 1: base=2
+            (0.0, 4.0),  # attempt 2: base=4
+            (0.0, 8.0),  # attempt 3: base=8
+            (0.0, 10.0),  # attempt 4: base=10 (capped)
+            (0.0, 10.0),  # attempt 5: base=10 (capped)
+        ]
+
+        for min_bound, max_bound in expected_bounds:
+            delay = backoff.next_delay()
+            assert min_bound <= delay <= max_bound, (
+                f"Delay {delay} not in [{min_bound}, {max_bound}]"
+            )
+
+    def test_multiple_backoff_instances_independent(self):
+        """Test multiple backoff instances don't share state."""
+        mock_logger = Mock()
+        backoff1 = Backoff(mock_logger, base=1.0, jitter=False)
+        backoff2 = Backoff(mock_logger, base=2.0, jitter=False)
+
+        backoff1.next_delay()
+        backoff1.next_delay()
+
+        assert backoff1.attempts == 2
+        assert backoff2.attempts == 0
+
+        delay2 = backoff2.next_delay()
+        assert delay2 == 2.0  # Uses its own base
+
+    @patch("appinfra.rate_limit.time.sleep")
+    def test_wait_uses_calculated_delay(self, mock_sleep):
+        """Test wait() sleeps for the calculated delay."""
+        mock_logger = Mock()
+        backoff = Backoff(mock_logger, base=5.0, factor=2.0, jitter=False)
+
+        backoff.wait()
+        mock_sleep.assert_called_once_with(5.0)
+
+        mock_sleep.reset_mock()
+        backoff.wait()
+        mock_sleep.assert_called_once_with(10.0)

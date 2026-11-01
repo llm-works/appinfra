@@ -61,8 +61,9 @@ def generate_large_config(size_mb: int) -> str:
     entries_needed = (size_mb * 1024 * 1024) // 50
 
     lines = ["config:", "  large_data:"]
-    for i in range(entries_needed):
-        lines.append(f"    key_{i}: 'value_{i}_padding_data_here'")
+    lines.extend(
+        f"    key_{i}: 'value_{i}_padding_data_here'" for i in range(entries_needed)
+    )
 
     return "\n".join(lines)
 

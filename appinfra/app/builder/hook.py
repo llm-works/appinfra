@@ -17,16 +17,16 @@ class HookManager:
     """Manages application lifecycle hooks."""
 
     def __init__(self) -> None:
-        self._hooks: dict[str, list[Callable]] = defaultdict(list)
+        self._hooks: dict[str, list[Callable[..., Any]]] = defaultdict(list)
         self._hook_metadata: dict[str, list[dict[str, Any]]] = defaultdict(list)
 
     def register_hook(
         self,
         event: str,
-        callback: Callable,
+        callback: Callable[..., Any],
         priority: int = 0,
         once: bool = False,
-        condition: Callable | None = None,
+        condition: Callable[..., Any] | None = None,
     ) -> None:
         """
         Register a hook for an event.
@@ -104,11 +104,11 @@ class HookManager:
         """Check if there are any hooks for an event."""
         return len(self._hooks[event]) > 0
 
-    def get_hooks(self, event: str) -> list[Callable]:
+    def get_hooks(self, event: str) -> list[Callable[..., Any]]:
         """Get all hooks for an event."""
         return self._hooks[event].copy()
 
-    def iter_hooks(self) -> Iterator[tuple[str, Callable, dict[str, Any]]]:
+    def iter_hooks(self) -> Iterator[tuple[str, Callable[..., Any], dict[str, Any]]]:
         """Every hook with its event and metadata, in trigger order.
 
         The metadata keys are ``register_hook``'s keyword arguments, so a
@@ -153,66 +153,94 @@ class HookBuilder:
     """Builder for registering hooks."""
 
     def __init__(self) -> None:
-        self._hooks: dict[str, list[tuple]] = defaultdict(list)
+        # (func, priority, once, condition)
+        self._hooks: dict[str, list[tuple[Any, ...]]] = defaultdict(list)
 
     def on_startup(
-        self, func: Callable, priority: int = 0, condition: Callable | None = None
+        self,
+        func: Callable[..., Any],
+        priority: int = 0,
+        condition: Callable[..., Any] | None = None,
     ) -> Self:
         """Register a startup hook."""
         self._hooks["startup"].append((func, priority, False, condition))
         return self
 
     def on_shutdown(
-        self, func: Callable, priority: int = 0, condition: Callable | None = None
+        self,
+        func: Callable[..., Any],
+        priority: int = 0,
+        condition: Callable[..., Any] | None = None,
     ) -> Self:
         """Register a shutdown hook."""
         self._hooks["shutdown"].append((func, priority, False, condition))
         return self
 
     def on_tool_start(
-        self, func: Callable, priority: int = 0, condition: Callable | None = None
+        self,
+        func: Callable[..., Any],
+        priority: int = 0,
+        condition: Callable[..., Any] | None = None,
     ) -> Self:
         """Register a tool start hook."""
         self._hooks["tool_start"].append((func, priority, False, condition))
         return self
 
     def on_tool_end(
-        self, func: Callable, priority: int = 0, condition: Callable | None = None
+        self,
+        func: Callable[..., Any],
+        priority: int = 0,
+        condition: Callable[..., Any] | None = None,
     ) -> Self:
         """Register a tool end hook."""
         self._hooks["tool_end"].append((func, priority, False, condition))
         return self
 
     def on_error(
-        self, func: Callable, priority: int = 0, condition: Callable | None = None
+        self,
+        func: Callable[..., Any],
+        priority: int = 0,
+        condition: Callable[..., Any] | None = None,
     ) -> Self:
         """Register an error hook."""
         self._hooks["error"].append((func, priority, False, condition))
         return self
 
     def on_before_parse(
-        self, func: Callable, priority: int = 0, condition: Callable | None = None
+        self,
+        func: Callable[..., Any],
+        priority: int = 0,
+        condition: Callable[..., Any] | None = None,
     ) -> Self:
         """Register a before argument parsing hook."""
         self._hooks["before_parse"].append((func, priority, False, condition))
         return self
 
     def on_after_parse(
-        self, func: Callable, priority: int = 0, condition: Callable | None = None
+        self,
+        func: Callable[..., Any],
+        priority: int = 0,
+        condition: Callable[..., Any] | None = None,
     ) -> Self:
         """Register an after argument parsing hook."""
         self._hooks["after_parse"].append((func, priority, False, condition))
         return self
 
     def on_before_setup(
-        self, func: Callable, priority: int = 0, condition: Callable | None = None
+        self,
+        func: Callable[..., Any],
+        priority: int = 0,
+        condition: Callable[..., Any] | None = None,
     ) -> Self:
         """Register a before setup hook."""
         self._hooks["before_setup"].append((func, priority, False, condition))
         return self
 
     def on_after_setup(
-        self, func: Callable, priority: int = 0, condition: Callable | None = None
+        self,
+        func: Callable[..., Any],
+        priority: int = 0,
+        condition: Callable[..., Any] | None = None,
     ) -> Self:
         """Register an after setup hook."""
         self._hooks["after_setup"].append((func, priority, False, condition))
@@ -221,9 +249,9 @@ class HookBuilder:
     def on_custom(
         self,
         event: str,
-        func: Callable,
+        func: Callable[..., Any],
         priority: int = 0,
-        condition: Callable | None = None,
+        condition: Callable[..., Any] | None = None,
     ) -> Self:
         """Register a custom event hook."""
         self._hooks[event].append((func, priority, False, condition))
@@ -232,9 +260,9 @@ class HookBuilder:
     def once(
         self,
         event: str,
-        func: Callable,
+        func: Callable[..., Any],
         priority: int = 0,
-        condition: Callable | None = None,
+        condition: Callable[..., Any] | None = None,
     ) -> Self:
         """Register a hook that runs only once."""
         self._hooks[event].append((func, priority, True, condition))
@@ -331,7 +359,6 @@ class BuiltinHooks:
     def cleanup_resources(context: HookContext) -> None:
         """Clean up resources on shutdown."""
         # This would be implemented based on specific application needs
-        pass
 
 
 def create_logging_hooks() -> HookBuilder:

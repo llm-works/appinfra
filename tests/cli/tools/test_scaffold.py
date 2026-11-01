@@ -132,7 +132,7 @@ class TestScaffoldToolAddArgs:
         tool.add_args(parser)
 
         # Check 'name' was added as positional argument
-        calls = [c for c in parser.add_argument.call_args_list]
+        calls = list(parser.add_argument.call_args_list)
         name_calls = [c for c in calls if c[0][0] == "name"]
         assert len(name_calls) == 1
 
@@ -143,7 +143,7 @@ class TestScaffoldToolAddArgs:
 
         tool.add_args(parser)
 
-        calls = [c for c in parser.add_argument.call_args_list]
+        calls = list(parser.add_argument.call_args_list)
         path_calls = [c for c in calls if c[0][0] == "--path"]
         assert len(path_calls) == 1
         # Check default is current directory
@@ -404,7 +404,7 @@ class TestAppImportsSection:
         lines = tool._app_imports_section("myproject", with_db=False)
 
         content = "\n".join(lines)
-        assert "from appinfra.app import App, AppBuilder" in content
+        assert "from appinfra.app import AppBuilder" in content
         assert "from appinfra.db import PG" not in content
 
     def test_imports_with_database(self):
@@ -636,9 +636,11 @@ class TestGenerateMakefile:
             args.makefile_style = "standalone"
             tool._parsed_args = args
 
-            with patch.object(Path, "exists", return_value=True):
-                with patch.object(Path, "read_text", return_value=template_content):
-                    tool._generate_makefile(project_path, "myproject")
+            with (
+                patch.object(Path, "exists", return_value=True),
+                patch.object(Path, "read_text", return_value=template_content),
+            ):
+                tool._generate_makefile(project_path, "myproject")
 
             makefile_path = project_path / "Makefile"
             if makefile_path.exists():

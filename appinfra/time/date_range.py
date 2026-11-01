@@ -123,7 +123,7 @@ def iter_dates_midnight_gmt(
 
 
 def dates_from_lists(
-    dates_list: list, date_range_list: list = [], strings: bool = True
+    dates_list: list[Any], date_range_list: list[Any] = [], strings: bool = True
 ) -> set[str] | set[datetime.date]:
     """
     Combine individual dates and date ranges into a unified set.
@@ -160,4 +160,4 @@ def dates_from_lists(
     # Convert to strings if requested
     if not strings:
         return dates
-    return set([date_to_str(d) for d in dates])
+    return {date_to_str(d) for d in dates}
