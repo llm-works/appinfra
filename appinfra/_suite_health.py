@@ -30,6 +30,7 @@ The rules applied to these figures live in appinfra/scripts/check_suite_health.p
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import signal
@@ -244,10 +245,27 @@ class SuiteHealth:
     def pytest_fixture_setup(
         self, fixturedef: pytest.FixtureDef[Any], request: pytest.FixtureRequest
     ) -> Generator[None, object, object]:
-        """Record a fixture's setup under its own name, charged to the tests that use it
-        (charged_fixtures)."""
-        with self._recorder.running(f"fixture:{fixturedef.argname}"):
+        """Record the setup and teardown of a fixture wider than one test under its own name,
+        charged to the tests that use it (charged_fixtures).
+
+        A function-scoped fixture is made for one test and stays on that test's record: under
+        its own name, what one test's instance did (a monkeypatch undoing a chdir) would be
+        charged to every later test using it. A wider fixture ends during the teardown of the
+        last test of its scope, which may not use it. Finalizers run last in, first out: one
+        added before the fixture runs ends the recording after its teardown, one added after it
+        runs starts it before.
+        """
+        if fixturedef.scope == "function":
             return (yield)
+        key = f"fixture:{fixturedef.argname}"
+        teardown = contextlib.ExitStack()
+        fixturedef.addfinalizer(teardown.close)
+        with self._recorder.running(key):
+            result = yield
+        fixturedef.addfinalizer(
+            lambda: teardown.enter_context(self._recorder.running(key))
+        )
+        return result
 
     @pytest.hookimpl(wrapper=True)
     def pytest_runtest_protocol(

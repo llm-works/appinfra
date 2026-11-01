@@ -351,6 +351,47 @@ def test_a_test_is_charged_with_what_it_asks_for_and_per_test_autouse(
     assert found == {"test_in_tmp": ["chdir", "fs-write"]}
 
 
+_TEARDOWN = """\
+import pytest
+
+
+@pytest.fixture(scope="module")
+def leaves_a_file(tmp_path_factory):
+    path = tmp_path_factory.mktemp("teardown")
+    yield path
+    (path / "done").write_text("x")
+
+
+def test_uses_it(leaves_a_file):
+    pass
+
+
+def test_changes_directory(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+
+
+def test_only_sets_the_environment(monkeypatch):
+    monkeypatch.setenv("SUITE_HEALTH_ONLY_ENV", "1")
+
+
+def test_last_of_the_module():
+    pass
+"""
+
+
+def test_a_fixture_teardown_is_charged_to_the_tests_it_belongs_to(
+    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A wider fixture ends during the teardown of the last test of its scope; a test's own
+    fixture undoes what that test did, and no other."""
+    layout = {**_PROJECT, "tests/unit/test_teardown.py": _TEARDOWN}
+    behavior = _report(_run(pytester, monkeypatch, layout))["behavior"]
+    assert sorted(nodeid.split("::")[-1] for nodeid in behavior) == [
+        "test_changes_directory",
+        "test_uses_it",
+    ]
+
+
 def test_an_exemption_needs_a_reason(
     pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
 ) -> None:
