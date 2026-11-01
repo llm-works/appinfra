@@ -50,34 +50,52 @@ class TestImporting:
 
 class TestChanged:
     def test_an_env_var_a_test_set_is_a_leak(self) -> None:
-        assert _suite_health._changed(_state(), _state(X="1"), frozenset()) == ["$X"]
+        changed = _suite_health._changed(_state(), _state(X="1"), set(), {"X"})
+        assert changed == ["$X"]
 
     def test_an_env_var_set_by_an_import_is_not(self) -> None:
         before, after = _state(), _state(TORCHINDUCTOR_CACHE_DIR="/tmp/c")
-        assert _suite_health._changed(before, after, {"TORCHINDUCTOR_CACHE_DIR"}) == []
+        changed = _suite_health._changed(
+            before, after, {"TORCHINDUCTOR_CACHE_DIR"}, set()
+        )
+        assert changed == []
 
     def test_an_env_var_an_import_removed_is_not(self) -> None:
-        assert _suite_health._changed(_state(X="1"), _state(), {"X"}) == []
+        assert _suite_health._changed(_state(X="1"), _state(), {"X"}, set()) == []
+
+    def test_a_test_changing_what_an_import_set_is_a_leak(self) -> None:
+        changed = _suite_health._changed(_state(X="1"), _state(X="2"), {"X"}, {"X"})
+        assert changed == ["$X"]
 
 
-class TestNoteImportEnv:
-    def test_keeps_the_name_of_a_var_set_during_an_import(
-        self, monkeypatch: pytest.MonkeyPatch
+class TestNoteEnv:
+    @pytest.fixture
+    def written(self, monkeypatch: pytest.MonkeyPatch) -> tuple[set[str], set[str]]:
+        """The names the hook keeps: (written by imports, written by the test)."""
+        by_import: set[str] = set()
+        by_test: set[str] = set()
+        monkeypatch.setattr(_suite_health, "_import_env", by_import)
+        monkeypatch.setattr(_suite_health, "_test_env", by_test)
+        return by_import, by_test
+
+    def test_a_var_set_during_an_import_is_the_import_s(
+        self, monkeypatch: pytest.MonkeyPatch, written: tuple[set[str], set[str]]
     ) -> None:
-        names: set[str] = set()
-        monkeypatch.setattr(_suite_health, "_import_env", names)
         monkeypatch.setattr(_suite_health, "_importing", lambda frame: True)
-        _suite_health._note_import_env("os.putenv", (b"VLLM_LOGGING_LEVEL", b"INFO"))
-        _suite_health._note_import_env("os.unsetenv", (b"VLLM_HOST_IP",))
-        assert names == {"VLLM_LOGGING_LEVEL", "VLLM_HOST_IP"}
+        _suite_health._note_env("os.putenv", (b"VLLM_LOGGING_LEVEL", b"INFO"))
+        _suite_health._note_env("os.unsetenv", (b"VLLM_HOST_IP",))
+        assert written == ({"VLLM_LOGGING_LEVEL", "VLLM_HOST_IP"}, set())
 
-    def test_ignores_a_var_set_outside_an_import_and_other_events(
-        self, monkeypatch: pytest.MonkeyPatch
+    def test_a_var_set_outside_an_import_is_the_test_s(
+        self, monkeypatch: pytest.MonkeyPatch, written: tuple[set[str], set[str]]
     ) -> None:
-        names: set[str] = set()
-        monkeypatch.setattr(_suite_health, "_import_env", names)
         monkeypatch.setattr(_suite_health, "_importing", lambda frame: False)
-        _suite_health._note_import_env("os.putenv", (b"X", b"1"))
+        _suite_health._note_env("os.putenv", (b"X", b"1"))
+        assert written == (set(), {"X"})
+
+    def test_other_events_are_ignored(
+        self, monkeypatch: pytest.MonkeyPatch, written: tuple[set[str], set[str]]
+    ) -> None:
         monkeypatch.setattr(_suite_health, "_importing", lambda frame: True)
-        _suite_health._note_import_env("open", ("/tmp/x", "r", 0))
-        assert names == set()
+        _suite_health._note_env("open", ("/tmp/x", "r", 0))
+        assert written == (set(), set())

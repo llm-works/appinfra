@@ -123,6 +123,10 @@ def test_imports_a_library_that_sets_env():
     import sets_env_on_import  # noqa: F401
 
 
+def test_changes_what_an_import_set():
+    os.environ["SUITE_HEALTH_IMPORT"] = "2"
+
+
 @pytest.mark.integration
 def test_integration_may_change_state():
     os.environ["SUITE_HEALTH_INTEGRATION"] = "1"
@@ -148,6 +152,8 @@ def test_unit_tests_that_leave_state_changed_are_reported(
         "test_timer": ["ITIMER_REAL"],
         "test_env": ["$SUITE_HEALTH_LEAK"],
         "test_cwd": ["cwd"],
+        # an import set it earlier, but this test changed it
+        "test_changes_what_an_import_set": ["$SUITE_HEALTH_IMPORT"],
     }
 
 
