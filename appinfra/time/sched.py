@@ -62,7 +62,7 @@ class Period(Enum):
     Values:
         DAILY: Execute once per day at the specified time
         WEEKLY: Execute once per week on the specified weekday at the specified time
-        MONTHLY: Execute once per month on the specified day at the specified time
+        MONTHLY: Execute once per month on the 1st at the specified time
         HOURLY: Execute once per hour at the specified minute offset
         MINUTELY: Execute once per minute at the specified second offset
 
@@ -183,6 +183,16 @@ def _parse_hhmm_format(when: str) -> tuple[int, int]:
                 raise InvalidTimeFormatError(f"Invalid time format: {when}")
 
     raise InvalidTimeFormatError(f"Unsupported time format: {when}")
+
+
+def _wall_ts(day: datetime.date, hour: int, minute: int) -> float:
+    """Timestamp of a local wall-clock time on ``day``.
+
+    A time the fall-back hour repeats resolves to its first pass. A time the
+    spring-forward gap skips resolves as if the offset before the change still
+    held: 02:30 in a gap from 02:00 to 03:00 runs at 03:30.
+    """
+    return datetime.datetime.combine(day, datetime.time(hour, minute)).timestamp()
 
 
 class Sched:
@@ -308,139 +318,56 @@ class Sched:
         """
         return self._running
 
-    def _setup(self) -> None:
-        """
-        Set up the next scheduled execution time.
-
-        Calculates the next execution time based on the current time and
-        the configured schedule. If the scheduled time has already passed
-        for the current period, schedules for the next occurrence.
-        """
-        now = datetime.datetime.now()
-
-        if self._period == Period.DAILY:
-            self._setup_daily(now)
-        elif self._period == Period.WEEKLY:
-            self._setup_weekly(now)
-        elif self._period == Period.MONTHLY:
-            self._setup_monthly(now)
-        elif self._period == Period.HOURLY:
-            self._setup_hourly(now)
-        elif self._period == Period.MINUTELY:
-            self._setup_minutely(now)
-        else:
-            raise UnsupportedPeriodError(
-                f"Setup not implemented for period: {self._period}"
-            )
-
-    def _setup_daily(self, now: datetime.datetime) -> None:
-        """Set up daily scheduling."""
-        target_time = now.replace(
-            hour=self._hour, minute=self._minute, second=0, microsecond=0
-        )
-
-        # If time has passed today, schedule for tomorrow
-        if now >= target_time:
-            target_time += datetime.timedelta(days=1)
-
-        self._next_t = target_time.timestamp()
-        self._log_setup(target_time)
-
-    def _setup_weekly(self, now: datetime.datetime) -> None:
-        """Set up weekly scheduling."""
-        assert self._weekday is not None  # Validated in __init__ for WEEKLY period
-        # Calculate days until target weekday. days_ahead == 0 means today *is*
-        # the target weekday — keep it 0 so the same-day time-check below can
-        # decide whether to fire today or push to next week.
-        days_ahead = self._weekday - now.weekday()
-        if days_ahead < 0:  # Target day was earlier this week → go to next week
-            days_ahead += 7
-
-        target_date = now + datetime.timedelta(days=days_ahead)
-        target_time = target_date.replace(
-            hour=self._hour, minute=self._minute, second=0, microsecond=0
-        )
-
-        # If we're on the target day but time has passed, schedule for next week
-        if now.weekday() == self._weekday and now >= target_time:
-            target_time += datetime.timedelta(days=7)
-
-        self._next_t = target_time.timestamp()
-        self._log_setup(target_time)
-
-    def _calculate_next_month(self, now: datetime.datetime) -> datetime.datetime:
-        """Calculate next month's target time, handling year rollover."""
-        if now.month == 12:
-            return now.replace(
-                year=now.year + 1,
-                month=1,
-                day=1,
-                hour=self._hour,
-                minute=self._minute,
-                second=0,
-                microsecond=0,
-            )
-        return now.replace(
-            month=now.month + 1,
-            day=1,
-            hour=self._hour,
-            minute=self._minute,
-            second=0,
-            microsecond=0,
-        )
-
-    def _setup_monthly(self, now: datetime.datetime) -> None:
-        """Set up monthly scheduling."""
-        try:
-            next_month = self._calculate_next_month(now)
-            target_time = now.replace(
-                day=1, hour=self._hour, minute=self._minute, second=0, microsecond=0
-            )
-
-            # Schedule for next month if time has passed, otherwise this month
-            if now >= target_time:
-                self._next_t = next_month.timestamp()
-            else:
-                self._next_t = target_time.timestamp()
-
-            self._log_setup(datetime.datetime.fromtimestamp(self._next_t))
-        except ValueError:
-            # Handle edge cases like Feb 31st
-            self._setup_daily(now)  # Fallback to daily
-
-    def _setup_hourly(self, now: datetime.datetime) -> None:
-        """Set up hourly scheduling."""
-        target_time = now.replace(minute=self._minute, second=0, microsecond=0)
-
-        # If time has passed this hour, schedule for next hour
-        if now >= target_time:
-            target_time += datetime.timedelta(hours=1)
-
-        self._next_t = target_time.timestamp()
-        self._log_setup(target_time)
-
-    def _setup_minutely(self, now: datetime.datetime) -> None:
-        """Set up minutely scheduling."""
-        target_time = now.replace(second=self._minute, microsecond=0)
-
-        # If time has passed this minute, schedule for next minute
-        if now >= target_time:
-            target_time += datetime.timedelta(minutes=1)
-
-        self._next_t = target_time.timestamp()
-        self._log_setup(target_time)
-
-    def _log_setup(self, target_time: datetime.datetime) -> None:
-        """Log scheduler setup information."""
-        diff = (target_time - datetime.datetime.now()).total_seconds()
+    def _setup(self, now: float) -> None:
+        """Set the first run: the next one after ``now``."""
+        self._next_t = self._next_after(now)
         self.lg.info(
             "scheduler configured",
             extra={
                 "period": self._period.value,
-                "next": target_time.isoformat(),
-                "in": delta_str(diff, precise=False),
+                "next": datetime.datetime.fromtimestamp(self._next_t).isoformat(),
+                "in": delta_str(self._next_t - now, precise=False),
             },
         )
+
+    def _next_after(self, now: float) -> float:
+        """The first run strictly after the timestamp ``now``.
+
+        Minutely and hourly runs step through real time, so they keep their pace
+        across a DST change. Daily, weekly and monthly runs fall on a local
+        wall-clock time, which a DST change moves in real time.
+        """
+        if self._period == Period.MINUTELY:
+            # UTC offsets are whole minutes: a second of the minute is the same in
+            # every zone, and in UTC
+            t = now - now % SECONDS_PER_MINUTE + self._minute
+            return t if t > now else t + SECONDS_PER_MINUTE
+        if self._period == Period.HOURLY:
+            # The local offset in effect at now: the minute of the hour is local
+            local = datetime.datetime.fromtimestamp(now, datetime.UTC).astimezone()
+            t = local.replace(minute=self._minute, second=0, microsecond=0).timestamp()
+            return t if t > now else t + SECONDS_PER_HOUR
+        today = datetime.datetime.fromtimestamp(now).date()
+        for day in self._candidate_days(today):
+            t = _wall_ts(day, self._hour, self._minute)
+            if t > now:
+                return t
+        raise AssertionError("the later candidate day always follows now")
+
+    def _candidate_days(
+        self, today: datetime.date
+    ) -> tuple[datetime.date, datetime.date]:
+        """The day of this period's run and the day of the next period's."""
+        if self._period == Period.DAILY:
+            return today, today + datetime.timedelta(days=1)
+        if self._period == Period.WEEKLY:
+            assert self._weekday is not None  # validated in __init__ for WEEKLY
+            day = today + datetime.timedelta(days=(self._weekday - today.weekday()) % 7)
+            return day, day + datetime.timedelta(days=7)
+        if self._period == Period.MONTHLY:
+            first = today.replace(day=1)
+            return first, (first + datetime.timedelta(days=32)).replace(day=1)
+        raise UnsupportedPeriodError(f"Unsupported period: {self._period}")
 
     def sync(self, instant: bool = False) -> tuple[bool, float]:
         """
@@ -461,14 +388,15 @@ class Sched:
         now = time.time()
 
         if self.next_t is None:
-            self._setup()
+            self._setup(now)
             assert self.next_t is not None  # _setup() always sets next_t
             if instant:
                 return True, self.next_t - now
 
         if now >= self.next_t:
-            # Schedule next execution
-            self._schedule_next()
+            # The run after now: a scheduler that fell behind runs once, not
+            # once for every run it missed
+            self.next_t = self._next_after(now)
             self.lg.info(
                 "scheduler triggered",
                 extra={
@@ -479,25 +407,6 @@ class Sched:
             return True, self.next_t - now
 
         return False, self.next_t - now
-
-    def _schedule_next(self) -> None:
-        """Schedule the next execution based on period."""
-        assert self.next_t is not None  # Always set by sync() before calling this
-        if self._period == Period.DAILY:
-            self.next_t += SECONDS_PER_DAY
-        elif self._period == Period.WEEKLY:
-            self.next_t += SECONDS_PER_WEEK
-        elif self._period == Period.MONTHLY:
-            # Approximate month as 30 days
-            self.next_t += SECONDS_PER_DAY * 30
-        elif self._period == Period.HOURLY:
-            self.next_t += SECONDS_PER_HOUR
-        elif self._period == Period.MINUTELY:
-            self.next_t += SECONDS_PER_MINUTE
-        else:
-            raise UnsupportedPeriodError(
-                f"Next scheduling not implemented for period: {self._period}"
-            )
 
     def _log_scheduler_status(self, delay: float) -> None:
         """Log periodic scheduler status."""

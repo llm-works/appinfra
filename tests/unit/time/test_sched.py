@@ -16,15 +16,20 @@ Tests key scheduler features including:
 
 import contextlib
 import datetime
+import itertools
 import time
+from collections.abc import Iterator
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import pytest
 
+from appinfra.time import sched as sched_module
 from appinfra.time.sched import (
     SECONDS_PER_DAY,
     SECONDS_PER_HOUR,
     SECONDS_PER_MINUTE,
+    SECONDS_PER_WEEK,
     InvalidConfigError,
     InvalidTimeFormatError,
     Period,
@@ -315,75 +320,43 @@ class TestSchedProperties:
 class TestSchedSetup:
     """Test Sched setup methods."""
 
-    def test_setup_daily_sets_next_time(self, mock_logger):
-        """Test _setup_daily sets next execution time."""
-        sched = Sched(mock_logger, Period.DAILY, "14:30")
-        sched._setup()
-        assert sched.next_t is not None
-        assert sched.next_t > time.time()
+    @pytest.mark.parametrize(
+        ("period", "when"),
+        [(Period.DAILY, "14:30"), (Period.HOURLY, "45"), (Period.MINUTELY, "45")],
+    )
+    def test_setup_sets_a_later_next_time(self, mock_logger, clock, period, when):
+        clock.t = _ts(2026, 5, 25, 14, 30, 45)  # on each schedule's own time
+        sched = Sched(mock_logger, period, when)
+        sched._setup(clock.t)
+        assert sched.next_t is not None and sched.next_t > clock.t
 
-    def test_setup_hourly_sets_next_time(self, mock_logger):
-        """Test _setup_hourly sets next execution time."""
-        sched = Sched(mock_logger, Period.HOURLY, "45")
-        sched._setup()
-        assert sched.next_t is not None
-        assert sched.next_t > time.time()
-
-    def test_setup_minutely_sets_next_time(self, mock_logger):
-        """Test _setup_minutely sets next execution time."""
-        sched = Sched(mock_logger, Period.MINUTELY, "45")
-        sched._setup()
-        assert sched.next_t is not None
-        assert sched.next_t > time.time()
-
-    @patch.object(Sched, "_log_setup")
-    def test_setup_daily_advances_when_time_passed(self, _log_setup, mock_logger):
-        """Cover _setup_daily branch where the scheduled time has already passed today."""
+    def test_setup_daily_advances_when_time_passed(self, mock_logger, clock):
+        clock.t = _ts(2026, 5, 25, 23, 59)
         sched = Sched(mock_logger, Period.DAILY, "08:00")
-        # Force "now" to be after 08:00 so the +1 day branch fires.
-        now = datetime.datetime(2026, 5, 25, 23, 59, 0)
-        sched._setup_daily(now)
-        expected = datetime.datetime(2026, 5, 26, 8, 0, 0)
-        assert sched.next_t == expected.timestamp()
+        sched._setup(clock.t)
+        assert sched.next_t == _ts(2026, 5, 26, 8, 0)
 
-    @patch.object(Sched, "_log_setup")
     def test_setup_weekly_advances_when_same_weekday_time_passed(
-        self, _log_setup, mock_logger
+        self, mock_logger, clock
     ):
-        """Same target weekday, time already passed → fire next week."""
-        # Monday = 0. Now is Monday afternoon, schedule Monday at 08:00.
+        clock.t = _ts(2026, 5, 25, 14, 0)  # Monday afternoon
         sched = Sched(mock_logger, Period.WEEKLY, "08:00", weekday=0)
-        monday_afternoon = datetime.datetime(2026, 5, 25, 14, 0, 0)
-        assert monday_afternoon.weekday() == 0
-        sched._setup_weekly(monday_afternoon)
-        expected = datetime.datetime(2026, 6, 1, 8, 0, 0)  # next Monday 08:00
-        assert sched.next_t == expected.timestamp()
+        sched._setup(clock.t)
+        assert sched.next_t == _ts(2026, 6, 1, 8, 0)  # next Monday 08:00
 
-    @patch.object(Sched, "_log_setup")
     def test_setup_weekly_fires_today_when_same_weekday_time_not_passed(
-        self, _log_setup, mock_logger
+        self, mock_logger, clock
     ):
-        """Same target weekday, time still ahead → fire today (regression).
-
-        Before sched.py:359 was changed from `<= 0` to `< 0`, today's 08:00
-        on the target weekday was incorrectly skipped to next week.
-        """
+        clock.t = _ts(2026, 5, 25, 6, 0)  # Monday morning
         sched = Sched(mock_logger, Period.WEEKLY, "08:00", weekday=0)
-        monday_morning = datetime.datetime(2026, 5, 25, 6, 0, 0)
-        assert monday_morning.weekday() == 0
-        sched._setup_weekly(monday_morning)
-        expected = datetime.datetime(2026, 5, 25, 8, 0, 0)  # same Monday 08:00
-        assert sched.next_t == expected.timestamp()
+        sched._setup(clock.t)
+        assert sched.next_t == _ts(2026, 5, 25, 8, 0)  # same Monday 08:00
 
-    @patch.object(Sched, "_log_setup")
-    def test_setup_minutely_advances_when_time_passed(self, _log_setup, mock_logger):
-        """Cover _setup_minutely branch where current second is past the target second."""
+    def test_setup_minutely_advances_when_time_passed(self, mock_logger, clock):
+        clock.t = _ts(2026, 5, 25, 12, 0, 30)
         sched = Sched(mock_logger, Period.MINUTELY, "5")
-        # Pick a "now" whose second component is > 5 to trigger the +1 minute branch.
-        now = datetime.datetime(2026, 5, 25, 12, 0, 30)
-        sched._setup_minutely(now)
-        expected = datetime.datetime(2026, 5, 25, 12, 1, 5)
-        assert sched.next_t == expected.timestamp()
+        sched._setup(clock.t)
+        assert sched.next_t == _ts(2026, 5, 25, 12, 1, 5)
 
     def test_log_scheduler_status_emits_debug(self, mock_logger):
         """Cover _log_scheduler_status (debug log emission)."""
@@ -440,32 +413,26 @@ class TestSchedSync:
 # =============================================================================
 
 
-class TestSchedScheduleNext:
-    """Test _schedule_next method."""
+class TestSchedNextRun:
+    """After a run, the next one is a period later."""
 
-    def test_schedule_next_daily(self, mock_logger):
-        """Test _schedule_next for daily period."""
-        sched = Sched(mock_logger, Period.DAILY, "14:30")
-        sched.next_t = 1000.0
-
-        sched._schedule_next()
-        assert sched.next_t == 1000.0 + SECONDS_PER_DAY
-
-    def test_schedule_next_hourly(self, mock_logger):
-        """Test _schedule_next for hourly period."""
-        sched = Sched(mock_logger, Period.HOURLY, "15")
-        sched.next_t = 1000.0
-
-        sched._schedule_next()
-        assert sched.next_t == 1000.0 + SECONDS_PER_HOUR
-
-    def test_schedule_next_minutely(self, mock_logger):
-        """Test _schedule_next for minutely period."""
-        sched = Sched(mock_logger, Period.MINUTELY, "30")
-        sched.next_t = 1000.0
-
-        sched._schedule_next()
-        assert sched.next_t == 1000.0 + SECONDS_PER_MINUTE
+    @pytest.mark.parametrize(
+        ("period", "when", "weekday", "step"),
+        [
+            (Period.DAILY, "14:30", None, SECONDS_PER_DAY),
+            (Period.WEEKLY, "14:30", 2, SECONDS_PER_WEEK),
+            (Period.HOURLY, "15", None, SECONDS_PER_HOUR),
+            (Period.MINUTELY, "30", None, SECONDS_PER_MINUTE),
+        ],
+    )
+    def test_next_run_is_one_period_later(
+        self, mock_logger, clock, period, when, weekday, step
+    ):
+        clock.t = _ts(2026, 6, 1, 12, 0)  # no DST change within a week
+        sched = Sched(mock_logger, period, when, weekday=weekday)
+        sched.sync()
+        first = sched.next_t
+        assert _fire(sched, clock) == first + step
 
 
 # =============================================================================
@@ -747,98 +714,157 @@ class TestCoverageImprovements:
         assert sched.next_t is not None
         assert sched.next_t > 0
 
-    def test_monthly_year_rollover(self, mock_logger):
-        """Test monthly scheduling year rollover (lines 375-384)."""
-        # Create scheduler in December to test year rollover
-        with patch("appinfra.time.sched.datetime") as mock_dt:
-            # Mock current time as December 15, 2025, 15:00
-            dec_time = datetime.datetime(2025, 12, 15, 15, 0, 0)
-            mock_dt.datetime.now.return_value = dec_time
-            mock_dt.datetime.fromtimestamp = datetime.datetime.fromtimestamp
-
-            sched = Sched(mock_logger, Period.MONTHLY, "14:30")
-            sched._setup_monthly(dec_time)
-
-            # Should schedule for next month (January 2026)
-            next_dt = datetime.datetime.fromtimestamp(sched.next_t)
-            assert next_dt.year == 2026
-            assert next_dt.month == 1
-
-    def test_weekly_schedule_next(self, mock_logger):
-        """Test weekly _schedule_next() increments by week (line 490)."""
-        sched = Sched(mock_logger, Period.WEEKLY, "14:30", weekday=2)
-
-        # Trigger first sync to set up next_t
-        sched.sync()
-        initial_next_t = sched.next_t
-
-        # Call _schedule_next (private method)
-        sched._schedule_next()
-
-        # Should increment by one week (7 days)
-        from appinfra.time.sched import SECONDS_PER_WEEK
-
-        assert sched.next_t == pytest.approx(initial_next_t + SECONDS_PER_WEEK, abs=1)
-
-    def test_monthly_schedule_next(self, mock_logger):
-        """Test monthly _schedule_next() increments by 30 days (line 493)."""
+    def test_monthly_year_rollover(self, mock_logger, clock):
+        clock.t = _ts(2025, 12, 15, 15, 0)
         sched = Sched(mock_logger, Period.MONTHLY, "14:30")
+        sched._setup(clock.t)
+        assert sched.next_t == _ts(2026, 1, 1, 14, 30)
 
-        # Trigger first sync to set up next_t
-        sched.sync()
-        initial_next_t = sched.next_t
-
-        # Call _schedule_next (private method)
-        sched._schedule_next()
-
-        # Should increment by 30 days
-        from appinfra.time.sched import SECONDS_PER_DAY
-
-        assert sched.next_t == pytest.approx(
-            initial_next_t + (SECONDS_PER_DAY * 30), abs=1
-        )
-
-    def test_hourly_time_already_passed(self, mock_logger):
-        """Test hourly scheduling when time has already passed (line 420)."""
-        # Create hourly scheduler with offset 30 (runs at minute 30 of each hour)
+    def test_hourly_time_already_passed(self, mock_logger, clock):
+        clock.t = _ts(2030, 1, 1, 14, 45)
         sched = Sched(mock_logger, Period.HOURLY, "30")
+        sched._setup(clock.t)
+        assert sched.next_t == _ts(2030, 1, 1, 15, 30)
 
-        # Use a future time that's after this hour's target (14:45, target is 14:30)
-        with patch("appinfra.time.sched.datetime") as mock_dt:
-            current_time = datetime.datetime(2030, 1, 1, 14, 45, 0)
-            # Mock both datetime.now() calls
-            mock_dt.datetime = Mock()
-            mock_dt.datetime.now = Mock(return_value=current_time)
-            mock_dt.datetime.fromtimestamp = datetime.datetime.fromtimestamp
-            mock_dt.timedelta = datetime.timedelta
+    def test_weekly_same_day_time_passed(self, mock_logger, clock):
+        clock.t = _ts(2030, 1, 2, 15, 0)  # Wednesday, after 14:30
+        sched = Sched(mock_logger, Period.WEEKLY, "14:30", weekday=2)
+        sched._setup(clock.t)
+        assert sched.next_t == _ts(2030, 1, 9, 14, 30)  # next Wednesday
 
-            # Call setup with the current time
-            sched._setup_hourly(current_time)
 
-            # Since 14:30 has passed, should schedule for 15:30
-            next_dt = datetime.datetime.fromtimestamp(sched.next_t)
-            assert next_dt.hour == 15
-            assert next_dt.minute == 30
+# =============================================================================
+# Daylight saving time and month lengths
+# =============================================================================
 
-    def test_weekly_same_day_time_passed(self, mock_logger):
-        """Test weekly scheduling when on target day but time has passed (lines 367-368)."""
-        # Create weekly scheduler for Wednesday at 14:30
-        sched = Sched(mock_logger, Period.WEEKLY, "14:30", weekday=2)  # Wednesday
 
-        # Use a future time - 2030-01-02 is a Wednesday at 15:00 (time has passed)
-        with patch("appinfra.time.sched.datetime") as mock_dt:
-            current_time = datetime.datetime(2030, 1, 2, 15, 0, 0)
-            # Mock datetime module properly
-            mock_dt.datetime = Mock()
-            mock_dt.datetime.now = Mock(return_value=current_time)
-            mock_dt.datetime.fromtimestamp = datetime.datetime.fromtimestamp
-            mock_dt.timedelta = datetime.timedelta
+class _Clock:
+    """The time Sched reads, set by the test."""
 
-            sched._setup_weekly(current_time)
+    def __init__(self) -> None:
+        self.t = 0.0
 
-            # Should schedule for next Wednesday, not today
-            next_dt = datetime.datetime.fromtimestamp(sched.next_t)
-            assert next_dt.weekday() == 2  # Wednesday
-            # The difference should be 7 days exactly
-            days_diff = (next_dt - current_time).days
-            assert days_diff >= 6 and days_diff <= 7  # Allow for time-of-day effects
+
+@pytest.fixture
+def new_york(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """Local time is America/New_York: fall-back 2026-11-01, spring-forward 2027-03-14."""
+    monkeypatch.setenv("TZ", "America/New_York")
+    time.tzset()
+    yield
+    monkeypatch.undo()
+    time.tzset()
+
+
+@pytest.fixture
+def clock(monkeypatch: pytest.MonkeyPatch, new_york: None) -> _Clock:
+    """Sched's time.time() reads clock.t."""
+    c = _Clock()
+    monkeypatch.setattr(
+        sched_module, "time", SimpleNamespace(time=lambda: c.t, sleep=lambda _: None)
+    )
+    return c
+
+
+def _ts(*wall: int, fold: int = 0) -> float:
+    """Timestamp of a New York wall time; fold=1 is the second pass of the repeated hour."""
+    return datetime.datetime(*wall, fold=fold).timestamp()  # type: ignore[misc]
+
+
+def _fire(sched: Sched, clock: _Clock) -> float:
+    """Move the clock to the next run, let it trigger, and return the run after it."""
+    assert sched.next_t is not None
+    clock.t = sched.next_t
+    triggered, _ = sched.sync()
+    assert triggered
+    assert sched.next_t is not None
+    return sched.next_t
+
+
+class TestDaylightSaving:
+    """Runs fall on the configured local time on both DST transition days."""
+
+    def test_minutely_set_up_in_the_repeated_hour(self, mock_logger, clock):
+        clock.t = _ts(2026, 11, 1, 1, 19, 50, fold=1)  # 01:19:50 EST, second pass
+        sched = Sched(mock_logger, Period.MINUTELY, "45")
+        sched.sync()
+        assert sched.next_t == clock.t + 55  # 01:20:45 EST, not an hour earlier
+
+    def test_minutely_fires_once_a_minute_through_fall_back(self, mock_logger, clock):
+        clock.t = _ts(2026, 11, 1, 0, 59, 30)  # EDT
+        sched = Sched(mock_logger, Period.MINUTELY, "0")
+        sched.sync()
+        runs = [_fire(sched, clock) for _ in range(150)]
+        assert {b - a for a, b in itertools.pairwise(runs)} == {60}
+
+    def test_hourly_keeps_the_second_pass_of_the_repeated_hour(
+        self, mock_logger, clock
+    ):
+        clock.t = _ts(2026, 11, 1, 1, 40)  # 01:40 EDT, first pass
+        sched = Sched(mock_logger, Period.HOURLY, "30")
+        sched.sync()
+        assert sched.next_t == _ts(2026, 11, 1, 1, 30, fold=1)  # 01:30 EST
+        assert _fire(sched, clock) == _ts(2026, 11, 1, 2, 30)
+
+    def test_daily_keeps_its_wall_time_across_fall_back(self, mock_logger, clock):
+        clock.t = _ts(2026, 10, 31, 8, 0)  # EDT
+        sched = Sched(mock_logger, Period.DAILY, "09:00")
+        sched.sync()
+        assert sched.next_t == _ts(2026, 10, 31, 9, 0)
+        assert _fire(sched, clock) == _ts(2026, 11, 1, 9, 0)  # 09:00 EST, 25h later
+        assert _fire(sched, clock) == _ts(2026, 11, 2, 9, 0)
+
+    def test_daily_keeps_its_wall_time_across_spring_forward(self, mock_logger, clock):
+        clock.t = _ts(2027, 3, 13, 8, 0)  # EST
+        sched = Sched(mock_logger, Period.DAILY, "09:00")
+        sched.sync()
+        assert _fire(sched, clock) == _ts(2027, 3, 14, 9, 0)  # 09:00 EDT, 23h later
+
+    def test_daily_in_the_repeated_hour_runs_once(self, mock_logger, clock):
+        clock.t = _ts(2026, 11, 1, 1, 0)  # EDT
+        sched = Sched(mock_logger, Period.DAILY, "01:30")
+        sched.sync()
+        assert sched.next_t == _ts(2026, 11, 1, 1, 30)  # first pass, EDT
+        assert _fire(sched, clock) == _ts(2026, 11, 2, 1, 30)  # not again at 01:30 EST
+
+    def test_daily_in_the_skipped_hour_runs_after_the_gap(self, mock_logger, clock):
+        clock.t = _ts(2027, 3, 14, 0, 0)  # EST
+        sched = Sched(mock_logger, Period.DAILY, "02:30")
+        sched.sync()
+        # 02:30 does not exist on that day; it runs one hour after 01:30 EST
+        assert sched.next_t == _ts(2027, 3, 14, 1, 30) + 3600
+
+    def test_weekly_keeps_its_wall_time_across_fall_back(self, mock_logger, clock):
+        clock.t = _ts(2026, 10, 25, 8, 0)  # Sunday, EDT
+        sched = Sched(mock_logger, Period.WEEKLY, "09:00", weekday=6)
+        sched.sync()
+        assert _fire(sched, clock) == _ts(2026, 11, 1, 9, 0)  # Sunday 09:00 EST
+
+
+class TestMonthlyRuns:
+    """Monthly runs land on the 1st of every month."""
+
+    def test_monthly_runs_on_the_first(self, mock_logger, clock):
+        clock.t = _ts(2026, 12, 15, 12, 0)
+        sched = Sched(mock_logger, Period.MONTHLY, "09:00")
+        sched.sync()
+        runs = [sched.next_t] + [_fire(sched, clock) for _ in range(4)]
+        assert runs == [
+            _ts(2027, 1, 1, 9, 0),
+            _ts(2027, 2, 1, 9, 0),
+            _ts(2027, 3, 1, 9, 0),
+            _ts(2027, 4, 1, 9, 0),  # after spring-forward, still 09:00
+            _ts(2027, 5, 1, 9, 0),
+        ]
+
+
+class TestMissedRuns:
+    """A scheduler that falls behind runs once, then waits for the next run."""
+
+    def test_minutely_after_a_long_pause_runs_once(self, mock_logger, clock):
+        clock.t = _ts(2026, 6, 1, 12, 0, 10)
+        sched = Sched(mock_logger, Period.MINUTELY, "0")
+        sched.sync()
+        clock.t += 3 * 3600  # the machine slept
+        assert sched.sync()[0] is True
+        assert sched.sync()[0] is False
+        assert sched.next_t == _ts(2026, 6, 1, 15, 1, 0)
