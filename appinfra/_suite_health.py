@@ -17,7 +17,13 @@ pytest-xdist worker) writes one JSON report there at the end of the session, ``<
 - ``leaks``: each unit test that left process-wide state changed (signal handlers, the
   ``ITIMER_REAL`` timer, environment variables by name, the working directory), compared from
   before its setup to after its teardown; an environment variable a module sets while being
-  imported is the library's, not the test's.
+  imported is the library's, not the test's;
+- ``suited``: the number of tests collected, each with its suite;
+- ``behavior``: what the unit, integration and e2e tests this process ran did
+  (appinfra/_suite_behavior.py), by node id: the ``suite``, the ``directory`` suite it sits
+  under ("" for none), the ``evidence`` (category -> first detail), and the ``exempt`` reason
+  of a test marked ``suite_exempt``. A unit test appears only
+  with evidence or an exemption; every integration and e2e test appears.
 
 The rules applied to these figures live in appinfra/scripts/check_suite_health.py.
 """
@@ -36,7 +42,12 @@ from typing import Any
 
 import pytest
 
+from . import _suite_behavior
+
 REPORT_DIR_ENV = "_APPINFRA_CHECK_SUITE_HEALTH_DIR"
+
+# The suites whose tests' behavior is recorded; security and performance tests are not judged
+_JUDGED = frozenset({"unit", "integration", "e2e"})
 
 # Set by pytest for each test phase and removed after it; not the test's doing
 _PYTEST_ENV = frozenset({"PYTEST_CURRENT_TEST"})
@@ -142,18 +153,60 @@ def _scope_entry(
     return entry
 
 
+def exempt_reason(item: pytest.Item) -> str | None:
+    """The reason given by the test's ``suite_exempt`` marker, if it has one ("" for none)."""
+    marker = item.get_closest_marker("suite_exempt")
+    if marker is None:
+        return None
+    reason = marker.kwargs.get("reason", marker.args[0] if marker.args else "")
+    return str(reason).strip()
+
+
+def charged_fixtures(item: pytest.Item) -> set[str]:
+    """The fixtures whose evidence counts for a test: those it asks for (arguments,
+    ``usefixtures``), its function-scoped autouse fixtures, and what they depend on.
+
+    An autouse fixture wider than one test sets up for every test, not for this one; whether it
+    does anything can even depend on pytest-xdist (a session fixture only the main process
+    runs), so neither it nor what only it depends on is charged.
+    """
+    info = getattr(item, "_fixtureinfo", None)
+    if info is None:  # not a pytest Function
+        return set(getattr(item, "fixturenames", ()))
+    defs = info.name2fixturedefs
+    asked = set(info.argnames) | {
+        name for marker in item.iter_markers("usefixtures") for name in marker.args
+    }
+    pending = [
+        name
+        for name in info.initialnames
+        if name in asked or (name in defs and defs[name][-1].scope == "function")
+    ]
+    charged: set[str] = set()
+    while pending:
+        name = pending.pop()
+        if name not in charged:
+            charged.add(name)
+            if name in defs:
+                pending.extend(defs[name][-1].argnames)
+    return charged
+
+
 class SuiteHealth:
     """Collects the report of one pytest process and writes it at the end of the session."""
 
-    def __init__(self, report_dir: Path) -> None:
+    def __init__(self, report_dir: Path, rootdir: Path) -> None:
         _install_env_hook()
         self._report_dir = report_dir
-        self._rootdir = ""
+        self._rootdir = str(rootdir)
         self._collected = 0
         self._total = 0
         self._suite_of: dict[str, str] = {}
         self._scopes: list[dict[str, Any]] = []
         self._leaks: list[dict[str, Any]] = []
+        self._behavior: dict[str, dict[str, Any]] = {}
+        self._home_of: dict[str, str] = {}
+        self._recorder = _suite_behavior.install(_suite_behavior.project_of(rootdir))
 
     def record_collection(
         self,
@@ -167,6 +220,7 @@ class SuiteHealth:
         self._collected = len(items)
         self._total = 0
         self._suite_of = suite_of
+        self._home_of = {item.nodeid: home_of(item) or "" for item in items}
         own: dict[str, Counter[str]] = {}
         files: dict[str, Counter[str]] = {}
         homes: dict[str, str] = {}
@@ -187,20 +241,51 @@ class SuiteHealth:
         ]
 
     @pytest.hookimpl(wrapper=True)
+    def pytest_fixture_setup(
+        self, fixturedef: pytest.FixtureDef[Any], request: pytest.FixtureRequest
+    ) -> Generator[None, object, object]:
+        """Record a fixture's setup under its own name, charged to the tests that use it
+        (charged_fixtures)."""
+        with self._recorder.running(f"fixture:{fixturedef.argname}"):
+            return (yield)
+
+    @pytest.hookimpl(wrapper=True)
     def pytest_runtest_protocol(
         self, item: pytest.Item, nextitem: pytest.Item | None
     ) -> Generator[None, object, object]:
-        """Compare the process-wide state from before a unit test's setup to after its teardown."""
-        if self._suite_of.get(item.nodeid) != "unit":
+        """Record what a judged test does; compare the process-wide state from before a unit
+        test's setup to after its teardown."""
+        suite = self._suite_of.get(item.nodeid)
+        if suite not in _JUDGED:
             return (yield)
-        _import_env.clear()
-        before = _snapshot()
+        before: dict[str, Any] | None = None
+        if suite == "unit":
+            _import_env.clear()
+            before = _snapshot()
         try:
-            return (yield)
+            with self._recorder.running(item.nodeid):
+                return (yield)
         finally:
-            changed = _changed(before, _snapshot(), _import_env)
-            if changed:
-                self._leaks.append({"test": item.nodeid, "changed": changed})
+            self._record_behavior(item, suite)
+            if before is not None:
+                changed = _changed(before, _snapshot(), _import_env)
+                if changed:
+                    self._leaks.append({"test": item.nodeid, "changed": changed})
+
+    def _record_behavior(self, item: pytest.Item, suite: str) -> None:
+        """Keep the evidence of an integration or e2e test, and of a unit test that has any."""
+        evidence = self._recorder.evidence(item.nodeid, charged_fixtures(item))
+        exempt = exempt_reason(item)
+        if suite == "unit" and not evidence and exempt is None:
+            return
+        entry: dict[str, Any] = {
+            "suite": suite,
+            "directory": self._home_of.get(item.nodeid, ""),
+            "evidence": evidence,
+        }
+        if exempt is not None:
+            entry["exempt"] = exempt
+        self._behavior[item.nodeid] = entry
 
     def pytest_sessionfinish(self, session: pytest.Session) -> None:
         """Write the report; a process that collected nothing (the xdist controller) writes none."""
@@ -212,5 +297,7 @@ class SuiteHealth:
             "total": self._total,
             "scopes": self._scopes,
             "leaks": self._leaks,
+            "suited": self._collected,
+            "behavior": self._behavior,
         }
         (self._report_dir / f"{os.getpid()}.json").write_text(json.dumps(report))

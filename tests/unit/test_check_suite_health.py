@@ -32,9 +32,36 @@ def _scope(name: str, home: str, **suites: int) -> dict[str, Any]:
 
 
 def _report(
-    *scopes: dict[str, Any], leaks: list[dict[str, Any]] | None = None, total: int = 100
+    *scopes: dict[str, Any],
+    leaks: list[dict[str, Any]] | None = None,
+    total: int = 100,
+    behavior: dict[str, dict[str, Any]] | None = None,
+    suited: int | None = None,
 ) -> dict[str, Any]:
-    return {"total": total, "scopes": list(scopes), "leaks": leaks or []}
+    report: dict[str, Any] = {
+        "total": total,
+        "scopes": list(scopes),
+        "leaks": leaks or [],
+    }
+    if behavior is not None:
+        report["behavior"] = behavior
+    if suited is not None:
+        report["suited"] = suited
+    return report
+
+
+def _ran(
+    suite: str, directory: str | None = None, exempt: str | None = None, **evidence: str
+) -> dict[str, Any]:
+    """A behavior entry; evidence categories are given with _ for -, as fs_write."""
+    entry: dict[str, Any] = {
+        "suite": suite,
+        "directory": directory if directory is not None else suite,
+        "evidence": {k.replace("_", "-"): v for k, v in evidence.items()},
+    }
+    if exempt is not None:
+        entry["exempt"] = exempt
+    return entry
 
 
 def _judge(
@@ -139,7 +166,143 @@ class TestMerge:
         assert _kinds(report) == ["placement", "overrides", "leak"]
 
 
+class TestBehavior:
+    def test_unit_tests_doing_integration_work_are_misfiled_by_scope(self) -> None:
+        behavior = {
+            "t.py::A::test_a": _ran("unit", fs_write="/tmp/x"),
+            "t.py::A::test_b": _ran("unit", process="subprocess.Popen git"),
+        }
+        assert _judge(_report(behavior=behavior)) == [
+            (
+                "misfiled",
+                "t.py::A",
+                "2 unit ➜ integration (fs-write /tmp/x)",
+            )
+        ]
+
+    def test_module_level_tests_group_by_file(self) -> None:
+        behavior = {"t.py::test_a": _ran("unit", socket="socket.bind")}
+        ((kind, where, detail),) = _judge(_report(behavior=behavior))
+        assert (kind, where) == ("misfiled", "t.py")
+        assert detail == "1 unit ➜ integration (socket socket.bind)"
+
+    def test_a_unit_test_running_the_project_belongs_in_e2e(self) -> None:
+        behavior = {"t.py::test_a": _ran("unit", entry_point="python -m myapp")}
+        ((_, _, detail),) = _judge(_report(behavior=behavior))
+        assert detail == "1 unit ➜ e2e (entry-point python -m myapp)"
+
+    def test_an_exempt_test_is_not_judged(self) -> None:
+        behavior = {
+            "t.py::test_a": _ran("unit", exempt="on purpose", fs_write="/tmp/x")
+        }
+        assert _judge(_report(behavior=behavior)) == []
+
+    def test_an_e2e_test_must_run_the_project(self) -> None:
+        behavior = {
+            "e.py::test_ok": _ran("e2e", entry_point="python -m myapp"),
+            "e.py::test_files": _ran("e2e", fs_write="/tmp/x"),
+            "f.py::test_nothing": _ran("e2e"),
+        }
+        assert _judge(_report(behavior=behavior)) == [
+            (
+                "misfiled",
+                "e.py",
+                "1 e2e ➜ integration (fs-write /tmp/x)",
+            ),
+            ("misfiled", "f.py", "1 e2e ➜ unit"),
+        ]
+
+    def test_an_integration_test_without_integration_work_belongs_in_unit(self) -> None:
+        behavior = {
+            "i.py::A::test_a": _ran("integration"),
+            "i.py::A::test_b": _ran("integration", fs_read="/srv/x"),
+        }
+        assert _judge(_report(behavior=behavior)) == [
+            ("misfiled", "i.py::A", "1 integration ➜ unit")
+        ]
+
+    def test_a_test_reported_by_two_processes_counts_once(self) -> None:
+        behavior = {"t.py::test_a": _ran("unit", chdir="/tmp")}
+        report = _report(behavior=behavior)
+        ((_, _, detail),) = _judge(report, report)
+        assert detail.startswith("1 unit ➜")
+
+    def test_tests_whose_work_fits_their_directory_are_not_placed_elsewhere(
+        self,
+    ) -> None:
+        behavior = {
+            f"u.py::A::test_{i}": _ran("integration", directory="unit")
+            for i in range(4)
+        }
+        report = _report(_scope("u.py::A", "unit", integration=4), behavior=behavior)
+        assert _judge(report) == [("misfiled", "u.py::A", "4 integration ➜ unit")]
+
+    def test_only_tests_whose_work_fits_their_directory_leave_the_scope_finding(
+        self,
+    ) -> None:
+        behavior = {
+            "i.py::B::test_a": _ran("unit", directory="integration", fs_write="/tmp"),
+            "i.py::B::test_b": _ran("unit", directory="integration", socket="bind"),
+        }
+        report = _report(
+            _scope("i.py::B", "integration", integration=2, unit=7),
+            behavior=behavior,
+        )
+        # the 2 unit tests doing integration work count as integration: 5 of 9 stay unit
+        assert _judge(report) == [
+            (
+                "placement",
+                "i.py::B",
+                "5 of 9 tests (56%) are unit, the majority: move them to tests/unit/",
+            ),
+            ("misfiled", "i.py::B", "2 unit ➜ integration (fs-write /tmp)"),
+        ]
+
+    def test_findings_order_placement_misfiled_leaks(self) -> None:
+        report = _report(
+            _scope("c.py::Move", "unit", integration=4),
+            leaks=[{"test": "a.py::test_z", "changed": ["cwd"]}],
+            behavior={
+                "d.py::test_a": _ran("unit", db="sqlite3 /tmp/a.db"),
+                "i.py::test_b": _ran("integration"),
+            },
+        )
+        assert _kinds(report) == ["placement", "misfiled", "misfiled", "leak"]
+
+
 class TestHealth:
+    def test_misfiled_tests_count_against_the_share(self) -> None:
+        behavior = {f"t.py::test_{i}": _ran("unit", fs_write="/tmp") for i in range(4)}
+        assert (
+            check_suite_health.health([_report(behavior=behavior, suited=100)])
+            == "96.0"
+        )
+
+    def test_exempt_tests_do_not(self) -> None:
+        behavior = {
+            "i.py::test_a": _ran("integration", exempt="on purpose"),
+            "t.py::test_b": _ran("unit", exempt="on purpose", fs_write="/tmp"),
+        }
+        assert (
+            check_suite_health.health([_report(behavior=behavior, suited=10)])
+            == "100.0"
+        )
+
+    def test_a_test_outside_its_directory_and_misfiled_counts_once(self) -> None:
+        behavior = {
+            "u.py::test_a": _ran("unit", directory="integration", fs_write="/tmp")
+        }
+        report = _report(
+            _scope("u.py", "integration", unit=1), behavior=behavior, suited=10
+        )
+        assert check_suite_health.health([report]) == "90.0"
+
+    def test_tests_outside_the_suite_directories_count_toward_the_whole(self) -> None:
+        # 10 tests collected, 4 under tests/<suite>/; the share is of all 10
+        behavior = {"cli.py::test_a": _ran("unit", directory="", fs_write="/tmp")}
+        report = _report(total=4, behavior=behavior, suited=10)
+        assert check_suite_health.health([report]) == "90.0"
+
     def test_tolerated_tests_outside_their_directory_count_too(self) -> None:
         report = _report(
             _scope("u.py::A", "unit", unit=3, integration=1),

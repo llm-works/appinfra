@@ -21,8 +21,18 @@ size; past that:
 
 A unit test that left process-wide state changed is a ``leak``, a finding of its own.
 
-A scope takes one finding at most, placement first. The output is the share of tests that run in
-their directory's suite, tolerated ones counted as outside, then one line per finding:
+What the tests did (appinfra/_suite_behavior.py) is judged against their suite, by scope:
+
+``misfiled``: unit tests that did integration work (files, processes, sockets, databases,
+signals, the working directory) or ran the project as its own process, integration tests that
+did none, and e2e tests that did not run the project; they move to the suite their work needs.
+A test whose work belongs to its directory's suite counts as that suite for placement and
+overrides: its marker is wrong, not its place.
+
+A test marked ``suite_exempt`` is not judged. A scope takes one placement or overrides finding at
+most, placement first. The output is the share of collected tests that keep to the rules (in
+their directory's suite, tolerated ones counted as outside, and not misfiled), then one line per
+finding:
 
     <percent>
     <kind><TAB><where><TAB><detail>
@@ -37,11 +47,25 @@ import argparse
 import json
 import math
 import sys
+from collections import Counter
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
 NO_REPORT = 3
+
+# Evidence categories of integration work, in the order a finding names the first one found
+_INTEGRATION_WORK = (
+    "fs-write",
+    "process",
+    "socket",
+    "db",
+    "signal",
+    "chdir",
+    "fs-read",
+)
+_ENTRY_POINT = "entry-point"
+_ORDER = ("placement", "overrides", "misfiled", "leak")
 
 
 def load(report_dir: Path, root: Path) -> list[dict[str, Any]]:
@@ -89,43 +113,155 @@ def _scope_finding(
     return None
 
 
+def _behavior(reports: Iterable[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """What each judged test did, by node id; a test appears in the report of its process."""
+    behavior: dict[str, dict[str, Any]] = {}
+    for report in reports:
+        behavior.update(report.get("behavior", {}))
+    return behavior
+
+
+def _scope_of(nodeid: str) -> str:
+    """A test's class, or its file for a module-level test."""
+    parts = nodeid.split("::")
+    return "::".join(parts[:-1]) if len(parts) > 2 else parts[0]
+
+
+def _first(evidence: dict[str, str], categories: Iterable[str]) -> str:
+    """The first of the categories found, with its detail; "" for none."""
+    for category in categories:
+        if category in evidence:
+            return f"{category} {evidence[category]}"
+    return ""
+
+
+def _verdict(entry: dict[str, Any]) -> tuple[str, str] | None:
+    """(target suite, first evidence) for a test whose work does not fit its suite."""
+    if entry.get("exempt") is not None:
+        return None
+    suite, evidence = entry["suite"], entry["evidence"]
+    work = any(c in evidence for c in _INTEGRATION_WORK)
+    if suite == "unit" and _ENTRY_POINT in evidence:
+        return ("e2e", _first(evidence, [_ENTRY_POINT]))
+    if suite == "unit" and work:
+        return ("integration", _first(evidence, _INTEGRATION_WORK))
+    if suite == "e2e" and _ENTRY_POINT not in evidence:
+        return ("integration" if work else "unit", _first(evidence, _INTEGRATION_WORK))
+    if suite == "integration" and not work and _ENTRY_POINT not in evidence:
+        return ("unit", "")
+    return None
+
+
+def _behavior_findings(
+    behavior: dict[str, dict[str, Any]],
+) -> list[tuple[str, str, str]]:
+    """Misfiled tests, one finding per scope and target suite:
+    "3 unit ➜ integration (fs-write /tmp/x)", the first test's evidence in parentheses."""
+    groups: dict[tuple[str, str, str], list[str]] = {}
+    for nodeid in sorted(behavior):
+        verdict = _verdict(behavior[nodeid])
+        if verdict is not None:
+            target, evidence = verdict
+            key = (_scope_of(nodeid), behavior[nodeid]["suite"], target)
+            groups.setdefault(key, []).append(evidence)
+    findings = []
+    for (scope, suite, target), found in groups.items():
+        shown = f" ({found[0]})" if found[0] else ""
+        findings.append(("misfiled", scope, f"{len(found)} {suite} ➜ {target}{shown}"))
+    return findings
+
+
+def _remarked(behavior: dict[str, dict[str, Any]]) -> dict[str, Counter[str]]:
+    """Tests whose work belongs to their directory's suite though marked for another, counted
+    by scope and marked suite: their marker is wrong, not their place."""
+    remarked: dict[str, Counter[str]] = {}
+    for nodeid, entry in behavior.items():
+        verdict = _verdict(entry)
+        if verdict is not None and verdict[0] == entry.get("directory"):
+            remarked.setdefault(_scope_of(nodeid), Counter())[entry["suite"]] += 1
+    return remarked
+
+
+def _shifted(suites: dict[str, int], home: str, moved: Counter[str]) -> dict[str, int]:
+    """Suite counts with the moved tests counted under the home suite."""
+    shifted = Counter(suites)
+    shifted.subtract(moved)
+    shifted[home] += moved.total()
+    return {suite: n for suite, n in shifted.items() if n > 0}
+
+
+def _as_placed(
+    scope: dict[str, Any], remarked: dict[str, Counter[str]]
+) -> dict[str, Any]:
+    """A scope with its remarked tests counted under its directory's suite; a file's
+    ``file_suites`` take those of every scope of the file."""
+    home, name = scope["directory"], scope["scope"]
+    placed = {
+        **scope,
+        "suites": _shifted(scope["suites"], home, remarked.get(name, Counter())),
+    }
+    if "file_suites" in scope:
+        in_file: Counter[str] = Counter()
+        for other, moved in remarked.items():
+            if other.split("::")[0] == name:
+                in_file.update(moved)
+        placed["file_suites"] = _shifted(scope["file_suites"], home, in_file)
+    return placed
+
+
 def judge(
     reports: Iterable[dict[str, Any]], threshold: float, outliers: int
 ) -> list[tuple[str, str, str]]:
-    """The findings, as (kind, where, detail): placements, then overrides, then leaks."""
+    """The findings, as (kind, where, detail): placements, overrides, misfiled tests, then
+    leaks."""
+    reports = list(reports)
     scopes: dict[str, dict[str, Any]] = {}
     leaks: dict[str, list[str]] = {}
     for report in reports:
         scopes.update((s["scope"], s) for s in report["scopes"])
         leaks.update((leak["test"], leak["changed"]) for leak in report["leaks"])
+    behavior = _behavior(reports)
+    remarked = _remarked(behavior)
     findings: list[tuple[str, str, str]] = []
     for name in sorted(scopes):
-        found = _scope_finding(scopes[name], threshold, outliers)
+        found = _scope_finding(_as_placed(scopes[name], remarked), threshold, outliers)
         if found:
             findings.append((found[0], name, found[1]))
+    findings.extend(_behavior_findings(behavior))
     findings.extend(
         ("leak", test, "left changed: " + ", ".join(leaks[test]))
         for test in sorted(leaks)
     )
-    findings.sort(key=lambda f: ("placement", "overrides", "leak").index(f[0]))
+    findings.sort(key=lambda f: (_ORDER.index(f[0]), f[1]))
     return findings
 
 
+def _misfiled_in_place(behavior: dict[str, dict[str, Any]]) -> int:
+    """Misfiled tests that sit in their directory's suite, or in no suite directory: those
+    outside their directory already count against the share."""
+    return sum(
+        1
+        for entry in behavior.values()
+        if _verdict(entry) and entry.get("directory", "") in ("", entry["suite"])
+    )
+
+
 def health(reports: Iterable[dict[str, Any]]) -> str:
-    """The share of tests that run in their directory's suite, rounded down, so 100.0 means
-    every test does; tests the rules tolerate in another directory count as outside it."""
-    total = 0
+    """The share of collected tests that keep to the rules, rounded down, so 100.0 means every
+    test does: a test outside its directory's suite (tolerated or not) or misfiled does not."""
+    reports = list(reports)
+    whole = 0
     outside: dict[str, int] = {}
     for report in reports:
-        total = max(total, report["total"])
+        whole = max(whole, report.get("suited", report["total"]))
         for scope in report["scopes"]:
             outside[scope["scope"]] = sum(
                 n for suite, n in scope["suites"].items() if suite != scope["directory"]
             )
-    if not total:
+    if not whole:
         return "100.0"
-    inside = total - sum(outside.values())
-    return f"{math.floor(inside * 1000 / total) / 10:.1f}"
+    keeping = whole - sum(outside.values()) - _misfiled_in_place(_behavior(reports))
+    return f"{math.floor(keeping * 1000 / whole) / 10:.1f}"
 
 
 def main(argv: list[str] | None = None) -> int:

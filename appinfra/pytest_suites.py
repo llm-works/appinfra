@@ -28,7 +28,7 @@ import pytest
 from _pytest.mark import MarkMatcher
 from _pytest.mark.expression import Expression
 
-from ._suite_health import REPORT_DIR_ENV, SuiteHealth
+from ._suite_health import REPORT_DIR_ENV, SuiteHealth, exempt_reason
 
 _HEALTH_KEY = pytest.StashKey[SuiteHealth]()
 
@@ -51,9 +51,14 @@ def pytest_configure(config: pytest.Config) -> None:
     """
     for suite in SUITES:
         config.addinivalue_line("markers", f"{suite}: {_MARKER_HELP[suite]}")
+    config.addinivalue_line(
+        "markers",
+        "suite_exempt(reason): the test may do what its suite does not allow; "
+        "Test structure health leaves its behavior unjudged",
+    )
     report_dir = os.environ.get(REPORT_DIR_ENV)
     if report_dir:
-        health = SuiteHealth(Path(report_dir))
+        health = SuiteHealth(Path(report_dir), config.rootpath)
         config.stash[_HEALTH_KEY] = health
         config.pluginmanager.register(health, "appinfra-suite-health")
 
@@ -144,6 +149,12 @@ def pytest_collection_modifyitems(
     if conflicting:
         raise pytest.UsageError(
             "tests with more than one suite marker: " + ", ".join(conflicting)
+        )
+    unexplained = [i.nodeid for i in items if exempt_reason(i) == ""]
+    if unexplained:
+        raise pytest.UsageError(
+            "suite_exempt needs a reason, as suite_exempt(reason=...): "
+            + ", ".join(unexplained)
         )
     health = config.stash.get(_HEALTH_KEY, None)
     if health is not None:
