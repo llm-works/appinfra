@@ -141,19 +141,27 @@ test.e2e.v:: ## runs end-to-end tests (verbose)
 endif # skip test.e2e
 .PHONY: test.e2e test.e2e.v
 
+# Suites a project replaced through APPINFRA_DEV_SKIP_TARGETS: test.all leaves their
+# markers (the suite names) out of the parallel run and runs the project's targets after it
+_APPINFRA_TEST_REPLACED := $(filter test.unit test.integration test.e2e test.security,$(APPINFRA_DEV_SKIP_TARGETS))
+_APPINFRA_TEST_ALL_MARKERS := not performance$(foreach _APPINFRA_SUITE,$(_APPINFRA_TEST_REPLACED), and not $(_APPINFRA_SUITE:test.%=%))
+
 # Every suite but performance in one pytest run, so the workers start, collect and
-# balance the work once; then test.perf, serially. As recipe lines, not prerequisites:
-# make -j would run prerequisites at the same time, and performance tests need the CPU
+# balance the work once; then replaced suites and test.perf, serially. As recipe lines,
+# not prerequisites: make -j would run prerequisites at the same time, and performance
+# tests need the CPU
 test.all:: ## runs all tests: every suite in one parallel run, then performance
 	@echo "* running every suite but performance..."
-	@$(call APPINFRA_RUN_PYTEST,tests/ -m "not performance" -qq --tb=short)
+	@$(call APPINFRA_RUN_PYTEST,tests/ -m "$(_APPINFRA_TEST_ALL_MARKERS)" -qq --tb=short)
+	@$(foreach _APPINFRA_SUITE,$(_APPINFRA_TEST_REPLACED),$(MAKE) --no-print-directory $(_APPINFRA_SUITE) &&) true
 	@$(MAKE) --no-print-directory test.perf
 	@echo "* all tests completed"
 .PHONY: test.all
 
 test.all.v:: ## runs all tests (verbose)
 	@echo "* running every suite but performance... (verbose)"
-	@$(call APPINFRA_RUN_PYTEST,tests/ -m "not performance" -v)
+	@$(call APPINFRA_RUN_PYTEST,tests/ -m "$(_APPINFRA_TEST_ALL_MARKERS)" -v)
+	@$(foreach _APPINFRA_SUITE,$(_APPINFRA_TEST_REPLACED),$(MAKE) --no-print-directory $(_APPINFRA_SUITE).v &&) true
 	@$(MAKE) --no-print-directory test.perf.v
 	@echo "* all tests completed (verbose)"
 .PHONY: test.all.v

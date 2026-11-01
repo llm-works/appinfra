@@ -360,6 +360,9 @@ test.e2e.v:: ## runs e2e tests (verbose, sequential)
 	@echo "* e2e tests done"
 ```
 
+`test.all` leaves a replaced suite out of its parallel run and runs the project's target for it
+afterwards (`test.e2e.v` under `test.all.v`).
+
 > **Note:** `APPINFRA_DEV_SKIP_TARGETS` must be set **before** the include statement.
 
 ## Overriding Variables

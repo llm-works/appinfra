@@ -378,6 +378,35 @@ class TestAllTestsTargets:
         suites = self._pytest_calls(tmp_path, "test.all", workers="1")[0]
         assert "-n 1" in suites
 
+    @pytest.mark.parametrize(
+        ("target", "suffix"), [("test.all", ""), ("test.all.v", ".v")]
+    )
+    def test_replaced_suite_runs_through_its_own_target(
+        self, tmp_path: Path, target: str, suffix: str
+    ) -> None:
+        """A suite in APPINFRA_DEV_SKIP_TARGETS stays out of the parallel run."""
+        (tmp_path / "Makefile").write_text(
+            "APPINFRA_DEV_SKIP_TARGETS = test.e2e\n"
+            f"include {MAKE_DIR / 'Makefile.pytest'}\n"
+            f"test.e2e{suffix}::\n"
+            "\t@$(call APPINFRA_RUN_PYTEST_SERIAL,tests/ -m e2e --project-e2e)\n"
+        )
+        result = subprocess.run(
+            ["make", "--no-print-directory", "-n", target, "APPINFRA_PYTEST_WORKERS=4"],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+            env=_clean_env(),
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr
+        calls = [line for line in result.stdout.splitlines() if " -m pytest " in line]
+        assert len(calls) == 3, calls
+        suites, e2e, perf = calls
+        assert '-m "not performance and not e2e"' in suites and "-n 4" in suites
+        assert "--project-e2e" in e2e and "-n " not in e2e
+        assert "-m performance" in perf
+
 
 class TestConfigLoading:
     """Makefile.local loads in every layout; INFRA_* config overrides pass through."""
