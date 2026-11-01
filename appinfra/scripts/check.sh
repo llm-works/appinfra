@@ -1119,6 +1119,19 @@ run_test_structure() {
     return 0
 }
 
+# The last line when every check passed and $1 warnings were recorded: the pass mark, only the
+# warnings in yellow, then the time $2
+passed_with_warnings() {
+    local count="$1" elapsed="$2" noun="warnings"
+    [ "$count" -eq 1 ] && noun="warning"
+    echo -e "${UI_MARK_OK} All checks passed ${UI_BRIGHT_YELLOW}with ${count} ${noun}${UI_RESET} ${UI_GRAY}in ${elapsed}s${UI_RESET}"
+}
+
+# A run_raw check passed with $1 warnings: run_raw's last line sums them
+raw_warned() {
+    echo "$1" >> "${STATUS_DIR}/raw-warnings"
+}
+
 # run_raw's Test structure health: the summary and every finding. Returns 0 with no finding,
 # otherwise EXIT_CODE_WARNING in warn mode or 1 in strict mode.
 run_raw_test_structure() {
@@ -1148,6 +1161,8 @@ run_raw_test_structure() {
     if [ "$TEST_HEALTH" = strict ]; then
         rc=1
         mark="${UI_MARK_FAIL}"
+    else
+        raw_warned "$count"
     fi
     echo "  ${mark} ${HEALTH_NAME} (${summary})"
     raw_health_findings "$out"
@@ -1545,7 +1560,9 @@ run_raw() {
         echo "${UI_MARK_FAIL} Some checks failed ${UI_GRAY}in ${elapsed}s${UI_RESET}"
         exit 1
     elif [ "$has_warnings" = true ]; then
-        echo "${UI_MARK_WARN} All checks passed with warnings ${UI_GRAY}in ${elapsed}s${UI_RESET}"
+        passed_with_warnings \
+            "$(awk '{ n += $1 } END { print n + 0 }' "${STATUS_DIR}/raw-warnings" 2>/dev/null)" \
+            "$elapsed"
     else
         echo "${UI_MARK_OK} All checks passed ${UI_GRAY}in ${elapsed}s${UI_RESET}"
     fi
@@ -1572,17 +1589,19 @@ run_raw_check() {
         eval "$(with_pytest_args "$cmd")" || rc=$?
     fi
 
-    local found="" note=""
+    local found="" note="" warnings=1
     if [ "$scan" = scan ] && [ "$rc" -eq 0 ]; then
         found=$(found_warnings "$log")
     fi
     if [ -n "$found" ]; then
-        note=" ($(awk -F'\t' '{ n += $1 } END { print n }' <<< "$found") warnings)"
+        warnings=$(awk -F'\t' '{ n += $1 } END { print n }' <<< "$found")
+        note=" (${warnings} warnings)"
         rc=$EXIT_CODE_WARNING
         if [ "$WARNINGS_MODE" = strict ]; then
             rc=1
         fi
     fi
+    [ "$rc" -ne "$EXIT_CODE_WARNING" ] || raw_warned "$warnings"
     if [ "$rc" -eq 5 ] && [ -n "$indent" ]; then
         echo "${indent}${UI_GRAY}[ ]${UI_RESET} $name ${UI_GRAY}(no tests)${UI_RESET}"
     elif [ "$rc" -eq 0 ]; then
@@ -1685,10 +1704,9 @@ main() {
         exit 1
     elif [ -f "${STATUS_DIR}/warnings" ]; then
         # The warnings of every check that warned, each counting the warnings it recorded
-        local warning_count noun="warnings"
-        warning_count=$(awk -F'|' '{n += ($3 == "" ? 1 : $3)} END {print n + 0}' "${STATUS_DIR}/warnings")
-        [ "$warning_count" -eq 1 ] && noun="warning"
-        echo -e "${UI_MARK_WARN} ${UI_BRIGHT_YELLOW}All checks passed with ${warning_count} ${noun}${UI_RESET} ${UI_GRAY}in ${elapsed}s${UI_RESET}"
+        passed_with_warnings \
+            "$(awk -F'|' '{n += ($3 == "" ? 1 : $3)} END {print n + 0}' "${STATUS_DIR}/warnings")" \
+            "$elapsed"
     else
         echo -e "${UI_MARK_OK} All checks passed ${UI_GRAY}in ${elapsed}s${UI_RESET}"
     fi
