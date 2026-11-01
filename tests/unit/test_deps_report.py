@@ -152,6 +152,12 @@ class TestNewest:
         )
         assert dr.newest(versions, SpecifierSet(">3"), include_pre=False) is None
 
+    def test_a_spec_naming_a_pre_release_admits_it(self, dr: ModuleType) -> None:
+        """As pip does: ==2.0rc1 installs without --pre."""
+        versions = V("1.9", "2.0rc1")
+        spec = SpecifierSet("==2.0rc1")
+        assert dr.newest(versions, spec, include_pre=False) == Version("2.0rc1")
+
 
 class TestStatus:
     @pytest.mark.parametrize(
@@ -178,6 +184,10 @@ class TestStatus:
             # requirers' ranges exclude each other: >=2 from one, <2 from another
             ("2.4", ">=2,<2", None, "2.4", False, "no release fits"),
             ("1.0", ">=99", None, "1.0", False, "no release fits"),
+            (None, ">=2,<2", None, "2.4", False, "missing, no release fits"),
+            # an exact pin missing from the list may be yanked, which pip still installs
+            ("1.5", "==1.5", None, "2.0", False, "unknown"),
+            (None, "==1.5", None, "2.0", False, "missing"),
             ("2.0.dev1", "", "1.9", "1.9", False, "pre-release"),
             ("1.0", "", None, None, True, "local"),
             ("0.13.1.dev29", "", None, None, True, "local pre-release"),
@@ -208,6 +218,7 @@ class TestBounds:
             ("==2.50.1", "==2.50.1", ""),  # a pin is the whole range
             (">=2.10,<3,==2.13.0", "==2.13.0", ""),
             ("==2.13.*", "==2.13.*", ""),
+            ("==2.*,>=2.10,<2.13", "==2.*,2.10", "2.13"),  # a wildcard pin is a range
             ("===1.0+local", "===1.0+local", ""),
             (">=2,<2", "2", "2"),  # empty: the status says no release fits
             ("==1.0,==2.0", "==1.0,==2.0", ""),  # pins that cannot both hold
@@ -224,6 +235,24 @@ class TestBounds:
         """Two requirers' identical pins show once."""
         spec = SpecifierSet(">=2.10,<3,==2.13.0") & SpecifierSet("==2.13.0")
         assert dr.bounds(spec) == ("==2.13.0", "")
+
+
+class TestShownVersion:
+    @pytest.mark.parametrize(
+        ("version", "shown"),
+        [
+            ("1.0", "1.0"),
+            ("0.1.dev29+ga47dbd027.d20261031", "0.1.dev29"),  # setuptools-scm build
+            ("0.8.1.dev2+g0a4e9df", "0.8.1.dev2"),
+            ("1.0+d20261031", "1.0"),  # dirty build of a tagged release
+            ("2.13.0+cu124", "2.13.0+cu124"),  # a distribution's own label stays
+            ("1.7.1+cpu", "1.7.1+cpu"),
+        ],
+    )
+    def test_build_labels_dropped(
+        self, dr: ModuleType, version: str, shown: str
+    ) -> None:
+        assert dr.shown_version(Version(version)) == shown
 
 
 class TestAvailable:
