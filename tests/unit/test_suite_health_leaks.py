@@ -50,52 +50,51 @@ class TestImporting:
 
 class TestChanged:
     def test_an_env_var_a_test_set_is_a_leak(self) -> None:
-        changed = _suite_health._changed(_state(), _state(X="1"), set(), {"X"})
-        assert changed == ["$X"]
+        assert _suite_health._changed(_state(), _state(X="1"), {}) == ["$X"]
 
-    def test_an_env_var_set_by_an_import_is_not(self) -> None:
+    def test_an_env_var_left_as_an_import_set_it_is_not(self) -> None:
         before, after = _state(), _state(TORCHINDUCTOR_CACHE_DIR="/tmp/c")
-        changed = _suite_health._changed(
-            before, after, {"TORCHINDUCTOR_CACHE_DIR"}, set()
-        )
-        assert changed == []
+        import_env = {"TORCHINDUCTOR_CACHE_DIR": "/tmp/c"}
+        assert _suite_health._changed(before, after, import_env) == []
 
     def test_an_env_var_an_import_removed_is_not(self) -> None:
-        assert _suite_health._changed(_state(X="1"), _state(), {"X"}, set()) == []
+        assert _suite_health._changed(_state(X="1"), _state(), {"X": None}) == []
 
     def test_a_test_changing_what_an_import_set_is_a_leak(self) -> None:
-        changed = _suite_health._changed(_state(X="1"), _state(X="2"), {"X"}, {"X"})
+        changed = _suite_health._changed(_state(X="1"), _state(X="2"), {"X": "1"})
         assert changed == ["$X"]
 
+    def test_a_test_removing_what_an_import_set_is_a_leak(self) -> None:
+        assert _suite_health._changed(_state(X="1"), _state(), {"X": "1"}) == ["$X"]
 
-class TestNoteEnv:
+
+class TestNoteImportEnv:
     @pytest.fixture
-    def written(self, monkeypatch: pytest.MonkeyPatch) -> tuple[set[str], set[str]]:
-        """The names the hook keeps: (written by imports, written by the test)."""
-        by_import: set[str] = set()
-        by_test: set[str] = set()
-        monkeypatch.setattr(_suite_health, "_import_env", by_import)
-        monkeypatch.setattr(_suite_health, "_test_env", by_test)
-        return by_import, by_test
+    def written(self, monkeypatch: pytest.MonkeyPatch) -> dict[str, str | None]:
+        """The values the hook keeps, by variable."""
+        values: dict[str, str | None] = {}
+        monkeypatch.setattr(_suite_health, "_import_env", values)
+        return values
 
-    def test_a_var_set_during_an_import_is_the_import_s(
-        self, monkeypatch: pytest.MonkeyPatch, written: tuple[set[str], set[str]]
+    def test_keeps_the_value_an_import_set_or_removed(
+        self, monkeypatch: pytest.MonkeyPatch, written: dict[str, str | None]
     ) -> None:
         monkeypatch.setattr(_suite_health, "_importing", lambda frame: True)
-        _suite_health._note_env("os.putenv", (b"VLLM_LOGGING_LEVEL", b"INFO"))
-        _suite_health._note_env("os.unsetenv", (b"VLLM_HOST_IP",))
-        assert written == ({"VLLM_LOGGING_LEVEL", "VLLM_HOST_IP"}, set())
+        _suite_health._note_import_env("os.putenv", (b"VLLM_LOGGING_LEVEL", b"INFO"))
+        _suite_health._note_import_env("os.unsetenv", (b"VLLM_HOST_IP",))
+        assert written == {"VLLM_LOGGING_LEVEL": "INFO", "VLLM_HOST_IP": None}
 
-    def test_a_var_set_outside_an_import_is_the_test_s(
-        self, monkeypatch: pytest.MonkeyPatch, written: tuple[set[str], set[str]]
+    def test_ignores_a_var_set_outside_an_import(
+        self, monkeypatch: pytest.MonkeyPatch, written: dict[str, str | None]
     ) -> None:
         monkeypatch.setattr(_suite_health, "_importing", lambda frame: False)
-        _suite_health._note_env("os.putenv", (b"X", b"1"))
-        assert written == (set(), {"X"})
+        _suite_health._note_import_env("os.putenv", (b"X", b"1"))
+        assert written == {}
 
-    def test_other_events_are_ignored(
-        self, monkeypatch: pytest.MonkeyPatch, written: tuple[set[str], set[str]]
+    def test_ignores_other_events_and_pytest_s_own_var(
+        self, monkeypatch: pytest.MonkeyPatch, written: dict[str, str | None]
     ) -> None:
         monkeypatch.setattr(_suite_health, "_importing", lambda frame: True)
-        _suite_health._note_env("open", ("/tmp/x", "r", 0))
-        assert written == (set(), set())
+        _suite_health._note_import_env("open", ("/tmp/x", "r", 0))
+        _suite_health._note_import_env("os.putenv", (b"PYTEST_CURRENT_TEST", b"t"))
+        assert written == {}

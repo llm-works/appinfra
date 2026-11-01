@@ -29,8 +29,7 @@ import os
 import signal
 import sys
 from collections import Counter
-from collections.abc import Callable, Generator
-from collections.abc import Set as AbstractSet
+from collections.abc import Callable, Generator, Mapping
 from pathlib import Path
 from types import FrameType
 from typing import Any
@@ -44,12 +43,10 @@ _PYTEST_ENV = frozenset({"PYTEST_CURRENT_TEST"})
 
 _SIGNALS = sorted(signal.valid_signals())
 
-# Environment variables a module set or removed while being imported (_note_env): a library
-# configuring itself on first import, as torch or vllm do, not the test importing it. Those
-# written outside an import during the running unit test are the test's, even when an import
-# wrote them too; pytest_runtest_protocol empties that set before each unit test.
-_import_env: set[str] = set()
-_test_env: set[str] = set()
+# The value each environment variable was last given while a module was being imported
+# (_note_import_env), None for removed: a library configuring itself on first import, as torch
+# or vllm do. A variable a test leaves at that value is the library's, not the test's.
+_import_env: dict[str, str | None] = {}
 _env_hook_installed = False
 
 # The import machinery's files, frozen ("<frozen importlib._bootstrap>") or from source
@@ -66,22 +63,22 @@ def _importing(frame: FrameType | None) -> bool:
     return False
 
 
-def _note_env(event: str, args: tuple[Any, ...]) -> None:
-    """Audit hook: keep the name of an environment variable set or removed, as an import's
-    or as the test's; pytest's own (_PYTEST_ENV) is neither."""
-    if event in ("os.putenv", "os.unsetenv"):
-        name = os.fsdecode(args[0])
-        if name not in _PYTEST_ENV:
-            written = _import_env if _importing(sys._getframe(1)) else _test_env
-            written.add(name)
+def _note_import_env(event: str, args: tuple[Any, ...]) -> None:
+    """Audit hook: keep the value an import gives an environment variable, None for removed;
+    pytest's own (_PYTEST_ENV) is not kept. The event comes before the write, with the value."""
+    if event not in ("os.putenv", "os.unsetenv"):
+        return
+    name = os.fsdecode(args[0])
+    if name not in _PYTEST_ENV and _importing(sys._getframe(1)):
+        _import_env[name] = os.fsdecode(args[1]) if event == "os.putenv" else None
 
 
 def _install_env_hook() -> None:
-    """Install _note_env once per process; an audit hook cannot be removed, so only the health
-    check installs it."""
+    """Install _note_import_env once per process; an audit hook cannot be removed, so only the
+    health check installs it."""
     global _env_hook_installed
     if not _env_hook_installed:
-        sys.addaudithook(_note_env)
+        sys.addaudithook(_note_import_env)
         _env_hook_installed = True
 
 
@@ -103,13 +100,10 @@ def _snapshot() -> dict[str, Any]:
 
 
 def _changed(
-    before: dict[str, Any],
-    after: dict[str, Any],
-    import_env: AbstractSet[str],
-    test_env: AbstractSet[str],
+    before: dict[str, Any], after: dict[str, Any], import_env: Mapping[str, str | None]
 ) -> list[str]:
     """What differs between two snapshots; environment variables by name, never by value, and
-    not those only an import wrote (in ``import_env``, not in ``test_env``)."""
+    not those left at the value an import gave them (``import_env``)."""
     changed = [
         _signal_name(signum)
         for signum, handler in before["signals"].items()
@@ -122,7 +116,7 @@ def _changed(
         f"${name}"
         for name in sorted(env_before.keys() | env_after.keys())
         if env_before.get(name) != env_after.get(name)
-        and (name not in import_env or name in test_env)
+        and not (name in import_env and import_env[name] == env_after.get(name))
     )
     if after["cwd"] != before["cwd"]:
         changed.append("cwd")
@@ -197,12 +191,11 @@ class SuiteHealth:
         """Compare the process-wide state from before a unit test's setup to after its teardown."""
         if self._suite_of.get(item.nodeid) != "unit":
             return (yield)
-        _test_env.clear()
         before = _snapshot()
         try:
             return (yield)
         finally:
-            changed = _changed(before, _snapshot(), _import_env, _test_env)
+            changed = _changed(before, _snapshot(), _import_env)
             if changed:
                 self._leaks.append({"test": item.nodeid, "changed": changed})
 

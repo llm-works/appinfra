@@ -127,6 +127,12 @@ def test_changes_what_an_import_set():
     os.environ["SUITE_HEALTH_IMPORT"] = "2"
 
 
+def test_patches_what_its_import_set(monkeypatch):
+    import sets_env_on_import_too  # noqa: F401
+
+    monkeypatch.setenv("SUITE_HEALTH_IMPORT_TOO", "2")
+
+
 @pytest.mark.integration
 def test_integration_may_change_state():
     os.environ["SUITE_HEALTH_INTEGRATION"] = "1"
@@ -141,6 +147,9 @@ def test_unit_tests_that_leave_state_changed_are_reported(
         # a library configuring itself on first import, as torch or vllm do
         "tests/unit/sets_env_on_import.py": (
             'import os\nos.environ["SUITE_HEALTH_IMPORT"] = "1"\n'
+        ),
+        "tests/unit/sets_env_on_import_too.py": (
+            'import os\nos.environ["SUITE_HEALTH_IMPORT_TOO"] = "1"\n'
         ),
     }
     report = _report(_run(pytester, monkeypatch, layout))
