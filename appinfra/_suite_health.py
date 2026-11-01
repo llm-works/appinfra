@@ -16,7 +16,8 @@ pytest-xdist worker) writes one JSON report there at the end of the session, ``<
   module-level tests, also the count per suite of every test in the file (``file_suites``);
 - ``leaks``: each unit test that left process-wide state changed (signal handlers, the
   ``ITIMER_REAL`` timer, environment variables by name, the working directory), compared from
-  before its setup to after its teardown.
+  before its setup to after its teardown; an environment variable a module sets while being
+  imported is the library's, not the test's.
 
 The rules applied to these figures live in appinfra/scripts/check_suite_health.py.
 """
@@ -26,9 +27,12 @@ from __future__ import annotations
 import json
 import os
 import signal
+import sys
 from collections import Counter
 from collections.abc import Callable, Generator
+from collections.abc import Set as AbstractSet
 from pathlib import Path
+from types import FrameType
 from typing import Any
 
 import pytest
@@ -39,6 +43,39 @@ REPORT_DIR_ENV = "_APPINFRA_CHECK_SUITE_HEALTH_DIR"
 _PYTEST_ENV = frozenset({"PYTEST_CURRENT_TEST"})
 
 _SIGNALS = sorted(signal.valid_signals())
+
+# Environment variables a module set or removed while being imported (_note_import_env): a
+# library configuring itself on first import, as torch or vllm do, not the test importing it
+_import_env: set[str] = set()
+_env_hook_installed = False
+
+# The import machinery's files, frozen ("<frozen importlib._bootstrap>") or from source
+_IMPORT_MACHINERY = ("importlib._bootstrap", os.path.join("importlib", "_bootstrap"))
+
+
+def _importing(frame: FrameType | None) -> bool:
+    """Whether the import machinery is on the stack from ``frame`` up: a module is loading."""
+    while frame is not None:
+        filename = frame.f_code.co_filename
+        if any(part in filename for part in _IMPORT_MACHINERY):
+            return True
+        frame = frame.f_back
+    return False
+
+
+def _note_import_env(event: str, args: tuple[Any, ...]) -> None:
+    """Audit hook: keep the name of an environment variable set or removed during an import."""
+    if event in ("os.putenv", "os.unsetenv") and _importing(sys._getframe(1)):
+        _import_env.add(os.fsdecode(args[0]))
+
+
+def _install_env_hook() -> None:
+    """Install _note_import_env once per process; an audit hook cannot be removed, so only
+    the health check installs it."""
+    global _env_hook_installed
+    if not _env_hook_installed:
+        sys.addaudithook(_note_import_env)
+        _env_hook_installed = True
 
 
 def _signal_name(signum: int) -> str:
@@ -58,8 +95,11 @@ def _snapshot() -> dict[str, Any]:
     }
 
 
-def _changed(before: dict[str, Any], after: dict[str, Any]) -> list[str]:
-    """What differs between two snapshots; environment variables by name, never by value."""
+def _changed(
+    before: dict[str, Any], after: dict[str, Any], import_env: AbstractSet[str]
+) -> list[str]:
+    """What differs between two snapshots; environment variables by name, never by value, and
+    not those an import set (``import_env``)."""
     changed = [
         _signal_name(signum)
         for signum, handler in before["signals"].items()
@@ -71,7 +111,7 @@ def _changed(before: dict[str, Any], after: dict[str, Any]) -> list[str]:
     changed.extend(
         f"${name}"
         for name in sorted(env_before.keys() | env_after.keys())
-        if env_before.get(name) != env_after.get(name)
+        if env_before.get(name) != env_after.get(name) and name not in import_env
     )
     if after["cwd"] != before["cwd"]:
         changed.append("cwd")
@@ -99,6 +139,7 @@ class SuiteHealth:
     """Collects the report of one pytest process and writes it at the end of the session."""
 
     def __init__(self, report_dir: Path) -> None:
+        _install_env_hook()
         self._report_dir = report_dir
         self._rootdir = ""
         self._collected = 0
@@ -149,7 +190,7 @@ class SuiteHealth:
         try:
             return (yield)
         finally:
-            changed = _changed(before, _snapshot())
+            changed = _changed(before, _snapshot(), _import_env)
             if changed:
                 self._leaks.append({"test": item.nodeid, "changed": changed})
 

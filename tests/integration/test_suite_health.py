@@ -119,6 +119,10 @@ def test_restored(monkeypatch):
     monkeypatch.chdir("/")
 
 
+def test_imports_a_library_that_sets_env():
+    import sets_env_on_import  # noqa: F401
+
+
 @pytest.mark.integration
 def test_integration_may_change_state():
     os.environ["SUITE_HEALTH_INTEGRATION"] = "1"
@@ -128,7 +132,14 @@ def test_integration_may_change_state():
 def test_unit_tests_that_leave_state_changed_are_reported(
     pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    report = _report(_run(pytester, monkeypatch, {"tests/unit/test_leaks.py": _LEAKS}))
+    layout = {
+        "tests/unit/test_leaks.py": _LEAKS,
+        # a library configuring itself on first import, as torch or vllm do
+        "tests/unit/sets_env_on_import.py": (
+            'import os\nos.environ["SUITE_HEALTH_IMPORT"] = "1"\n'
+        ),
+    }
+    report = _report(_run(pytester, monkeypatch, layout))
     changed = {
         leak["test"].split("::")[-1]: leak["changed"] for leak in report["leaks"]
     }

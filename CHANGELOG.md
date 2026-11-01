@@ -10,6 +10,10 @@ For API stability guarantees and deprecation policy, see
 
 ## [Unreleased]
 
+### Fixed
+- Test structure health no longer reports a unit test as leaking an environment variable that a
+  library sets while being imported (torch, vllm and others configure themselves on first import).
+
 ## [0.14.0] - 2026-11-01
 
 ### Added
