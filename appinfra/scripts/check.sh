@@ -251,6 +251,12 @@ if [ -n "${APPINFRA_DEV_CQ_EXCLUDE:-}" ]; then
     )
 fi
 
+# The same for the decorators dead private code counts as registering what they decorate
+CQ_KEEP_DECORATOR_FLAGS=""
+for dec in ${APPINFRA_DEV_CQ_DEAD_KEEP_DECORATORS:-}; do
+    CQ_KEEP_DECORATOR_FLAGS+="${CQ_KEEP_DECORATOR_FLAGS:+ }--keep-decorator \"${dec}\""
+done
+
 # Extra ruff rules reported over the package as warnings, never failing: a comma-separated list
 # of rule codes (empty or false = off; "-" not ":-" keeps an empty value). Rules that should fail
 # the build belong in the project's ruff config.
@@ -344,7 +350,7 @@ cq_check() {
     CQ_FAILED=false
     cq_tool size "$(cq_strict_flag "$CQ_STRICT")" "cf ${CQ_EXCLUDE_FLAGS}"
     [ "$CQ_DUP" = "false" ] || cq_tool dup "$(cq_strict_flag "$CQ_DUP")" "dup ${PKG_NAME}/ ${CQ_EXCLUDE_FLAGS}"
-    [ "$CQ_DEAD" = "false" ] || cq_tool dead "$(cq_strict_flag "$CQ_DEAD")" "dead ${PKG_NAME}/ ${CQ_EXCLUDE_FLAGS}"
+    [ "$CQ_DEAD" = "false" ] || cq_tool dead "$(cq_strict_flag "$CQ_DEAD")" "dead ${PKG_NAME}/ ${CQ_EXCLUDE_FLAGS} ${CQ_KEEP_DECORATOR_FLAGS}"
     [ "$CQ_FAILED" = false ] || return 1
     [ "${#CQ_SUMMARY[@]}" -gt 0 ] || return 0
     local summary

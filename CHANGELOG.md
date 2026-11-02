@@ -13,6 +13,8 @@ For API stability guarantees and deprecation policy, see
 ### Added
 - `Envelope` works as a pydantic field type without `arbitrary_types_allowed`: a str is wrapped,
   and JSON dumps and schemas mask it like `pydantic.SecretStr`.
+- `cq dead` counts methods under pydantic's validator and serializer decorators as used;
+  `--keep-decorator` (`APPINFRA_DEV_CQ_DEAD_KEEP_DECORATORS`) adds other registering decorators.
 
 ### Changed
 - The `hotreload` extra accepts watchdog up to 7.x and the `ui` extra accepts rich up to 15.x.
