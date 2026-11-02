@@ -116,20 +116,22 @@ _R = TypeVar("_R")
 
 class FakeClock:
     """
-    A virtual clock for tests of time-based code: it moves only when slept on.
+    A virtual clock that takes the waiting out of tests of time-based code: it moves only
+    when slept on.
 
     While active, as a context manager, a decorator or the fake_clock fixture, it stands in
     for the module-level ``time`` of appinfra's Ticker, RateLimiter and ETA, of the modules
     given as ``modules``, and of any module passed to patch(): their ``time.monotonic()``,
     ``time.time()`` and ``time.sleep()`` read and advance the clock, so a sleep returns at
-    once and elapsed time is exact. Every other ``time`` function stays real, and so does
-    the time of every module not patched (pytest, logging). On exit the modules get their
-    real ``time`` back.
+    once. Every other ``time`` function stays real, and so does the time of every module not
+    patched (pytest, logging). On exit the modules get their real ``time`` back.
+
+    The clock only speeds a test up: a test on it must pass on the real clock as well, so it
+    asserts what the code does rather than the clock's readings, and any bound on time holds
+    however much real time passes too (an elapsed time at least, a time remaining at most).
 
     As a decorator, each call runs on a fresh clock made from the same ``start`` and
-    ``modules``; the function does not get the clock, so the decorator suits tests that
-    need sleeps to return at once, and the context manager or the fixture tests that
-    assert on time.
+    ``modules``.
 
     Limits: only a module-level ``import time`` is redirected, not ``from time import
     sleep``, which binds the real function when the module is imported. Code on the clock
@@ -283,7 +285,8 @@ def fake_clock() -> Generator[FakeClock, None, None]:
     """
     Run appinfra's Ticker, RateLimiter and ETA on a FakeClock for one test.
 
-    ``fake_clock.patch("myapp.retry")`` puts a project's own module on the same clock.
+    ``fake_clock.patch("myapp.retry")`` puts a project's own module on the same clock. The
+    test must pass on the real clock as well; the fake one only removes the waiting.
     Objects that capture time functions when constructed (a Ticker's scheduler and stop
     event) must be created after this fixture is set up, which pytest guarantees for
     objects the test body creates.

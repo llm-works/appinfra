@@ -408,6 +408,33 @@ class TestAllTestsTargets:
         assert "-m performance" in perf
 
 
+class TestPytestArgs:
+    """APPINFRA_PYTEST_ARGS reaches every pytest run the test targets start."""
+
+    # test.perf runs serially (APPINFRA_RUN_PYTEST_SERIAL), the others in parallel
+    @pytest.mark.parametrize("target", ["test.unit", "test.integration", "test.perf"])
+    def test_args_reach_pytest(self, tmp_path: Path, target: str) -> None:
+        (tmp_path / "Makefile").write_text(f"include {MAKE_DIR / 'Makefile.pytest'}\n")
+        result = subprocess.run(
+            [
+                "make",
+                "--no-print-directory",
+                "-n",
+                target,
+                "APPINFRA_PYTEST_ARGS=--x-marker",
+            ],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+            env=_clean_env(),
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr
+        calls = [line for line in result.stdout.splitlines() if " -m pytest " in line]
+        assert calls, result.stdout
+        assert all("--x-marker" in call for call in calls), calls
+
+
 class TestConfigLoading:
     """Makefile.local loads in every layout; INFRA_* config overrides pass through."""
 

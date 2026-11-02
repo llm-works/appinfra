@@ -14,6 +14,17 @@ from appinfra.app.fastapi.ratelimit.token_bucket import (
     _extract_ip_with_header,
 )
 
+
+@pytest.fixture
+def clock(fake_clock):
+    """Put this module's sleeps on the fake clock with the token bucket's.
+
+    The assertions hold on the real clock as well: a sleep lasts at least as long as asked,
+    so a refill is at least the tokens that time is worth and an entry at least that stale.
+    """
+    fake_clock.patch("appinfra.app.fastapi.ratelimit.token_bucket", __name__)
+
+
 # =============================================================================
 # Test IP extraction helpers
 # =============================================================================
@@ -189,7 +200,7 @@ class TestIsAllowed:
         allowed, _ = limiter.is_allowed("client1")
         assert allowed is False
 
-    def test_tokens_refill_over_time(self):
+    def test_tokens_refill_over_time(self, clock):
         """Test that tokens refill after time passes."""
         limiter = TokenBucketLimiter(rate=10, window=1.0)  # 10/sec
 
@@ -276,7 +287,7 @@ class TestExtractKey:
 class TestCleanup:
     """Test stale entry cleanup."""
 
-    def test_removes_stale_entries(self):
+    def test_removes_stale_entries(self, clock):
         """Test that cleanup removes old entries."""
         limiter = TokenBucketLimiter(rate=10, window=1.0, stale_ttl=0.1)
 

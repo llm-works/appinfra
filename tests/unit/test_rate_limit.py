@@ -18,6 +18,18 @@ import pytest
 
 from appinfra.rate_limit import Backoff, RateLimiter
 
+
+@pytest.fixture
+def clock(fake_clock):
+    """Put this module's sleeps on the fake clock with the limiter's, so they take no real time.
+
+    Every assertion holds on the real clock as well: a wait or a time remaining is at most
+    the interval, an elapsed time at least what was waited, and a "not yet" checked right
+    after claiming a slot holds unless the machine stalls for a whole interval in between.
+    """
+    fake_clock.patch(__name__)
+
+
 # =============================================================================
 # Test RateLimiter Initialization
 # =============================================================================
@@ -75,15 +87,15 @@ class TestRateLimiterInitialization:
 class TestRateLimiterNext:
     """Test RateLimiter next() method."""
 
-    def test_first_call_waits_by_default(self, fake_clock):
+    def test_first_call_waits_by_default(self, clock):
         """Test first call to next() waits (initial=False by default)."""
         mock_logger = Mock()
-        limiter = RateLimiter(mock_logger, per_minute=60)
-        start = fake_clock.monotonic()
+        limiter = RateLimiter(mock_logger, per_minute=120)  # 0.5s interval
+        start = time.monotonic()
         wait = limiter.next()
-        # First call waits one interval because last_t is initialized to future time
-        assert wait == 1.0
-        assert fake_clock.monotonic() - start == 1.0
+        # First call waits up to one interval because last_t starts one interval ahead
+        assert 0.0 < wait <= 0.5
+        assert time.monotonic() - start >= wait
 
     def test_first_call_immediate_when_initial_true(self):
         """Test first call to next() goes through immediately (initial=True)."""
@@ -92,55 +104,53 @@ class TestRateLimiterNext:
         wait = limiter.next()
         assert wait == 0.0
 
-    def test_rapid_calls_cause_waiting(self, fake_clock):
+    def test_rapid_calls_cause_waiting(self, clock):
         """Test rapid calls cause waiting."""
         mock_logger = Mock()
-        limiter = RateLimiter(mock_logger, per_minute=120)  # 2 per second
+        limiter = RateLimiter(mock_logger, per_minute=120)  # 0.5s interval
 
         # First call
         limiter.next()
 
-        # Second call should wait one full interval
-        start = fake_clock.monotonic()
+        # Second call waits for the next slot, at most one interval away
+        start = time.monotonic()
         wait = limiter.next()
-        elapsed = fake_clock.monotonic() - start
+        elapsed = time.monotonic() - start
 
-        assert wait == 0.5
-        assert elapsed == 0.5
+        assert 0.0 < wait <= 0.5
+        assert elapsed >= wait
 
-    def test_respect_max_ticks_false_no_sleep(self, fake_clock):
-        """Test respect_max_ticks=False doesn't sleep."""
+    def test_respect_max_ticks_false_no_sleep(self, clock):
+        """Test respect_max_ticks=False returns the wait without sleeping it."""
         mock_logger = Mock()
         limiter = RateLimiter(mock_logger, per_minute=120)
 
         # First call
         limiter.next()
+        mock_logger.reset_mock()
 
-        # Second call with respect_max_ticks=False should not sleep
-        start = fake_clock.monotonic()
         wait = limiter.next(respect_max_ticks=False)
-        elapsed = fake_clock.monotonic() - start
 
-        # Should calculate wait but not actually sleep
-        assert wait == 0.5
-        assert elapsed == 0.0
+        # The wait is computed, but the sleep path (which logs) is not taken
+        assert 0.0 < wait <= 0.5
+        mock_logger.trace.assert_not_called()
 
-    def test_sufficient_delay_no_wait(self, fake_clock):
+    def test_sufficient_delay_no_wait(self, clock):
         """Test sufficient delay between calls doesn't cause waiting."""
         mock_logger = Mock()
-        limiter = RateLimiter(mock_logger, per_minute=60)
+        limiter = RateLimiter(mock_logger, per_minute=120)  # 0.5s interval
 
         # First call
         limiter.next()
 
-        # Wait for the rate limit delay
-        fake_clock.sleep(1.1)  # Slightly more than 1 second (60 per minute = 1/sec)
+        # Wait out the interval
+        time.sleep(0.75)
 
         # Second call should not wait
         wait = limiter.next()
         assert wait == 0
 
-    def test_logger_called_when_waiting(self, fake_clock):
+    def test_logger_called_when_waiting(self, clock):
         """Test logger is called when waiting."""
         mock_logger = Mock()
         limiter = RateLimiter(mock_logger, per_minute=120, initial=False)
@@ -155,17 +165,17 @@ class TestRateLimiterNext:
         assert "extra" in kwargs
         assert "wait" in kwargs["extra"]
 
-    def test_logger_not_called_when_slot_available(self, fake_clock):
+    def test_logger_not_called_when_slot_available(self, clock):
         """Test logger not called when slot is available (after waiting)."""
         mock_logger = Mock()
-        limiter = RateLimiter(mock_logger, per_minute=60)
+        limiter = RateLimiter(mock_logger, per_minute=120)  # 0.5s interval
 
         # First call waits
         limiter.next()
         mock_logger.reset_mock()
 
         # Wait for slot to become available
-        fake_clock.sleep(1.1)
+        time.sleep(0.75)
 
         # Second call - slot available, no wait
         limiter.next()
@@ -195,40 +205,35 @@ class TestRateLimiterTryNext:
         limiter = RateLimiter(mock_logger, per_minute=60, initial=True)
         assert limiter.try_next() is True
 
-    def test_rapid_call_returns_false(self, fake_clock):
-        """Test rapid calls return False without blocking until slot available."""
+    def test_rapid_call_returns_false(self, clock):
+        """Test rapid calls return False, leaving the slot as it is."""
         mock_logger = Mock()
-        limiter = RateLimiter(mock_logger, per_minute=60)  # 1 per second
+        limiter = RateLimiter(mock_logger, per_minute=120)  # 0.5s interval
 
         # Wait for slot to become available
-        fake_clock.sleep(1.1)
+        time.sleep(0.75)
 
         # First call after wait should succeed
         assert limiter.try_next() is True
         first_t = limiter.last_t
 
-        # Immediate second call should fail (non-blocking)
-        start = fake_clock.monotonic()
+        # Immediate second call fails
         assert limiter.try_next() is False
-        elapsed = fake_clock.monotonic() - start
-
-        # Should be non-blocking: any sleep would have advanced the clock
-        assert elapsed == 0.0
         # last_t should not have changed
         assert limiter.last_t == first_t
 
-    def test_after_delay_returns_true(self, fake_clock):
+    def test_after_delay_returns_true(self, clock):
         """Test try_next() returns True after sufficient delay."""
         mock_logger = Mock()
         limiter = RateLimiter(mock_logger, per_minute=120)  # 0.5 second delay
 
         # Wait for initial slot to become available
-        fake_clock.sleep(0.55)
+        time.sleep(0.55)
 
         assert limiter.try_next() is True
 
         # Wait for the rate limit delay
-        fake_clock.sleep(0.55)
+        time.sleep(0.55)
 
         # Should succeed now
         assert limiter.try_next() is True
@@ -247,7 +252,7 @@ class TestRateLimiterTryNext:
 
         assert limiter.last_t == original_last_t
 
-    def test_updates_state_on_true(self, fake_clock):
+    def test_updates_state_on_true(self, clock):
         """Test try_next() updates last_t when returning True."""
         mock_logger = Mock()
         limiter = RateLimiter(mock_logger, per_minute=120)
@@ -255,7 +260,7 @@ class TestRateLimiterTryNext:
         limiter.try_next()
         first_t = limiter.last_t
 
-        fake_clock.sleep(0.55)
+        time.sleep(0.55)
 
         limiter.try_next()
         second_t = limiter.last_t
@@ -299,13 +304,13 @@ class TestRateLimiterCanProceed:
         limiter = RateLimiter(mock_logger, per_minute=60, initial=True)
         assert limiter.can_proceed() is True
 
-    def test_does_not_modify_last_t_on_true(self, fake_clock):
+    def test_does_not_modify_last_t_on_true(self, clock):
         """Test can_proceed() does NOT update last_t when returning True."""
         mock_logger = Mock()
-        limiter = RateLimiter(mock_logger, per_minute=60)
+        limiter = RateLimiter(mock_logger, per_minute=120)  # 0.5s interval
 
         # Wait for slot to become available
-        fake_clock.sleep(1.1)
+        time.sleep(0.75)
         original_last_t = limiter.last_t
         assert limiter.can_proceed() is True
         # last_t unchanged - slot not consumed
@@ -335,26 +340,26 @@ class TestRateLimiterCanProceed:
         # Immediate can_proceed() should return False
         assert limiter.can_proceed() is False
 
-    def test_after_delay_returns_true(self, fake_clock):
+    def test_after_delay_returns_true(self, clock):
         """Test can_proceed() returns True after sufficient delay."""
         mock_logger = Mock()
         limiter = RateLimiter(mock_logger, per_minute=120)  # 0.5 second delay
 
         # Wait for initial slot
-        fake_clock.sleep(0.55)
+        time.sleep(0.55)
 
         limiter.try_next()
 
         # Wait for the rate limit delay
-        fake_clock.sleep(0.55)
+        time.sleep(0.55)
 
         # Should return True now
         assert limiter.can_proceed() is True
 
-    def test_multiple_calls_return_same_value(self, fake_clock):
+    def test_multiple_calls_return_same_value(self, clock):
         """Test calling can_proceed() multiple times returns consistent value."""
         mock_logger = Mock()
-        limiter = RateLimiter(mock_logger, per_minute=60)
+        limiter = RateLimiter(mock_logger, per_minute=120)  # 0.5s interval
 
         # All should return False (initial=False by default)
         assert limiter.can_proceed() is False
@@ -362,7 +367,7 @@ class TestRateLimiterCanProceed:
         assert limiter.can_proceed() is False
 
         # Wait for slot to become available
-        fake_clock.sleep(1.1)
+        time.sleep(0.75)
 
         # Now all should return True
         assert limiter.can_proceed() is True
@@ -389,7 +394,7 @@ class TestRateLimiterCanProceed:
         assert result is False  # Slot not available yet
         assert elapsed < 0.01  # Should be near-instant
 
-    def test_consistent_with_try_next(self, fake_clock):
+    def test_consistent_with_try_next(self, clock):
         """Test can_proceed() returns True exactly when try_next() would succeed."""
         mock_logger = Mock()
         limiter = RateLimiter(mock_logger, per_minute=120)  # 0.5 second delay
@@ -399,7 +404,7 @@ class TestRateLimiterCanProceed:
         assert limiter.try_next() is False
 
         # Wait for slot to become available
-        fake_clock.sleep(0.55)
+        time.sleep(0.55)
 
         # Both would succeed now
         assert limiter.can_proceed() is True
@@ -436,13 +441,13 @@ class TestRateLimiterTimeUntilNext:
         # With initial=True, slot is immediately available
         assert limiter.time_until_next() == 0.0
 
-    def test_returns_zero_after_waiting(self, fake_clock):
+    def test_returns_zero_after_waiting(self, clock):
         """Test time_until_next() returns 0.0 after waiting for slot."""
         mock_logger = Mock()
         limiter = RateLimiter(mock_logger, per_minute=120)  # 0.5 second delay
 
         # Wait for slot to become available
-        fake_clock.sleep(0.55)
+        time.sleep(0.55)
 
         assert limiter.time_until_next() == 0.0
 
@@ -488,17 +493,17 @@ class TestRateLimiterTimeUntilNext:
         remaining = limiter.time_until_next(now=fake_now)
         assert remaining == 0.0
 
-    def test_consistent_with_can_proceed(self, fake_clock):
+    def test_consistent_with_can_proceed(self, clock):
         """Test time_until_next() is consistent with can_proceed()."""
         mock_logger = Mock()
         limiter = RateLimiter(mock_logger, per_minute=120)
 
         # While time_until_next() > 0, can_proceed() should be False
-        assert limiter.time_until_next() == 0.5
+        assert 0.0 < limiter.time_until_next() <= 0.5
         assert limiter.can_proceed() is False
 
         # Wait for slot
-        fake_clock.sleep(0.55)
+        time.sleep(0.55)
 
         # When time_until_next() == 0, can_proceed() should be True
         assert limiter.time_until_next() == 0.0
@@ -517,17 +522,18 @@ class TestRateLimiterTimeUntilNext:
         assert remaining > 0  # Slot not available
         assert elapsed < 0.01  # Should be near-instant
 
-    def test_decreases_over_time(self, fake_clock):
+    def test_decreases_over_time(self, clock):
         """Test time_until_next() value decreases as time passes."""
         mock_logger = Mock()
-        limiter = RateLimiter(mock_logger, per_minute=60)
+        limiter = RateLimiter(mock_logger, per_minute=60)  # 1s interval
 
         remaining1 = limiter.time_until_next()
-        fake_clock.sleep(0.25)
+        time.sleep(0.25)
         remaining2 = limiter.time_until_next()
 
-        assert remaining1 == 1.0
-        assert remaining2 == 0.75
+        # At most a full interval at first; at least the time slept less afterwards
+        assert remaining1 <= 1.0
+        assert remaining2 <= max(0.0, remaining1 - 0.25)
 
 
 # =============================================================================
@@ -568,35 +574,22 @@ class TestRateLimitingCalculations:
 class TestRateLimiterIntegration:
     """Test real-world rate limiter scenarios."""
 
-    def test_rate_limiter_workflow(self, fake_clock):
-        """Test complete rate limiter workflow."""
+    def test_rate_limiter_workflow(self, clock):
+        """Test complete rate limiter workflow: every call waits, at most an interval."""
         mock_logger = Mock()
-        limiter = RateLimiter(mock_logger, per_minute=120)  # Fast rate for testing
+        limiter = RateLimiter(mock_logger, per_minute=120)  # 0.5s interval
 
-        # First operation - waits (initial=False by default)
-        wait1 = limiter.next()
-        assert wait1 == 0.5
+        # First operation waits (initial=False by default), and so does each one after
+        waits = [limiter.next() for _ in range(3)]
+        assert all(0.0 < wait <= 0.5 for wait in waits), waits
 
-        # Second operation - should wait
-        wait2 = limiter.next()
-        assert wait2 == 0.5
-
-        # Third operation - should wait
-        wait3 = limiter.next()
-        assert wait3 == 0.5
-
-    def test_rate_limiter_workflow_initial_false(self, fake_clock):
+    def test_rate_limiter_workflow_initial_false(self, clock):
         """Test rate limiter workflow with initial=False (all calls wait)."""
         mock_logger = Mock()
         limiter = RateLimiter(mock_logger, per_minute=120, initial=False)
 
-        # First operation - waits (initial=False)
-        wait1 = limiter.next()
-        assert wait1 == 0.5
-
-        # Second operation - should wait
-        wait2 = limiter.next()
-        assert wait2 == 0.5
+        waits = [limiter.next() for _ in range(2)]
+        assert all(0.0 < wait <= 0.5 for wait in waits), waits
 
     def test_rate_limiter_with_variable_delays(self):
         """Test rate limiter with variable delays between calls."""

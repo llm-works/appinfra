@@ -47,8 +47,8 @@ class TestClock:
     def test_time_advances_with_monotonic(self):
         clock = FakeClock()
         wall = clock.time()
-        clock.sleep(60.0)
-        assert clock.time() == wall + 60.0
+        clock.sleep(8.0)
+        assert clock.time() == wall + 8.0
 
 
 class TestPatch:
@@ -56,8 +56,8 @@ class TestPatch:
 
     def test_module_runs_on_the_clock_inside_the_block(self, target):
         with FakeClock(modules=[_MODULE]) as clock:
-            target.time.sleep(60.0)
-            assert target.time.monotonic() == clock.monotonic() == 1060.0
+            target.time.sleep(8.0)
+            assert target.time.monotonic() == clock.monotonic() == 1008.0
             assert target.time.time() == clock.time()
 
     def test_other_functions_stay_real(self, target):
@@ -103,21 +103,21 @@ class TestPatch:
 
     def test_decorator(self, target):
         @FakeClock(modules=[_MODULE])
-        def wait_an_hour() -> float:
-            target.time.sleep(3600.0)
+        def wait_ten_seconds() -> float:
+            target.time.sleep(10.0)
             return target.time.monotonic()
 
-        assert wait_an_hour() == 4600.0
+        assert wait_ten_seconds() == 1010.0
         assert target.time is time
 
     def test_decorator_starts_each_call_on_a_fresh_clock(self, target):
         @FakeClock(modules=[_MODULE])
-        def wait_an_hour() -> float:
-            target.time.sleep(3600.0)
+        def wait_ten_seconds() -> float:
+            target.time.sleep(10.0)
             return target.time.monotonic()
 
-        assert wait_an_hour() == 4600.0
-        assert wait_an_hour() == 4600.0
+        assert wait_ten_seconds() == 1010.0
+        assert wait_ten_seconds() == 1010.0
 
     def test_decorator_passes_arguments_and_keeps_the_name(self, target):
         @FakeClock(start=0.0, modules=[_MODULE])
@@ -131,18 +131,26 @@ class TestPatch:
 
     @FakeClock(modules=[_MODULE])
     def test_decorated_test_still_takes_fixtures(self, target):
-        target.time.sleep(3600.0)
-        assert target.time.monotonic() == 4600.0
+        target.time.sleep(10.0)
+        assert target.time.monotonic() == 1010.0
+
+
+@pytest.fixture
+def plugin_fake_clock(request: pytest.FixtureRequest, fake_clock):
+    """The plugin's fake_clock fixture; --real-clock replaces it, so its tests skip there."""
+    if request.config.getoption("--real-clock"):
+        pytest.skip("--real-clock replaces the fake_clock fixture these tests check")
+    return fake_clock
 
 
 class TestFixture:
     """The fake_clock fixture: appinfra's modules on the clock, plus any the test patches."""
 
-    def test_appinfra_modules_on_the_clock(self, fake_clock):
+    def test_appinfra_modules_on_the_clock(self, plugin_fake_clock):
         appinfra.rate_limit.time.sleep(1.0)
-        assert fake_clock.monotonic() == 1001.0
+        assert plugin_fake_clock.monotonic() == 1001.0
 
-    def test_patch_a_project_module(self, fake_clock, target):
-        fake_clock.patch(_MODULE)
+    def test_patch_a_project_module(self, plugin_fake_clock, target):
+        plugin_fake_clock.patch(_MODULE)
         target.time.sleep(2.0)
-        assert fake_clock.monotonic() == 1002.0
+        assert plugin_fake_clock.monotonic() == 1002.0

@@ -27,6 +27,8 @@ For API stability guarantees and deprecation policy, see
   an error instead of expanding it (a URL spells `$` as `%24`).
 
 ### Fixed
+- `APPINFRA_PYTEST_ARGS` reaches pytest in the `make test*` targets and in `make check`'s test
+  runs; it was ignored.
 - `APPINFRA_DEV_CQ_EXCLUDE` patterns reach `make check` and `make cq.*` as written; a quote in one
   no longer breaks the code quality check.
 - `make check` stops with a clear error on a malformed package name, threshold, ruff rule list or

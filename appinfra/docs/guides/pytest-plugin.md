@@ -85,10 +85,9 @@ def lg():
 ### `fake_clock`
 
 Runs time-based code on a virtual clock, `FakeClock`, that moves only when slept on: a
-`time.sleep(3600)` returns at once and advances the clock by exactly 3600 seconds, so a test of
-retries, timeouts or rate limits runs in microseconds and asserts exact times. appinfra's
-`Ticker`, `RateLimiter` and `ETA` are on the clock for every test that takes the fixture;
-`patch()` adds a project's own modules:
+`time.sleep(3600)` returns at once instead of blocking, so a test of retries, timeouts or rate
+limits takes no real time. appinfra's `Ticker`, `RateLimiter` and `ETA` are on the clock for
+every test that takes the fixture; `patch()` adds a project's own modules:
 
 ```python
 # myapp/retry.py
@@ -109,14 +108,21 @@ from myapp.retry import retry
 
 def test_retry_gives_up_after_three_attempts(fake_clock):
     fake_clock.patch("myapp.retry")
-    assert retry(lambda: False, attempts=3, delay=60.0) is False
-    assert fake_clock.monotonic() == 1000.0 + 120.0
+    calls = []
+    assert retry(lambda: calls.append(1) or False, attempts=3, delay=60.0) is False
+    assert len(calls) == 3
 ```
 
+The clock only removes the waiting: a test on it must pass just the same on the real clock, only
+slower. So a test asserts what the code does (its results, the calls it makes, their order),
+not the clock's readings. Where time itself is the subject, every assertion has to hold however
+much real time passes as well: an elapsed time is at least the time slept, never exactly it, and
+a time remaining is at most what it was, never exactly it. A test that only holds on the virtual
+clock fails the day it runs for real.
+
 In a patched module, `time.monotonic()`, `time.time()` and `time.sleep()` read and advance the
-clock: `monotonic()` starts at 1000.0 and `time()` at the real wall-clock time. Every other
-`time` function stays real, and modules not patched (pytest, logging) keep real time. The
-patches end with the test.
+clock. Every other `time` function stays real, and modules not patched (pytest, logging) keep
+real time. The patches end with the test.
 
 `FakeClock` also works without the fixture, as a context manager or a decorator, with
 `modules` naming the modules to patch:
@@ -124,20 +130,16 @@ patches end with the test.
 ```python
 from appinfra.testing import FakeClock
 
-with FakeClock(modules=["myapp.retry"]) as clock:
-    retry(lambda: False, attempts=3, delay=60.0)
-    assert clock.monotonic() == 1120.0
-```
+with FakeClock(modules=["myapp.retry"]):
+    assert retry(lambda: False, attempts=3, delay=60.0) is False
 
-The decorator runs each call on a fresh clock. The decorated function does not get the clock,
-so the decorator suits a test that only needs the sleeps to return at once; a test that asserts
-on time uses the fixture or the context manager. A decorated test still takes fixtures:
 
-```python
 @FakeClock(modules=["myapp.retry"])
 def test_retry_gives_up():
     assert retry(lambda: False, attempts=3, delay=60.0) is False
 ```
+
+The decorator runs each call on a fresh clock, and a decorated test still takes fixtures.
 
 Limits:
 

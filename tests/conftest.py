@@ -12,6 +12,7 @@ import os
 import shutil
 import sys
 import tempfile
+import time
 from collections.abc import Generator
 from pathlib import Path
 
@@ -42,6 +43,53 @@ pytest_plugins = [
     "tests.fixtures.logging",
     "tests.fixtures.yaml_files",
 ]
+
+
+# =============================================================================
+# Fake clock, or real time with --real-clock
+# =============================================================================
+
+
+def pytest_addoption(parser: pytest.Parser) -> None:
+    """Add --real-clock: the fake clock only speeds tests up, and this checks it."""
+    parser.addoption(
+        "--real-clock",
+        action="store_true",
+        help="run the tests that take fake_clock on real time: the fixture patches nothing",
+    )
+
+
+class _RealClock:
+    """fake_clock under --real-clock: real time, and patch() puts nothing on a fake clock."""
+
+    def monotonic(self) -> float:
+        """The real monotonic time."""
+        return time.monotonic()
+
+    def time(self) -> float:
+        """The real wall-clock time."""
+        return time.time()
+
+    def sleep(self, secs: float) -> None:
+        """Really sleep."""
+        time.sleep(secs)
+
+    def patch(self, *modules: str) -> None:
+        """Leave the modules on real time."""
+
+
+@pytest.fixture
+def fake_clock(request: pytest.FixtureRequest) -> Generator[object, None, None]:
+    """appinfra.testing's fake_clock, or a stand-in on real time under --real-clock."""
+    # Imported here: imported at the top, the plugin would load before pytest registers it
+    # from pytest_plugins and could not have its asserts rewritten
+    from appinfra.testing import FakeClock
+
+    if request.config.getoption("--real-clock"):
+        yield _RealClock()
+    else:
+        with FakeClock() as clock:
+            yield clock
 
 
 # =============================================================================

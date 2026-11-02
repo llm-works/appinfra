@@ -63,11 +63,11 @@ import time
 import retry
 
 
-def test_three_hours_of_retries(fake_clock):
+def test_retries_on_the_clock(fake_clock):
     fake_clock.patch("retry")
-    assert retry.time is not time  # on the clock before the hours of sleep below
-    assert retry.wait_out(3, 3600.0) == 10800.0
-    assert fake_clock.monotonic() == 1000.0 + 10800.0
+    assert retry.time is not time  # on the clock before the sleeps below
+    assert retry.wait_out(3, 2.0) == 6.0
+    assert fake_clock.monotonic() == 1000.0 + 6.0
 """
 
 
