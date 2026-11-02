@@ -89,6 +89,17 @@ DEFAULT_COVERAGE_TARGET="$(appinfra_setting APPINFRA_PYTEST_COVERAGE_THRESHOLD 8
 COVERAGE_TARGET="${COVERAGE_TARGET:-$DEFAULT_COVERAGE_TARGET}"
 COVERAGE_TARGET="$(appinfra_setting COVERAGE_TARGET "" percent)" || exit 2
 
+# Docstring coverage threshold (0 to disable)
+DOCSTRING_THRESHOLD="$(appinfra_setting APPINFRA_DEV_DOCSTRING_THRESHOLD 80 percent)" || exit 2
+# Decorators dead private code counts as registering what they decorate
+CQ_KEEP_DECORATORS="$(appinfra_setting APPINFRA_DEV_CQ_DEAD_KEEP_DECORATORS "" decorators)" || exit 2
+# Extra ruff rules reported over the package as warnings, never failing: a comma-separated list
+# of rule codes (empty or false = off). Rules that should fail the build belong in the project's
+# ruff config.
+CQ_LINT_SELECT="$(appinfra_setting APPINFRA_DEV_CQ_LINT_SELECT C90,SIM,RET,PIE,PERF,FURB,C4 rules)" || exit 2
+# Where performance tests live (default tests/)
+PERF_DIR="$(appinfra_setting APPINFRA_PYTEST_PERF_DIR tests path)" || exit 2
+
 # Coverage's marker expression can subsume standalone test suites. When
 # check.sh runs both a standalone suite and coverage over the same marker
 # set, both execute the same work with only a fraction of the effective
@@ -203,8 +214,6 @@ if ${PYTHON} -c "import sys; sys.exit(0 if sys.version_info >= (3, 12) else 1)" 
     COVERAGE_CORE_ENV="COVERAGE_CORE=sysmon "
 fi
 
-# Docstring coverage threshold (0 to disable)
-DOCSTRING_THRESHOLD="$(appinfra_setting APPINFRA_DEV_DOCSTRING_THRESHOLD 80 percent)" || exit 2
 MAX_INLINE_LINES=30
 
 # Check definitions: "Name|Make Target|Command|Fix Target", listed from a file's outside in
@@ -250,16 +259,10 @@ if [ -n "${APPINFRA_DEV_CQ_EXCLUDE:-}" ]; then
 fi
 
 # The same for the decorators dead private code counts as registering what they decorate
-CQ_KEEP_DECORATORS="$(appinfra_setting APPINFRA_DEV_CQ_DEAD_KEEP_DECORATORS "" decorators)" || exit 2
 CQ_KEEP_DECORATOR_FLAGS=""
 for dec in $CQ_KEEP_DECORATORS; do
     CQ_KEEP_DECORATOR_FLAGS+="${CQ_KEEP_DECORATOR_FLAGS:+ }--keep-decorator ${dec}"
 done
-
-# Extra ruff rules reported over the package as warnings, never failing: a comma-separated list
-# of rule codes (empty or false = off; "-" not ":-" keeps an empty value). Rules that should fail
-# the build belong in the project's ruff config.
-CQ_LINT_SELECT="$(appinfra_setting APPINFRA_DEV_CQ_LINT_SELECT C90,SIM,RET,PIE,PERF,FURB,C4 rules)" || exit 2
 
 # Duplicated code (pylint) and dead private code checks over the package. Each takes false (off),
 # warn (default: report the count, never fail) or strict (fail on findings); any case.
@@ -397,7 +400,6 @@ fi
 # usage (`@pytest.mark.X`) and module-level `pytestmark = pytest.mark.X`
 # (including lists) — and suite directories (tests/<suite>/), whose tests
 # take the suite's marker without naming it (_settings.sh).
-PERF_DIR="$(appinfra_setting APPINFRA_PYTEST_PERF_DIR tests path)" || exit 2
 _MARKERS_FOUND=$(appinfra_suite_markers "$PERF_DIR" | tr '\n' ' ')
 
 # Emit the pytest command for a marker if any test uses it; otherwise a

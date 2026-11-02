@@ -92,6 +92,32 @@ def test_a_bad_setting_stops_check_sh_and_runs_nothing(
     assert not marker.exists()
 
 
+@pytest.mark.parametrize(
+    ("name", "value"),
+    [
+        ("APPINFRA_DEV_PKG_NAME", "my-pkg"),
+        ("APPINFRA_PYTEST_COVERAGE_THRESHOLD", "150"),
+        ("APPINFRA_DEV_DOCSTRING_THRESHOLD", "high"),
+        ("APPINFRA_DEV_CQ_DEAD_KEEP_DECORATORS", "*"),
+        ("APPINFRA_DEV_CQ_LINT_SELECT", "C90, SIM"),
+        ("APPINFRA_PYTEST_PERF_DIR", "perf tests"),
+    ],
+)
+def test_a_bad_setting_stops_check_sh_before_any_command(
+    tmp_path: Path, name: str, value: str
+) -> None:
+    """Every setting is checked before check.sh runs its first command (the interpreter)."""
+    marker = tmp_path / "ran"
+    python = tmp_path / "python"
+    python.write_text(f"#!/bin/sh\ntouch '{marker}'\nexec '{sys.executable}' \"$@\"\n")
+    python.chmod(0o755)
+    result = _check(tmp_path, {"PYTHON": str(python), name: value})
+
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert f"{name}={value} is not" in result.stderr
+    assert not marker.exists()
+
+
 # An exclude pattern is any text, so it passes to cq as it is: the second pattern is a real one
 # that must still exclude its file
 @pytest.mark.parametrize("value", ["a$(date>{marker})", "a`date>{marker}`", 'a"b'])
