@@ -10,6 +10,10 @@ For API stability guarantees and deprecation policy, see
 
 ## [Unreleased]
 
+### Added
+- `Envelope` works as a pydantic field type without `arbitrary_types_allowed`: a str is wrapped,
+  and JSON dumps and schemas mask it like `pydantic.SecretStr`.
+
 ### Changed
 - The `hotreload` extra accepts watchdog up to 7.x and the `ui` extra accepts rich up to 15.x.
   With watchdog 7, `ConfigWatcher.start()` raises `FileNotFoundError` for a watched config in a
