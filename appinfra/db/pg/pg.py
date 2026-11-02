@@ -305,10 +305,11 @@ class PG(Interface):
 
     def dispose_scoped_cache(self) -> None:
         """
-        Dispose all cached ScopedPG instances and clear the cache.
+        Close the connection pool of every cached ScopedPG.
 
-        Use during shutdown or when all scoped schemas are no longer needed.
-        Each ScopedPG's internal connection pool is disposed.
+        Use during shutdown or when all scoped schemas are no longer needed. The instances
+        stay cached: one a caller still holds opens a new pool on its next query, and the
+        next dispose closes that pool too. ScopedPG.dispose() removes a single schema.
 
         Example:
             >>> pg = PG(logger, config)
@@ -320,7 +321,6 @@ class PG(Interface):
         with self._scoped_cache_lock:
             for scoped in self._scoped_cache.values():
                 scoped._pg._engine.dispose()
-            self._scoped_cache.clear()
         self._lg.trace("disposed scoped cache")
 
     def dispose(self) -> None:
@@ -329,7 +329,8 @@ class PG(Interface):
 
         Call when done with the instance. An engine that is only dropped leaves its
         idle connections open until garbage collection, where psycopg reports each one
-        with a ResourceWarning. A query after dispose() opens a new pool.
+        with a ResourceWarning. A query after dispose(), through this instance or a ScopedPG
+        from it, opens a new pool, which the next dispose() closes.
 
         Example:
             >>> pg = PG(logger, config)

@@ -13,6 +13,8 @@ For API stability guarantees and deprecation policy, see
 ### Fixed
 - Test structure health no longer reports a unit test as leaking an environment variable that a
   library sets while being imported (torch, vllm and others configure themselves on first import).
+- `PG.dispose()` keeps the cached `ScopedPG` instances, so a scoped instance used after a dispose
+  is closed again by the next one instead of keeping its pool open until exit.
 
 ## [0.14.0] - 2026-11-01
 
