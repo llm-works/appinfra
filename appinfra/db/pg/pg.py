@@ -278,6 +278,7 @@ class PG(Interface):
             If a schema is dropped and recreated, the cached ScopedPG's pool may
             hold stale connections: call that ScopedPG's dispose() and get a fresh
             one from scoped(), or dispose() the parent PG, which closes every pool.
+            Dispose closes idle connections only, so close open sessions first.
 
         Args:
             schema_name: PostgreSQL schema name for the scope
