@@ -28,6 +28,9 @@ def _run(
     report_dir = pytester.path / "health"
     monkeypatch.setenv("PYTHONPATH", str(_REPO_ROOT))
     monkeypatch.setenv("_APPINFRA_CHECK_SUITE_HEALTH_DIR", str(report_dir))
+    # Only the plugin under test: an installed plugin that reorders tests (pytest-randomly)
+    # would break the layouts whose tests depend on running in file order
+    monkeypatch.setenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")
     for path, source in layout.items():
         target = pytester.path / path
         target.parent.mkdir(parents=True, exist_ok=True)
