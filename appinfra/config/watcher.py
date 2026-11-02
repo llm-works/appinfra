@@ -266,15 +266,38 @@ class ConfigWatcher:
             self._file_handler = self._create_file_handler()
             # Watch all directories containing source files
             self._watched_dirs = {f.parent for f in self._watched_files}
-            self._dir_watches = {}
-            for dir_path in self._watched_dirs:
-                watch = self._observer.schedule(
-                    self._file_handler, str(dir_path), recursive=False
-                )
-                self._dir_watches[dir_path] = watch
-            self._observer.start()
+            try:
+                self._schedule_and_start()
+            except BaseException:
+                self._abandon_start()
+                raise
             self._generation += 1
             self._running = True
+
+    def _schedule_and_start(self) -> None:
+        """Watch every directory holding a source file, then start the observer."""
+        self._dir_watches = {}
+        for dir_path in self._watched_dirs:
+            self._dir_watches[dir_path] = self._observer.schedule(
+                self._file_handler, str(dir_path), recursive=False
+            )
+        self._observer.start()
+
+    def _abandon_start(self) -> None:
+        """Undo a start() whose scheduling or observer start raised.
+
+        On inotify, watchdog raises FileNotFoundError from Observer.start() for a
+        directory that does not exist, after starting the emitters scheduled before
+        it, and only Observer.stop() ends those. The observer's own thread never
+        started, so it is stopped but not joined, and no file handler can be waiting
+        on the watcher lock held here.
+        """
+        observer, self._observer = self._observer, None
+        self._watched_files = set()
+        self._watched_dirs = set()
+        self._dir_watches = {}
+        self._file_handler = None
+        self._stop_bounded(observer)
 
     def stop(self) -> None:
         """Stop watching for file changes."""
@@ -314,6 +337,11 @@ class ConfigWatcher:
         join never returns. Upstream report:
         https://github.com/gorakhargosh/watchdog/issues/64
         """
+        if self._stop_bounded(observer):
+            observer.join(timeout=_OBSERVER_STOP_TIMEOUT_S)
+
+    def _stop_bounded(self, observer: Any) -> bool:
+        """Run observer.stop() for at most the stop bound; whether it returned."""
         stopper = threading.Thread(
             target=observer.stop, name="config-watcher-stop", daemon=True
         )
@@ -324,8 +352,8 @@ class ConfigWatcher:
                 "file observer did not stop in time; abandoning its threads",
                 extra={"timeout_s": _OBSERVER_STOP_TIMEOUT_S},
             )
-            return
-        observer.join(timeout=_OBSERVER_STOP_TIMEOUT_S)
+            return False
+        return True
 
     def is_running(self) -> bool:
         """Check if watcher is active."""

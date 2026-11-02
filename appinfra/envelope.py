@@ -12,6 +12,7 @@ opened with ``.reveal()`` only where the plaintext is consumed.
 from __future__ import annotations
 
 import hmac
+from typing import Any
 
 
 class Envelope:
@@ -32,6 +33,11 @@ class Envelope:
     Equality compares underlying values so config round-trips work in tests.
     Hashing is deliberately omitted; secrets should not be dict keys or set
     members.
+
+    As a pydantic field type it takes a str or an Envelope, without
+    ``arbitrary_types_allowed``. A python-mode dump keeps the Envelope, which
+    loads back; a JSON dump writes ``'***'``, which does not, as with
+    ``pydantic.SecretStr``.
     """
 
     __slots__ = ("_value",)
@@ -89,3 +95,37 @@ class Envelope:
         return NotImplemented
 
     __hash__ = None  # type: ignore[assignment]
+
+    @classmethod
+    def __get_pydantic_core_schema__(cls, source: Any, handler: Any) -> Any:
+        """Pydantic hook: validate a str or an Envelope; write the mask in JSON.
+
+        Pydantic calls it only once it is imported, so appinfra keeps no
+        dependency on pydantic.
+        """
+        from pydantic_core import core_schema
+
+        return core_schema.no_info_plain_validator_function(
+            _validate,
+            serialization=core_schema.plain_serializer_function_ser_schema(
+                _mask, when_used="json"
+            ),
+        )
+
+    @classmethod
+    def __get_pydantic_json_schema__(cls, schema: Any, handler: Any) -> dict[str, Any]:
+        """Pydantic hook: a string that is written, never read back."""
+        return {"type": "string", "format": "password", "writeOnly": True}
+
+
+def _validate(value: object) -> Envelope:
+    """Pydantic validator; a ValueError, unlike Envelope()'s TypeError, becomes a
+    ValidationError."""
+    if not isinstance(value, (str, Envelope)):
+        raise ValueError(f"Envelope requires a str, got {type(value).__name__}")
+    return Envelope(value)
+
+
+def _mask(_value: Envelope) -> str:
+    """Pydantic JSON serializer: the mask, never the plaintext."""
+    return Envelope._MASK
