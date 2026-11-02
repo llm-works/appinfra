@@ -37,7 +37,6 @@ pytest_plugins = [
     # rewrite its asserts
     "appinfra.db.pg.testing",
     "pytester",
-    "tests.fixtures.clock",
     "tests.fixtures.pg_integration",
     "tests.fixtures.sqlite_integration",
     "tests.fixtures.logging",

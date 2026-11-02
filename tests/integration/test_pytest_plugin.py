@@ -43,3 +43,39 @@ class TestDestroyTestLoggers:
 
         result.assert_outcomes(passed=1, failed=1)
         result.stdout.fnmatch_lines(["*LoggerExistsError*"])
+
+
+# A project's own time-based module and its test on the plugin's fake_clock
+_RETRY_MODULE = """
+import time
+
+
+def wait_out(attempts, delay):
+    start = time.monotonic()
+    for _ in range(attempts):
+        time.sleep(delay)
+    return time.monotonic() - start
+"""
+
+_RETRY_TEST = """
+import time
+
+import retry
+
+
+def test_three_hours_of_retries(fake_clock):
+    fake_clock.patch("retry")
+    assert retry.time is not time  # on the clock before the hours of sleep below
+    assert retry.wait_out(3, 3600.0) == 10800.0
+    assert fake_clock.monotonic() == 1000.0 + 10800.0
+"""
+
+
+class TestFakeClock:
+    """A project loading the plugin runs its own time-based code on fake_clock."""
+
+    def test_project_module_runs_on_the_clock(self, pytester):
+        pytester.makeconftest('pytest_plugins = ["appinfra.testing"]')
+        pytester.makepyfile(retry=_RETRY_MODULE, test_retry=_RETRY_TEST)
+
+        pytester.runpytest(*_INNER_ARGS).assert_outcomes(passed=1)

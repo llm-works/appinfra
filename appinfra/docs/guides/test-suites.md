@@ -60,7 +60,8 @@ it from the outside, through its arguments, output, exit code or network interfa
 No suite asserts on elapsed time or waits a fixed real-time interval: short sleeps and
 sub-second timing make tests flaky on loaded CI machines. A test waits on an event or a
 condition. It polls with a deadline only when nothing can signal, and the deadline is the failure
-path, never the expected one. Logic that depends on time runs against a fake clock.
+path, never the expected one. Logic that depends on time runs against a fake clock: the
+[`fake_clock` fixture](pytest-plugin.md#fake_clock) of `appinfra.testing`.
 
 ## Assigning a suite
 
