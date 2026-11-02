@@ -59,12 +59,15 @@ class TestTimingFunctions:
 
     def test_since_calculates_elapsed_time(self, clock):
         """Test since() calculates elapsed time correctly."""
+        before = time.monotonic()
         start_time = start()
         time.sleep(0.25)
         elapsed = since(start_time)
+        after = time.monotonic()
 
+        # At least the sleep, at most the span around both calls: 0.25 on the fake clock
         assert isinstance(elapsed, float)
-        assert elapsed >= 0.25
+        assert 0.25 <= elapsed <= after - before
 
     def test_since_with_zero_elapsed(self):
         """Test since() with minimal elapsed time."""
@@ -266,13 +269,16 @@ class TestTimeItContextManager:
         """Test time_it() calls callback with elapsed time."""
         callback = Mock()
 
+        before = time.monotonic()
         with time_it(callback):
             time.sleep(0.25)
+        after = time.monotonic()
 
+        # At least the sleep, at most the span around the block: 0.25 on the fake clock
         callback.assert_called_once()
         elapsed = callback.call_args[0][0]
         assert isinstance(elapsed, float)
-        assert elapsed >= 0.25
+        assert 0.25 <= elapsed <= after - before
 
     def test_time_it_calls_callback_even_with_exception(self):
         """Test time_it() calls callback even when exception occurs."""
@@ -321,13 +327,16 @@ class TestTimeItLgContextManager:
         """Test time_it_lg() includes elapsed time in extra data."""
         log_func = Mock()
 
+        before = time.monotonic()
         with time_it_lg(log_func, "test message"):
             time.sleep(0.25)
+        after = time.monotonic()
 
+        # At least the sleep, at most the span around the block: 0.25 on the fake clock
         kwargs = log_func.call_args[1]
         elapsed = kwargs["extra"]["after"]
         assert isinstance(elapsed, float)
-        assert elapsed >= 0.25
+        assert 0.25 <= elapsed <= after - before
 
     def test_time_it_lg_merges_extra_data(self, clock):
         """Test time_it_lg() merges provided extra data."""
@@ -380,6 +389,7 @@ class TestIntegrationScenarios:
     def test_timing_workflow(self, clock):
         """Test complete timing workflow."""
         # Start timing
+        before = time.monotonic()
         start_time = start()
 
         # Simulate work
@@ -388,6 +398,7 @@ class TestIntegrationScenarios:
         # Calculate elapsed
         elapsed = since(start_time)
         elapsed_str = since_str(start_time)
+        after = time.monotonic()
 
-        assert elapsed >= 0.25
+        assert 0.25 <= elapsed <= after - before
         assert isinstance(elapsed_str, str)

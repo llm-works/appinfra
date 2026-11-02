@@ -14,10 +14,31 @@ from appinfra.time.eta import ETA
 def clock(fake_clock):
     """Put this module's sleeps on the fake clock with ETA's, so they take no real time.
 
-    Every assertion holds on the real clock as well: a sleep lasts at least as long as
-    asked, so a measured rate is at most the nominal one and a remaining time at least.
+    Every assertion holds on the real clock as well. Each update() is bracketed by clock
+    readings taken just before and after it, which bound the time it read; on the fake
+    clock the two readings are equal and the bounds exact.
     """
     fake_clock.patch(__name__)
+
+
+def _update(eta: ETA, completed: float) -> tuple[float, float]:
+    """Update ``eta``; return the clock readings taken just before and just after."""
+    before = time.monotonic()
+    eta.update(completed)
+    return before, time.monotonic()
+
+
+def _rate_bounds(
+    units: float, previous: tuple[float, float], current: tuple[float, float]
+) -> tuple[float, float]:
+    """The lowest and highest rate of ``units`` done between two bracketed updates."""
+    (before0, after0), (before1, after1) = previous, current
+    return units / (after1 - before0), units / (before1 - after0)
+
+
+def _within(value: float, low: float, high: float) -> bool:
+    """``low <= value <= high``, allowing for float rounding in ETA's arithmetic."""
+    return low * (1 - 1e-9) <= value <= high * (1 + 1e-9)
 
 
 class TestETAInitialization:
@@ -92,24 +113,29 @@ class TestETARateCalculation:
 
     def test_rate_calculation(self, clock):
         """Test rate is calculated from progress deltas."""
-        eta = ETA(total=100.0, age=1.0)  # Low age for fast response
-        eta.update(0.0)
+        eta = ETA(total=100.0, age=1.0)  # Age 1: the rate is the latest sample's
+        start = _update(eta, 0.0)
         time.sleep(0.25)
-        eta.update(10.0)  # 10 units in at least 0.25s: at most 40 units/sec
+        end = _update(eta, 10.0)
 
-        assert 0.0 < eta.rate() <= 40.0
+        # 10 units over the time between the updates: 40 units/sec on the fake clock
+        assert _within(eta.rate(), *_rate_bounds(10.0, start, end))
 
     def test_rate_smoothing(self, clock):
-        """Test the smoothed rate of steady progress stays within the progress's rate."""
+        """Test the smoothed rate of steady progress stays within its samples' rates."""
         eta = ETA(total=100.0, age=5.0)
 
         # A binary fraction of a second, so virtual time adds up without rounding
-        eta.update(0.0)
+        readings = [_update(eta, 0.0)]
         for i in range(1, 11):
             time.sleep(1 / 64)
-            eta.update(float(i * 5))  # 5 units in at least 1/64s: at most 320 units/sec
+            readings.append(_update(eta, float(i * 5)))
 
-        assert 0.0 < eta.rate() <= 320.0
+        # The smoothed rate lies between its samples': 320 units/sec on the fake clock
+        bounds = [_rate_bounds(5.0, a, b) for a, b in zip(readings, readings[1:])]
+        low = min(lo for lo, _ in bounds)
+        high = max(hi for _, hi in bounds)
+        assert _within(eta.rate(), low, high)
 
 
 class TestETARemaining:
@@ -126,12 +152,13 @@ class TestETARemaining:
         eta = ETA(total=100.0, age=1.0)
 
         # Establish rate
-        eta.update(0.0)
+        start = _update(eta, 0.0)
         time.sleep(0.25)
-        eta.update(50.0)  # 50 units in at least 0.25s: at most 200 units/sec
+        end = _update(eta, 50.0)
 
-        # 50 units left at no more than 200 units/sec
-        assert eta.remaining_secs() >= 0.25
+        # 200 units/sec on the fake clock, so 50 units left take 0.25s
+        assert _within(eta.rate(), *_rate_bounds(50.0, start, end))
+        assert eta.remaining_secs() == pytest.approx(50.0 / eta.rate())
 
     def test_remaining_zero_at_completion(self, clock):
         """Test remaining is 0 when complete."""
@@ -142,21 +169,21 @@ class TestETARemaining:
 
         assert eta.remaining_secs() == 0.0
 
-    def test_remaining_at_least_work_left_over_rate(self, clock):
-        """Test remaining time is the work left at no more than the steady rate."""
+    def test_remaining_is_work_left_over_rate(self, clock):
+        """Test remaining time is the work left at the smoothed rate, at every step."""
         eta = ETA(total=100.0, age=2.0)
 
-        remaining = []
-        eta.update(0.0)
+        readings = [_update(eta, 0.0)]
         for completed in (25.0, 50.0, 75.0):
             time.sleep(0.25)
-            eta.update(completed)  # 25 units in at least 0.25s: at most 100 units/sec
-            remaining.append(eta.remaining_secs())
+            readings.append(_update(eta, completed))
+            bounds = [_rate_bounds(25.0, a, b) for a, b in zip(readings, readings[1:])]
 
-        # 75, 50 and 25 units left at no more than 100 units/sec
-        assert remaining[0] >= 0.75
-        assert remaining[1] >= 0.5
-        assert remaining[2] >= 0.25
+            # The smoothed rate lies between its samples': 100 units/sec on the fake
+            # clock, so 75, 50 and 25 units left take 0.75, 0.5 and 0.25s
+            rate = eta.rate()
+            assert _within(rate, min(b[0] for b in bounds), max(b[1] for b in bounds))
+            assert eta.remaining_secs() == pytest.approx((100.0 - completed) / rate)
 
 
 class TestETAEdgeCases:
