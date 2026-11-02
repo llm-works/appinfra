@@ -110,6 +110,30 @@ class TestPatch:
         assert wait_an_hour() == 4600.0
         assert target.time is time
 
+    def test_decorator_starts_each_call_on_a_fresh_clock(self, target):
+        @FakeClock(modules=[_MODULE])
+        def wait_an_hour() -> float:
+            target.time.sleep(3600.0)
+            return target.time.monotonic()
+
+        assert wait_an_hour() == 4600.0
+        assert wait_an_hour() == 4600.0
+
+    def test_decorator_passes_arguments_and_keeps_the_name(self, target):
+        @FakeClock(start=0.0, modules=[_MODULE])
+        def wait(secs: float, *, times: int) -> float:
+            for _ in range(times):
+                target.time.sleep(secs)
+            return target.time.monotonic()
+
+        assert wait(2.0, times=3) == 6.0
+        assert wait.__name__ == "wait"
+
+    @FakeClock(modules=[_MODULE])
+    def test_decorated_test_still_takes_fixtures(self, target):
+        target.time.sleep(3600.0)
+        assert target.time.monotonic() == 4600.0
+
 
 class TestFixture:
     """The fake_clock fixture: appinfra's modules on the clock, plus any the test patches."""

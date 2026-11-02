@@ -129,6 +129,16 @@ with FakeClock(modules=["myapp.retry"]) as clock:
     assert clock.monotonic() == 1120.0
 ```
 
+The decorator runs each call on a fresh clock. The decorated function does not get the clock,
+so the decorator suits a test that only needs the sleeps to return at once; a test that asserts
+on time uses the fixture or the context manager. A decorated test still takes fixtures:
+
+```python
+@FakeClock(modules=["myapp.retry"])
+def test_retry_gives_up():
+    assert retry(lambda: False, attempts=3, delay=60.0) is False
+```
+
 Limits:
 
 - Only a module-level `import time` is redirected. `from time import sleep` binds the real

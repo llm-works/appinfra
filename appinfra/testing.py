@@ -28,13 +28,13 @@ Example:
 
 from __future__ import annotations
 
-import contextlib
+import functools
 import importlib
 import threading
 import time
-from collections.abc import Generator, Iterable
+from collections.abc import Callable, Generator, Iterable
 from types import ModuleType
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ParamSpec, TypeVar
 
 import pytest
 
@@ -110,8 +110,11 @@ _APPINFRA_CLOCKED_MODULES = (
 # The Ticker also waits on threading.Event (its scheduler's delay and its iterator)
 _TICKER_MODULE = "appinfra.time.ticker"
 
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
 
-class FakeClock(contextlib.ContextDecorator):
+
+class FakeClock:
     """
     A virtual clock for tests of time-based code: it moves only when slept on.
 
@@ -122,6 +125,11 @@ class FakeClock(contextlib.ContextDecorator):
     once and elapsed time is exact. Every other ``time`` function stays real, and so does
     the time of every module not patched (pytest, logging). On exit the modules get their
     real ``time`` back.
+
+    As a decorator, each call runs on a fresh clock made from the same ``start`` and
+    ``modules``; the function does not get the clock, so the decorator suits tests that
+    need sleeps to return at once, and the context manager or the fixture tests that
+    assert on time.
 
     Limits: only a module-level ``import time`` is redirected, not ``from time import
     sleep``, which binds the real function when the module is imported. Code on the clock
@@ -179,6 +187,16 @@ class FakeClock(contextlib.ContextDecorator):
     def __exit__(self, *exc_info: object) -> None:
         """Give every patched module its real ``time`` back."""
         self._restore()
+
+    def __call__(self, func: Callable[_P, _R]) -> Callable[_P, _R]:
+        """Decorate ``func`` to run each call on a fresh clock like this one."""
+
+        @functools.wraps(func)
+        def on_clock(*args: _P.args, **kwargs: _P.kwargs) -> _R:
+            with FakeClock(self._start, self._modules):
+                return func(*args, **kwargs)
+
+        return on_clock
 
     def _swap(self, module: ModuleType, attr: str, value: Any) -> None:
         """Set ``module.attr`` to ``value``, recording the old value for _restore()."""
