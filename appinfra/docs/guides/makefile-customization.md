@@ -470,7 +470,9 @@ versions share, such a name only prints a warning. Names starting with
 framework Makefiles: the name and type checks run when Makefile.config is read, so a setting
 assigned after the include skips them (an on/off or mode value is still checked when the
 framework reads it). A setting the environment or the command line sets empty stops make: unset
-it or give it a value.
+it or give it a value. A value from either may not contain `$` either, since make would expand
+it as a reference; a URL spells `$` as `%24`. In a Makefile or `Makefile.local`, references
+expand as usual.
 
 Each setting has a type, and a value that does not fit it stops make:
 

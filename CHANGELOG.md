@@ -20,8 +20,15 @@ For API stability guarantees and deprecation policy, see
 - The `hotreload` extra accepts watchdog up to 7.x and the `ui` extra accepts rich up to 15.x.
   With watchdog 7, `ConfigWatcher.start()` raises `FileNotFoundError` for a watched config in a
   missing directory, where it used to watch nothing.
+- A setting from the environment or the command line may no longer contain `$`: make stops with
+  an error instead of expanding it (a URL spells `$` as `%24`).
 
 ### Fixed
+- `APPINFRA_DEV_CQ_EXCLUDE` patterns reach `make check` and `make cq.*` as written; a quote in one
+  no longer breaks the code quality check.
+- `make check` stops with a clear error on a malformed package name, threshold, ruff rule list or
+  perf test directory, where the value used to break a command; a coverage target above 100 is
+  rejected, as make already did.
 - Test structure health no longer reports a unit test as leaking an environment variable that a
   library sets while being imported (torch, vllm and others configure themselves on first import).
 - `PG.dispose()` keeps the cached `ScopedPG` instances, so a scoped instance used after a dispose

@@ -78,10 +78,11 @@ export APPINFRA_PYTEST_COVERAGE_THRESHOLD
 export APPINFRA_PYTEST_HANG_DUMP_SECONDS
 export APPINFRA_PYTEST_PERF_DIR
 
-# Expand CQ_EXCLUDE patterns to --exclude flags (empty if no exclusions)
-_APPINFRA_CQ_EXCLUDE_FLAGS := $(if $(APPINFRA_DEV_CQ_EXCLUDE),$(foreach _APPINFRA_PAT,$(APPINFRA_DEV_CQ_EXCLUDE),--exclude "$(_APPINFRA_PAT)"))
-# The same for the decorators dead private code keeps. Single-quoted, so the shell passes each
-# name through as is, and --keep-decorator rejects any that is not a dotted name.
+# Expand CQ_EXCLUDE patterns to --exclude flags (empty if no exclusions). Single-quoted, so the
+# shell passes each pattern through as written.
+_APPINFRA_CQ_EXCLUDE_FLAGS := $(foreach _APPINFRA_PAT,$(APPINFRA_DEV_CQ_EXCLUDE),--exclude '$(subst ','\'',$(_APPINFRA_PAT))')
+# The same for the decorators dead private code keeps; --keep-decorator rejects any that is not
+# a dotted name.
 _APPINFRA_CQ_KEEP_DECORATOR_FLAGS := $(foreach _APPINFRA_DEC,$(APPINFRA_DEV_CQ_DEAD_KEEP_DECORATORS),--keep-decorator '$(subst ','\'',$(_APPINFRA_DEC))')
 
 # Endpoint run_examples.py probes for `# ci-requires: pg` files, as HOST:PORT.
