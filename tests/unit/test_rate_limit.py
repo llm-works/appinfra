@@ -12,7 +12,7 @@ Tests key rate limiter features including:
 """
 
 import time
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, call, patch
 
 import pytest
 
@@ -32,6 +32,15 @@ def clock(fake_clock):
     fake_clock.patch(__name__)
 
 
+def _next_sleeping(limiter: RateLimiter) -> float:
+    """Call ``limiter.next()``; check it slept exactly the wait it returned, once or not at all."""
+    real_sleep = appinfra.rate_limit.time.sleep
+    with patch.object(appinfra.rate_limit.time, "sleep", wraps=real_sleep) as sleep:
+        wait = limiter.next()
+    assert sleep.call_args_list == ([call(wait)] if wait > 0 else [])
+    return wait
+
+
 def _paced_calls(per_minute: float, calls: int, **kwargs) -> list[float]:
     """Make a RateLimiter, call next() ``calls`` times, and check each call against its slot.
 
@@ -47,7 +56,7 @@ def _paced_calls(per_minute: float, calls: int, **kwargs) -> list[float]:
     waits = []
     for k in range(1, calls + 1):
         before = time.monotonic()
-        wait = limiter.next()
+        wait = _next_sleeping(limiter)
         after = time.monotonic()
         assert after >= created + k * interval, f"call {k} returned before its slot"
         assert after - before >= wait, f"call {k} did not sleep its wait"
@@ -137,8 +146,8 @@ class TestRateLimiterNext:
         created = time.monotonic()
         limiter = RateLimiter(mock_logger, per_minute=120)  # 0.5s interval
 
-        # First call
-        limiter.next()
+        # First call: it sleeps its wait
+        _next_sleeping(limiter)
         first_returned = time.monotonic()
         mock_logger.reset_mock()
 
