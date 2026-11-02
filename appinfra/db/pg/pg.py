@@ -275,9 +275,9 @@ class PG(Interface):
 
         Note:
             Repeated calls with the same schema_name return the cached instance.
-            If you drop and recreate a schema, the cached ScopedPG's pool may
-            have stale connections. In that case, dispose the parent PG and
-            create a new one.
+            If a schema is dropped and recreated, the cached ScopedPG's pool may
+            hold stale connections: call that ScopedPG's dispose() and get a fresh
+            one from scoped(), or dispose() the parent PG, which closes every pool.
 
         Args:
             schema_name: PostgreSQL schema name for the scope
@@ -321,7 +321,7 @@ class PG(Interface):
         with self._scoped_cache_lock:
             for scoped in self._scoped_cache.values():
                 scoped._pg._engine.dispose()
-        self._lg.trace("disposed scoped cache")
+        self._lg.trace("disposed scoped pools")
 
     def dispose(self) -> None:
         """
