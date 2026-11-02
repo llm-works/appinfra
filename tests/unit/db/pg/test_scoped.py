@@ -306,8 +306,11 @@ class TestPGScopedCaching:
         # Verify all engines were disposed
         mock_scoped_a._pg._engine.dispose.assert_called_once()
         mock_scoped_b._pg._engine.dispose.assert_called_once()
-        # Verify cache was cleared
-        assert pg._scoped_cache == {}
+        # The instances stay cached: a held one is still reached by the next dispose
+        assert pg._scoped_cache == {
+            "schema_a": mock_scoped_a,
+            "schema_b": mock_scoped_b,
+        }
         pg._lg.trace.assert_called_once()
 
     def test_dispose_disposes_scoped_cache_and_engine(self):
@@ -326,8 +329,30 @@ class TestPGScopedCaching:
         pg.dispose()
 
         mock_scoped._pg._engine.dispose.assert_called_once()
-        assert pg._scoped_cache == {}
+        assert pg._scoped_cache == {"schema_a": mock_scoped}
         pg._engine.dispose.assert_called_once()
+
+    def test_a_scoped_pg_used_after_dispose_is_disposed_again(self):
+        """A ScopedPG a caller holds opens a new pool on its next query after dispose(); the
+        next dispose() must close that pool too, and scoped() keeps returning the same one."""
+        import threading
+
+        from appinfra.db.pg import PG
+
+        pg = object.__new__(PG)
+        pg._lg = MagicMock()
+        pg._scoped_cache_lock = threading.Lock()
+        pg._scoped_cache = {}
+        pg._engine = MagicMock()
+
+        with patch("appinfra.db.pg.pg.ScopedPG") as MockScopedPG:
+            held = pg.scoped("schema_a")
+            pg.dispose()
+            assert pg.scoped("schema_a") is held  # no second instance for the schema
+            pg.dispose()
+
+        assert MockScopedPG.call_count == 1
+        assert held._pg._engine.dispose.call_count == 2
 
 
 class TestScopedPGDispose:
