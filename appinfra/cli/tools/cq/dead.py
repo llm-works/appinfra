@@ -22,6 +22,13 @@ outside the analyzed files (e.g. a stdlib hook) is kept with ``# cq: keep`` on
 its line, followed by the reason. One kept definition keeps the name throughout
 its file, so an attribute assigned in several places needs the directive once.
 
+A definition under a registering decorator is kept the same way: the decorator
+hands it to a framework that calls it, never by name. pydantic's validators and
+serializers (REGISTERING_DECORATORS) are built in; ``--keep-decorator`` adds
+others, matched as the decorator's dotted name or a suffix of it, so
+``router.get`` covers ``@api.router.get("/x")``. A decorator that only wraps
+(``staticmethod``, ``property``, ``functools.cache``) keeps nothing.
+
 Exit Codes:
     0: No findings
     1: Findings (in strict mode)
@@ -33,7 +40,7 @@ from __future__ import annotations
 import argparse
 import ast
 import sys
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -45,6 +52,15 @@ from .common import (
     has_keep,
     keep_lines,
     read_source,
+)
+
+# Decorators whose framework collects the definition and calls it itself: pydantic's model
+# metaclass runs these during validation and serialization
+REGISTERING_DECORATORS = (
+    "field_validator",
+    "model_validator",
+    "field_serializer",
+    "model_serializer",
 )
 
 
@@ -65,6 +81,43 @@ def is_private(name: str) -> bool:
     if name.startswith("__") and name.endswith("__"):
         return False
     return not (name.endswith("_") and not name.startswith("__"))
+
+
+def _decorator_name(decorator: ast.expr) -> str:
+    """The dotted name of a decorator, called or not; '' for any other expression.
+
+    ``@pydantic.field_validator("x")`` gives ``pydantic.field_validator``.
+    """
+    node = decorator.func if isinstance(decorator, ast.Call) else decorator
+    parts: list[str] = []
+    while isinstance(node, ast.Attribute):
+        parts.append(node.attr)
+        node = node.value
+    if not isinstance(node, ast.Name):
+        return ""
+    parts.append(node.id)
+    return ".".join(reversed(parts))
+
+
+def decorator_name_arg(value: str) -> str:
+    """argparse type for ``--keep-decorator``: a dotted ASCII name such as ``router.get``, the
+    names check.sh accepts in APPINFRA_DEV_CQ_DEAD_KEEP_DECORATORS."""
+    if not all(p.isascii() and p.isidentifier() for p in value.split(".")):
+        raise argparse.ArgumentTypeError(f"not a dotted decorator name: {value!r}")
+    return value
+
+
+def is_registered(node: ast.AST, keep_decorators: Iterable[str]) -> bool:
+    """Whether a function or class carries a decorator of ``keep_decorators``, given as its
+    dotted name or a suffix of it at a dot."""
+    if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+        return False
+    names = [_decorator_name(d) for d in node.decorator_list]
+    return any(
+        name == keep or name.endswith("." + keep)
+        for name in names
+        for keep in keep_decorators
+    )
 
 
 def _assigned_names(stmt: ast.stmt) -> Iterator[str]:
@@ -137,8 +190,10 @@ def _used_names(tree: ast.Module) -> Iterator[str]:
 class DeadCodeAnalyzer:
     """Collects private definitions and name uses across a set of files."""
 
-    def __init__(self) -> None:
-        """Initialize empty definition and use sets."""
+    def __init__(self, keep_decorators: tuple[str, ...]) -> None:
+        """Initialize empty definition and use sets; definitions under one of
+        ``keep_decorators`` are kept."""
+        self._keep_decorators = keep_decorators
         self.definitions: list[Definition] = []
         self.used: set[str] = set()
         self.kept: set[tuple[str, Path]] = set()
@@ -161,7 +216,9 @@ class DeadCodeAnalyzer:
             line_number = node.lineno  # type: ignore[attr-defined]
             if not is_private(name):
                 continue
-            if has_keep(kept_lines, line_number, line_number):
+            if has_keep(kept_lines, line_number, line_number) or is_registered(
+                node, self._keep_decorators
+            ):
                 self.kept.add((name, file_path))
             else:
                 self.definitions.append(Definition(name, kind, file_path, line_number))
@@ -223,13 +280,25 @@ class CheckDeadTool(Tool):
             action="append",
             help="Patterns to exclude (can be used multiple times)",
         )
+        parser.add_argument(
+            "--keep-decorator",
+            action="append",
+            type=decorator_name_arg,
+            metavar="NAME",
+            help=(
+                "Decorator that registers what it decorates, so its definitions count as "
+                "used: its dotted name or a suffix of it (can be used multiple times). "
+                "pydantic's " + ", ".join(REGISTERING_DECORATORS) + " are built in"
+            ),
+        )
 
     def run(self, **kwargs: Any) -> int:
         """Run the analysis and print the report."""
         files = collect_python_files(
             self.lg, [self.args.dir], self.args.exclude or [], include_tests=False
         )
-        analyzer = DeadCodeAnalyzer()
+        keep = (*REGISTERING_DECORATORS, *(self.args.keep_decorator or []))
+        analyzer = DeadCodeAnalyzer(keep)
         for file_path in files:
             analyzer.add_file(file_path)
         for file_path in analyzer.unparsable:
