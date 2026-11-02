@@ -136,6 +136,19 @@ def test_patches_what_its_import_set(monkeypatch):
 @pytest.mark.integration
 def test_integration_may_change_state():
     os.environ["SUITE_HEALTH_INTEGRATION"] = "1"
+
+
+def test_imports_a_library_that_sets_env_again():
+    import sets_env_stale  # noqa: F401
+
+
+@pytest.mark.integration
+def test_integration_removes_what_an_import_set():
+    del os.environ["SUITE_HEALTH_STALE"]
+
+
+def test_sets_what_an_earlier_import_set():
+    os.environ["SUITE_HEALTH_STALE"] = "1"
 """
 
 
@@ -151,6 +164,9 @@ def test_unit_tests_that_leave_state_changed_are_reported(
         "tests/unit/sets_env_on_import_too.py": (
             'import os\nos.environ["SUITE_HEALTH_IMPORT_TOO"] = "1"\n'
         ),
+        "tests/unit/sets_env_stale.py": (
+            'import os\nos.environ["SUITE_HEALTH_STALE"] = "1"\n'
+        ),
     }
     report = _report(_run(pytester, monkeypatch, layout))
     changed = {
@@ -163,6 +179,8 @@ def test_unit_tests_that_leave_state_changed_are_reported(
         "test_cwd": ["cwd"],
         # an import set it earlier, but this test changed it
         "test_changes_what_an_import_set": ["$SUITE_HEALTH_IMPORT"],
+        # the value an import set in an earlier test does not excuse this test's change
+        "test_sets_what_an_earlier_import_set": ["$SUITE_HEALTH_STALE"],
     }
 
 

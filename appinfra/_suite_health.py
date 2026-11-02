@@ -43,9 +43,11 @@ _PYTEST_ENV = frozenset({"PYTEST_CURRENT_TEST"})
 
 _SIGNALS = sorted(signal.valid_signals())
 
-# The value each environment variable was last given while a module was being imported
-# (_note_import_env), None for removed: a library configuring itself on first import, as torch
-# or vllm do. A variable a test leaves at that value is the library's, not the test's.
+# The value each environment variable was last given while a module was being imported during
+# the running unit test (_note_import_env), None for removed: a library configuring itself on
+# first import, as torch or vllm do. A variable the test leaves at that value is the library's,
+# not the test's. pytest_runtest_protocol empties it before each unit test, so a value an
+# earlier test's import set excuses nothing.
 _import_env: dict[str, str | None] = {}
 _env_hook_installed = False
 
@@ -191,6 +193,7 @@ class SuiteHealth:
         """Compare the process-wide state from before a unit test's setup to after its teardown."""
         if self._suite_of.get(item.nodeid) != "unit":
             return (yield)
+        _import_env.clear()
         before = _snapshot()
         try:
             return (yield)
