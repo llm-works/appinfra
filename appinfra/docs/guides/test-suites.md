@@ -122,7 +122,8 @@ for every test out of place. Past that, a finding is one of:
 
 A unit test that left process-wide state changed is a **leak**, a finding of its own: a signal
 handler, the `ITIMER_REAL` timer, an environment variable or the working directory, compared from
-before its setup to after its teardown.
+before its setup to after its teardown. An environment variable a module sets while being
+imported, as torch or vllm do on first import, is not the test's.
 
 The line passes with no finding. Otherwise the findings show under the checklist and in
 `.build/check/test-structure-health.log`, and `APPINFRA_DEV_TEST_HEALTH` decides the outcome: `warn`

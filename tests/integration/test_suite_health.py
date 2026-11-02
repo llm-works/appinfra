@@ -28,6 +28,9 @@ def _run(
     report_dir = pytester.path / "health"
     monkeypatch.setenv("PYTHONPATH", str(_REPO_ROOT))
     monkeypatch.setenv("_APPINFRA_CHECK_SUITE_HEALTH_DIR", str(report_dir))
+    # Only the plugin under test: an installed plugin that reorders tests (pytest-randomly)
+    # would break the layouts whose tests depend on running in file order
+    monkeypatch.setenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")
     for path, source in layout.items():
         target = pytester.path / path
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -119,16 +122,56 @@ def test_restored(monkeypatch):
     monkeypatch.chdir("/")
 
 
+def test_imports_a_library_that_sets_env():
+    import sets_env_on_import  # noqa: F401
+
+
+def test_changes_what_an_import_set():
+    os.environ["SUITE_HEALTH_IMPORT"] = "2"
+
+
+def test_patches_what_its_import_set(monkeypatch):
+    import sets_env_on_import_too  # noqa: F401
+
+    monkeypatch.setenv("SUITE_HEALTH_IMPORT_TOO", "2")
+
+
 @pytest.mark.integration
 def test_integration_may_change_state():
     os.environ["SUITE_HEALTH_INTEGRATION"] = "1"
+
+
+def test_imports_a_library_that_sets_env_again():
+    import sets_env_stale  # noqa: F401
+
+
+@pytest.mark.integration
+def test_integration_removes_what_an_import_set():
+    del os.environ["SUITE_HEALTH_STALE"]
+
+
+def test_sets_what_an_earlier_import_set():
+    os.environ["SUITE_HEALTH_STALE"] = "1"
 """
 
 
 def test_unit_tests_that_leave_state_changed_are_reported(
     pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    report = _report(_run(pytester, monkeypatch, {"tests/unit/test_leaks.py": _LEAKS}))
+    layout = {
+        "tests/unit/test_leaks.py": _LEAKS,
+        # a library configuring itself on first import, as torch or vllm do
+        "tests/unit/sets_env_on_import.py": (
+            'import os\nos.environ["SUITE_HEALTH_IMPORT"] = "1"\n'
+        ),
+        "tests/unit/sets_env_on_import_too.py": (
+            'import os\nos.environ["SUITE_HEALTH_IMPORT_TOO"] = "1"\n'
+        ),
+        "tests/unit/sets_env_stale.py": (
+            'import os\nos.environ["SUITE_HEALTH_STALE"] = "1"\n'
+        ),
+    }
+    report = _report(_run(pytester, monkeypatch, layout))
     changed = {
         leak["test"].split("::")[-1]: leak["changed"] for leak in report["leaks"]
     }
@@ -137,6 +180,10 @@ def test_unit_tests_that_leave_state_changed_are_reported(
         "test_timer": ["ITIMER_REAL"],
         "test_env": ["$SUITE_HEALTH_LEAK"],
         "test_cwd": ["cwd"],
+        # an import set it earlier, but this test changed it
+        "test_changes_what_an_import_set": ["$SUITE_HEALTH_IMPORT"],
+        # the value an import set in an earlier test does not excuse this test's change
+        "test_sets_what_an_earlier_import_set": ["$SUITE_HEALTH_STALE"],
     }
 
 
