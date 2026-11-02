@@ -1206,6 +1206,52 @@ class TestConfigWatcherStopBounded:
 
 
 @pytest.mark.usefixtures("clean_env")
+class TestConfigWatcherStartFailure:
+    """A start() that fails stops what it started and leaves the watcher stopped."""
+
+    def test_failed_observer_start_stops_observer(
+        self, tmp_path, mock_logger, monkeypatch
+    ):
+        """An observer whose start() raises is stopped, and the error propagates.
+
+        On inotify, watchdog 7 raises FileNotFoundError from Observer.start() for a
+        watched directory that does not exist, after starting the emitters of the
+        directories before it; only Observer.stop() ends those threads. Its own
+        thread never started, so join() raises, as threading.Thread.join() does.
+        """
+        calls: list[str] = []
+
+        class FailingObserver:
+            def schedule(self, handler: object, path: str, recursive: bool) -> object:
+                return object()
+
+            def start(self) -> None:
+                raise FileNotFoundError(2, "No such file or directory")
+
+            def stop(self) -> None:
+                calls.append("stop")
+
+            def join(self, timeout: float | None = None) -> None:
+                raise RuntimeError("cannot join thread before it is started")
+
+        monkeypatch.setattr(
+            ConfigWatcher, "_observer_class", staticmethod(lambda: FailingObserver)
+        )
+        (tmp_path / "config.yaml").write_text("logging:\n  level: info\n")
+        watcher = ConfigWatcher(mock_logger, etc_dir=tmp_path)
+        watcher.configure("config.yaml")
+
+        with pytest.raises(FileNotFoundError):
+            watcher.start()
+
+        assert calls == ["stop"]
+        assert watcher.is_running() is False
+        assert watcher._observer is None
+        assert watcher._file_handler is None
+        assert watcher._dir_watches == {}
+
+
+@pytest.mark.usefixtures("clean_env")
 class TestConfigWatcherMultiConfig:
     """Tests for multi-config file scenarios."""
 

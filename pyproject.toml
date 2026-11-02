@@ -77,10 +77,10 @@ fastapi = [
     "uvicorn[standard]>=0.23.0,<0.55",
 ]
 hotreload = [
-    "watchdog>=3.0.0,<5.0.0",
+    "watchdog>=3.0.0,<8.0.0",
 ]
 ui = [
-    "rich>=13.0.0,<14.0.0",
+    "rich>=13.0.0,<16.0.0",
     "questionary>=2.0.0,<3.0.0",
     "InquirerPy>=0.3.0,<1.0.0",
 ]
