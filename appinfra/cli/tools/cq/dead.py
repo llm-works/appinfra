@@ -99,6 +99,14 @@ def _decorator_name(decorator: ast.expr) -> str:
     return ".".join(reversed(parts))
 
 
+def decorator_name_arg(value: str) -> str:
+    """argparse type for ``--keep-decorator``: a dotted ASCII name such as ``router.get``, the
+    names check.sh accepts in APPINFRA_DEV_CQ_DEAD_KEEP_DECORATORS."""
+    if not all(p.isascii() and p.isidentifier() for p in value.split(".")):
+        raise argparse.ArgumentTypeError(f"not a dotted decorator name: {value!r}")
+    return value
+
+
 def is_registered(node: ast.AST, keep_decorators: Iterable[str]) -> bool:
     """Whether a function or class carries a decorator of ``keep_decorators``, given as its
     dotted name or a suffix of it at a dot."""
@@ -275,6 +283,7 @@ class CheckDeadTool(Tool):
         parser.add_argument(
             "--keep-decorator",
             action="append",
+            type=decorator_name_arg,
             metavar="NAME",
             help=(
                 "Decorator that registers what it decorates, so its definitions count as "

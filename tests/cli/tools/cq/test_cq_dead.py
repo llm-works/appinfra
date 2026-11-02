@@ -225,6 +225,15 @@ class TestCheckDeadTool:
         )
         assert args.keep_decorator == ["router.get", "cli.command"]
 
+    @pytest.mark.parametrize(
+        "value", ["a$(touch x)", "router.", ".get", "router..get", "1st", "*", "ré"]
+    )
+    def test_keep_decorator_rejects_non_names(self, value: str):
+        parser = argparse.ArgumentParser()
+        CheckDeadTool(parent=None).add_args(parser)
+        with pytest.raises(SystemExit):
+            parser.parse_args(["--keep-decorator", value])
+
 
 def _first_def(source: str) -> ast.AST:
     """The first statement of a parsed snippet: the definition under test."""

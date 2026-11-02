@@ -251,10 +251,17 @@ if [ -n "${APPINFRA_DEV_CQ_EXCLUDE:-}" ]; then
     )
 fi
 
-# The same for the decorators dead private code counts as registering what they decorate
+# The same for the decorators dead private code counts as registering what they decorate. Only
+# dotted names pass, so nothing in the flags means anything to the eval in cq_tool.
+CQ_KEEP_DECORATORS="${APPINFRA_DEV_CQ_DEAD_KEEP_DECORATORS:-}"
+_cq_name='[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*'
+if ! [[ "$CQ_KEEP_DECORATORS" =~ ^[[:space:]]*(${_cq_name}([[:space:]]+${_cq_name})*)?[[:space:]]*$ ]]; then
+    echo "Error: APPINFRA_DEV_CQ_DEAD_KEEP_DECORATORS takes dotted decorator names, got: $CQ_KEEP_DECORATORS" >&2
+    exit 1
+fi
 CQ_KEEP_DECORATOR_FLAGS=""
-for dec in ${APPINFRA_DEV_CQ_DEAD_KEEP_DECORATORS:-}; do
-    CQ_KEEP_DECORATOR_FLAGS+="${CQ_KEEP_DECORATOR_FLAGS:+ }--keep-decorator \"${dec}\""
+for dec in $CQ_KEEP_DECORATORS; do
+    CQ_KEEP_DECORATOR_FLAGS+="${CQ_KEEP_DECORATOR_FLAGS:+ }--keep-decorator ${dec}"
 done
 
 # Extra ruff rules reported over the package as warnings, never failing: a comma-separated list
