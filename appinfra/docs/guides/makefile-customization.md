@@ -339,8 +339,8 @@ lint::
 Projects with special test requirements (e.g., GPU tests that OOM when run in parallel) can skip
 framework test targets and provide their own. Two helper macros are available:
 `APPINFRA_RUN_PYTEST` honors `APPINFRA_PYTEST_WORKERS`, while `APPINFRA_RUN_PYTEST_SERIAL` never
-passes `-n` and always runs pytest in-process. Both treat "no tests collected" (exit 5) as
-success.
+passes `-n` and always runs pytest in-process. Both append `APPINFRA_PYTEST_ARGS`, which rejects
+worker options, and treat "no tests collected" (exit 5) as success.
 
 ```makefile
 # Skip the built-in test.e2e target
@@ -535,7 +535,7 @@ Each setting has a type, and a value that does not fit it stops make:
 | `APPINFRA_PYTEST_TESTS_DIR` | `tests` | Tests directory |
 | `APPINFRA_PYTEST_PERF_DIR` | `tests` | Directory `test.perf*` and `make check`'s Performance group collect from. Pointing it at the directory holding the performance tests skips importing the rest of the test tree |
 | `APPINFRA_PYTEST_WORKERS` | `auto` | pytest-xdist worker count (`auto`, `logical`, which needs `psutil`, or N) for `test.*` targets; empty (in `Makefile.local`) runs pytest in-process. Never applied to `test.perf*`. `make check` ignores it: `check.sh` runs suites concurrently with its own per-suite worker heuristic |
-| `APPINFRA_PYTEST_ARGS` | (empty) | Additional pytest arguments for the `make test*` targets and `make check`'s test runs |
+| `APPINFRA_PYTEST_ARGS` | (empty) | Additional pytest arguments for the `make test*` targets and `make check`'s test runs, after their own. An xdist worker option (`-n`, `--numprocesses`, `--maxprocesses`, `--dist`) is an error: workers come from `APPINFRA_PYTEST_WORKERS` |
 | `APPINFRA_PYTEST_HANG_DUMP_SECONDS` | `120` | In `make check`, a test still running after this many seconds gets a row below the checklist and its process's stacks in the check's log; the test is neither stopped nor failed. `0` disables it |
 
 **Documentation (DOCS):**

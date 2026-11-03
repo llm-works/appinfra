@@ -28,7 +28,7 @@ For API stability guarantees and deprecation policy, see
 
 ### Fixed
 - `APPINFRA_PYTEST_ARGS` reaches pytest in the `make test*` targets and in `make check`'s test
-  runs; it was ignored.
+  runs; it was ignored. An xdist worker option in it is an error: use `APPINFRA_PYTEST_WORKERS`.
 - `APPINFRA_DEV_CQ_EXCLUDE` patterns reach `make check` and `make cq.*` as written; a quote in one
   no longer breaks the code quality check.
 - `make check` stops with a clear error on a malformed package name, threshold, ruff rule list or

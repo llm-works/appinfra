@@ -150,9 +150,21 @@ for _m in unit integration e2e security; do
 done
 COVERAGE_LABEL="${_cov_prefix}Coverage tests"
 MYPY_FLAGS="${APPINFRA_DEV_MYPY_FLAGS:-}"
-# Extra arguments for every test run, after check.sh's own; not for the configuration probe
-# below, which runs without the project's conftest.py, where such an option may be defined
-PYTEST_ARGS="${APPINFRA_PYTEST_ARGS:-}"
+# Extra arguments for every test run, after check.sh's own (with_pytest_args); not for the
+# configuration probe below, which runs without the project's conftest.py, where such an option
+# may be defined
+PYTEST_ARGS="$(appinfra_pytest_args APPINFRA_PYTEST_ARGS)" || exit 2
+
+# with_pytest_args CMD: prints CMD, with PYTEST_ARGS appended when CMD runs pytest. They join the
+# command only when it runs, not in the TEST_SUBCHECKS records, which split on |: a pytest
+# argument may hold one, as a parametrized test's id can.
+with_pytest_args() {
+    if [[ "$1" == *" -m pytest "* ]] && [ -n "$PYTEST_ARGS" ]; then
+        printf '%s %s' "$1" "$PYTEST_ARGS"
+    else
+        printf '%s' "$1"
+    fi
+}
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="${APPINFRA_DEV_PROJECT_ROOT:-$(dirname "$SCRIPT_DIR")}"
 
@@ -417,7 +429,7 @@ _pytest_cmd_for() {
     [ "$marker" = unit ] && health_env="$HEALTH_ENV"
     case " $_MARKERS_FOUND " in
         *" $marker "*)
-            echo "${PYTEST_PLUGIN_PATH}${health_env}_APPINFRA_CHECK_PYTEST_SUITE=$suite ${PYTHON} -m pytest $path -m $marker ${PYTEST_PLUGINS} $flags ${PYTEST_ARGS}"
+            echo "${PYTEST_PLUGIN_PATH}${health_env}_APPINFRA_CHECK_PYTEST_SUITE=$suite ${PYTHON} -m pytest $path -m $marker ${PYTEST_PLUGINS} $flags"
             ;;
         *)
             echo "(exit 5)"
@@ -454,8 +466,8 @@ fi
 COVERAGE_HEALTH_ENV=""
 [ "$HEALTH_TARGET" = test.coverage ] && COVERAGE_HEALTH_ENV="$HEALTH_ENV"
 if awk "BEGIN {exit !($COVERAGE_TARGET > 0)}" 2>/dev/null; then
-    TEST_SUBCHECKS+=("${COVERAGE_LABEL}|test.coverage|${PYTEST_PLUGIN_PATH}${COVERAGE_CORE_ENV}${COVERAGE_HEALTH_ENV}_APPINFRA_CHECK_PYTEST_SUITE=cov ${PYTHON} -m pytest tests/ ${COVERAGE_MARKER_ARG} ${PYTEST_PLUGINS} --cov=${PKG_NAME} --cov-report=term${COVERAGE_FAIL_UNDER} -q -rEfs ${PYTEST_PARALLEL_COVERAGE} ${PYTEST_ARGS}|${COVERAGE_TARGET}")
-    TEST_SUBCHECKS_RAW+=("${COVERAGE_LABEL}|test.coverage|${PYTEST_PLUGIN_PATH}${COVERAGE_CORE_ENV}${COVERAGE_HEALTH_ENV}_APPINFRA_CHECK_PYTEST_SUITE=cov ${PYTHON} -m pytest tests/ ${COVERAGE_MARKER_ARG} ${PYTEST_PLUGINS} --cov=${PKG_NAME} --cov-report=term-missing -rEfs ${PYTEST_PARALLEL_COVERAGE} ${PYTEST_ARGS}|${COVERAGE_TARGET}")
+    TEST_SUBCHECKS+=("${COVERAGE_LABEL}|test.coverage|${PYTEST_PLUGIN_PATH}${COVERAGE_CORE_ENV}${COVERAGE_HEALTH_ENV}_APPINFRA_CHECK_PYTEST_SUITE=cov ${PYTHON} -m pytest tests/ ${COVERAGE_MARKER_ARG} ${PYTEST_PLUGINS} --cov=${PKG_NAME} --cov-report=term${COVERAGE_FAIL_UNDER} -q -rEfs ${PYTEST_PARALLEL_COVERAGE}|${COVERAGE_TARGET}")
+    TEST_SUBCHECKS_RAW+=("${COVERAGE_LABEL}|test.coverage|${PYTEST_PLUGIN_PATH}${COVERAGE_CORE_ENV}${COVERAGE_HEALTH_ENV}_APPINFRA_CHECK_PYTEST_SUITE=cov ${PYTHON} -m pytest tests/ ${COVERAGE_MARKER_ARG} ${PYTEST_PLUGINS} --cov=${PKG_NAME} --cov-report=term-missing -rEfs ${PYTEST_PARALLEL_COVERAGE}|${COVERAGE_TARGET}")
 fi
 
 _standalone_suite unit        "Unit tests"        test.unit        unit
@@ -1168,7 +1180,7 @@ run_check() {
         watch_slow_tests "$tmpfile" "$name" &
         watch_pid=$!
     fi
-    eval "$cmd" > "$tmpfile" 2>&1 || exit_code=$?
+    eval "$(with_pytest_args "$cmd")" > "$tmpfile" 2>&1 || exit_code=$?
     if [ -n "$watch_pid" ]; then
         kill -TERM "$watch_pid" 2>/dev/null || true
         wait "$watch_pid" 2>/dev/null || true
@@ -1518,11 +1530,11 @@ run_raw_check() {
         set +e
         # -i: on Ctrl-C tee keeps passing output until the check closes the pipe, so what pytest
         # prints on its way out still reaches the terminal; stop_children ends the rest
-        eval "$cmd" 2>&1 | tee -i "$log"
+        eval "$(with_pytest_args "$cmd")" 2>&1 | tee -i "$log"
         rc=${PIPESTATUS[0]}
         set -e
     else
-        eval "$cmd" || rc=$?
+        eval "$(with_pytest_args "$cmd")" || rc=$?
     fi
 
     local found="" note=""

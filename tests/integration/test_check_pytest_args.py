@@ -17,8 +17,9 @@ import pytest
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
-    """Add --x-marker."""
+    """Add --x-marker and --x-value."""
     parser.addoption("--x-marker", action="store_true")
+    parser.addoption("--x-value")
 
 
 def pytest_configure(config: pytest.Config) -> None:
@@ -37,9 +38,22 @@ def test_option_given(request: pytest.FixtureRequest) -> None:
     assert request.config.getoption("--x-marker")
 '''
 
+_TEST_VALUE = '''"""A test that passes only when pytest was given --x-value with a | in it."""
 
-def _check(project: Path, settings: dict[str, str]) -> subprocess.CompletedProcess[str]:
-    """Run check.sh over a package and the one test above, with the given settings.
+import pytest
+
+
+@pytest.mark.unit
+def test_value_whole(request: pytest.FixtureRequest) -> None:
+    """The value reached pytest whole."""
+    assert request.config.getoption("--x-value") == "a|b"
+'''
+
+
+def _check(
+    project: Path, settings: dict[str, str], test: str = _TEST
+) -> subprocess.CompletedProcess[str]:
+    """Run check.sh over a package and one scratch test, with the given settings.
 
     The environment drops the settings a surrounding make check exports.
     """
@@ -47,7 +61,7 @@ def _check(project: Path, settings: dict[str, str]) -> subprocess.CompletedProce
     (project / "pkg" / "__init__.py").write_text('"""A package for the check."""\n')
     (project / "tests").mkdir()
     (project / "tests" / "conftest.py").write_text(_CONFTEST)
-    (project / "tests" / "test_option.py").write_text(_TEST)
+    (project / "tests" / "test_option.py").write_text(test)
     env = {
         k: v
         for k, v in os.environ.items()
@@ -75,6 +89,19 @@ def _check(project: Path, settings: dict[str, str]) -> subprocess.CompletedProce
 def test_args_reach_the_test_runs(tmp_path: Path) -> None:
     result = _check(tmp_path, {"APPINFRA_PYTEST_ARGS": "--x-marker"})
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_an_arg_with_a_pipe_reaches_the_test_runs_whole(tmp_path: Path) -> None:
+    """check.sh keeps each run in a |-separated record; the args must not be split there."""
+    result = _check(tmp_path, {"APPINFRA_PYTEST_ARGS": "--x-value='a|b'"}, _TEST_VALUE)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_a_worker_option_is_an_error(tmp_path: Path) -> None:
+    """Workers come from APPINFRA_PYTEST_WORKERS: after -n 1, -n 2 would end the serial run."""
+    result = _check(tmp_path, {"APPINFRA_PYTEST_ARGS": "--x-marker -n 2"})
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "APPINFRA_PYTEST_WORKERS" in result.stderr, result.stderr
 
 
 def test_without_the_args_the_test_fails(tmp_path: Path) -> None:
