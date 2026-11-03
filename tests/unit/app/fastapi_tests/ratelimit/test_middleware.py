@@ -4,6 +4,7 @@
 """Tests for RateLimitMiddleware."""
 
 import json
+import time
 
 import pytest
 
@@ -13,6 +14,21 @@ from appinfra.app.fastapi.ratelimit.middleware import (
     _send_429,
 )
 from appinfra.app.fastapi.ratelimit.token_bucket import TokenBucketLimiter
+
+
+@pytest.fixture
+def clock(fake_clock):
+    """Put this module's sleeps on the fake clock with the middleware's and token bucket's.
+
+    The assertions hold on the real clock as well: a sleep lasts at least as long as asked,
+    so a bucket idle past stale_ttl stays stale.
+    """
+    fake_clock.patch(
+        "appinfra.app.fastapi.ratelimit.middleware",
+        "appinfra.app.fastapi.ratelimit.token_bucket",
+        __name__,
+    )
+
 
 # =============================================================================
 # Helpers
@@ -286,7 +302,7 @@ class TestRateLimitMiddleware:
         assert collector.status == 200
 
     @pytest.mark.asyncio
-    async def test_cleanup_triggered(self):
+    async def test_cleanup_triggered(self, clock):
         """Test that cleanup removes stale buckets."""
         app = MockApp()
         limiter = TokenBucketLimiter(rate=1, window=60.0, stale_ttl=0.01)
@@ -299,8 +315,6 @@ class TestRateLimitMiddleware:
 
         # Verify the bucket exists and is exhausted
         assert "1.1.1.1" in limiter._buckets
-
-        import time
 
         time.sleep(0.02)
 

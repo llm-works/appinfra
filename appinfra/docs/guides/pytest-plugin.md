@@ -82,6 +82,76 @@ def lg():
     return LoggerFactory.create("/test", LogConfig(level=logging.DEBUG))
 ```
 
+### `fake_clock`
+
+Runs time-based code on a virtual clock, `FakeClock`, that moves only when slept on: a
+`time.sleep(3600)` returns at once instead of blocking, so a test of retries, timeouts or rate
+limits takes no real time. appinfra's `Ticker`, `RateLimiter` and `ETA` are on the clock for
+every test that takes the fixture; `patch()` adds a project's own modules:
+
+```python
+# myapp/retry.py
+import time
+
+
+def retry(op, attempts, delay):
+    for _ in range(attempts - 1):
+        if op():
+            return True
+        time.sleep(delay)
+    return op()
+```
+
+```python
+from myapp.retry import retry
+
+
+def test_retry_gives_up_after_three_attempts(fake_clock):
+    fake_clock.patch("myapp.retry")
+    calls = []
+    assert retry(lambda: calls.append(1) or False, attempts=3, delay=60.0) is False
+    assert len(calls) == 3
+```
+
+The clock only removes the waiting: a test on it must pass just the same on the real clock, only
+slower. So a test asserts what the code does (its results, the calls it makes, their order),
+not the clock's readings. Where time itself is the subject, every assertion has to hold however
+much real time passes as well: an elapsed time is at least the time slept, never exactly it, and
+a time remaining is at most what it was, never exactly it. A test that only holds on the virtual
+clock fails the day it runs for real.
+
+In a patched module, `time.monotonic()`, `time.time()` and `time.sleep()` read and advance the
+clock. Every other `time` function stays real, and modules not patched (pytest, logging) keep
+real time. The patches end with the test.
+
+`FakeClock` also works without the fixture, as a context manager or a decorator, with
+`modules` naming the modules to patch:
+
+```python
+from appinfra.testing import FakeClock
+
+with FakeClock(modules=["myapp.retry"]):
+    assert retry(lambda: False, attempts=3, delay=60.0) is False
+
+
+@FakeClock(modules=["myapp.retry"])
+def test_retry_gives_up():
+    assert retry(lambda: False, attempts=3, delay=60.0) is False
+```
+
+The decorator runs each call on a fresh clock, and a decorated test still takes fixtures. It
+raises `TypeError` for an async or generator function, whose body would run after the clock exits.
+
+Limits:
+
+- Only a module-level `import time` is redirected. `from time import sleep` binds the real
+  function when the module is imported, so `patch()` cannot reach it; such a module needs
+  `import time` to run on the clock.
+- Code on the clock runs in one thread. The `Ticker`'s `threading.Event` waits advance the clock
+  instead of blocking, so a wait that is not already set runs out its full timeout.
+- Objects that capture time functions when created, such as a `Ticker`'s scheduler, must be
+  created after the clock is active.
+
 ## Integration with `check.sh`
 
 The `make check` command shows a skip summary at the end:

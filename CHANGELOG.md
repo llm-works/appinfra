@@ -15,6 +15,9 @@ For API stability guarantees and deprecation policy, see
   and JSON dumps and schemas mask it like `pydantic.SecretStr`.
 - `cq dead` counts methods under pydantic's validator and serializer decorators as used;
   `--keep-decorator` (`APPINFRA_DEV_CQ_DEAD_KEEP_DECORATORS`) adds other registering decorators.
+- `appinfra.testing` provides `FakeClock` and the `fake_clock` fixture: time-based code runs on a
+  virtual clock whose sleeps return at once, and `fake_clock.patch("myapp.retry")` adds a
+  project's own modules. See the pytest plugin guide.
 
 ### Changed
 - The `hotreload` extra accepts watchdog up to 7.x and the `ui` extra accepts rich up to 15.x.
@@ -24,6 +27,9 @@ For API stability guarantees and deprecation policy, see
   an error instead of expanding it (a URL spells `$` as `%24`).
 
 ### Fixed
+- `APPINFRA_PYTEST_ARGS` reaches pytest in the `make test*` targets and in `make check`'s test
+  runs; it was ignored. An xdist worker option in it is an error: `make test*` take workers from
+  `APPINFRA_PYTEST_WORKERS`, `make check` sets its own.
 - `APPINFRA_DEV_CQ_EXCLUDE` patterns reach `make check` and `make cq.*` as written; a quote in one
   no longer breaks the code quality check.
 - `make check` stops with a clear error on a malformed package name, threshold, ruff rule list or

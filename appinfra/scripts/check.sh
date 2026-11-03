@@ -150,6 +150,21 @@ for _m in unit integration e2e security; do
 done
 COVERAGE_LABEL="${_cov_prefix}Coverage tests"
 MYPY_FLAGS="${APPINFRA_DEV_MYPY_FLAGS:-}"
+# Extra arguments for every test run, after check.sh's own (with_pytest_args); not for the
+# configuration probe below, which runs without the project's conftest.py, where such an option
+# may be defined
+PYTEST_ARGS="$(appinfra_pytest_args APPINFRA_PYTEST_ARGS)" || exit 2
+
+# with_pytest_args CMD: prints CMD, with PYTEST_ARGS appended when CMD runs pytest. They join the
+# command only when it runs, not in the TEST_SUBCHECKS records, which split on |: a pytest
+# argument may hold one, as a parametrized test's id can.
+with_pytest_args() {
+    if [[ "$1" == *" -m pytest "* ]] && [ -n "$PYTEST_ARGS" ]; then
+        printf '%s %s' "$1" "$PYTEST_ARGS"
+    else
+        printf '%s' "$1"
+    fi
+}
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="${APPINFRA_DEV_PROJECT_ROOT:-$(dirname "$SCRIPT_DIR")}"
 
@@ -1165,7 +1180,7 @@ run_check() {
         watch_slow_tests "$tmpfile" "$name" &
         watch_pid=$!
     fi
-    eval "$cmd" > "$tmpfile" 2>&1 || exit_code=$?
+    eval "$(with_pytest_args "$cmd")" > "$tmpfile" 2>&1 || exit_code=$?
     if [ -n "$watch_pid" ]; then
         kill -TERM "$watch_pid" 2>/dev/null || true
         wait "$watch_pid" 2>/dev/null || true
@@ -1515,11 +1530,11 @@ run_raw_check() {
         set +e
         # -i: on Ctrl-C tee keeps passing output until the check closes the pipe, so what pytest
         # prints on its way out still reaches the terminal; stop_children ends the rest
-        eval "$cmd" 2>&1 | tee -i "$log"
+        eval "$(with_pytest_args "$cmd")" 2>&1 | tee -i "$log"
         rc=${PIPESTATUS[0]}
         set -e
     else
-        eval "$cmd" || rc=$?
+        eval "$(with_pytest_args "$cmd")" || rc=$?
     fi
 
     local found="" note=""

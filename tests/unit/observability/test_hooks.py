@@ -15,11 +15,23 @@ import time
 from io import StringIO
 from unittest.mock import Mock, patch
 
+import pytest
+
 from appinfra.observability.hooks import (
     HookContext,
     HookEvent,
     ObservabilityHooks,
 )
+
+
+@pytest.fixture
+def clock(fake_clock):
+    """Put this module's sleeps on the fake clock with the hooks'.
+
+    The assertions hold on the real clock as well: a duration is at least the time slept.
+    """
+    fake_clock.patch("appinfra.observability.hooks", __name__)
+
 
 # =============================================================================
 # Test HookEvent Enum
@@ -105,17 +117,17 @@ class TestHookContext:
         assert hasattr(context, "start_time")
         assert context.start_time > 0
 
-    def test_set_duration(self):
+    def test_set_duration(self, clock):
         """Test set_duration calculates from start_time."""
         context = HookContext(event=HookEvent.TOOL_START)
 
         # Small delay
-        time.sleep(0.01)
+        time.sleep(0.25)
 
         context.set_duration()
 
         assert context.duration is not None
-        assert context.duration >= 0.01
+        assert context.duration >= 0.25
 
 
 # =============================================================================
@@ -459,7 +471,7 @@ class TestObservabilityHooksCallbackQuery:
 class TestObservabilityHooksIntegration:
     """Test real-world usage scenarios."""
 
-    def test_query_monitoring_workflow(self):
+    def test_query_monitoring_workflow(self, clock):
         """Test complete query monitoring workflow."""
         hooks = ObservabilityHooks()
         query_log = []
@@ -500,7 +512,7 @@ class TestObservabilityHooksIntegration:
         assert HookEvent.QUERY_END in events
         assert HookEvent.REQUEST_END in events
 
-    def test_tool_execution_timing(self):
+    def test_tool_execution_timing(self, clock):
         """Test tool execution timing with context."""
         hooks = ObservabilityHooks()
         timings = []

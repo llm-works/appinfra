@@ -18,10 +18,13 @@ import logging
 import pickle
 import threading
 import time
+from collections.abc import Callable
+from typing import Any
 from unittest.mock import Mock
 
 import pytest
 
+import appinfra.time.ticker
 from appinfra.errors import TickerAPIError, TickerConfigError, TickerStateError
 from appinfra.log import create_lg
 from appinfra.time.ticker import Ticker, TickerHandler, TickerMode
@@ -73,6 +76,105 @@ def simple_handler():
             self.stopped = True
 
     return SimpleHandler()
+
+
+# A monotonic timestamp for tests that pass ``now`` to try_tick() and
+# time_until_next_tick(): those read no clock, so their results are exact on any clock
+T0 = 1000.0
+
+
+@pytest.fixture
+def clock(fake_clock):
+    """Put this module's sleeps on the fake clock with the ticker's, so they take no real time.
+
+    Every assertion holds on the real clock as well: a tick comes no earlier than its
+    schedule allows, and a time until the next tick is at most what the schedule left.
+    """
+    fake_clock.patch(__name__)
+
+
+# Tests that run a ticker on a thread of its own wait on events its handler sets, never
+# for a fixed time; running out of the timeout is the failure, never the expected path.
+_TIMEOUT = 5.0
+
+
+def _start(ticker: Ticker, *args, **kwargs) -> threading.Thread:
+    """Start ``ticker.run(*args, **kwargs)`` on a thread of its own."""
+    thread = threading.Thread(target=ticker.run, args=args, kwargs=kwargs, daemon=True)
+    thread.start()
+    return thread
+
+
+def _stop(ticker: Ticker, thread: threading.Thread) -> None:
+    """Stop ``ticker`` and check its run() thread ends."""
+    ticker.stop()
+    thread.join(timeout=_TIMEOUT)
+    assert not thread.is_alive()
+
+
+def _signal_after(event: threading.Event, ticks: int) -> Callable[[], None]:
+    """A tick function that sets ``event`` on its ``ticks``-th call."""
+    count = 0
+
+    def tick() -> None:
+        nonlocal count
+        count += 1
+        if count == ticks:
+            event.set()
+
+    return tick
+
+
+def _recording_delays(ticker: Ticker) -> list[float]:
+    """Record every delay run() schedules a tick after; exact on any clock."""
+    assert ticker._sched is not None
+    delays: list[float] = []
+    enter = ticker._sched.enter
+
+    def recording(delay: float, *args, **kwargs):
+        delays.append(delay)
+        return enter(delay, *args, **kwargs)
+
+    ticker._sched.enter = recording  # type: ignore[method-assign]
+    return delays
+
+
+class _TimeSpy:
+    """Stands in for a module's ``time`` (real or the fake clock's): records the sleep()
+    calls and passes everything on to it."""
+
+    def __init__(self, inner) -> None:
+        self.inner = inner
+        self.sleeps: list[float] = []
+
+    def sleep(self, secs: float) -> None:
+        self.sleeps.append(secs)
+        self.inner.sleep(secs)
+
+    def __getattr__(self, name: str):
+        return getattr(self.inner, name)
+
+
+def _spy_on_waits(ticker: Ticker, monkeypatch) -> tuple[_TimeSpy, Mock]:
+    """Record every sleep in the ticker module and every wait on ``ticker``'s stop event,
+    which is how run() waits for its next tick."""
+    sleeps = _TimeSpy(appinfra.time.ticker.time)
+    monkeypatch.setattr(appinfra.time.ticker, "time", sleeps)
+    waits = Mock(wraps=ticker._stop_event.wait)
+    ticker._stop_event.wait = waits  # type: ignore[method-assign]
+    return sleeps, waits
+
+
+def _also_signal(handler: TickerHandler, event: threading.Event, ticks: int) -> None:
+    """Make ``handler`` set ``event`` on its ``ticks``-th tick, after its own ticker_tick."""
+    tick = handler.ticker_tick
+    signal = _signal_after(event, ticks)
+
+    def ticking() -> None:
+        tick()
+        signal()
+
+    handler.ticker_tick = ticking  # type: ignore[method-assign]
 
 
 # =============================================================================
@@ -184,27 +286,47 @@ class TestTickerInitialization:
         ticker = Ticker(mock_logger, mock_handler, secs=1.0, initial=False)
         assert ticker._initial is False
 
-    def _first_tick_offset(self, mock_logger, fake_clock, initial: bool) -> float:
-        """Run a 1s ticker on the fake clock; return when its first tick fired."""
-        start = fake_clock.monotonic()
-        tick_times: list[float] = []
+    def _first_tick(
+        self, mock_logger, monkeypatch, secs: float, initial: bool
+    ) -> dict[str, Any]:
+        """Run a ticker until its first tick. Return how long after run() it fired
+        (``offset``), and what run() scheduled, waited for and slept before it."""
+        start = time.monotonic()
+        before: dict[str, Any] = {}
 
         class TimingHandler(TickerHandler):
             def ticker_tick(self):
-                tick_times.append(fake_clock.monotonic() - start)
+                before["offset"] = time.monotonic() - start
+                before["scheduled"] = list(delays)
+                before["waited"] = [c.args[0] for c in waits.call_args_list]
+                before["slept"] = list(sleeps.sleeps)
                 ticker.stop()
 
-        ticker = Ticker(mock_logger, TimingHandler(), secs=1, initial=initial)
+        ticker = Ticker(mock_logger, TimingHandler(), secs=secs, initial=initial)
+        delays = _recording_delays(ticker)
+        sleeps, waits = _spy_on_waits(ticker, monkeypatch)
         ticker.run()
-        return tick_times[0]
+        return before
 
-    def test_initial_false_skips_immediate_tick(self, mock_logger, fake_clock):
+    def test_initial_false_skips_immediate_tick(self, mock_logger, clock, monkeypatch):
         """Test initial=False skips the immediate tick and waits for interval."""
-        assert self._first_tick_offset(mock_logger, fake_clock, initial=False) == 1.0
+        before = self._first_tick(mock_logger, monkeypatch, 0.5, initial=False)
 
-    def test_initial_true_fires_immediately(self, mock_logger, fake_clock):
-        """Test initial=True (default) fires tick immediately on start."""
-        assert self._first_tick_offset(mock_logger, fake_clock, initial=True) == 0.0
+        # The first tick was scheduled a full interval out, waited for no longer than that,
+        # and came no earlier
+        assert before["scheduled"] == [0.5]
+        assert before["waited"] and all(w <= 0.5 for w in before["waited"])
+        assert before["slept"] == []
+        assert before["offset"] >= 0.5
+
+    def test_initial_true_fires_immediately(self, mock_logger, clock, monkeypatch):
+        """Test initial=True (default) fires the first tick without waiting an interval."""
+        before = self._first_tick(mock_logger, monkeypatch, 0.5, initial=True)
+
+        # Nothing was scheduled, waited for or slept before the first tick
+        assert before["scheduled"] == []
+        assert before["waited"] == []
+        assert before["slept"] == []
 
 
 # =============================================================================
@@ -217,63 +339,49 @@ class TestScheduledMode:
 
     def test_scheduled_mode_calls_ticker_start(self, mock_logger, mock_handler):
         """Test scheduled mode calls ticker_start."""
+        started = threading.Event()
+        mock_handler.ticker_start.side_effect = lambda *args, **kwargs: started.set()
         ticker = Ticker(mock_logger, mock_handler, secs=0.1)
 
-        # Run in thread and stop quickly
-        def run_and_stop():
-            ticker.run()
-
-        thread = threading.Thread(target=run_and_stop, daemon=True)
-        thread.start()
-        time.sleep(0.05)
-        ticker.stop()
-        thread.join(timeout=1.0)
+        thread = _start(ticker)
+        assert started.wait(timeout=_TIMEOUT)
+        _stop(ticker, thread)
 
         mock_handler.ticker_start.assert_called_once()
 
     def test_scheduled_mode_calls_before_first_tick(self, mock_logger, mock_handler):
         """Test scheduled mode calls ticker_before_first_tick."""
+        ticked = threading.Event()
+        mock_handler.ticker_tick.side_effect = ticked.set
         ticker = Ticker(mock_logger, mock_handler, secs=0.1)
 
-        def run_and_stop():
-            ticker.run()
-
-        thread = threading.Thread(target=run_and_stop, daemon=True)
-        thread.start()
-        time.sleep(0.15)  # Wait for first tick
-        ticker.stop()
-        thread.join(timeout=1.0)
+        thread = _start(ticker)
+        assert ticked.wait(timeout=_TIMEOUT)
+        _stop(ticker, thread)
 
         mock_handler.ticker_before_first_tick.assert_called_once()
 
     def test_scheduled_mode_executes_multiple_ticks(self, mock_logger, simple_handler):
         """Test scheduled mode executes multiple ticks."""
+        ticked_thrice = threading.Event()
+        _also_signal(simple_handler, ticked_thrice, 3)
         ticker = Ticker(mock_logger, simple_handler, secs=0.05)
 
-        def run_and_stop():
-            ticker.run()
+        thread = _start(ticker)
+        assert ticked_thrice.wait(timeout=_TIMEOUT)
+        _stop(ticker, thread)
 
-        thread = threading.Thread(target=run_and_stop, daemon=True)
-        thread.start()
-        time.sleep(0.25)  # Allow multiple ticks
-        ticker.stop()
-        thread.join(timeout=1.0)
-
-        # Should have executed multiple ticks
-        assert simple_handler.tick_count >= 2
+        assert simple_handler.tick_count >= 3
 
     def test_scheduled_mode_calls_ticker_stop(self, mock_logger, mock_handler):
         """Test scheduled mode calls ticker_stop on cleanup."""
+        ticked = threading.Event()
+        mock_handler.ticker_tick.side_effect = ticked.set
         ticker = Ticker(mock_logger, mock_handler, secs=0.1)
 
-        def run_and_stop():
-            ticker.run()
-
-        thread = threading.Thread(target=run_and_stop, daemon=True)
-        thread.start()
-        time.sleep(0.05)
-        ticker.stop()
-        thread.join(timeout=1.0)
+        thread = _start(ticker)
+        assert ticked.wait(timeout=_TIMEOUT)
+        _stop(ticker, thread)
 
         mock_handler.ticker_stop.assert_called_once()
 
@@ -284,57 +392,47 @@ class TestScheduledMode:
         mock_handler.ticker_before_first_tick.side_effect = Exception(
             "before first tick error"
         )
+        ticked = threading.Event()
+        mock_handler.ticker_tick.side_effect = ticked.set
         ticker = Ticker(mock_logger, mock_handler, secs=0.05)
 
-        def run_and_stop():
-            ticker.run()
+        thread = _start(ticker)
+        # The ticker carries on to its ticks despite the error
+        assert ticked.wait(timeout=_TIMEOUT)
+        _stop(ticker, thread)
 
-        thread = threading.Thread(target=run_and_stop, daemon=True)
-        thread.start()
-        time.sleep(0.15)  # Wait for first tick and error
-        ticker.stop()
-        thread.join(timeout=1.0)
-
-        # Should have called ticker_before_first_tick once
         mock_handler.ticker_before_first_tick.assert_called_once()
-        # Should have logged the exception
         mock_logger.error.assert_called()
-        # Ticker should continue and call ticker_tick despite error
-        assert mock_handler.ticker_tick.call_count >= 1
 
     def test_scheduled_mode_handles_ticker_tick_error(self, mock_logger, mock_handler):
-        """Test scheduled mode handles errors in ticker_tick."""
-        mock_handler.ticker_tick.side_effect = Exception("tick error")
+        """Test scheduled mode keeps ticking through errors in ticker_tick."""
+        failed_thrice = threading.Event()
+        signal = _signal_after(failed_thrice, 3)
+
+        def failing_tick():
+            signal()
+            raise Exception("tick error")
+
+        mock_handler.ticker_tick.side_effect = failing_tick
         ticker = Ticker(mock_logger, mock_handler, secs=0.05)
 
-        def run_and_stop():
-            ticker.run()
+        thread = _start(ticker)
+        assert failed_thrice.wait(timeout=_TIMEOUT)
+        _stop(ticker, thread)
 
-        thread = threading.Thread(target=run_and_stop, daemon=True)
-        thread.start()
-        time.sleep(0.15)  # Allow multiple attempts
-        ticker.stop()
-        thread.join(timeout=1.0)
-
-        # Should have called ticker_tick multiple times despite errors
-        assert mock_handler.ticker_tick.call_count >= 1
+        assert mock_handler.ticker_tick.call_count >= 3
+        assert mock_logger.error.call_count >= 3
 
     def test_scheduled_mode_stops_gracefully(self, mock_logger, simple_handler):
         """Test scheduled mode stops gracefully."""
+        ticked = threading.Event()
+        _also_signal(simple_handler, ticked, 1)
         ticker = Ticker(mock_logger, simple_handler, secs=0.1)
 
-        def run_and_stop():
-            ticker.run()
+        thread = _start(ticker)
+        assert ticked.wait(timeout=_TIMEOUT)
+        _stop(ticker, thread)
 
-        thread = threading.Thread(target=run_and_stop, daemon=True)
-        thread.start()
-        time.sleep(0.05)
-
-        initial_count = simple_handler.tick_count
-        ticker.stop()
-        thread.join(timeout=1.0)
-
-        # Should stop cleanly
         assert simple_handler.stopped is True
         assert not ticker.is_running()
 
@@ -349,105 +447,92 @@ class TestContinuousMode:
 
     def test_continuous_mode_calls_ticker_start(self, mock_logger, mock_handler):
         """Test continuous mode calls ticker_start."""
+        started = threading.Event()
+        mock_handler.ticker_start.side_effect = lambda *args, **kwargs: started.set()
         ticker = Ticker(mock_logger, mock_handler)
 
-        def run_and_stop():
-            ticker.run()
-
-        thread = threading.Thread(target=run_and_stop, daemon=True)
-        thread.start()
-        time.sleep(0.01)
-        ticker.stop()
-        thread.join(timeout=1.0)
+        thread = _start(ticker)
+        assert started.wait(timeout=_TIMEOUT)
+        _stop(ticker, thread)
 
         mock_handler.ticker_start.assert_called_once()
 
     def test_continuous_mode_calls_before_first_tick(self, mock_logger, mock_handler):
         """Test continuous mode calls ticker_before_first_tick."""
+        ticked = threading.Event()
+        mock_handler.ticker_tick.side_effect = ticked.set
         ticker = Ticker(mock_logger, mock_handler)
 
-        def run_and_stop():
-            ticker.run()
-
-        thread = threading.Thread(target=run_and_stop, daemon=True)
-        thread.start()
-        time.sleep(0.01)
-        ticker.stop()
-        thread.join(timeout=1.0)
+        thread = _start(ticker)
+        assert ticked.wait(timeout=_TIMEOUT)
+        _stop(ticker, thread)
 
         mock_handler.ticker_before_first_tick.assert_called_once()
 
-    def test_continuous_mode_executes_many_ticks(self, mock_logger, simple_handler):
+    def test_continuous_mode_executes_many_ticks(
+        self, mock_logger, simple_handler, monkeypatch
+    ):
         """Test continuous mode executes many ticks rapidly."""
+        ticked_often = threading.Event()
+        _also_signal(simple_handler, ticked_often, 50)
         ticker = Ticker(mock_logger, simple_handler)
+        # Rapidly: the loop never waits, neither on the stop event nor in a sleep
+        assert ticker._sched is None
+        sleeps, waits = _spy_on_waits(ticker, monkeypatch)
 
-        def run_and_stop():
-            ticker.run()
+        thread = _start(ticker)
+        assert ticked_often.wait(timeout=_TIMEOUT)
+        _stop(ticker, thread)
 
-        thread = threading.Thread(target=run_and_stop, daemon=True)
-        thread.start()
-        time.sleep(0.1)  # Short time but should execute many ticks
-        ticker.stop()
-        thread.join(timeout=1.0)
-
-        # Continuous mode should execute many times
-        assert simple_handler.tick_count > 10
+        assert simple_handler.tick_count >= 50
+        assert sleeps.sleeps == []
+        waits.assert_not_called()
 
     def test_continuous_mode_stops_on_stop_event(self, mock_logger, simple_handler):
         """Test continuous mode stops when stop event is set."""
+        ticked = threading.Event()
+        _also_signal(simple_handler, ticked, 1)
         ticker = Ticker(mock_logger, simple_handler)
 
-        def run_and_stop():
-            ticker.run()
+        thread = _start(ticker)
+        assert ticked.wait(timeout=_TIMEOUT)
+        _stop(ticker, thread)
 
-        thread = threading.Thread(target=run_and_stop, daemon=True)
-        thread.start()
-        time.sleep(0.05)
-        ticker.stop()
-        thread.join(timeout=1.0)
-
-        # Should have stopped
-        assert not thread.is_alive()
         assert ticker.is_running() is False
         assert simple_handler.stopped is True
 
     def test_continuous_mode_handles_ticker_tick_error(self, mock_logger, mock_handler):
-        """Test continuous mode handles errors in ticker_tick."""
-        # First few calls raise error, then we stop
+        """Test continuous mode keeps ticking through errors in ticker_tick."""
+        # The first four calls raise; the sixth tells the test the ticker went on
         call_count = [0]
+        went_on = threading.Event()
+        signal = _signal_after(went_on, 6)
 
         def side_effect():
             call_count[0] += 1
+            signal()
             if call_count[0] < 5:
                 raise Exception("tick error")
 
         mock_handler.ticker_tick.side_effect = side_effect
         ticker = Ticker(mock_logger, mock_handler)
 
-        def run_and_stop():
-            ticker.run()
+        thread = _start(ticker)
+        assert went_on.wait(timeout=_TIMEOUT)
+        _stop(ticker, thread)
 
-        thread = threading.Thread(target=run_and_stop, daemon=True)
-        thread.start()
-        time.sleep(0.01)
-        ticker.stop()
-        thread.join(timeout=1.0)
-
-        # Should have called ticker_tick multiple times despite errors
-        assert mock_handler.ticker_tick.call_count >= 1
+        assert mock_handler.ticker_tick.call_count >= 6
+        assert mock_logger.error.call_count == 4
 
     def test_continuous_mode_calls_ticker_stop(self, mock_logger, mock_handler):
         """Test continuous mode calls ticker_stop on cleanup."""
+        ticked = threading.Event()
+        mock_handler.ticker_tick.side_effect = ticked.set
         ticker = Ticker(mock_logger, mock_handler)
 
-        def run_and_stop():
-            ticker.run()
-
-        thread = threading.Thread(target=run_and_stop, daemon=True)
-        thread.start()
-        time.sleep(0.01)
-        ticker.stop()
-        thread.join(timeout=1.0)
+        thread = _start(ticker)
+        assert ticked.wait(timeout=_TIMEOUT)
+        _stop(ticker, thread)
 
         mock_handler.ticker_stop.assert_called_once()
 
@@ -467,32 +552,26 @@ class TestTickerControl:
 
     def test_is_running_returns_true_while_running(self, mock_logger, mock_handler):
         """Test is_running returns True while running."""
+        ticked = threading.Event()
+        mock_handler.ticker_tick.side_effect = ticked.set
         ticker = Ticker(mock_logger, mock_handler, secs=0.1)
 
-        def run_and_stop():
-            ticker.run()
-
-        thread = threading.Thread(target=run_and_stop, daemon=True)
-        thread.start()
-        time.sleep(0.05)
+        thread = _start(ticker)
+        assert ticked.wait(timeout=_TIMEOUT)
 
         assert ticker.is_running() is True
 
-        ticker.stop()
-        thread.join(timeout=1.0)
+        _stop(ticker, thread)
 
     def test_is_running_returns_false_after_stop(self, mock_logger, mock_handler):
         """Test is_running returns False after stopping."""
+        ticked = threading.Event()
+        mock_handler.ticker_tick.side_effect = ticked.set
         ticker = Ticker(mock_logger, mock_handler, secs=0.1)
 
-        def run_and_stop():
-            ticker.run()
-
-        thread = threading.Thread(target=run_and_stop, daemon=True)
-        thread.start()
-        time.sleep(0.05)
-        ticker.stop()
-        thread.join(timeout=1.0)
+        thread = _start(ticker)
+        assert ticked.wait(timeout=_TIMEOUT)
+        _stop(ticker, thread)
 
         assert ticker.is_running() is False
 
@@ -526,44 +605,37 @@ class TestTickerControl:
 
     def test_get_status_shows_running_state(self, mock_logger, mock_handler):
         """Test get_status shows running state."""
+        ticked = threading.Event()
+        mock_handler.ticker_tick.side_effect = ticked.set
         ticker = Ticker(mock_logger, mock_handler, secs=0.1)
 
         # Initially not running
         status = ticker.get_status()
         assert status["running"] is False
 
-        # Start ticker
-        def run_and_stop():
-            ticker.run()
-
-        thread = threading.Thread(target=run_and_stop, daemon=True)
-        thread.start()
-        time.sleep(0.05)
+        thread = _start(ticker)
+        assert ticked.wait(timeout=_TIMEOUT)
 
         # Should be running
         status = ticker.get_status()
         assert status["running"] is True
 
-        ticker.stop()
-        thread.join(timeout=1.0)
+        _stop(ticker, thread)
 
     def test_run_raises_if_already_running(self, mock_logger, mock_handler):
         """Test run raises RuntimeError if already running."""
+        ticked = threading.Event()
+        mock_handler.ticker_tick.side_effect = ticked.set
         ticker = Ticker(mock_logger, mock_handler, secs=0.1)
 
-        def run_and_stop():
-            ticker.run()
-
-        thread = threading.Thread(target=run_and_stop, daemon=True)
-        thread.start()
-        time.sleep(0.05)
+        thread = _start(ticker)
+        assert ticked.wait(timeout=_TIMEOUT)
 
         # Try to run again
         with pytest.raises(TickerStateError, match="already running"):
             ticker.run()
 
-        ticker.stop()
-        thread.join(timeout=1.0)
+        _stop(ticker, thread)
 
     def test_stop_cancels_scheduled_events(self, mock_logger, mock_handler):
         """Test stop wakes run() mid-interval and cancels pending events."""
@@ -735,16 +807,13 @@ class TestIntegrationScenarios:
 
     def test_ticker_with_args_and_kwargs(self, mock_logger, mock_handler):
         """Test ticker passes args and kwargs to handler."""
+        started = threading.Event()
+        mock_handler.ticker_start.side_effect = lambda *args, **kwargs: started.set()
         ticker = Ticker(mock_logger, mock_handler, secs=0.1)
 
-        def run_and_stop():
-            ticker.run("arg1", "arg2", key="value")
-
-        thread = threading.Thread(target=run_and_stop, daemon=True)
-        thread.start()
-        time.sleep(0.05)
-        ticker.stop()
-        thread.join(timeout=1.0)
+        thread = _start(ticker, "arg1", "arg2", key="value")
+        assert started.wait(timeout=_TIMEOUT)
+        _stop(ticker, thread)
 
         mock_handler.ticker_start.assert_called_once_with("arg1", "arg2", key="value")
 
@@ -785,9 +854,11 @@ class TestCallableWrapper:
     def test_callable_is_wrapped_in_handler(self, mock_logger):
         """Test that a plain callable is wrapped in a TickerHandler."""
         call_count = [0]
+        ticked = threading.Event()
 
         def my_tick():
             call_count[0] += 1
+            ticked.set()
 
         ticker = Ticker(mock_logger, my_tick, secs=0.05)
 
@@ -796,14 +867,9 @@ class TestCallableWrapper:
 
         assert isinstance(ticker._handler, _CallableWrapper)
 
-        def run_and_stop():
-            ticker.run()
-
-        thread = threading.Thread(target=run_and_stop, daemon=True)
-        thread.start()
-        time.sleep(0.1)
-        ticker.stop()
-        thread.join(timeout=1.0)
+        thread = _start(ticker)
+        assert ticked.wait(timeout=_TIMEOUT)
+        _stop(ticker, thread)
 
         # Should have executed the callable
         assert call_count[0] >= 1
@@ -811,45 +877,46 @@ class TestCallableWrapper:
     def test_lambda_is_wrapped(self, mock_logger):
         """Test that a lambda is wrapped in a TickerHandler."""
         results = []
+        ticked = threading.Event()
 
-        ticker = Ticker(mock_logger, lambda: results.append("tick"), secs=0.05)
+        ticker = Ticker(
+            mock_logger, lambda: (results.append("tick"), ticked.set()), secs=0.05
+        )
 
         from appinfra.time.ticker import _CallableWrapper
 
         assert isinstance(ticker._handler, _CallableWrapper)
 
-        def run_and_stop():
-            ticker.run()
-
-        thread = threading.Thread(target=run_and_stop, daemon=True)
-        thread.start()
-        time.sleep(0.1)
-        ticker.stop()
-        thread.join(timeout=1.0)
+        thread = _start(ticker)
+        assert ticked.wait(timeout=_TIMEOUT)
+        _stop(ticker, thread)
 
         assert len(results) >= 1
         assert results[0] == "tick"
 
-    def test_callable_in_continuous_mode(self, mock_logger):
+    def test_callable_in_continuous_mode(self, mock_logger, monkeypatch):
         """Test callable works in continuous mode."""
         call_count = [0]
+        ticked_often = threading.Event()
+        signal = _signal_after(ticked_often, 50)
 
         def my_tick():
             call_count[0] += 1
+            signal()
 
         ticker = Ticker(mock_logger, my_tick)  # No secs = continuous
+        # Back to back: the loop never waits, neither on the stop event nor in a sleep
+        assert ticker._sched is None
+        sleeps, waits = _spy_on_waits(ticker, monkeypatch)
 
-        def run_and_stop():
-            ticker.run()
-
-        thread = threading.Thread(target=run_and_stop, daemon=True)
-        thread.start()
-        time.sleep(0.05)
-        ticker.stop()
-        thread.join(timeout=1.0)
+        thread = _start(ticker)
+        assert ticked_often.wait(timeout=_TIMEOUT)
+        _stop(ticker, thread)
 
         # Continuous mode should execute many times
-        assert call_count[0] > 10
+        assert call_count[0] >= 50
+        assert sleeps.sleeps == []
+        waits.assert_not_called()
 
     def test_handler_instance_not_wrapped(self, mock_logger, mock_handler):
         """Test that TickerHandler instances are not wrapped."""
@@ -922,31 +989,25 @@ class TestEdgeCases:
     def test_ticker_stop_handles_handler_stop_error(self, mock_logger, mock_handler):
         """Test ticker handles error in ticker_stop gracefully."""
         mock_handler.ticker_stop.side_effect = Exception("stop error")
+        ticked = threading.Event()
+        mock_handler.ticker_tick.side_effect = ticked.set
         ticker = Ticker(mock_logger, mock_handler, secs=0.1)
 
-        def run_and_stop():
-            ticker.run()
-
-        thread = threading.Thread(target=run_and_stop, daemon=True)
-        thread.start()
-        time.sleep(0.05)
-        ticker.stop()
+        thread = _start(ticker)
+        assert ticked.wait(timeout=_TIMEOUT)
         # Should not raise, error is caught
-        thread.join(timeout=1.0)
+        _stop(ticker, thread)
 
     def test_first_flag_reset_after_first_tick(self, mock_logger, mock_handler):
         """Test first flag is reset after first tick."""
+        ticked = threading.Event()
+        mock_handler.ticker_tick.side_effect = ticked.set
         ticker = Ticker(mock_logger, mock_handler, secs=0.05)
         assert ticker._first is True
 
-        def run_and_stop():
-            ticker.run()
-
-        thread = threading.Thread(target=run_and_stop, daemon=True)
-        thread.start()
-        time.sleep(0.1)  # Wait for first tick
-        ticker.stop()
-        thread.join(timeout=1.0)
+        thread = _start(ticker)
+        assert ticked.wait(timeout=_TIMEOUT)
+        _stop(ticker, thread)
 
         assert ticker._first is False
 
@@ -1047,14 +1108,15 @@ class TestTickerIteratorIntegration:
         """Test that callback mode and iterator mode are independent."""
         # Callback mode
         call_count = [0]
+        ticked = threading.Event()
         ticker1 = Ticker(
-            mock_logger, lambda: call_count.__setitem__(0, call_count[0] + 1), secs=0.01
+            mock_logger,
+            lambda: (call_count.__setitem__(0, call_count[0] + 1), ticked.set()),
+            secs=0.01,
         )
-        thread = threading.Thread(target=ticker1.run, daemon=True)
-        thread.start()
-        time.sleep(0.05)
-        ticker1.stop()
-        thread.join(timeout=1.0)
+        thread = _start(ticker1)
+        assert ticked.wait(timeout=_TIMEOUT)
+        _stop(ticker1, thread)
         assert call_count[0] >= 1
 
         # Iterator mode (no handler)
@@ -1090,24 +1152,27 @@ class TestNonBlockingAPI:
         ticker = Ticker(mock_logger, secs=1.0, initial=False)
         assert ticker.time_until_next_tick() == 1.0
 
-    def test_time_until_next_tick_not_started(self, mock_logger, fake_clock):
+    def test_time_until_next_tick_not_started(self, mock_logger):
         """Test time_until_next_tick returns remaining time after a tick."""
         ticker = Ticker(mock_logger, secs=2.0)
-        ticker.try_tick()
-        fake_clock.sleep(0.5)
-        assert ticker.time_until_next_tick() == 1.5
+        ticker.try_tick(now=T0)
+        assert ticker.time_until_next_tick(now=T0 + 0.5) == 1.5
 
-    def test_time_until_next_tick_with_now_parameter(self, mock_logger, fake_clock):
+    def test_time_until_next_tick_with_now_parameter(self, mock_logger, clock):
         """Test time_until_next_tick accepts optional now parameter."""
         ticker = Ticker(mock_logger, secs=1.0)
-        ticker.try_tick()  # First tick
+        now = time.monotonic()
+        ticker.try_tick(now=now)  # First tick
 
-        now = fake_clock.monotonic()
-        fake_clock.sleep(0.25)
+        time.sleep(0.25)
 
-        # The captured time is answered as of then; the default reads the clock now
+        # The captured time is answered as of then; the default reads the clock now,
+        # between the readings around the call: 0.75 on the fake clock
         assert ticker.time_until_next_tick(now=now) == 1.0
-        assert ticker.time_until_next_tick() == 0.75
+        before = time.monotonic()
+        remaining = ticker.time_until_next_tick()
+        after = time.monotonic()
+        assert max(0.0, now + 1.0 - after) <= remaining <= now + 1.0 - before
 
     def test_try_tick_returns_false_when_not_ready(self, mock_logger):
         """Test try_tick returns False when interval hasn't elapsed."""
@@ -1119,29 +1184,26 @@ class TestNonBlockingAPI:
         # Immediate retry fails (not enough time elapsed)
         assert ticker.try_tick() is False
 
-    def test_try_tick_returns_true_when_ready(self, mock_logger, fake_clock):
+    def test_try_tick_returns_true_when_ready(self, mock_logger):
         """Test try_tick returns True once the interval has elapsed."""
         ticker = Ticker(mock_logger, secs=0.25)
 
         # First tick
-        assert ticker.try_tick() is True
+        assert ticker.try_tick(now=T0) is True
 
         # Not yet: just short of the interval
-        fake_clock.sleep(0.125)
-        assert ticker.try_tick() is False
+        assert ticker.try_tick(now=T0 + 0.125) is False
 
         # Exactly at the interval the tick is due
-        fake_clock.sleep(0.125)
-        assert ticker.try_tick() is True
+        assert ticker.try_tick(now=T0 + 0.25) is True
 
-    def test_try_tick_without_handler(self, mock_logger, fake_clock):
+    def test_try_tick_without_handler(self, mock_logger):
         """Test try_tick works without handler (timing oracle mode)."""
         ticker = Ticker(mock_logger, secs=0.25)
 
         # Should work without handler
-        assert ticker.try_tick() is True
-        fake_clock.sleep(0.25)
-        assert ticker.try_tick() is True
+        assert ticker.try_tick(now=T0) is True
+        assert ticker.try_tick(now=T0 + 0.25) is True
 
     def test_try_tick_calls_handler(self, mock_logger, mock_handler):
         """Test try_tick calls handler when present."""
@@ -1173,73 +1235,69 @@ class TestNonBlockingAPI:
         # Error should be logged
         mock_logger.error.assert_called()
 
-    def test_flex_mode_waits_full_interval(self, mock_logger, fake_clock):
+    def test_flex_mode_waits_full_interval(self, mock_logger):
         """Test FLEX mode maintains interval from tick start with no catch-up."""
         ticker = Ticker(mock_logger, secs=2.0, mode=TickerMode.FLEX)
 
         # First tick at t=0
-        assert ticker.try_tick() is True
+        assert ticker.try_tick(now=T0) is True
 
         # Partway through the interval: next tick at t=2.0
-        fake_clock.sleep(1.0)
-        assert ticker.time_until_next_tick() == 1.0
+        assert ticker.time_until_next_tick(now=T0 + 1.0) == 1.0
 
         # Tick late, at t=2.5
-        fake_clock.sleep(1.5)
-        assert ticker.try_tick() is True
+        assert ticker.try_tick(now=T0 + 2.5) is True
 
         # FLEX restarts the interval from this tick: a full 2.0s, no catch-up
-        assert ticker.time_until_next_tick() == 2.0
+        assert ticker.time_until_next_tick(now=T0 + 2.5) == 2.0
 
-    def test_strict_mode_maintains_rate(self, mock_logger, fake_clock):
+    def test_strict_mode_maintains_rate(self, mock_logger):
         """Test STRICT mode keeps the schedule: a late tick shortens the next wait."""
         ticker = Ticker(mock_logger, secs=2.0, mode=TickerMode.STRICT)
 
         # First tick at t=0
-        assert ticker.try_tick() is True
+        assert ticker.try_tick(now=T0) is True
 
         # Partway through the interval: next tick at t=2.0
-        fake_clock.sleep(1.0)
-        assert ticker.time_until_next_tick() == 1.0
+        assert ticker.time_until_next_tick(now=T0 + 1.0) == 1.0
 
         # Tick late, at t=2.5
-        fake_clock.sleep(1.5)
-        assert ticker.try_tick() is True
+        assert ticker.try_tick(now=T0 + 2.5) is True
 
         # Unlike FLEX, the next tick stays on schedule at t=4.0
-        assert ticker.time_until_next_tick() == 1.5
+        assert ticker.time_until_next_tick(now=T0 + 2.5) == 1.5
 
-    def test_strict_mode_catches_up(self, mock_logger, fake_clock):
+    def test_strict_mode_catches_up(self, mock_logger):
         """Test STRICT mode catches up when tasks run slow."""
         ticker = Ticker(mock_logger, secs=0.25, mode=TickerMode.STRICT)
 
         # First tick at t=0
-        assert ticker.try_tick() is True
+        assert ticker.try_tick(now=T0) is True
 
         # Slow task: t=0.625, two scheduled ticks (0.25, 0.5) already due
-        fake_clock.sleep(0.625)
+        now = T0 + 0.625
 
         # Both due ticks fire back to back
-        assert ticker.time_until_next_tick() == 0.0
-        assert ticker.try_tick() is True
-        assert ticker.time_until_next_tick() == 0.0
-        assert ticker.try_tick() is True
+        assert ticker.time_until_next_tick(now=now) == 0.0
+        assert ticker.try_tick(now=now) is True
+        assert ticker.time_until_next_tick(now=now) == 0.0
+        assert ticker.try_tick(now=now) is True
 
         # Caught up: the tick at t=0.75 is the next one
-        assert ticker.time_until_next_tick() == 0.125
+        assert ticker.time_until_next_tick(now=now) == 0.125
 
-    def test_no_drift_with_fast_ticks(self, mock_logger, fake_clock):
+    def test_no_drift_with_fast_ticks(self, mock_logger):
         """Test that rapid try_tick polling doesn't accumulate drift."""
         ticker = Ticker(mock_logger, secs=0.25, mode=TickerMode.FLEX)
 
-        start = fake_clock.monotonic()
+        now = T0
         tick_times = []
 
         # Poll in steps that divide the interval exactly (binary fractions)
         for _ in range(5):
-            while not ticker.try_tick():
-                fake_clock.sleep(1 / 64)
-            tick_times.append(fake_clock.monotonic() - start)
+            while not ticker.try_tick(now=now):
+                now += 1 / 64
+            tick_times.append(now - T0)
 
         assert tick_times == [0.0, 0.25, 0.5, 0.75, 1.0]
 
@@ -1267,22 +1325,20 @@ class TestNonBlockingAPI:
         assert msg_count == 2
         assert tick_count >= 1  # At least one tick should have fired
 
-    def test_initial_false_with_try_tick(self, mock_logger, fake_clock):
+    def test_initial_false_with_try_tick(self, mock_logger):
         """Test initial=False delays first tick in non-blocking API."""
         ticker = Ticker(mock_logger, secs=2.0, initial=False)
 
         # First call should not tick immediately; the full interval remains
-        assert ticker.try_tick() is False
-        assert ticker.time_until_next_tick() == 2.0
+        assert ticker.try_tick(now=T0) is False
+        assert ticker.time_until_next_tick(now=T0) == 2.0
 
         # Partway: still not ready, half the interval left
-        fake_clock.sleep(1.0)
-        assert ticker.try_tick() is False
-        assert ticker.time_until_next_tick() == 1.0
+        assert ticker.try_tick(now=T0 + 1.0) is False
+        assert ticker.time_until_next_tick(now=T0 + 1.0) == 1.0
 
         # At the interval the first tick is due
-        fake_clock.sleep(1.0)
-        assert ticker.try_tick() is True
+        assert ticker.try_tick(now=T0 + 2.0) is True
 
     def test_initial_true_with_try_tick(self, mock_logger):
         """Test initial=True fires immediately in non-blocking API."""
@@ -1294,120 +1350,124 @@ class TestNonBlockingAPI:
         # Next call should not be ready
         assert ticker.try_tick() is False
 
-    def test_try_tick_with_now_parameter(self, mock_logger, fake_clock):
+    def test_try_tick_with_now_parameter(self, mock_logger):
         """Test try_tick accepts optional now parameter."""
         ticker = Ticker(mock_logger, secs=0.25)
 
         # First tick
-        now = fake_clock.monotonic()
-        assert ticker.try_tick(now=now) is True
+        assert ticker.try_tick(now=T0) is True
 
         # Using same timestamp should not tick (not enough time)
-        assert ticker.try_tick(now=now) is False
+        assert ticker.try_tick(now=T0) is False
 
         # A timestamp one interval later ticks
-        fake_clock.sleep(0.25)
-        assert ticker.try_tick(now=fake_clock.monotonic()) is True
+        assert ticker.try_tick(now=T0 + 0.25) is True
 
-    def test_shared_timestamp_pattern(self, mock_logger, fake_clock):
+    def test_shared_timestamp_pattern(self, mock_logger):
         """Test pattern of sharing timestamp between methods."""
         ticker = Ticker(mock_logger, secs=0.5)
 
-        # Capture time once
-        now = fake_clock.monotonic()
-
         # First tick using shared timestamp
-        remaining = ticker.time_until_next_tick(now=now)
-        assert remaining == 0.0
-        assert ticker.try_tick(now=now) is True
+        assert ticker.time_until_next_tick(now=T0) == 0.0
+        assert ticker.try_tick(now=T0) is True
 
-        # Check again with same timestamp - should not be ready
-        remaining = ticker.time_until_next_tick(now=now)
-        assert 0.4 < remaining <= 0.5  # ~0.5 (full interval from that moment)
-        assert ticker.try_tick(now=now) is False
+        # Check again with same timestamp: a full interval from that moment
+        assert ticker.time_until_next_tick(now=T0) == 0.5
+        assert ticker.try_tick(now=T0) is False
 
-    def test_spaced_mode_waits_from_completion(self, mock_logger, fake_clock):
+    def test_spaced_mode_waits_from_completion(self, mock_logger, clock):
         """Test SPACED mode waits full interval from task completion."""
 
         def handler():
-            fake_clock.sleep(1.0)  # The task takes 1s
+            time.sleep(0.25)  # The task takes at least 0.25s
 
-        ticker = Ticker(mock_logger, handler, secs=2.0, mode=TickerMode.SPACED)
+        ticker = Ticker(mock_logger, handler, secs=1.0, mode=TickerMode.SPACED)
 
-        # First tick at t=0 completes at t=1.0
-        start = fake_clock.monotonic()
+        start = time.monotonic()
         assert ticker.try_tick() is True
-        assert fake_clock.monotonic() - start == 1.0
+        done = time.monotonic()
 
-        # A full interval from completion remains
-        assert ticker.time_until_next_tick() == 2.0
+        # The interval counts from the task's completion, which lies between start + 0.25
+        # and done: a full interval is left at the first, at most one at the second
+        assert ticker.time_until_next_tick(now=start + 0.25) >= 1.0
+        assert ticker.time_until_next_tick(now=done) <= 1.0
+        # One interval after the call returned, the next tick is due
+        assert ticker.try_tick(now=done + 1.0) is True
 
-        # Due exactly one interval after completion
-        fake_clock.sleep(2.0)
-        assert ticker.try_tick() is True
-
-    def test_spaced_mode_with_slow_task(self, mock_logger, fake_clock):
+    def test_spaced_mode_with_slow_task(self, mock_logger, clock):
         """Test SPACED mode waits from completion even for slow tasks."""
 
         def slow_handler():
-            fake_clock.sleep(1.5)  # Longer than the 1s interval
+            time.sleep(0.5)  # Longer than the 0.25s interval
 
-        ticker = Ticker(mock_logger, slow_handler, secs=1.0, mode=TickerMode.SPACED)
+        ticker = Ticker(mock_logger, slow_handler, secs=0.25, mode=TickerMode.SPACED)
 
-        # First tick at t=0 completes at t=1.5
-        start = fake_clock.monotonic()
+        start = time.monotonic()
         assert ticker.try_tick() is True
-        assert fake_clock.monotonic() - start == 1.5
+        done = time.monotonic()
 
-        # The full interval counts from completion, not from the tick start
-        assert ticker.time_until_next_tick() == 1.0
-        assert ticker.try_tick() is False
+        # The interval counts from completion, not from the tick start: a whole
+        # interval after the start the task had not even finished. Completion lies
+        # between start + 0.5 and done
+        assert ticker.time_until_next_tick(now=start + 0.5) >= 0.25
+        assert ticker.time_until_next_tick(now=done) <= 0.25
+        assert ticker.try_tick(now=done + 0.25) is True
 
-        fake_clock.sleep(1.0)
-        assert ticker.try_tick() is True
-
-    def test_spaced_vs_flex_comparison(self, mock_logger, fake_clock):
+    def test_spaced_vs_flex_comparison(self, mock_logger, clock):
         """Test difference between SPACED and FLEX modes with task execution time."""
 
         def handler():
-            fake_clock.sleep(0.5)  # Each task takes 0.5s
+            time.sleep(0.25)  # Each task takes at least 0.25s
 
-        flex_ticker = Ticker(mock_logger, handler, secs=2.0, mode=TickerMode.FLEX)
-        spaced_ticker = Ticker(mock_logger, handler, secs=2.0, mode=TickerMode.SPACED)
+        flex_ticker = Ticker(mock_logger, handler, secs=1.0, mode=TickerMode.FLEX)
+        spaced_ticker = Ticker(mock_logger, handler, secs=1.0, mode=TickerMode.SPACED)
 
-        # FLEX ticks at t=0 (interval counted from the start, before the handler);
-        # SPACED ticks at t=0.5 and completes at t=1.0 (counted from completion)
+        # FLEX counts the interval from the tick's start, before the handler; SPACED from
+        # the handler's completion
+        flex_start = time.monotonic()
         assert flex_ticker.try_tick() is True
+        flex_done = time.monotonic()
+        spaced_start = time.monotonic()
         assert spaced_ticker.try_tick() is True
+        spaced_done = time.monotonic()
 
-        # Now t=1.0: FLEX's next tick is at t=2.0, SPACED's at t=3.0
-        assert flex_ticker.time_until_next_tick() == 1.0
-        assert spaced_ticker.time_until_next_tick() == 2.0
+        # FLEX's reference lies between flex_start and flex_done - 0.25, the handler's
+        # time before the call returned; counted from completion it would be later
+        assert flex_ticker.time_until_next_tick(now=flex_start) >= 1.0
+        assert flex_ticker.time_until_next_tick(now=flex_done - 0.25) <= 1.0
+        # SPACED's lies between spaced_start + 0.25 and spaced_done
+        assert spaced_ticker.time_until_next_tick(now=spaced_start + 0.25) >= 1.0
+        assert spaced_ticker.time_until_next_tick(now=spaced_done) <= 1.0
 
-    def test_spaced_mode_guarantees_minimum_spacing(self, mock_logger, fake_clock):
+    def test_spaced_mode_guarantees_minimum_spacing(self, mock_logger, clock):
         """Test SPACED mode guarantees minimum spacing between operations."""
         ticker = Ticker(mock_logger, secs=0.5, mode=TickerMode.SPACED)
 
-        completion_times = []
+        calls = []  # (before, after) each tick's try_tick()
 
         for _ in range(3):
             # Poll in steps that divide the interval exactly (binary fractions)
-            while not ticker.try_tick():
-                fake_clock.sleep(1 / 64)
+            while True:
+                before = time.monotonic()
+                if ticker.try_tick():
+                    break
+                time.sleep(1 / 64)
+            after = time.monotonic()
+            calls.append((before, after))
 
-            completion_times.append(fake_clock.monotonic())
+            # The tick completed within the call, and the interval counts from there
+            assert ticker.time_until_next_tick(now=before) >= 0.5
+            assert ticker.time_until_next_tick(now=after) <= 0.5
 
             # The task after the tick takes 0.125s
-            fake_clock.sleep(0.125)
+            time.sleep(0.125)
 
-        # Each tick comes exactly one interval after the previous one completed
-        intervals = [
-            completion_times[i + 1] - completion_times[i]
-            for i in range(len(completion_times) - 1)
-        ]
-        assert intervals == [0.5, 0.5]
+        # Each tick completed no earlier than its call began, and the next one comes at
+        # least an interval after that
+        gaps = [calls[i + 1][1] - calls[i][0] for i in range(len(calls) - 1)]
+        assert all(gap >= 0.5 for gap in gaps), gaps
 
-    def test_spaced_mode_handles_exceptions(self, mock_logger, fake_clock):
+    def test_spaced_mode_handles_exceptions(self, mock_logger, clock):
         """Test SPACED mode handles handler exceptions and maintains spacing."""
         from unittest.mock import Mock
 
@@ -1416,16 +1476,20 @@ class TestNonBlockingAPI:
         ticker = Ticker(mock_logger, handler, secs=0.5, mode=TickerMode.SPACED)
 
         # First tick should not raise (exception caught)
+        start = time.monotonic()
         assert ticker.try_tick() is True
+        done = time.monotonic()
 
         # Exception should be logged
         assert mock_logger.error.called
 
-        # Should still maintain spacing even after exception
-        assert ticker.time_until_next_tick() == 0.5
+        # Should still maintain spacing even after exception: the interval counts from
+        # the failed task's completion, between start and done
+        assert ticker.time_until_next_tick(now=start) >= 0.5
+        assert ticker.time_until_next_tick(now=done) <= 0.5
 
         # Wait for next tick
-        fake_clock.sleep(0.5)
+        time.sleep(0.5)
 
         # Second tick should succeed
         assert ticker.try_tick() is True
@@ -1448,14 +1512,13 @@ class TestNonBlockingAPI:
 
     def test_cannot_mix_run_and_try_tick(self, mock_logger, mock_handler):
         """Test that mixing run() and try_tick() raises RuntimeError."""
-        import threading
-
+        ticked = threading.Event()
+        mock_handler.ticker_tick.side_effect = ticked.set
         ticker = Ticker(mock_logger, mock_handler, secs=0.1)
 
-        # Start run() in background
-        thread = threading.Thread(target=ticker.run, daemon=True)
-        thread.start()
-        time.sleep(0.05)  # Let it start
+        # Start run() in background, and wait until it is ticking
+        thread = _start(ticker)
+        assert ticked.wait(timeout=_TIMEOUT)
 
         # Attempting to use try_tick() should raise
         try:
@@ -1464,24 +1527,23 @@ class TestNonBlockingAPI:
             ):
                 ticker.try_tick()
         finally:
-            ticker.stop()
-            thread.join(timeout=1.0)
+            _stop(ticker, thread)
 
     def test_cannot_mix_iterator_and_run(self, mock_logger, mock_handler):
         """Test that mixing iterator and run() raises RuntimeError."""
         ticker = Ticker(mock_logger, mock_handler, secs=0.1)
+        iterating = threading.Event()
 
         # Start iterator in a thread so it doesn't block
-        import threading
-
         def iterate():
             for _ in ticker:
+                iterating.set()
                 ticker.stop()  # Stop after first tick
                 break
 
         thread = threading.Thread(target=iterate, daemon=True)
         thread.start()
-        time.sleep(0.05)  # Let iterator start and set mode
+        assert iterating.wait(timeout=_TIMEOUT)  # The iterator has set its mode
 
         # Attempting to use run() should raise
         try:
@@ -1490,24 +1552,23 @@ class TestNonBlockingAPI:
             ):
                 ticker.run()
         finally:
-            ticker.stop()
-            thread.join(timeout=1.0)
+            _stop(ticker, thread)
 
     def test_cannot_mix_iterator_and_try_tick(self, mock_logger):
         """Test that mixing iterator and try_tick() raises RuntimeError."""
         ticker = Ticker(mock_logger, secs=0.1)
+        iterating = threading.Event()
 
         # Start iterator in a thread so it doesn't block
-        import threading
-
         def iterate():
             for _ in ticker:
+                iterating.set()
                 ticker.stop()  # Stop after first tick
                 break
 
         thread = threading.Thread(target=iterate, daemon=True)
         thread.start()
-        time.sleep(0.05)  # Let iterator start and set mode
+        assert iterating.wait(timeout=_TIMEOUT)  # The iterator has set its mode
 
         # Attempting to use try_tick() should raise
         try:
@@ -1516,19 +1577,17 @@ class TestNonBlockingAPI:
             ):
                 ticker.try_tick()
         finally:
-            ticker.stop()
-            thread.join(timeout=1.0)
+            _stop(ticker, thread)
 
     def test_cannot_mix_run_and_iterator(self, mock_logger, mock_handler):
         """Test that mixing run() and iterator raises RuntimeError."""
-        import threading
-
+        ticked = threading.Event()
+        mock_handler.ticker_tick.side_effect = ticked.set
         ticker = Ticker(mock_logger, mock_handler, secs=0.1)
 
-        # Start run() in background
-        thread = threading.Thread(target=ticker.run, daemon=True)
-        thread.start()
-        time.sleep(0.05)  # Let it start
+        # Start run() in background, and wait until it is ticking
+        thread = _start(ticker)
+        assert ticked.wait(timeout=_TIMEOUT)
 
         # Attempting to use iterator should raise when starting iteration
         try:
@@ -1536,8 +1595,7 @@ class TestNonBlockingAPI:
                 it = iter(ticker)
                 next(it)  # Exception raised on first iteration
         finally:
-            ticker.stop()
-            thread.join(timeout=1.0)
+            _stop(ticker, thread)
 
     def test_cannot_mix_try_tick_and_iterator(self, mock_logger):
         """Test that mixing try_tick() and iterator raises RuntimeError."""
@@ -1551,30 +1609,21 @@ class TestNonBlockingAPI:
             it = iter(ticker)
             next(it)  # Exception raised on first iteration
 
-    def test_time_until_next_tick_no_side_effects(self, mock_logger, fake_clock):
+    def test_time_until_next_tick_no_side_effects(self, mock_logger):
         """Test that time_until_next_tick() doesn't mutate state (query method invariant)."""
         ticker = Ticker(mock_logger, secs=1.0, initial=False)
 
-        # Call time_until_next_tick() multiple times with different timestamps
-        # This should NOT affect the timing state
-        now1 = fake_clock.monotonic()
-        remaining1 = ticker.time_until_next_tick(now=now1)
-
-        fake_clock.sleep(0.25)
-        now2 = fake_clock.monotonic()
-        remaining2 = ticker.time_until_next_tick(now=now2)
-
-        # Both calls should return the full interval (1.0s) since ticker hasn't initialized yet
-        assert remaining1 == 1.0
-        assert remaining2 == 1.0
+        # Call time_until_next_tick() with different timestamps: this should NOT affect
+        # the timing state, so both return the full interval
+        assert ticker.time_until_next_tick(now=T0) == 1.0
+        assert ticker.time_until_next_tick(now=T0 + 0.25) == 1.0
 
         # Now call try_tick() which WILL initialize the state
-        result = ticker.try_tick(now=now2)
+        result = ticker.try_tick(now=T0 + 0.25)
         assert result is False  # Not ready yet (initial=False requires full interval)
 
-        # After initialization the interval counts from now2
-        fake_clock.sleep(0.25)
-        assert ticker.time_until_next_tick(now=fake_clock.monotonic()) == 0.75
+        # After initialization the interval counts from T0 + 0.25
+        assert ticker.time_until_next_tick(now=T0 + 0.5) == 0.75
 
     def test_validates_negative_now_parameter(self, mock_logger):
         """Test that negative 'now' parameter triggers warning."""
@@ -1614,68 +1663,131 @@ class TestNonBlockingAPI:
 class TestBlockingAPITimingModes:
     """Test that blocking API (run()) respects timing modes."""
 
-    # These run Ticker.run() on the fake clock in the test's own thread: the
-    # scheduler's waits advance virtual time, and the handler stops the ticker
-    # after the ticks the test needs, which makes run() return.
+    # These run Ticker.run() in the test's own thread, its waits on the fake clock, and
+    # the handler stops the ticker after the ticks the test needs. A handler records its
+    # start after the ticker's own reading and its end before the ticker's, so a tick is
+    # never earlier than the schedule computed from those readings.
 
-    def test_blocking_flex_mode_no_catchup(self, mock_logger, fake_clock):
+    def test_blocking_flex_mode_no_catchup(self, mock_logger, clock, monkeypatch):
         """Test FLEX mode in blocking API doesn't catch up after slow tasks."""
-        start = fake_clock.monotonic()
-        tick_times: list[float] = []
+        starts: list[float] = []
+        ends: list[float] = []
 
         def slow_handler():
-            tick_times.append(fake_clock.monotonic() - start)
-            if len(tick_times) == 2:
-                fake_clock.sleep(0.5)  # Slow task, longer than the interval
-            if len(tick_times) == 3:
+            starts.append(time.monotonic())
+            if len(starts) == 2:
+                time.sleep(0.5)  # Slow task, longer than the interval
+            ends.append(time.monotonic())
+            if len(starts) == 3:
                 ticker.stop()
 
         ticker = Ticker(mock_logger, slow_handler, secs=0.25, mode=TickerMode.FLEX)
+        delays = _recording_delays(ticker)
+        sleeps, waits = _spy_on_waits(ticker, monkeypatch)
+        start = time.monotonic()
         ticker.run()
 
-        # Tick 2 ends late at t=0.75; FLEX waits a full interval from there
-        # (t=1.0) instead of firing the missed tick at once
-        assert tick_times == [0.0, 0.25, 1.0]
+        assert len(starts) == 3
+        assert starts[1] >= start + 0.25
+        # Tick 2 ended late; FLEX waits a full interval from there instead of firing
+        # the missed tick at once
+        assert starts[2] >= ends[1] + 0.25
+        # What run() scheduled: at most an interval after the first tick, then a full
+        # interval from each late tick's end; and it waited no longer than it scheduled
+        assert delays[0] <= 0.25
+        assert delays[1:] == [0.25, 0.25]
+        assert all(c.args[0] <= max(delays) for c in waits.call_args_list)
+        assert sleeps.sleeps == []
 
-    def test_blocking_strict_mode_catches_up(self, mock_logger, fake_clock):
+    def test_blocking_strict_mode_catches_up(self, mock_logger, clock, monkeypatch):
         """Test STRICT mode in blocking API catches up after slow tasks."""
-        start = fake_clock.monotonic()
-        tick_times: list[float] = []
+        starts: list[float] = []
+        ends: list[float] = []
 
         def slow_handler():
-            tick_times.append(fake_clock.monotonic() - start)
-            if len(tick_times) == 2:
-                fake_clock.sleep(0.625)  # Very slow task: ends at t=0.875
-            if len(tick_times) == 5:
+            starts.append(time.monotonic())
+            if len(starts) == 2:
+                time.sleep(0.625)  # Very slow task: two ticks fall due meanwhile
+            ends.append(time.monotonic())
+            if len(starts) == 5:
                 ticker.stop()
 
         ticker = Ticker(mock_logger, slow_handler, secs=0.25, mode=TickerMode.STRICT)
+        delays = _recording_delays(ticker)
+        sleeps, waits = _spy_on_waits(ticker, monkeypatch)
+        start = time.monotonic()
         ticker.run()
 
-        # Ticks due at t=0.5 and t=0.75 fire back to back at t=0.875, then the
-        # schedule resumes at t=1.0
-        assert tick_times == [0.0, 0.25, 0.875, 0.875, 1.0]
+        # Tick k is due k intervals after the first, and none comes earlier
+        assert len(starts) == 5
+        assert all(t >= start + k * 0.25 for k, t in enumerate(starts)), starts
+        # The ticks due during the slow task fire back to back, with no delay; then the
+        # schedule resumes, the next tick at most what is left to its slot. And run()
+        # waited no longer than it scheduled
+        assert delays[0] <= 0.25
+        assert delays[1:3] == [0.0, 0.0]
+        assert delays[3] <= max(0.0, starts[0] + 1.0 - ends[3])
+        assert all(c.args[0] <= max(delays) for c in waits.call_args_list)
+        assert sleeps.sleeps == []
 
-    def test_blocking_spaced_mode_guarantees_spacing(self, mock_logger, fake_clock):
+    def test_blocking_spaced_mode_guarantees_spacing(
+        self, mock_logger, clock, monkeypatch
+    ):
         """Test SPACED mode in blocking API guarantees spacing from completion."""
-        start = fake_clock.monotonic()
-        tick_times: list[float] = []
-        completion_times: list[float] = []
+        starts: list[float] = []
+        ends: list[float] = []
 
         def varying_handler():
-            tick_times.append(fake_clock.monotonic() - start)
+            starts.append(time.monotonic())
             # Variable task duration: tick 2 is long
-            fake_clock.sleep(0.25 if len(tick_times) == 2 else 0.0625)
-            completion_times.append(fake_clock.monotonic() - start)
-            if len(tick_times) == 4:
+            time.sleep(0.25 if len(starts) == 2 else 0.0625)
+            ends.append(time.monotonic())
+            if len(starts) == 4:
                 ticker.stop()
 
         ticker = Ticker(mock_logger, varying_handler, secs=0.25, mode=TickerMode.SPACED)
+        delays = _recording_delays(ticker)
+        sleeps, waits = _spy_on_waits(ticker, monkeypatch)
         ticker.run()
 
-        # Every tick starts exactly one interval after the previous one completed
-        gaps = [tick_times[i + 1] - completion_times[i] for i in range(3)]
-        assert gaps == [0.25, 0.25, 0.25]
+        # Every tick starts at least one interval after the previous one completed; run()
+        # scheduled exactly one interval after each, and waited no longer than that
+        gaps = [starts[i + 1] - ends[i] for i in range(3)]
+        assert all(gap >= 0.25 for gap in gaps), gaps
+        assert delays == [0.25] * 4
+        assert all(c.args[0] <= 0.25 for c in waits.call_args_list)
+        assert sleeps.sleeps == []
+
+
+class TestNextTickDelay:
+    """run()'s delay to the next tick, from a tick's start and end times; no clock read."""
+
+    def _delays(
+        self, mock_logger, mode: TickerMode, ticks: list[tuple[float, float]]
+    ) -> list[float]:
+        """The delays a 1s ticker in ``mode`` computes after each (start, end) tick."""
+        ticker = Ticker(mock_logger, secs=1.0, mode=mode)
+        return [ticker._calculate_next_tick_delay(T0 + s, T0 + e) for s, e in ticks]
+
+    def test_flex_keeps_the_interval_from_the_start_and_resets_when_late(
+        self, mock_logger
+    ):
+        # On time: the rest of the interval from the start; late (the second tick ends
+        # at 2.5, past its successor's 2.0): a full interval from the end, no catch-up
+        delays = self._delays(mock_logger, TickerMode.FLEX, [(0.0, 0.25), (1.0, 2.5)])
+        assert delays == [0.75, 1.0]
+
+    def test_strict_catches_up_back_to_back(self, mock_logger):
+        # The first tick runs 2.5s: ticks due at 1.0 and 2.0 fire at once, then the
+        # schedule resumes at 3.0
+        delays = self._delays(
+            mock_logger, TickerMode.STRICT, [(0.0, 2.5), (2.5, 2.5), (2.5, 2.75)]
+        )
+        assert delays == [0.0, 0.0, 0.25]
+
+    def test_spaced_waits_a_full_interval_from_the_end(self, mock_logger):
+        delays = self._delays(mock_logger, TickerMode.SPACED, [(0.0, 0.5), (1.5, 3.0)])
+        assert delays == [1.0, 1.0]
 
 
 class TestPickling:

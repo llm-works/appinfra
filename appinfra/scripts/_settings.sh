@@ -74,6 +74,27 @@ appinfra_setting() {
     printf '%s' "$value"
 }
 
+# appinfra_pytest_args NAME: prints the variable NAME's value, pytest arguments,
+# or prints an error to stderr and returns 2 when one is an xdist worker option.
+# The arguments come after check.sh's own, so -n there would override the
+# worker counts check.sh sets from the CPU count, and the serial performance
+# run's -n 1. Makefile.pytest checks the same options for make test*
+# (_APPINFRA_PYTEST_WORKER_OPTS), whose workers come from APPINFRA_PYTEST_WORKERS.
+appinfra_pytest_args() {
+    local name="$1" arg
+    local -a args
+    read -ra args <<< "${!name-}"
+    for arg in "${args[@]}"; do
+        case "$arg" in
+            -n*|--numprocesses*|--maxprocesses*|--dist*)
+                echo "Error: $name=${!name} sets xdist workers ($arg): make check sets its own worker counts from the CPU count; remove it" >&2
+                return 2
+                ;;
+        esac
+    done
+    printf '%s' "${!name-}"
+}
+
 # appinfra_suite_markers [DIR...]: prints the markers named in the test files
 # under tests/ and each DIR, and the name of each directory under tests/, one
 # per line. A suite directory (tests/<suite>/) gives its tests the suite's
