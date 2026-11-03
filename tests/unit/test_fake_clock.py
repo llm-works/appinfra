@@ -134,6 +134,22 @@ class TestPatch:
         target.time.sleep(10.0)
         assert target.time.monotonic() == 1010.0
 
+    def test_decorator_rejects_async_and_generator_functions(self):
+        """Their call only makes a coroutine or generator: the body would run after the clock."""
+
+        async def coroutine() -> None:
+            pass
+
+        def generator():
+            yield
+
+        async def async_generator():
+            yield
+
+        for func in (coroutine, generator, async_generator):
+            with pytest.raises(TypeError, match="with FakeClock"):
+                FakeClock()(func)
+
 
 @pytest.fixture
 def plugin_fake_clock(request: pytest.FixtureRequest, fake_clock):

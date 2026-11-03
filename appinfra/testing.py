@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import functools
 import importlib
+import inspect
 import threading
 import time
 from collections.abc import Callable, Generator, Iterable
@@ -131,7 +132,7 @@ class FakeClock:
     however much real time passes too (an elapsed time at least, a time remaining at most).
 
     As a decorator, each call runs on a fresh clock made from the same ``start`` and
-    ``modules``.
+    ``modules``; it does not take an async or generator function.
 
     Limits: only a module-level ``import time`` is redirected, not ``from time import
     sleep``, which binds the real function when the module is imported. Code on the clock
@@ -191,7 +192,21 @@ class FakeClock:
         self._restore()
 
     def __call__(self, func: Callable[_P, _R]) -> Callable[_P, _R]:
-        """Decorate ``func`` to run each call on a fresh clock like this one."""
+        """Decorate ``func`` to run each call on a fresh clock like this one.
+
+        Raises TypeError for an async or generator function: calling one only makes the
+        coroutine or generator, whose body would run after the clock exits.
+        """
+        if (
+            inspect.iscoroutinefunction(func)
+            or inspect.isgeneratorfunction(func)
+            or inspect.isasyncgenfunction(func)
+        ):
+            raise TypeError(
+                f"FakeClock cannot decorate {func.__qualname__}, an async or generator "
+                "function: its body would run after the clock exits; use "
+                "`with FakeClock(...)` inside it, or the fake_clock fixture"
+            )
 
         @functools.wraps(func)
         def on_clock(*args: _P.args, **kwargs: _P.kwargs) -> _R:

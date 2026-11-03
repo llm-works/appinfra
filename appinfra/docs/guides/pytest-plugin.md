@@ -139,7 +139,8 @@ def test_retry_gives_up():
     assert retry(lambda: False, attempts=3, delay=60.0) is False
 ```
 
-The decorator runs each call on a fresh clock, and a decorated test still takes fixtures.
+The decorator runs each call on a fresh clock, and a decorated test still takes fixtures. It
+raises `TypeError` for an async or generator function, whose body would run after the clock exits.
 
 Limits:
 
