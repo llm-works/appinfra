@@ -77,8 +77,9 @@ appinfra_setting() {
 # appinfra_pytest_args NAME: prints the variable NAME's value, pytest arguments,
 # or prints an error to stderr and returns 2 when one is an xdist worker option.
 # The arguments come after check.sh's own, so -n there would override the
-# serial performance run's -n 1: workers come from APPINFRA_PYTEST_WORKERS.
-# Makefile.pytest checks the same options (_APPINFRA_PYTEST_WORKER_OPTS).
+# worker counts check.sh sets from the CPU count, and the serial performance
+# run's -n 1. Makefile.pytest checks the same options for make test*
+# (_APPINFRA_PYTEST_WORKER_OPTS), whose workers come from APPINFRA_PYTEST_WORKERS.
 appinfra_pytest_args() {
     local name="$1" arg
     local -a args
@@ -86,7 +87,7 @@ appinfra_pytest_args() {
     for arg in "${args[@]}"; do
         case "$arg" in
             -n*|--numprocesses*|--maxprocesses*|--dist*)
-                echo "Error: $name=${!name} sets xdist workers ($arg): set APPINFRA_PYTEST_WORKERS instead" >&2
+                echo "Error: $name=${!name} sets xdist workers ($arg): make check sets its own worker counts from the CPU count; remove it" >&2
                 return 2
                 ;;
         esac

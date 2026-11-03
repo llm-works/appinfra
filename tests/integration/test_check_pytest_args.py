@@ -98,10 +98,12 @@ def test_an_arg_with_a_pipe_reaches_the_test_runs_whole(tmp_path: Path) -> None:
 
 
 def test_a_worker_option_is_an_error(tmp_path: Path) -> None:
-    """Workers come from APPINFRA_PYTEST_WORKERS: after -n 1, -n 2 would end the serial run."""
+    """check.sh sets its own worker counts: after -n 1, -n 2 would end the serial run."""
     result = _check(tmp_path, {"APPINFRA_PYTEST_ARGS": "--x-marker -n 2"})
     assert result.returncode == 2, result.stdout + result.stderr
-    assert "APPINFRA_PYTEST_WORKERS" in result.stderr, result.stderr
+    assert "make check sets its own worker counts" in result.stderr, result.stderr
+    # make check reads no APPINFRA_PYTEST_WORKERS: naming it would send the user nowhere
+    assert "APPINFRA_PYTEST_WORKERS" not in result.stderr, result.stderr
 
 
 def test_without_the_args_the_test_fails(tmp_path: Path) -> None:

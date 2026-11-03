@@ -3,6 +3,7 @@
 
 """Tests for appinfra.testing's FakeClock and the fake_clock fixture."""
 
+import functools
 import sys
 import time
 import types
@@ -146,7 +147,14 @@ class TestPatch:
         async def async_generator():
             yield
 
-        for func in (coroutine, generator, async_generator):
+        # A partial has no __qualname__ for the message, and still gets the TypeError
+        for func in (
+            coroutine,
+            generator,
+            async_generator,
+            functools.partial(coroutine),
+            functools.partial(generator),
+        ):
             with pytest.raises(TypeError, match="with FakeClock"):
                 FakeClock()(func)
 

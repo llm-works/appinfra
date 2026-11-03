@@ -202,8 +202,10 @@ class FakeClock:
             or inspect.isgeneratorfunction(func)
             or inspect.isasyncgenfunction(func)
         ):
+            # A functools.partial has no __qualname__; its repr names the wrapped function
+            name = getattr(func, "__qualname__", repr(func))
             raise TypeError(
-                f"FakeClock cannot decorate {func.__qualname__}, an async or generator "
+                f"FakeClock cannot decorate {name}, an async or generator "
                 "function: its body would run after the clock exits; use "
                 "`with FakeClock(...)` inside it, or the fake_clock fixture"
             )

@@ -9,16 +9,18 @@ import requests
 
 
 def wait_ready(url: str, deadline_secs: float) -> None:
-    """Poll ``url`` until it answers with a success status, or fail at the deadline.
+    """Poll ``url`` until it answers with a 2xx status itself, or fail at the deadline.
 
-    A refused connection, a poll that times out and an error status all mean "not ready
-    yet": a server whose socket is listening can accept a connection before it is able to
-    answer, and a loaded machine may take longer than one poll's timeout to do so.
+    A refused connection, a poll that times out and any other status, a redirect included,
+    all mean "not ready yet": a server whose socket is listening can accept a connection
+    before it is able to answer, and a loaded machine may take longer than one poll's
+    timeout to do so.
     """
     deadline = time.monotonic() + deadline_secs
     while time.monotonic() < deadline:
         try:
-            if requests.get(url, timeout=0.5).ok:
+            status = requests.get(url, timeout=0.5, allow_redirects=False).status_code
+            if 200 <= status < 300:
                 return
         except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
             pass
