@@ -202,10 +202,8 @@ class FakeClock:
             or inspect.isgeneratorfunction(func)
             or inspect.isasyncgenfunction(func)
         ):
-            # A functools.partial has no __qualname__; its repr names the wrapped function
-            name = getattr(func, "__qualname__", repr(func))
             raise TypeError(
-                f"FakeClock cannot decorate {name}, an async or generator "
+                f"FakeClock cannot decorate {_callable_name(func)}, an async or generator "
                 "function: its body would run after the clock exits; use "
                 "`with FakeClock(...)` inside it, or the fake_clock fixture"
             )
@@ -228,6 +226,16 @@ class FakeClock:
         saved, self._saved = self._saved or [], None
         for module, attr, value in reversed(saved):
             setattr(module, attr, value)
+
+
+def _callable_name(func: Callable[..., Any]) -> str:
+    """The qualified name of ``func``, through any functools.partial around it.
+
+    A partial has no __qualname__, and its repr would also print the arguments it binds.
+    """
+    while isinstance(func, functools.partial):
+        func = func.func
+    return getattr(func, "__qualname__", type(func).__name__)
 
 
 class _TimeProxy:

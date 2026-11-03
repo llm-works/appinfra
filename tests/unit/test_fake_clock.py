@@ -158,6 +158,18 @@ class TestPatch:
             with pytest.raises(TypeError, match="with FakeClock"):
                 FakeClock()(func)
 
+    def test_decorator_error_names_a_partial_without_its_arguments(self):
+        """A partial's bound arguments, a credential say, stay out of the message."""
+
+        async def coroutine(token: str) -> None:
+            pass
+
+        wrapped = functools.partial(functools.partial(coroutine, token="s3cr3t"))
+        with pytest.raises(TypeError) as excinfo:
+            FakeClock()(wrapped)
+        assert "coroutine" in str(excinfo.value)
+        assert "s3cr3t" not in str(excinfo.value)
+
 
 @pytest.fixture
 def plugin_fake_clock(request: pytest.FixtureRequest, fake_clock):
