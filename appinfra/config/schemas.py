@@ -106,7 +106,6 @@ try:
         model_config = ConfigDict(
             populate_by_name=True,  # Allow both 'password' and 'pass'
             extra="allow",
-            arbitrary_types_allowed=True,  # Envelope
         )
 
     class DatabaseConfig(BaseModel):
@@ -196,7 +195,7 @@ try:
                 )
             return v
 
-        model_config = ConfigDict(extra="allow", arbitrary_types_allowed=True)
+        model_config = ConfigDict(extra="allow")
 
     class TestConfig(BaseModel):
         """Configuration for testing."""

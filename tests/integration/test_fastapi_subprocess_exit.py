@@ -33,6 +33,7 @@ import requests
 from starlette.requests import Request
 
 from tests.helpers.fork import forks_in_xdist_worker
+from tests.helpers.http import wait_ready
 
 
 def _fastapi_available() -> bool:
@@ -92,14 +93,7 @@ def _build_server(port: int) -> Any:
 
 
 def _wait_ready(port: int) -> None:
-    deadline = time.monotonic() + 10.0
-    while time.monotonic() < deadline:
-        try:
-            if requests.get(f"http://127.0.0.1:{port}/ping", timeout=0.5).ok:
-                return
-        except requests.exceptions.ConnectionError:
-            time.sleep(0.1)
-    raise AssertionError("server did not become ready")
+    wait_ready(f"http://127.0.0.1:{port}/ping", deadline_secs=10.0)
 
 
 def _start_pending_request(port: int) -> tuple[threading.Thread, dict[str, Any]]:

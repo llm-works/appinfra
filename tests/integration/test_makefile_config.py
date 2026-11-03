@@ -408,6 +408,62 @@ class TestAllTestsTargets:
         assert "-m performance" in perf
 
 
+class TestPytestArgs:
+    """APPINFRA_PYTEST_ARGS reaches every pytest run the test targets start."""
+
+    # test.perf runs serially (APPINFRA_RUN_PYTEST_SERIAL), the others in parallel
+    @pytest.mark.parametrize("target", ["test.unit", "test.integration", "test.perf"])
+    def test_args_reach_pytest(self, tmp_path: Path, target: str) -> None:
+        (tmp_path / "Makefile").write_text(f"include {MAKE_DIR / 'Makefile.pytest'}\n")
+        result = subprocess.run(
+            [
+                "make",
+                "--no-print-directory",
+                "-n",
+                target,
+                "APPINFRA_PYTEST_ARGS=--x-marker",
+            ],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+            env=_clean_env(),
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr
+        calls = [line for line in result.stdout.splitlines() if " -m pytest " in line]
+        assert calls, result.stdout
+        assert all("--x-marker" in call for call in calls), calls
+
+    # A worker option would come after the target's own arguments, and so would also put
+    # APPINFRA_RUN_PYTEST_SERIAL's runs (test.perf) on workers
+    @pytest.mark.parametrize("target", ["test.unit", "test.perf"])
+    @pytest.mark.parametrize(
+        "args",
+        ["-n 4", "-nauto", "--numprocesses=2", "--maxprocesses=2", "--dist load"],
+    )
+    def test_worker_options_are_an_error(
+        self, tmp_path: Path, target: str, args: str
+    ) -> None:
+        (tmp_path / "Makefile").write_text(f"include {MAKE_DIR / 'Makefile.pytest'}\n")
+        result = subprocess.run(
+            [
+                "make",
+                "--no-print-directory",
+                "-n",
+                target,
+                f"APPINFRA_PYTEST_ARGS={args}",
+            ],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+            env=_clean_env(),
+            check=False,
+        )
+        assert result.returncode != 0, result.stdout
+        assert "APPINFRA_PYTEST_WORKERS" in result.stderr, result.stderr
+        assert " -m pytest " not in result.stdout, result.stdout
+
+
 class TestConfigLoading:
     """Makefile.local loads in every layout; INFRA_* config overrides pass through."""
 
@@ -566,6 +622,82 @@ class TestEmptyValues:
         )
         assert result.returncode == 0, result.stderr
         assert "inner-ok" in result.stdout
+
+
+class TestMakeReferences:
+    """A value from the environment or the command line is data: make must not expand it."""
+
+    # A typed setting, a text setting, the interpreter and a name this version does not know:
+    # each is read before the type checks, by the empty-value check and the source record
+    NAMES = [
+        "APPINFRA_DEV_CQ_DUP",
+        "APPINFRA_DEV_CQ_DEAD_KEEP_DECORATORS",
+        "PYTHON",
+        "APPINFRA_NEWER",
+    ]
+    PAYLOADS = ["a$(shell touch {marker})", "a${{shell touch {marker}}}"]
+
+    @pytest.mark.parametrize("payload", PAYLOADS)
+    @pytest.mark.parametrize("name", NAMES)
+    def test_environment(self, tmp_path: Path, name: str, payload: str) -> None:
+        marker = tmp_path / "ran"
+        result = _make(tmp_path, "", env={name: payload.format(marker=marker)})
+        assert result.returncode != 0
+        assert f"{name}: a value from the environment or the command line" in (
+            result.stderr
+        )
+        assert not marker.exists()
+
+    @pytest.mark.parametrize("payload", PAYLOADS)
+    @pytest.mark.parametrize("name", NAMES)
+    def test_command_line(self, tmp_path: Path, name: str, payload: str) -> None:
+        marker = tmp_path / "ran"
+        result = _make(tmp_path, "", f"{name}={payload.format(marker=marker)}")
+        assert result.returncode != 0
+        assert f"{name}: a value from the environment or the command line" in (
+            result.stderr
+        )
+        assert not marker.exists()
+
+    def test_makefile_reference_expands(self, tmp_path: Path) -> None:
+        """The project's own Makefile and Makefile.local are make code, references included."""
+        (tmp_path / "Makefile.local").write_text(
+            "APPINFRA_DEV_CQ_EXCLUDE := $(addprefix tests/,x)\n"
+        )
+        (tmp_path / "Makefile").write_text(
+            "APPINFRA_DEV_PKG_NAME := $(notdir /src/mypkg)\n"
+            f"include {MAKEFILE_CONFIG}\n"
+            "ok:\n\t@echo $(APPINFRA_DEV_PKG_NAME) $(APPINFRA_DEV_CQ_EXCLUDE)\n"
+        )
+        result = subprocess.run(
+            ["make", "--no-print-directory", "ok"],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+            env=_clean_env(),
+            check=False,
+        )
+        assert result.stdout.split() == ["mypkg", "tests/x"], result.stderr
+
+    def test_sub_make_takes_exported_settings(self, tmp_path: Path) -> None:
+        """A sub-make reads the parent's exports from its environment; they hold no '$'."""
+        (tmp_path / "Makefile").write_text(
+            "APPINFRA_DEV_PKG_NAME := $(notdir /src/mypkg)\n"
+            f"include {MAKEFILE_CONFIG}\n"
+            "export APPINFRA_DEV_PKG_NAME\n"
+            "ok:\n\t@$(MAKE) --no-print-directory inner\n"
+            "inner:\n\t@echo inner=$(APPINFRA_DEV_PKG_NAME)\n"
+        )
+        result = subprocess.run(
+            ["make", "--no-print-directory", "ok"],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+            env=_clean_env(),
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr
+        assert "inner=mypkg" in result.stdout
 
 
 def _areyousure(
@@ -740,6 +872,74 @@ class TestSettingsSh:
         result = _bool_sh(value)
         assert result.returncode == 2
         assert "X=" in result.stderr and "is not a boolean" in result.stderr
+
+
+def _setting_sh(
+    value: str | None, kind: str, default: str = "dflt"
+) -> subprocess.CompletedProcess[str]:
+    env = {k: v for k, v in _clean_env().items() if k != "X"}
+    if value is not None:
+        env["X"] = value
+    return subprocess.run(
+        ["bash", "-c", f'. "{SETTINGS_SH}"; appinfra_setting X "{default}" {kind}'],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+    )
+
+
+class TestSettingSh:
+    """scripts/_settings.sh's appinfra_setting: a typed value check.sh can put in a command."""
+
+    VALID = [
+        ("percent", ["0", "80", "95.5", "100", "100.0"]),
+        ("package", ["appinfra", "my_pkg", "_x", "Pkg2"]),
+        ("decorators", ["", "router.get", "router.get  cli.command"]),
+        ("rules", ["", "false", "C90,SIM,E501", "ALL"]),
+        ("path", ["tests", "tests/perf", "./tests-perf_1"]),
+    ]
+    INVALID = [
+        (
+            "percent",
+            "a percent",
+            ["", "101", "100.5", "95.", ".5", "007", "high", "80;x"],
+        ),
+        ("package", "a package name", ["", "my-pkg", "a.b", "src/pkg", "1pkg", "a;b"]),
+        ("decorators", "a list of decorator names", ["a$(x)", "*", "router.", "a;b"]),
+        ("rules", "a list of ruff rule codes", ["C90, SIM", "c90", "C90,", "C90;x"]),
+        ("path", "a path", ["", "a b", "a;b", "a'b", "$x"]),
+    ]
+
+    @pytest.mark.parametrize(
+        ("kind", "value"), [(k, v) for k, values in VALID for v in values]
+    )
+    def test_valid_value_printed_as_is(self, kind: str, value: str) -> None:
+        result = _setting_sh(value, kind)
+        assert result.returncode == 0, result.stderr
+        assert result.stdout == value
+
+    @pytest.mark.parametrize(
+        ("kind", "what", "value"),
+        [(k, w, v) for k, w, values in INVALID for v in values],
+    )
+    def test_invalid_value_fails(self, kind: str, what: str, value: str) -> None:
+        result = _setting_sh(value, kind)
+        assert result.returncode == 2
+        assert result.stdout == ""
+        assert f"X={value} is not {what}" in result.stderr
+
+    def test_unset_takes_default(self) -> None:
+        assert _setting_sh(None, "percent", default="80").stdout == "80"
+
+    def test_invalid_default_fails(self) -> None:
+        """The default is checked like a value: a caller's typo is not passed on."""
+        assert _setting_sh(None, "percent", default="high").returncode == 2
+
+    def test_unknown_type_fails(self) -> None:
+        result = _setting_sh("x", "colour")
+        assert result.returncode == 2
+        assert "unknown setting type: colour" in result.stderr
 
 
 class TestMakeConfig:

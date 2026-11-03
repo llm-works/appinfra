@@ -275,9 +275,10 @@ class PG(Interface):
 
         Note:
             Repeated calls with the same schema_name return the cached instance.
-            If you drop and recreate a schema, the cached ScopedPG's pool may
-            have stale connections. In that case, dispose the parent PG and
-            create a new one.
+            If a schema is dropped and recreated, the cached ScopedPG's pool may
+            hold stale connections: call that ScopedPG's dispose() and get a fresh
+            one from scoped(), or dispose() the parent PG, which closes every pool.
+            Dispose closes idle connections only, so close open sessions first.
 
         Args:
             schema_name: PostgreSQL schema name for the scope
@@ -305,10 +306,11 @@ class PG(Interface):
 
     def dispose_scoped_cache(self) -> None:
         """
-        Dispose all cached ScopedPG instances and clear the cache.
+        Close the connection pool of every cached ScopedPG.
 
-        Use during shutdown or when all scoped schemas are no longer needed.
-        Each ScopedPG's internal connection pool is disposed.
+        Use during shutdown or when all scoped schemas are no longer needed. The instances
+        stay cached: one a caller still holds opens a new pool on its next query, and the
+        next dispose closes that pool too. ScopedPG.dispose() removes a single schema.
 
         Example:
             >>> pg = PG(logger, config)
@@ -320,8 +322,7 @@ class PG(Interface):
         with self._scoped_cache_lock:
             for scoped in self._scoped_cache.values():
                 scoped._pg._engine.dispose()
-            self._scoped_cache.clear()
-        self._lg.trace("disposed scoped cache")
+        self._lg.trace("disposed scoped pools")
 
     def dispose(self) -> None:
         """
@@ -329,7 +330,8 @@ class PG(Interface):
 
         Call when done with the instance. An engine that is only dropped leaves its
         idle connections open until garbage collection, where psycopg reports each one
-        with a ResourceWarning. A query after dispose() opens a new pool.
+        with a ResourceWarning. A query after dispose(), through this instance or a ScopedPG
+        from it, opens a new pool, which the next dispose() closes.
 
         Example:
             >>> pg = PG(logger, config)

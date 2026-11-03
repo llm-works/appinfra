@@ -57,10 +57,14 @@ it from the outside, through its arguments, output, exit code or network interfa
 
 ## Timing
 
-No suite asserts on elapsed time or waits a fixed real-time interval: short sleeps and
-sub-second timing make tests flaky on loaded CI machines. A test waits on an event or a
-condition. It polls with a deadline only when nothing can signal, and the deadline is the failure
-path, never the expected one. Logic that depends on time runs against a fake clock.
+No suite waits a fixed real-time interval or asserts on time in a way a slow machine can break:
+short sleeps and sub-second timing make tests flaky on loaded CI machines. A bound on time holds
+only in the direction real time can only push it: an elapsed time at least some amount, a time
+remaining at most some amount, never an exact value or the other direction. A test waits on an
+event or a condition. It polls with a deadline only when nothing can signal, and the deadline is
+the failure path, never the expected one. Logic that depends on time runs against a fake clock:
+the [`fake_clock` fixture](pytest-plugin.md#fake_clock) of `appinfra.testing`, which only takes
+the waiting out. Every test on it passes on the real clock as well.
 
 ## Assigning a suite
 
@@ -122,7 +126,8 @@ for every test out of place. Past that, a finding is one of:
 
 A unit test that left process-wide state changed is a **leak**, a finding of its own: a signal
 handler, the `ITIMER_REAL` timer, an environment variable or the working directory, compared from
-before its setup to after its teardown.
+before its setup to after its teardown. An environment variable a module sets while being
+imported, as torch or vllm do on first import, is not the test's.
 
 The line passes with no finding. Otherwise the findings show under the checklist and in
 `.build/check/test-structure-health.log`, and `APPINFRA_DEV_TEST_HEALTH` decides the outcome: `warn`

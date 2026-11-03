@@ -40,6 +40,61 @@ appinfra_bool() {
     esac
 }
 
+# appinfra_setting NAME DEFAULT TYPE: prints the variable NAME's value, DEFAULT
+# when it is unset, or prints an error to stderr and returns 2 when the value is
+# not of TYPE. check.sh puts these values into the commands it runs, so no type
+# admits anything the shell would read as syntax:
+#   percent     a number from 0 to 100, e.g. 80 or 95.5 (as Makefile.config's)
+#   package     a Python identifier: the package's directory
+#   decorators  dotted names separated by whitespace, e.g. router.get; may be empty
+#   rules       ruff rule codes separated by commas, e.g. C90,SIM; empty or false: none
+#   path        letters, digits and _ . - /
+appinfra_setting() {
+    local name="$1" kind="$3" value pattern what
+    local dotted='[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*'
+    value="${!name-$2}"
+    case "$kind" in
+        percent) pattern='^([0-9]{1,2}(\.[0-9]+)?|100(\.0+)?)$'
+            what='a percent: use a number from 0 to 100, e.g. 80 or 95.5' ;;
+        package) pattern='^[A-Za-z_][A-Za-z0-9_]*$'
+            what='a package name: use a Python identifier, e.g. mypkg' ;;
+        decorators) pattern="^[[:space:]]*(${dotted}([[:space:]]+${dotted})*)?[[:space:]]*\$"
+            what='a list of decorator names: use dotted names separated by spaces, e.g. router.get' ;;
+        rules) pattern='^(false|[A-Z]+[0-9]*(,[A-Z]+[0-9]*)*)?$'
+            what='a list of ruff rule codes: use codes separated by commas, e.g. C90,SIM, or false' ;;
+        path) pattern='^[A-Za-z0-9_./-]+$'
+            what='a path: use letters, digits and _ . - /' ;;
+        *) echo "Error: unknown setting type: $kind" >&2
+            return 2 ;;
+    esac
+    if ! [[ "$value" =~ $pattern ]]; then
+        echo "Error: $name=$value is not $what" >&2
+        return 2
+    fi
+    printf '%s' "$value"
+}
+
+# appinfra_pytest_args NAME: prints the variable NAME's value, pytest arguments,
+# or prints an error to stderr and returns 2 when one is an xdist worker option.
+# The arguments come after check.sh's own, so -n there would override the
+# worker counts check.sh sets from the CPU count, and the serial performance
+# run's -n 1. Makefile.pytest checks the same options for make test*
+# (_APPINFRA_PYTEST_WORKER_OPTS), whose workers come from APPINFRA_PYTEST_WORKERS.
+appinfra_pytest_args() {
+    local name="$1" arg
+    local -a args
+    read -ra args <<< "${!name-}"
+    for arg in "${args[@]}"; do
+        case "$arg" in
+            -n*|--numprocesses*|--maxprocesses*|--dist*)
+                echo "Error: $name=${!name} sets xdist workers ($arg): make check sets its own worker counts from the CPU count; remove it" >&2
+                return 2
+                ;;
+        esac
+    done
+    printf '%s' "${!name-}"
+}
+
 # appinfra_suite_markers [DIR...]: prints the markers named in the test files
 # under tests/ and each DIR, and the name of each directory under tests/, one
 # per line. A suite directory (tests/<suite>/) gives its tests the suite's

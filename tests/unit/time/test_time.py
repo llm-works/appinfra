@@ -32,6 +32,17 @@ from appinfra.time.time import (
     yesterday,
 )
 
+
+@pytest.fixture
+def clock(fake_clock):
+    """Put this module's sleeps on the fake clock with appinfra.time.time's.
+
+    Every assertion holds on the real clock as well: an elapsed time is at least the time
+    slept, never exactly it.
+    """
+    fake_clock.patch("appinfra.time.time", __name__)
+
+
 # =============================================================================
 # Test Timing Functions
 # =============================================================================
@@ -46,15 +57,17 @@ class TestTimingFunctions:
         assert isinstance(result, float)
         assert result > 0
 
-    def test_since_calculates_elapsed_time(self):
+    def test_since_calculates_elapsed_time(self, clock):
         """Test since() calculates elapsed time correctly."""
+        before = time.monotonic()
         start_time = start()
-        time.sleep(0.01)
+        time.sleep(0.25)
         elapsed = since(start_time)
+        after = time.monotonic()
 
+        # At least the sleep, at most the span around both calls: 0.25 on the fake clock
         assert isinstance(elapsed, float)
-        assert elapsed >= 0.01
-        assert elapsed < 0.3  # Generous margin for slow CI runners
+        assert 0.25 <= elapsed <= after - before
 
     def test_since_with_zero_elapsed(self):
         """Test since() with minimal elapsed time."""
@@ -64,16 +77,16 @@ class TestTimingFunctions:
         assert isinstance(elapsed, float)
         assert elapsed >= 0
 
-    def test_since_str_formats_elapsed_time(self):
+    def test_since_str_formats_elapsed_time(self, clock):
         """Test since_str() formats elapsed time as string."""
         start_time = start()
-        time.sleep(0.01)
+        time.sleep(0.25)
         result = since_str(start_time)
 
         assert isinstance(result, str)
         assert len(result) > 0
 
-    def test_since_str_with_micros(self):
+    def test_since_str_with_micros(self, clock):
         """Test since_str() with microsecond precision."""
         start_time = start()
         time.sleep(0.001)
@@ -252,17 +265,20 @@ class TestYesterday:
 class TestTimeItContextManager:
     """Test time_it context manager."""
 
-    def test_time_it_calls_callback(self):
+    def test_time_it_calls_callback(self, clock):
         """Test time_it() calls callback with elapsed time."""
         callback = Mock()
 
+        before = time.monotonic()
         with time_it(callback):
-            time.sleep(0.01)
+            time.sleep(0.25)
+        after = time.monotonic()
 
+        # At least the sleep, at most the span around the block: 0.25 on the fake clock
         callback.assert_called_once()
         elapsed = callback.call_args[0][0]
         assert isinstance(elapsed, float)
-        assert elapsed >= 0.01
+        assert 0.25 <= elapsed <= after - before
 
     def test_time_it_calls_callback_even_with_exception(self):
         """Test time_it() calls callback even when exception occurs."""
@@ -294,7 +310,7 @@ class TestTimeItContextManager:
 class TestTimeItLgContextManager:
     """Test time_it_lg context manager."""
 
-    def test_time_it_lg_calls_logger(self):
+    def test_time_it_lg_calls_logger(self, clock):
         """Test time_it_lg() calls logging function."""
         log_func = Mock()
 
@@ -307,19 +323,22 @@ class TestTimeItLgContextManager:
         assert "extra" in kwargs
         assert "after" in kwargs["extra"]
 
-    def test_time_it_lg_includes_elapsed_time(self):
+    def test_time_it_lg_includes_elapsed_time(self, clock):
         """Test time_it_lg() includes elapsed time in extra data."""
         log_func = Mock()
 
+        before = time.monotonic()
         with time_it_lg(log_func, "test message"):
-            time.sleep(0.01)
+            time.sleep(0.25)
+        after = time.monotonic()
 
+        # At least the sleep, at most the span around the block: 0.25 on the fake clock
         kwargs = log_func.call_args[1]
         elapsed = kwargs["extra"]["after"]
         assert isinstance(elapsed, float)
-        assert elapsed >= 0.01
+        assert 0.25 <= elapsed <= after - before
 
-    def test_time_it_lg_merges_extra_data(self):
+    def test_time_it_lg_merges_extra_data(self, clock):
         """Test time_it_lg() merges provided extra data."""
         log_func = Mock()
         extra = {"key1": "value1", "key2": "value2"}
@@ -367,17 +386,19 @@ class TestIntegrationScenarios:
 
         assert result_date == date
 
-    def test_timing_workflow(self):
+    def test_timing_workflow(self, clock):
         """Test complete timing workflow."""
         # Start timing
+        before = time.monotonic()
         start_time = start()
 
         # Simulate work
-        time.sleep(0.01)
+        time.sleep(0.25)
 
         # Calculate elapsed
         elapsed = since(start_time)
         elapsed_str = since_str(start_time)
+        after = time.monotonic()
 
-        assert elapsed >= 0.01
+        assert 0.25 <= elapsed <= after - before
         assert isinstance(elapsed_str, str)

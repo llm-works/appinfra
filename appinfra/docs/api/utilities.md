@@ -603,6 +603,28 @@ absent, `Envelope.optional(value)` returns `None` for `None` and
 `Envelope`. `Envelope` is not a `str` subclass and is unhashable — do not use
 as a dict key or set member.
 
+**In a pydantic model.** `Envelope` is a field type of its own, with no
+`arbitrary_types_allowed`. A str is wrapped on validation and an `Envelope`
+passes through. A python-mode dump keeps the `Envelope`; a JSON dump and the
+JSON schema treat it like `pydantic.SecretStr`: the value is written as `'***'`
+and cannot be loaded back, and the schema is a `writeOnly` password string.
+
+```python
+import os
+
+from pydantic import BaseModel
+
+from appinfra import Envelope
+
+
+class Settings(BaseModel):
+    api_token: Envelope
+
+
+settings = Settings(api_token=os.environ["API_TOKEN"])
+settings.model_dump_json()  # '{"api_token":"***"}'
+```
+
 **`!path`** - Resolve paths relative to config file location with tilde expansion:
 
 ```yaml

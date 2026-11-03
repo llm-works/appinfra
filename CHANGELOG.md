@@ -10,6 +10,38 @@ For API stability guarantees and deprecation policy, see
 
 ## [Unreleased]
 
+## [0.14.1] - 2026-11-03
+
+### Added
+- `Envelope` works as a pydantic field type without `arbitrary_types_allowed`: a str is wrapped,
+  and JSON dumps and schemas mask it like `pydantic.SecretStr`.
+- `cq dead` counts methods under pydantic's validator and serializer decorators as used;
+  `--keep-decorator` (`APPINFRA_DEV_CQ_DEAD_KEEP_DECORATORS`) adds other registering decorators.
+- `appinfra.testing` provides `FakeClock` and the `fake_clock` fixture: time-based code runs on a
+  virtual clock whose sleeps return at once, and `fake_clock.patch("myapp.retry")` adds a
+  project's own modules. See the pytest plugin guide.
+
+### Changed
+- The `hotreload` extra accepts watchdog up to 7.x and the `ui` extra accepts rich up to 15.x.
+  With watchdog 7, `ConfigWatcher.start()` raises `FileNotFoundError` for a watched config in a
+  missing directory, where it used to watch nothing.
+- A setting from the environment or the command line may no longer contain `$`: make stops with
+  an error instead of expanding it (a URL spells `$` as `%24`).
+
+### Fixed
+- `APPINFRA_PYTEST_ARGS` reaches pytest in the `make test*` targets and in `make check`'s test
+  runs; it was ignored. An xdist worker option in it is an error: `make test*` take workers from
+  `APPINFRA_PYTEST_WORKERS`, `make check` sets its own.
+- `APPINFRA_DEV_CQ_EXCLUDE` patterns reach `make check` and `make cq.*` as written; a quote in one
+  no longer breaks the code quality check.
+- `make check` stops with a clear error on a malformed package name, threshold, ruff rule list or
+  perf test directory, where the value used to break a command; a coverage target above 100 is
+  rejected, as make already did.
+- Test structure health no longer reports a unit test as leaking an environment variable that a
+  library sets while being imported (torch, vllm and others configure themselves on first import).
+- `PG.dispose()` keeps the cached `ScopedPG` instances, so a scoped instance used after a dispose
+  is closed again by the next one instead of keeping its pool open until exit.
+
 ## [0.14.0] - 2026-11-01
 
 ### Added
@@ -1240,7 +1272,8 @@ as config. Affected: `ConfigValidator`, `PG.readonly`, `PG.migrate()`,
 ### Changed
 - Package renamed to `appinfra` (install and import both use `appinfra`)
 
-[Unreleased]: https://github.com/llm-works/appinfra/compare/v0.14.0...HEAD
+[Unreleased]: https://github.com/llm-works/appinfra/compare/v0.14.1...HEAD
+[0.14.1]: https://github.com/llm-works/appinfra/compare/v0.14.0...v0.14.1
 [0.14.0]: https://github.com/llm-works/appinfra/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/llm-works/appinfra/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/llm-works/appinfra/compare/v0.11.1...v0.12.0

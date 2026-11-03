@@ -4,6 +4,7 @@
 """Tests for appinfra/cli/tools/cq/dead.py."""
 
 import argparse
+import ast
 from pathlib import Path
 from textwrap import dedent
 from unittest.mock import MagicMock
@@ -12,10 +13,12 @@ import pytest
 
 from appinfra.cli.tools.cq.common import EXIT_CODE_WARNING
 from appinfra.cli.tools.cq.dead import (
+    REGISTERING_DECORATORS,
     CheckDeadTool,
     DeadCodeAnalyzer,
     format_report,
     is_private,
+    is_registered,
 )
 
 
@@ -27,7 +30,7 @@ def _write(tmp: Path, name: str, source: str) -> Path:
 
 def _unused(tmp: Path, **sources: str) -> list[tuple[str, str]]:
     """Analyze the given files; return (kind, name) of each finding."""
-    analyzer = DeadCodeAnalyzer()
+    analyzer = DeadCodeAnalyzer(REGISTERING_DECORATORS)
     for name, source in sources.items():
         analyzer.add_file(_write(tmp, f"{name}.py", source))
     return [(d.kind, d.name) for d in analyzer.unused()]
@@ -152,7 +155,7 @@ class TestDeadCodeAnalyzer:
         assert _unused(tmp_path, a=src) == []
 
     def test_unparsable_file_is_recorded(self, tmp_path: Path):
-        analyzer = DeadCodeAnalyzer()
+        analyzer = DeadCodeAnalyzer(REGISTERING_DECORATORS)
         path = _write(tmp_path, "bad.py", "def (:\n")
         analyzer.add_file(path)
         assert analyzer.unparsable == [path]
@@ -164,7 +167,7 @@ class TestFormatReport:
     """Test format_report()."""
 
     def test_lists_findings_and_totals(self, tmp_path: Path):
-        analyzer = DeadCodeAnalyzer()
+        analyzer = DeadCodeAnalyzer(REGISTERING_DECORATORS)
         path = _write(tmp_path, "a.py", "def _gone(): pass\n")
         analyzer.add_file(path)
 
@@ -174,10 +177,12 @@ class TestFormatReport:
         assert report.endswith("Files checked: 1\nViolations: 1")
 
 
-def _make_tool(tmp_path: Path, strict: bool) -> CheckDeadTool:
+def _make_tool(
+    tmp_path: Path, strict: bool, keep_decorator: list[str] | None = None
+) -> CheckDeadTool:
     tool = CheckDeadTool(parent=None)
     tool._parsed_args = argparse.Namespace(
-        dir=str(tmp_path), strict=strict, exclude=None
+        dir=str(tmp_path), strict=strict, exclude=None, keep_decorator=keep_decorator
     )
     tool._logger = MagicMock()
     return tool
@@ -211,3 +216,96 @@ class TestCheckDeadTool:
         CheckDeadTool(parent=None).add_args(parser)
         args = parser.parse_args(["pkg", "--strict", "--exclude", "x/*"])
         assert (args.dir, args.strict, args.exclude) == ("pkg", True, ["x/*"])
+
+    def test_keep_decorator_args(self):
+        parser = argparse.ArgumentParser()
+        CheckDeadTool(parent=None).add_args(parser)
+        args = parser.parse_args(
+            ["--keep-decorator", "router.get", "--keep-decorator", "cli.command"]
+        )
+        assert args.keep_decorator == ["router.get", "cli.command"]
+
+    @pytest.mark.parametrize(
+        "value", ["a$(touch x)", "router.", ".get", "router..get", "1st", "*", "ré"]
+    )
+    def test_keep_decorator_rejects_non_names(self, value: str):
+        parser = argparse.ArgumentParser()
+        CheckDeadTool(parent=None).add_args(parser)
+        with pytest.raises(SystemExit):
+            parser.parse_args(["--keep-decorator", value])
+
+
+def _first_def(source: str) -> ast.AST:
+    """The first statement of a parsed snippet: the definition under test."""
+    return ast.parse(dedent(source)).body[0]
+
+
+@pytest.mark.unit
+class TestIsRegistered:
+    """Test is_registered(): which decorators keep a definition."""
+
+    @pytest.mark.parametrize(
+        "decorator",
+        [
+            '@field_validator("x")',
+            '@pydantic.field_validator("x", mode="before")',
+            '@model_validator(mode="after")',
+            "@field_serializer",
+            "@model_serializer",
+        ],
+    )
+    def test_pydantic_decorators_register(self, decorator: str):
+        node = _first_def(f"{decorator}\ndef _check(cls, v): return v\n")
+        assert is_registered(node, REGISTERING_DECORATORS) is True
+
+    @pytest.mark.parametrize(
+        "decorator", ["@staticmethod", "@property", "@functools.cache", ""]
+    )
+    def test_wrapping_or_no_decorator_does_not_register(self, decorator: str):
+        node = _first_def(f"{decorator}\ndef _helper(): pass\n")
+        assert is_registered(node, REGISTERING_DECORATORS) is False
+
+    def test_suffix_matches_at_a_dot_only(self):
+        keep = ("router.get",)
+        assert is_registered(
+            _first_def('@api.router.get("/x")\ndef _h(): pass\n'), keep
+        )
+        assert not is_registered(_first_def('@cache.get("k")\ndef _h(): pass\n'), keep)
+        assert not is_registered(
+            _first_def('@subrouter.get("/x")\ndef _h(): pass\n'), keep
+        )
+
+    def test_class_decorator_registers(self):
+        node = _first_def("@registry.register\nclass _Plugin: pass\n")
+        assert is_registered(node, ("register",)) is True
+
+    def test_assignment_never_registers(self):
+        assert is_registered(_first_def("_X = 1\n"), ("register",)) is False
+
+
+@pytest.mark.integration
+class TestDeadCodeAnalyzerRegisteringDecorators:
+    """Definitions under a registering decorator are kept; the rest still reported."""
+
+    def test_pydantic_validator_kept_undecorated_reported(self, tmp_path: Path):
+        src = """
+            from pydantic import BaseModel, field_validator, model_validator
+
+            class Settings(BaseModel):
+                password: str
+
+                @field_validator("password")
+                @classmethod
+                def _long_enough(cls, v): return v
+
+                @model_validator(mode="after")
+                def _consistent(self): return self
+
+                def _unused_helper(self): pass
+        """
+        assert _unused(tmp_path, a=src) == [("method", "_unused_helper")]
+
+    def test_extra_decorator_from_the_tool(self, tmp_path: Path):
+        _write(tmp_path, "a.py", '@app.get("/health")\ndef _health(): return "ok"\n')
+        assert _make_tool(tmp_path, strict=True).run() == 1
+        assert _make_tool(tmp_path, strict=True, keep_decorator=["app.get"]).run() == 0

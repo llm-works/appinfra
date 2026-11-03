@@ -60,10 +60,19 @@ _APPINFRA_PYTEST_WORKERS_ARG := $(if $(APPINFRA_PYTEST_WORKERS),-n $(APPINFRA_PY
 # Public macros, not settings: `make config` leaves them out
 _APPINFRA_MACROS += APPINFRA_RUN_PYTEST APPINFRA_RUN_PYTEST_SERIAL
 
-# Helper to run pytest, treating "no tests collected" (exit 5) as success
+# APPINFRA_PYTEST_ARGS, checked when a run reads it. It comes after the target's
+# own arguments, so an xdist worker option there would override the target's
+# workers and put APPINFRA_RUN_PYTEST_SERIAL's runs on workers too: those come
+# from APPINFRA_PYTEST_WORKERS alone. check.sh checks the same options
+# (appinfra_pytest_args in _settings.sh).
+_APPINFRA_PYTEST_WORKER_OPTS := -n% --numprocesses% --maxprocesses% --dist%
+_APPINFRA_PYTEST_ARGS_CHECKED = $(if $(filter $(_APPINFRA_PYTEST_WORKER_OPTS),$(APPINFRA_PYTEST_ARGS)),$(error APPINFRA_PYTEST_ARGS=$(APPINFRA_PYTEST_ARGS) sets xdist workers: set APPINFRA_PYTEST_WORKERS instead),$(APPINFRA_PYTEST_ARGS))
+
+# Helper to run pytest, treating "no tests collected" (exit 5) as success;
+# APPINFRA_PYTEST_ARGS comes after the target's own arguments
 # Usage: $(call APPINFRA_RUN_PYTEST,args)
 define APPINFRA_RUN_PYTEST
-$(PYTHON) -m pytest $(_APPINFRA_PYTEST_WORKERS_ARG) $(1) || { ec=$$?; [ $$ec -eq 5 ] && exit 0 || exit $$ec; }
+$(PYTHON) -m pytest $(_APPINFRA_PYTEST_WORKERS_ARG) $(1) $(_APPINFRA_PYTEST_ARGS_CHECKED) || { ec=$$?; [ $$ec -eq 5 ] && exit 0 || exit $$ec; }
 endef
 
 # Same, ignoring APPINFRA_PYTEST_WORKERS. Performance targets always run
@@ -71,7 +80,7 @@ endef
 # uncaptured output.
 # Usage: $(call APPINFRA_RUN_PYTEST_SERIAL,args)
 define APPINFRA_RUN_PYTEST_SERIAL
-$(PYTHON) -m pytest $(1) || { ec=$$?; [ $$ec -eq 5 ] && exit 0 || exit $$ec; }
+$(PYTHON) -m pytest $(1) $(_APPINFRA_PYTEST_ARGS_CHECKED) || { ec=$$?; [ $$ec -eq 5 ] && exit 0 || exit $$ec; }
 endef
 
 ##@ Testing

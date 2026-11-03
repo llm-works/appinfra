@@ -34,6 +34,9 @@
 #                             scripts, and each needs its `# ci-*` header first)
 #   APPINFRA_DEV_CQ_EXCLUDE    - Patterns to exclude from cq checks (e.g., "examples/*")
 #                             Note: patterns cannot contain spaces (Make limitation)
+#   APPINFRA_DEV_CQ_DEAD_KEEP_DECORATORS - Space-separated decorators that register what they
+#                             decorate, so dead private code counts their definitions as used
+#                             (e.g., "router.get cli.command"); pydantic's are built in
 #   APPINFRA_DEV_PROJECT_ROOT  - Project root path (default: $(CURDIR))
 #   APPINFRA_DEV_CHECK_SCRIPT  - Path to check.sh (default: auto-derived)
 #   APPINFRA_DEV_INSTALL_EXTRAS - Optional extras for install (e.g., "ui,fastapi")
@@ -64,18 +67,24 @@ export APPINFRA_DEV_TEST_HEALTH_THRESHOLD
 export APPINFRA_DEV_TEST_HEALTH_OUTLIERS
 export APPINFRA_DEV_CHECK_EXAMPLES
 export APPINFRA_DEV_CQ_EXCLUDE
+export APPINFRA_DEV_CQ_DEAD_KEEP_DECORATORS
 export APPINFRA_DEV_DOCSTRING_THRESHOLD
 export APPINFRA_DEV_PROJECT_ROOT
 export APPINFRA_DEV_INSTALL_EXTRAS
 export APPINFRA_DEV_MYPY_FLAGS
 export APPINFRA_DEFAULT_CONFIG_FILE
+export APPINFRA_PYTEST_ARGS
 export APPINFRA_PYTEST_COVERAGE_MARKERS
 export APPINFRA_PYTEST_COVERAGE_THRESHOLD
 export APPINFRA_PYTEST_HANG_DUMP_SECONDS
 export APPINFRA_PYTEST_PERF_DIR
 
-# Expand CQ_EXCLUDE patterns to --exclude flags (empty if no exclusions)
-_APPINFRA_CQ_EXCLUDE_FLAGS := $(if $(APPINFRA_DEV_CQ_EXCLUDE),$(foreach _APPINFRA_PAT,$(APPINFRA_DEV_CQ_EXCLUDE),--exclude "$(_APPINFRA_PAT)"))
+# Expand CQ_EXCLUDE patterns to --exclude flags (empty if no exclusions). Single-quoted, so the
+# shell passes each pattern through as written.
+_APPINFRA_CQ_EXCLUDE_FLAGS := $(foreach _APPINFRA_PAT,$(APPINFRA_DEV_CQ_EXCLUDE),--exclude '$(subst ','\'',$(_APPINFRA_PAT))')
+# The same for the decorators dead private code keeps; --keep-decorator rejects any that is not
+# a dotted name.
+_APPINFRA_CQ_KEEP_DECORATOR_FLAGS := $(foreach _APPINFRA_DEC,$(APPINFRA_DEV_CQ_DEAD_KEEP_DECORATORS),--keep-decorator '$(subst ','\'',$(_APPINFRA_DEC))')
 
 # Endpoint run_examples.py probes for `# ci-requires: pg` files, as HOST:PORT.
 # Recursive (=) on purpose: _APPINFRA_PG_HOST / _APPINFRA_PG_PORT are defined
@@ -208,7 +217,7 @@ examples.check:: ## Run every example script; fail on errors or timeouts
 
 # cq tools over the package. Exit status 42 means findings in report mode.
 _APPINFRA_CQ_DUP_CMD = $(PYTHON) -m appinfra.cli.cli -l error cq dup $(APPINFRA_DEV_PKG_NAME)/ $(_APPINFRA_CQ_EXCLUDE_FLAGS)
-_APPINFRA_CQ_DEAD_CMD = $(PYTHON) -m appinfra.cli.cli -l error cq dead $(APPINFRA_DEV_PKG_NAME)/ $(_APPINFRA_CQ_EXCLUDE_FLAGS)
+_APPINFRA_CQ_DEAD_CMD = $(PYTHON) -m appinfra.cli.cli -l error cq dead $(APPINFRA_DEV_PKG_NAME)/ $(_APPINFRA_CQ_EXCLUDE_FLAGS) $(_APPINFRA_CQ_KEEP_DECORATOR_FLAGS)
 # Run command $(1) in mode $(2): strict fails on findings, warn reports them, false skips
 _APPINFRA_CQ_RUN = $(if $(filter strict,$(2)),$(1) --strict,$(if $(filter warn,$(2)),$(1) || [ $$? -eq 42 ],:))
 # Report-only mode for a tool that is enabled at all

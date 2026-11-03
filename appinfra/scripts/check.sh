@@ -75,7 +75,7 @@ appinfra_trim_settings
 EXIT_CODE_WARNING=42
 
 PYTHON="${PYTHON:-$(command -v python3)}"
-PKG_NAME="${APPINFRA_DEV_PKG_NAME:-appinfra}"
+PKG_NAME="$(appinfra_setting APPINFRA_DEV_PKG_NAME appinfra package)" || exit 2
 CQ_STRICT="$(appinfra_bool APPINFRA_DEV_CQ_STRICT false)" || exit 2
 CHECK_EXAMPLES="$(appinfra_bool APPINFRA_DEV_CHECK_EXAMPLES false)" || exit 2
 CQ_SPDX="$(appinfra_bool APPINFRA_DEV_CQ_SPDX false)" || exit 2
@@ -85,12 +85,20 @@ COVERAGE_MARKERS="${APPINFRA_PYTEST_COVERAGE_MARKERS:-unit}"
 
 # Coverage threshold precedence: CLI arg > env var > default (80)
 # Set to 0 to disable coverage checking entirely
-DEFAULT_COVERAGE_TARGET="${APPINFRA_PYTEST_COVERAGE_THRESHOLD:-80}"
+DEFAULT_COVERAGE_TARGET="$(appinfra_setting APPINFRA_PYTEST_COVERAGE_THRESHOLD 80 percent)" || exit 2
 COVERAGE_TARGET="${COVERAGE_TARGET:-$DEFAULT_COVERAGE_TARGET}"
-if ! echo "$COVERAGE_TARGET" | grep -qE '^[0-9]+(\.[0-9]+)?$'; then
-    echo "Error: Invalid coverage target: $COVERAGE_TARGET" >&2
-    exit 1
-fi
+COVERAGE_TARGET="$(appinfra_setting COVERAGE_TARGET "" percent)" || exit 2
+
+# Docstring coverage threshold (0 to disable)
+DOCSTRING_THRESHOLD="$(appinfra_setting APPINFRA_DEV_DOCSTRING_THRESHOLD 80 percent)" || exit 2
+# Decorators dead private code counts as registering what they decorate
+CQ_KEEP_DECORATORS="$(appinfra_setting APPINFRA_DEV_CQ_DEAD_KEEP_DECORATORS "" decorators)" || exit 2
+# Extra ruff rules reported over the package as warnings, never failing: a comma-separated list
+# of rule codes (empty or false = off). Rules that should fail the build belong in the project's
+# ruff config.
+CQ_LINT_SELECT="$(appinfra_setting APPINFRA_DEV_CQ_LINT_SELECT C90,SIM,RET,PIE,PERF,FURB,C4 rules)" || exit 2
+# Where performance tests live (default tests/)
+PERF_DIR="$(appinfra_setting APPINFRA_PYTEST_PERF_DIR tests path)" || exit 2
 
 # Coverage's marker expression can subsume standalone test suites. When
 # check.sh runs both a standalone suite and coverage over the same marker
@@ -142,6 +150,21 @@ for _m in unit integration e2e security; do
 done
 COVERAGE_LABEL="${_cov_prefix}Coverage tests"
 MYPY_FLAGS="${APPINFRA_DEV_MYPY_FLAGS:-}"
+# Extra arguments for every test run, after check.sh's own (with_pytest_args); not for the
+# configuration probe below, which runs without the project's conftest.py, where such an option
+# may be defined
+PYTEST_ARGS="$(appinfra_pytest_args APPINFRA_PYTEST_ARGS)" || exit 2
+
+# with_pytest_args CMD: prints CMD, with PYTEST_ARGS appended when CMD runs pytest. They join the
+# command only when it runs, not in the TEST_SUBCHECKS records, which split on |: a pytest
+# argument may hold one, as a parametrized test's id can.
+with_pytest_args() {
+    if [[ "$1" == *" -m pytest "* ]] && [ -n "$PYTEST_ARGS" ]; then
+        printf '%s %s' "$1" "$PYTEST_ARGS"
+    else
+        printf '%s' "$1"
+    fi
+}
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="${APPINFRA_DEV_PROJECT_ROOT:-$(dirname "$SCRIPT_DIR")}"
 
@@ -206,8 +229,6 @@ if ${PYTHON} -c "import sys; sys.exit(0 if sys.version_info >= (3, 12) else 1)" 
     COVERAGE_CORE_ENV="COVERAGE_CORE=sysmon "
 fi
 
-# Docstring coverage threshold (0 to disable)
-DOCSTRING_THRESHOLD="${APPINFRA_DEV_DOCSTRING_THRESHOLD:-80}"
 MAX_INLINE_LINES=30
 
 # Check definitions: "Name|Make Target|Command|Fix Target", listed from a file's outside in
@@ -238,23 +259,25 @@ if [ -n "$EXAMPLES_DIR" ]; then
     CHECKS+=("Type checking (examples)|type|${PYTHON} -m mypy ${EXAMPLES_DIR}/ --disable-error-code=no-untyped-def --disable-error-code=import-untyped --ignore-missing-imports --cache-dir .mypy_cache/examples ${MYPY_FLAGS}|")
 fi
 
-# Build exclude flags from APPINFRA_DEV_CQ_EXCLUDE (subshell contains set -f scope)
+# Build exclude flags from APPINFRA_DEV_CQ_EXCLUDE (subshell contains set -f scope). %q quotes
+# each pattern for the eval in cq_tool, which then passes it to cq as written.
 CQ_EXCLUDE_FLAGS=""
 if [ -n "${APPINFRA_DEV_CQ_EXCLUDE:-}" ]; then
     CQ_EXCLUDE_FLAGS=$(
         set -f  # Disable glob expansion to preserve patterns like "examples/*"
         sep=""
         for pat in ${APPINFRA_DEV_CQ_EXCLUDE}; do
-            printf '%s--exclude "%s"' "$sep" "$pat"
+            printf '%s--exclude %q' "$sep" "$pat"
             sep=" "
         done
     )
 fi
 
-# Extra ruff rules reported over the package as warnings, never failing: a comma-separated list
-# of rule codes (empty or false = off; "-" not ":-" keeps an empty value). Rules that should fail
-# the build belong in the project's ruff config.
-CQ_LINT_SELECT="${APPINFRA_DEV_CQ_LINT_SELECT-C90,SIM,RET,PIE,PERF,FURB,C4}"
+# The same for the decorators dead private code counts as registering what they decorate
+CQ_KEEP_DECORATOR_FLAGS=""
+for dec in $CQ_KEEP_DECORATORS; do
+    CQ_KEEP_DECORATOR_FLAGS+="${CQ_KEEP_DECORATOR_FLAGS:+ }--keep-decorator ${dec}"
+done
 
 # Duplicated code (pylint) and dead private code checks over the package. Each takes false (off),
 # warn (default: report the count, never fail) or strict (fail on findings); any case.
@@ -344,7 +367,7 @@ cq_check() {
     CQ_FAILED=false
     cq_tool size "$(cq_strict_flag "$CQ_STRICT")" "cf ${CQ_EXCLUDE_FLAGS}"
     [ "$CQ_DUP" = "false" ] || cq_tool dup "$(cq_strict_flag "$CQ_DUP")" "dup ${PKG_NAME}/ ${CQ_EXCLUDE_FLAGS}"
-    [ "$CQ_DEAD" = "false" ] || cq_tool dead "$(cq_strict_flag "$CQ_DEAD")" "dead ${PKG_NAME}/ ${CQ_EXCLUDE_FLAGS}"
+    [ "$CQ_DEAD" = "false" ] || cq_tool dead "$(cq_strict_flag "$CQ_DEAD")" "dead ${PKG_NAME}/ ${CQ_EXCLUDE_FLAGS} ${CQ_KEEP_DECORATOR_FLAGS}"
     [ "$CQ_FAILED" = false ] || return 1
     [ "${#CQ_SUMMARY[@]}" -gt 0 ] || return 0
     local summary
@@ -392,7 +415,6 @@ fi
 # usage (`@pytest.mark.X`) and module-level `pytestmark = pytest.mark.X`
 # (including lists) — and suite directories (tests/<suite>/), whose tests
 # take the suite's marker without naming it (_settings.sh).
-PERF_DIR="${APPINFRA_PYTEST_PERF_DIR:-tests}"
 _MARKERS_FOUND=$(appinfra_suite_markers "$PERF_DIR" | tr '\n' ' ')
 
 # Emit the pytest command for a marker if any test uses it; otherwise a
@@ -1158,7 +1180,7 @@ run_check() {
         watch_slow_tests "$tmpfile" "$name" &
         watch_pid=$!
     fi
-    eval "$cmd" > "$tmpfile" 2>&1 || exit_code=$?
+    eval "$(with_pytest_args "$cmd")" > "$tmpfile" 2>&1 || exit_code=$?
     if [ -n "$watch_pid" ]; then
         kill -TERM "$watch_pid" 2>/dev/null || true
         wait "$watch_pid" 2>/dev/null || true
@@ -1508,11 +1530,11 @@ run_raw_check() {
         set +e
         # -i: on Ctrl-C tee keeps passing output until the check closes the pipe, so what pytest
         # prints on its way out still reaches the terminal; stop_children ends the rest
-        eval "$cmd" 2>&1 | tee -i "$log"
+        eval "$(with_pytest_args "$cmd")" 2>&1 | tee -i "$log"
         rc=${PIPESTATUS[0]}
         set -e
     else
-        eval "$cmd" || rc=$?
+        eval "$(with_pytest_args "$cmd")" || rc=$?
     fi
 
     local found="" note=""

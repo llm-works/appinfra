@@ -16,7 +16,6 @@ the adapter's lifespan context manager instead of using deprecated on_event().
 import importlib
 import multiprocessing as mp
 import threading
-import time
 from dataclasses import dataclass
 from functools import partial
 from queue import Empty
@@ -26,6 +25,7 @@ import requests
 from starlette.requests import Request
 
 from tests.helpers.fork import forks_in_xdist_worker
+from tests.helpers.http import wait_ready
 
 
 def _get_real_fastapi():
@@ -230,19 +230,7 @@ class TestFastAPIIPCWithLifecycleCallbacks:
             server.start_subprocess()
             handler_thread.start()
 
-            # Wait for server to be ready (poll the /ping endpoint)
-            ready = False
-            for _ in range(50):  # 5 second timeout
-                try:
-                    resp = requests.get("http://127.0.0.1:18765/ping", timeout=0.5)
-                    if resp.status_code == 200:
-                        ready = True
-                        break
-                except requests.exceptions.ConnectionError:
-                    time.sleep(0.1)
-                    continue
-
-            assert ready, "Server did not become ready"
+            wait_ready("http://127.0.0.1:18765/ping", deadline_secs=10.0)
             assert startup_called.value, "Startup callback was not executed"
 
             # The server is running with startup callback executed
@@ -307,19 +295,7 @@ class TestFastAPIIPCWithLifecycleCallbacks:
             server.start_subprocess()
             handler_thread.start()
 
-            # Wait for server to be ready
-            ready = False
-            for _ in range(50):
-                try:
-                    resp = requests.get("http://127.0.0.1:18766/ping", timeout=0.5)
-                    if resp.status_code == 200:
-                        ready = True
-                        break
-                except requests.exceptions.ConnectionError:
-                    time.sleep(0.1)
-                    continue
-
-            assert ready, "Server did not become ready"
+            wait_ready("http://127.0.0.1:18766/ping", deadline_secs=10.0)
 
             # Make IPC request - this is the critical test
             # If IPC polling isn't running, this will timeout
@@ -380,19 +356,7 @@ class TestFastAPIIPCWithLifecycleCallbacks:
             # Start the subprocess
             server.start_subprocess()
 
-            # Wait for server to be ready
-            ready = False
-            for _ in range(50):
-                try:
-                    resp = requests.get("http://127.0.0.1:18767/ping", timeout=0.5)
-                    if resp.status_code == 200:
-                        ready = True
-                        break
-                except requests.exceptions.ConnectionError:
-                    time.sleep(0.1)
-                    continue
-
-            assert ready, "Server did not become ready"
+            wait_ready("http://127.0.0.1:18767/ping", deadline_secs=10.0)
 
             # Trigger the exception - this is the critical test
             # If Logger wasn't injected, the handler will raise RuntimeError
