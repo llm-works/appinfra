@@ -10,6 +10,8 @@ For API stability guarantees and deprecation policy, see
 
 ## [Unreleased]
 
+## [0.14.1] - 2026-11-03
+
 ### Added
 - `Envelope` works as a pydantic field type without `arbitrary_types_allowed`: a str is wrapped,
   and JSON dumps and schemas mask it like `pydantic.SecretStr`.
@@ -1270,7 +1272,8 @@ as config. Affected: `ConfigValidator`, `PG.readonly`, `PG.migrate()`,
 ### Changed
 - Package renamed to `appinfra` (install and import both use `appinfra`)
 
-[Unreleased]: https://github.com/llm-works/appinfra/compare/v0.14.0...HEAD
+[Unreleased]: https://github.com/llm-works/appinfra/compare/v0.14.1...HEAD
+[0.14.1]: https://github.com/llm-works/appinfra/compare/v0.14.0...v0.14.1
 [0.14.0]: https://github.com/llm-works/appinfra/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/llm-works/appinfra/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/llm-works/appinfra/compare/v0.11.1...v0.12.0
