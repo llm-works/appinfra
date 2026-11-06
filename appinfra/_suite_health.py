@@ -17,13 +17,20 @@ pytest-xdist worker) writes one JSON report there at the end of the session, ``<
 - ``leaks``: each unit test that left process-wide state changed (signal handlers, the
   ``ITIMER_REAL`` timer, environment variables by name, the working directory), compared from
   before its setup to after its teardown; an environment variable a module sets while being
-  imported is the library's, not the test's.
+  imported is the library's, not the test's;
+- ``suited``: the number of tests collected, each with its suite;
+- ``behavior``: what the unit tests this process ran were seen doing
+  (appinfra/_suite_behavior.py), by node id: the ``suite``, the ``directory`` suite it sits
+  under ("" for none), the ``evidence`` (category -> first detail), and the ``exempt`` reason
+  of a test marked ``suite_exempt``. Only a test with evidence or an exemption appears; other
+  suites are not recorded, since only what a test was seen doing is judged.
 
 The rules applied to these figures live in appinfra/scripts/check_suite_health.py.
 """
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import signal
@@ -35,6 +42,8 @@ from types import FrameType
 from typing import Any
 
 import pytest
+
+from . import _suite_behavior
 
 REPORT_DIR_ENV = "_APPINFRA_CHECK_SUITE_HEALTH_DIR"
 
@@ -142,18 +151,72 @@ def _scope_entry(
     return entry
 
 
+def exempt_reason(item: pytest.Item) -> str | None:
+    """The reason given by the test's ``suite_exempt`` marker, if it has one ("" for none)."""
+    marker = item.get_closest_marker("suite_exempt")
+    if marker is None:
+        return None
+    reason = marker.kwargs.get("reason", marker.args[0] if marker.args else "")
+    return str(reason).strip()
+
+
+def fixture_key(fixturedef: pytest.FixtureDef[Any], param_index: int) -> str:
+    """The recorder key of one setup of one fixture definition: same-named fixtures of different
+    files, and the parameters of one fixture, are kept apart."""
+    return f"fixture:{fixturedef.baseid}::{fixturedef.argname}[{param_index}]"
+
+
+def charged_fixtures(item: pytest.Item) -> set[str]:
+    """The recorder keys (fixture_key) of the fixtures whose evidence counts for a test: those
+    it asks for (arguments, ``usefixtures``), its function-scoped autouse fixtures, and what they
+    depend on, each as the definition and parameter the test resolved.
+
+    An autouse fixture wider than one test sets up for every test, not for this one; whether it
+    does anything can even depend on pytest-xdist (a session fixture only the main process
+    runs), so neither it nor what only it depends on is charged.
+    """
+    info = getattr(item, "_fixtureinfo", None)
+    if info is None:  # not a pytest Function: no fixture definitions to charge
+        return set()
+    defs = info.name2fixturedefs
+    asked = set(info.argnames) | {
+        name for marker in item.iter_markers("usefixtures") for name in marker.args
+    }
+    pending = [
+        name
+        for name in info.initialnames
+        if name in asked or (name in defs and defs[name][-1].scope == "function")
+    ]
+    indices: dict[str, int] = getattr(getattr(item, "callspec", None), "indices", {})
+    seen: set[str] = set()
+    keys: set[str] = set()
+    while pending:
+        name = pending.pop()
+        if name in seen:
+            continue
+        seen.add(name)
+        if name in defs:
+            fixturedef = defs[name][-1]
+            keys.add(fixture_key(fixturedef, indices.get(name, 0)))
+            pending.extend(fixturedef.argnames)
+    return keys
+
+
 class SuiteHealth:
     """Collects the report of one pytest process and writes it at the end of the session."""
 
-    def __init__(self, report_dir: Path) -> None:
+    def __init__(self, report_dir: Path, rootdir: Path) -> None:
         _install_env_hook()
         self._report_dir = report_dir
-        self._rootdir = ""
+        self._rootdir = str(rootdir)
         self._collected = 0
         self._total = 0
         self._suite_of: dict[str, str] = {}
         self._scopes: list[dict[str, Any]] = []
         self._leaks: list[dict[str, Any]] = []
+        self._behavior: dict[str, dict[str, Any]] = {}
+        self._home_of: dict[str, str] = {}
+        self._recorder = _suite_behavior.install(_suite_behavior.project_of(rootdir))
 
     def record_collection(
         self,
@@ -167,6 +230,7 @@ class SuiteHealth:
         self._collected = len(items)
         self._total = 0
         self._suite_of = suite_of
+        self._home_of = {item.nodeid: home_of(item) or "" for item in items}
         own: dict[str, Counter[str]] = {}
         files: dict[str, Counter[str]] = {}
         homes: dict[str, str] = {}
@@ -187,20 +251,67 @@ class SuiteHealth:
         ]
 
     @pytest.hookimpl(wrapper=True)
+    def pytest_fixture_setup(
+        self, fixturedef: pytest.FixtureDef[Any], request: pytest.FixtureRequest
+    ) -> Generator[None, object, object]:
+        """Record the setup and teardown of a fixture wider than one test under its own key,
+        charged to the tests that use it (charged_fixtures). Each setup replaces what the
+        previous setup of the same definition and parameter recorded, as only the current one
+        is in use.
+
+        A function-scoped fixture is made for one test and stays on that test's record: under
+        its own name, what one test's instance did (a monkeypatch undoing a chdir) would be
+        charged to every later test using it. A wider fixture ends during the teardown of the
+        last test of its scope, which may not use it. Finalizers run last in, first out: one
+        added before the fixture runs ends the recording after its teardown, one added after it
+        runs starts it before.
+        """
+        if fixturedef.scope == "function":
+            return (yield)
+        key = fixture_key(fixturedef, getattr(request, "param_index", 0))
+        self._recorder.reset(key)
+        teardown = contextlib.ExitStack()
+        fixturedef.addfinalizer(teardown.close)
+        with self._recorder.running(key):
+            result = yield
+        fixturedef.addfinalizer(
+            lambda: teardown.enter_context(self._recorder.running(key))
+        )
+        return result
+
+    @pytest.hookimpl(wrapper=True)
     def pytest_runtest_protocol(
         self, item: pytest.Item, nextitem: pytest.Item | None
     ) -> Generator[None, object, object]:
-        """Compare the process-wide state from before a unit test's setup to after its teardown."""
+        """Record what a unit test does, and compare the process-wide state from before its
+        setup to after its teardown."""
         if self._suite_of.get(item.nodeid) != "unit":
             return (yield)
         _import_env.clear()
         before = _snapshot()
         try:
-            return (yield)
+            with self._recorder.running(item.nodeid):
+                return (yield)
         finally:
+            self._record_behavior(item)
             changed = _changed(before, _snapshot(), _import_env)
             if changed:
                 self._leaks.append({"test": item.nodeid, "changed": changed})
+
+    def _record_behavior(self, item: pytest.Item) -> None:
+        """Keep the evidence of a unit test that has any, or is exempt."""
+        evidence = self._recorder.evidence(item.nodeid, charged_fixtures(item))
+        exempt = exempt_reason(item)
+        if not evidence and exempt is None:
+            return
+        entry: dict[str, Any] = {
+            "suite": "unit",
+            "directory": self._home_of.get(item.nodeid, ""),
+            "evidence": evidence,
+        }
+        if exempt is not None:
+            entry["exempt"] = exempt
+        self._behavior[item.nodeid] = entry
 
     def pytest_sessionfinish(self, session: pytest.Session) -> None:
         """Write the report; a process that collected nothing (the xdist controller) writes none."""
@@ -212,5 +323,7 @@ class SuiteHealth:
             "total": self._total,
             "scopes": self._scopes,
             "leaks": self._leaks,
+            "suited": self._collected,
+            "behavior": self._behavior,
         }
         (self._report_dir / f"{os.getpid()}.json").write_text(json.dumps(report))

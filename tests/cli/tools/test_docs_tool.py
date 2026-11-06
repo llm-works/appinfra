@@ -85,10 +85,11 @@ class TestGetExamplesDir:
         assert result.name == "examples"
 
 
-@pytest.mark.unit
+@pytest.mark.integration
 class TestFindDoc:
     """Test find_doc helper function."""
 
+    @pytest.mark.unit
     def test_returns_none_for_nonexistent_dir(self):
         """Test returns None when docs dir doesn't exist."""
         result = find_doc(Path("/nonexistent"), "topic")
@@ -143,10 +144,11 @@ class TestFindDoc:
             assert result is None
 
 
-@pytest.mark.unit
+@pytest.mark.integration
 class TestFindExample:
     """Test find_example helper function."""
 
+    @pytest.mark.unit
     def test_returns_none_for_nonexistent_dir(self):
         """Test returns None when examples dir doesn't exist."""
         result = find_example(Path("/nonexistent"), "example")
@@ -305,7 +307,7 @@ class TestParseFrontmatter:
         assert result == {}
 
 
-@pytest.mark.unit
+@pytest.mark.integration
 class TestExtractTitle:
     """Test extract_title helper function."""
 
@@ -368,6 +370,7 @@ class TestDocsListTool:
 
         assert result == 0
 
+    @pytest.mark.integration
     def test_lists_guides_section(self, capsys):
         """Test lists guides section when it exists."""
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -431,6 +434,7 @@ class TestDocsShowTool:
         captured = capsys.readouterr()
         assert "Error" in captured.out
 
+    @pytest.mark.integration
     def test_run_shows_doc_file(self, capsys):
         """Test displays documentation file content."""
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -458,6 +462,7 @@ class TestDocsShowTool:
             assert "# Logging" in captured.out
             assert "Content here" in captured.out
 
+    @pytest.mark.integration
     def test_run_shows_example(self, capsys):
         """Test displays example README and file list."""
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -512,6 +517,7 @@ class TestDocsShowTool:
         captured = capsys.readouterr()
         assert "not found" in captured.out
 
+    @pytest.mark.integration
     def test_run_with_md_suffix(self, capsys):
         """Test topic with .md suffix works (suffix is stripped)."""
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -538,6 +544,7 @@ class TestDocsShowTool:
             captured = capsys.readouterr()
             assert "# Logging" in captured.out
 
+    @pytest.mark.integration
     def test_run_shows_example_file(self, capsys):
         """Test displays example file contents (not just directory)."""
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -574,10 +581,11 @@ class TestDocsShowTool:
 # =============================================================================
 
 
-@pytest.mark.unit
+@pytest.mark.integration
 class TestDocsFindTool:
     """Test DocsFindTool class."""
 
+    @pytest.mark.unit
     def test_initialization(self):
         """Test tool initializes with correct config."""
         tool = DocsFindTool()
@@ -585,6 +593,7 @@ class TestDocsFindTool:
         assert "f" in tool.config.aliases
         assert "search" in tool.config.aliases
 
+    @pytest.mark.unit
     def test_add_args(self):
         """Test adds pattern and context arguments."""
         tool = DocsFindTool()
@@ -598,6 +607,7 @@ class TestDocsFindTool:
             c[1].get("dest") for c in parser.add_argument.call_args_list
         ]
 
+    @pytest.mark.unit
     def test_run_without_pattern_returns_error(self, capsys):
         """Test returns 1 when no pattern provided."""
         tool = DocsFindTool()
@@ -1319,6 +1329,7 @@ class TestDocsLicenseTool:
         assert tool.name == "license"
         assert tool.config.aliases == []
 
+    @pytest.mark.integration
     def test_run_displays_license(self, capsys):
         """Test displays LICENSE file content."""
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1368,6 +1379,7 @@ class TestDocsSecurityTool:
         assert tool.name == "security"
         assert tool.config.aliases == []
 
+    @pytest.mark.integration
     def test_run_displays_security(self, capsys):
         """Test displays SECURITY.md file content."""
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1428,6 +1440,7 @@ class TestDocsTool:
         assert "license" in subtool_names
         assert "security" in subtool_names
 
+    @pytest.mark.integration
     def test_run_overview_shows_index(self, capsys):
         """Test run without subcommand shows index.md."""
         with tempfile.TemporaryDirectory() as tmpdir:

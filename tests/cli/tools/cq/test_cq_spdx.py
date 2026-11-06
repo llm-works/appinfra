@@ -29,7 +29,7 @@ from appinfra.cli.tools.cq.spdx import (
 VALID_HEADER = build_header("appinfra", 2026)
 
 
-@pytest.mark.unit
+@pytest.mark.integration
 class TestMissingMarkers:
     """Test missing_markers() logic."""
 
@@ -65,7 +65,7 @@ class TestMissingMarkers:
         assert missing and missing[0].startswith("read error:")
 
 
-@pytest.mark.unit
+@pytest.mark.integration
 class TestCollectOffenders:
     """Test collect_offenders() aggregation."""
 
@@ -136,7 +136,7 @@ class TestApplyHeaderToText:
         assert result == "#!/usr/bin/env python3\n\n" + header + "x = 1\n"
 
 
-@pytest.mark.unit
+@pytest.mark.integration
 class TestDerivePackageName:
     """Test derive_package_name() pyproject.toml parsing."""
 
@@ -222,7 +222,7 @@ class TestFilterSourceFiles:
         assert result == []
 
 
-@pytest.mark.unit
+@pytest.mark.integration
 class TestApplyHeaders:
     """Test apply_headers() pure function."""
 
@@ -262,6 +262,7 @@ class TestApplyHeaders:
 class TestPrintOffenders:
     """Test _print_offenders() stderr output."""
 
+    @pytest.mark.integration
     def test_prints_offender_list_to_stderr(self, capsys, tmp_path: Path):
         p = tmp_path / "bad.py"
         _print_offenders([(p, ["SPDX-License-Identifier: Apache-2.0"])])
@@ -337,7 +338,7 @@ def _make_tool(**arg_overrides) -> CheckSpdxTool:
     return tool
 
 
-@pytest.mark.unit
+@pytest.mark.integration
 class TestCheckSpdxToolMethods:
     """Test CheckSpdxTool instance methods (args + lg injected directly)."""
 

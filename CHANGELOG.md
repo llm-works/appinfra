@@ -10,6 +10,18 @@ For API stability guarantees and deprecation policy, see
 
 ## [Unreleased]
 
+### Added
+- Test structure health in `make check` reports misfiled unit tests: those seen writing files,
+  starting processes, opening sockets or databases, installing signal handlers or running the
+  project itself, with the evidence. `@pytest.mark.suite_exempt(reason=...)` exempts a test;
+  see the test-suites guide.
+
+### Changed
+- `make check` keeps its coverage data in its run directory instead of `.coverage` in the
+  project root.
+- The package declares its license as the SPDX expression `Apache-2.0`; building from source
+  needs setuptools 77.0.3 or later.
+
 ## [0.14.1] - 2026-11-03
 
 ### Added
