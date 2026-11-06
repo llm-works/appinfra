@@ -67,6 +67,7 @@ class TestConfigToolInit:
         assert dump.name == "dump"
         assert "d" in dump.config.aliases
 
+    @pytest.mark.integration
     def test_parent_dispatch_runs_dump(self, capsys):
         """Test that parent ConfigTool.run() dispatches to dump subtool."""
         tool = ConfigTool()
@@ -380,7 +381,7 @@ class TestSectionFiltering:
 # =============================================================================
 
 
-@pytest.mark.unit
+@pytest.mark.integration
 class TestConfigLoading:
     """Test configuration file loading."""
 
@@ -403,6 +404,7 @@ class TestConfigLoading:
 
         Path(f.name).unlink()
 
+    @pytest.mark.unit
     def test_load_missing_file_returns_none(self):
         """Test loading missing file returns None."""
         tool = ConfigDumpTool()
@@ -438,7 +440,7 @@ class TestConfigLoading:
 # =============================================================================
 
 
-@pytest.mark.unit
+@pytest.mark.integration
 @pytest.mark.usefixtures("clean_env")
 class TestEnvVarHandling:
     """Test environment variable override handling."""
@@ -704,7 +706,7 @@ class TestConfigToolIntegration:
 # =============================================================================
 
 
-@pytest.mark.unit
+@pytest.mark.integration
 class TestSourceReport:
     """Test --source output: loaded path, winning rule, chain rendering."""
 
@@ -734,6 +736,7 @@ class TestSourceReport:
 
         return ConfigFile(Path(path), Path(path).parent, rule)
 
+    @pytest.mark.unit
     def test_no_spec_reports_no_chain(self, capsys):
         tool, ctx = self._tool_with_app(
             spec=None, source=None, parsed_args=Mock(etc_dir=None, config=None)

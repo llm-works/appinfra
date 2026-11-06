@@ -35,16 +35,18 @@ class TestCheckResult:
         assert result.suggestion == "Fix this"
 
 
-@pytest.mark.unit
+@pytest.mark.integration
 class TestDoctorTool:
     """Tests for DoctorTool."""
 
+    @pytest.mark.unit
     def test_init(self):
         """Test DoctorTool initialization."""
         tool = DoctorTool()
         assert tool.config.name == "doctor"
         assert "dr" in tool.config.aliases
 
+    @pytest.mark.unit
     def test_check_python_version_passes(self):
         """Test Python version check passes for 3.11+."""
         tool = DoctorTool()
@@ -54,6 +56,7 @@ class TestDoctorTool:
         assert result.passed is True
         assert ">= 3.11" in result.message
 
+    @pytest.mark.unit
     def test_check_python_version_fails_old_python(self):
         """Test Python version check fails for old Python."""
         tool = DoctorTool()
@@ -73,6 +76,7 @@ class TestDoctorTool:
             assert result.passed is False
             assert result.suggestion is not None
 
+    @pytest.mark.unit
     def test_extract_version_standard(self):
         """Test version extraction from standard output."""
         tool = DoctorTool()
@@ -80,11 +84,13 @@ class TestDoctorTool:
         assert tool._extract_version("mypy 1.19.0") == "1.19.0"
         assert tool._extract_version("pytest 9.0.1") == "9.0.1"
 
+    @pytest.mark.unit
     def test_extract_version_empty(self):
         """Test version extraction with empty output."""
         tool = DoctorTool()
         assert tool._extract_version("") == "installed"
 
+    @pytest.mark.unit
     def test_extract_version_no_version(self):
         """Test version extraction when no version pattern found."""
         tool = DoctorTool()
@@ -143,6 +149,7 @@ class TestDoctorTool:
         assert result.passed is False
         assert "__init__.py" in result.message
 
+    @pytest.mark.unit
     def test_check_package_name_not_set(self):
         """Test package name check when not set."""
         tool = DoctorTool()
@@ -224,6 +231,7 @@ class TestDoctorTool:
         assert result.passed is True
         assert "no Makefile.local found" in result.message
 
+    @pytest.mark.unit
     def test_output_pretty(self, capsys):
         """Test pretty output format."""
         tool = DoctorTool()
@@ -240,6 +248,7 @@ class TestDoctorTool:
         assert "[X]" in captured.out
         assert "Fix it" in captured.out
 
+    @pytest.mark.unit
     def test_output_pretty_all_passed(self, capsys):
         """Test pretty output when all checks pass."""
         tool = DoctorTool()
@@ -254,6 +263,7 @@ class TestDoctorTool:
         captured = capsys.readouterr()
         assert "All checks passed" in captured.out
 
+    @pytest.mark.unit
     def test_output_json(self, capsys):
         """Test JSON output format."""
         import json
@@ -322,6 +332,7 @@ class TestDoctorTool:
         assert "passed" in output
         assert "checks" in output
 
+    @pytest.mark.unit
     def test_check_single_tool_timeout(self):
         """Test check for tool that times out."""
         tool = DoctorTool()

@@ -42,7 +42,7 @@ class TestShouldExclude:
         assert should_exclude(Path("./app.py"), [], False) is False
 
 
-@pytest.mark.unit
+@pytest.mark.integration
 class TestCollectPythonFiles:
     """Test collect_python_files()."""
 
@@ -87,6 +87,7 @@ class TestCollectPythonFiles:
 
         assert collect_python_files(Mock(), [str(root)], [], False) == []
 
+    @pytest.mark.unit
     def test_handles_nonexistent_path(self):
         lg = Mock()
 
