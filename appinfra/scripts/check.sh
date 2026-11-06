@@ -175,7 +175,7 @@ mkdir -p "$STATUS_DIR"
 # Full output of failed checks and of checks with slow tests, copied out of STATUS_DIR (removed
 # on exit) so a failure or hang that does not reproduce on rerun can still be read. Each run, a
 # concurrent one included, replaces the previous run's logs; concurrent runs in one tree also
-# share .coverage and .mypy_cache.
+# share .mypy_cache.
 KEPT_LOG_DIR="${PROJECT_ROOT}/.build/check"
 # Rows added below the checklist (add_display_row). The count lives in a file because every
 # check draws from its own background process and needs the current count to find its line.
@@ -472,9 +472,13 @@ if [ "$RAW" = true ] && [ "$SUMMARY" = true ]; then
 fi
 COVERAGE_HEALTH_ENV=""
 case " $HEALTH_TARGETS " in *" test.coverage "*) COVERAGE_HEALTH_ENV="$HEALTH_ENV" ;; esac
+# The coverage data goes to the status directory, not the project root: a measured subprocess
+# that exits after pytest-cov combines the data (a multiprocessing helper) still writes a file
+COVERAGE_DATA_ENV="COVERAGE_FILE=$(printf '%q' "${STATUS_DIR}/coverage") "
+COVERAGE_ENV="${COVERAGE_CORE_ENV}${COVERAGE_DATA_ENV}${COVERAGE_HEALTH_ENV}"
 if awk "BEGIN {exit !($COVERAGE_TARGET > 0)}" 2>/dev/null; then
-    TEST_SUBCHECKS+=("${COVERAGE_LABEL}|test.coverage|${PYTEST_PLUGIN_PATH}${COVERAGE_CORE_ENV}${COVERAGE_HEALTH_ENV}_APPINFRA_CHECK_PYTEST_SUITE=cov ${PYTHON} -m pytest tests/ ${COVERAGE_MARKER_ARG} ${PYTEST_PLUGINS} --cov=${PKG_NAME} --cov-report=term${COVERAGE_FAIL_UNDER} -q -rEfs ${PYTEST_PARALLEL_COVERAGE}|${COVERAGE_TARGET}")
-    TEST_SUBCHECKS_RAW+=("${COVERAGE_LABEL}|test.coverage|${PYTEST_PLUGIN_PATH}${COVERAGE_CORE_ENV}${COVERAGE_HEALTH_ENV}_APPINFRA_CHECK_PYTEST_SUITE=cov ${PYTHON} -m pytest tests/ ${COVERAGE_MARKER_ARG} ${PYTEST_PLUGINS} --cov=${PKG_NAME} --cov-report=term-missing -rEfs ${PYTEST_PARALLEL_COVERAGE}|${COVERAGE_TARGET}")
+    TEST_SUBCHECKS+=("${COVERAGE_LABEL}|test.coverage|${PYTEST_PLUGIN_PATH}${COVERAGE_ENV}_APPINFRA_CHECK_PYTEST_SUITE=cov ${PYTHON} -m pytest tests/ ${COVERAGE_MARKER_ARG} ${PYTEST_PLUGINS} --cov=${PKG_NAME} --cov-report=term${COVERAGE_FAIL_UNDER} -q -rEfs ${PYTEST_PARALLEL_COVERAGE}|${COVERAGE_TARGET}")
+    TEST_SUBCHECKS_RAW+=("${COVERAGE_LABEL}|test.coverage|${PYTEST_PLUGIN_PATH}${COVERAGE_ENV}_APPINFRA_CHECK_PYTEST_SUITE=cov ${PYTHON} -m pytest tests/ ${COVERAGE_MARKER_ARG} ${PYTEST_PLUGINS} --cov=${PKG_NAME} --cov-report=term-missing -rEfs ${PYTEST_PARALLEL_COVERAGE}|${COVERAGE_TARGET}")
 fi
 
 _standalone_suite unit        "Unit tests"        test.unit        unit
