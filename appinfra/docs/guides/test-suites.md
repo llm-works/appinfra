@@ -110,14 +110,16 @@ line under the test suite:
 [⚠]    Test structure health (95.1%, 2 findings)
 ```
 
-The percentage is the share of tests that run in their directory's suite; the tests the rules
-tolerate elsewhere count against it. It is for reading, not judged: the findings decide the line.
+The percentage is the share of collected tests that keep to the rules: a test outside its
+directory's suite, tolerated or not, or a misfiled unit test counts against it. It is for reading,
+not judged: the findings decide the line.
 
-The run that executes the unit tests records the figures, and the line follows it. A class, or a
-file's module-level tests, may hold up to `APPINFRA_DEV_TEST_HEALTH_OUTLIERS` (3) tests of other
-suites whatever its size; a few tests that need a file or a signal fit in any class. The line
-looks for structure gone wrong, such as a batch of integration tests under `tests/unit/`, not
-for every test out of place. Past that, a finding is one of:
+Each run of `make check` that executes unit, integration or e2e tests records the figures, and the
+line follows the last of them. A class, or a file's module-level tests, may hold up to
+`APPINFRA_DEV_TEST_HEALTH_OUTLIERS` (3) tests of other suites whatever its size; a few tests that
+need a file or a signal fit in any class. The line looks for structure gone wrong, such as a batch
+of integration tests under `tests/unit/`, not for every test out of place. Past that, a finding is
+one of:
 
 - **placement**: most of a class's tests belong to another suite; they move to that suite's
   directory, and the rest of the class stays;
@@ -128,6 +130,70 @@ A unit test that left process-wide state changed is a **leak**, a finding of its
 handler, the `ITIMER_REAL` timer, an environment variable or the working directory, compared from
 before its setup to after its teardown. An environment variable a module sets while being
 imported, as torch or vllm do on first import, is not the test's.
+
+A unit test seen doing what its suite does not allow is **misfiled**, one finding per class and
+target suite, with the first test's evidence:
+
+```
+[⚠] Test structure health: tests/unit/test_export.py::TestExport: 3 unit ➜ integration (fs-write /tmp/x)
+```
+
+### What a unit test is seen doing
+
+While the unit tests run, an audit hook ([PEP 578](https://peps.python.org/pep-0578/)) and
+wrappers around what raises no audit event (`signal.signal`, `signal.setitimer`, the start of a
+`multiprocessing` process, psycopg's connect and `execute`) record what each test does:
+
+| Evidence | Recorded for | Misfiled to |
+|----------|--------------|-------------|
+| `fs-write` | a file written, created, removed or renamed | integration |
+| `fs-read` | a file read outside the project, the interpreter and the system directories | integration |
+| `process` | a process started, `multiprocessing` included | integration |
+| `socket` | a socket connected or bound | integration |
+| `db` | a database connection other than `sqlite3` in memory, a psycopg query | integration |
+| `signal` | a signal handler installed or a timer armed | integration |
+| `chdir` | the working directory changed | integration |
+| `entry-point` | a process running the project itself: `-m <package>`, a `.py` file of one of its packages, or one of its `[project.scripts]` | e2e |
+
+Not evidence: reading the project's own files, the interpreter's or the system's (`/etc`,
+`/proc`, `/usr`, ...), or code anywhere, which is an import; what a tool writes to its cache
+(`__pycache__`, `.hypothesis`); writes to a device; `sqlite3` in memory; sleeps; environment
+changes, which the leak check covers; and the SIGINT handler `asyncio.run` installs and restores.
+
+A finding comes only from what a test was seen doing, never from what it was not seen doing.
+Integration and e2e tests are not judged: an integration test with no evidence, or an e2e test
+that starts the project through a shell script or a container, may be doing work the recording
+cannot see. For the same reason some work goes unrecorded and is never a finding:
+
+- work in threads the test starts; only the thread running the test and its fixtures is recorded,
+  so a thread an earlier test left running is not charged to the current one;
+- I/O done in C code that raises no audit event, and database drivers other than `sqlite3` and
+  psycopg.
+
+A test is charged with its own work and that of the fixtures it uses: those it asks for (as
+arguments or through `usefixtures`), its function-scoped autouse fixtures, and what those depend
+on. A fixture wider than one test is charged, setup and teardown, to every test that uses it. An
+autouse fixture wider than one test is not charged: it sets up for every test, not for this one.
+
+A unit test whose work belongs to its directory's suite, such as a test marked `unit` under
+`tests/integration/` that writes files, counts as that suite for placement and overrides: its
+marker is wrong, not its place.
+
+A test that does such work on purpose is exempt from the behavior check, with the reason:
+
+```python
+@pytest.mark.suite_exempt(reason="checks the modes the real file system sets")
+def test_mode_bits(tmp_path): ...
+```
+
+An empty reason stops collection.
+
+The recording runs only while the line is on. Its audit hook and wrappers stay in place for the
+rest of each test process, since an audit hook cannot be removed. On appinfra's own suite it adds
+1 to 2 seconds to the coverage run of `make check`, about 5%; a suite that runs many psycopg
+queries pays more, as each one passes through a wrapper.
+
+### Outcome
 
 The line passes with no finding. Otherwise the findings show under the checklist and in
 `.build/check/test-structure-health.log`, and `APPINFRA_DEV_TEST_HEALTH` decides the outcome: `warn`
