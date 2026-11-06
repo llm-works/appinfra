@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import os
 import sys
+import threading
 
 import pytest
 
@@ -19,6 +20,7 @@ from appinfra._suite_behavior import (
     PROCESS,
     SOCKET,
     Project,
+    Recorder,
     event_evidence,
     open_evidence,
     runs_project,
@@ -170,3 +172,32 @@ class TestRunsProject:
     def test_a_shell_command_string(self) -> None:
         assert runs_project(PROJECT, "python -m myapp run")
         assert not runs_project(PROJECT, "ls -l")
+
+
+class TestRecorder:
+    """The recorder here is not installed: events are handed to it directly."""
+
+    def test_the_running_thread_is_charged(self) -> None:
+        recorder = Recorder(PROJECT)
+        with recorder.running("t.py::test_a"):
+            recorder.audit("os.chdir", ("/x",))
+            recorder.note((SOCKET, "socket.bind"))
+        assert recorder.evidence("t.py::test_a", []) == {
+            CHDIR: "/x",
+            SOCKET: "socket.bind",
+        }
+
+    def test_another_thread_is_not_charged(self) -> None:
+        """A thread left running by an earlier test works on its own time: its events are
+        not the running test's."""
+        recorder = Recorder(PROJECT)
+
+        def elsewhere() -> None:
+            recorder.audit("os.chdir", ("/x",))
+            recorder.note((SOCKET, "socket.bind"))
+
+        with recorder.running("t.py::test_a"):
+            thread = threading.Thread(target=elsewhere)
+            thread.start()
+            thread.join()
+        assert recorder.evidence("t.py::test_a", []) == {}

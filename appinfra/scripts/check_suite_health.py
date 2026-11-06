@@ -21,13 +21,14 @@ size; past that:
 
 A unit test that left process-wide state changed is a ``leak``, a finding of its own.
 
-What the tests did (appinfra/_suite_behavior.py) is judged against their suite, by scope:
+What the unit tests did (appinfra/_suite_behavior.py) is judged against their suite, by scope:
 
-``misfiled``: unit tests that did integration work (files, processes, sockets, databases,
-signals, the working directory) or ran the project as its own process, integration tests that
-did none, and e2e tests that did not run the project; they move to the suite their work needs.
-A test whose work belongs to its directory's suite counts as that suite for placement and
-overrides: its marker is wrong, not its place.
+``misfiled``: unit tests seen doing integration work (files, processes, sockets, databases,
+signals, the working directory) or running the project as its own process; they move to the
+suite their work needs. Only what a test was seen doing is a finding: what the recording did
+not see is no evidence, so no test is judged by what it did not do. A test whose work belongs
+to its directory's suite counts as that suite for placement and overrides: its marker is wrong,
+not its place.
 
 A test marked ``suite_exempt`` is not judged. A scope takes one placement or overrides finding at
 most, placement first. The output is the share of collected tests that keep to the rules (in
@@ -136,19 +137,15 @@ def _first(evidence: dict[str, str], categories: Iterable[str]) -> str:
 
 
 def _verdict(entry: dict[str, Any]) -> tuple[str, str] | None:
-    """(target suite, first evidence) for a test whose work does not fit its suite."""
-    if entry.get("exempt") is not None:
+    """(target suite, first evidence) for a unit test seen doing work its suite does not
+    allow: running the project needs e2e, other integration work needs integration."""
+    if entry.get("exempt") is not None or entry["suite"] != "unit":
         return None
-    suite, evidence = entry["suite"], entry["evidence"]
-    work = any(c in evidence for c in _INTEGRATION_WORK)
-    if suite == "unit" and _ENTRY_POINT in evidence:
+    evidence = entry["evidence"]
+    if _ENTRY_POINT in evidence:
         return ("e2e", _first(evidence, [_ENTRY_POINT]))
-    if suite == "unit" and work:
+    if any(c in evidence for c in _INTEGRATION_WORK):
         return ("integration", _first(evidence, _INTEGRATION_WORK))
-    if suite == "e2e" and _ENTRY_POINT not in evidence:
-        return ("integration" if work else "unit", _first(evidence, _INTEGRATION_WORK))
-    if suite == "integration" and not work and _ENTRY_POINT not in evidence:
-        return ("unit", "")
     return None
 
 
@@ -166,8 +163,9 @@ def _behavior_findings(
             groups.setdefault(key, []).append(evidence)
     findings = []
     for (scope, suite, target), found in groups.items():
-        shown = f" ({found[0]})" if found[0] else ""
-        findings.append(("misfiled", scope, f"{len(found)} {suite} ➜ {target}{shown}"))
+        findings.append(
+            ("misfiled", scope, f"{len(found)} {suite} ➜ {target} ({found[0]})")
+        )
     return findings
 
 

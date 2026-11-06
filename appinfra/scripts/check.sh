@@ -315,8 +315,9 @@ HEALTH_ENV=""
 if [ "$TEST_HEALTH" != false ]; then
     HEALTH_ENV="_APPINFRA_CHECK_SUITE_HEALTH_DIR=$(printf '%q' "$HEALTH_DIR") "
 fi
-# The runs that execute unit, integration or e2e tests write the reports: each records what the
-# tests it runs did (appinfra/_suite_behavior.py). That is the coverage run for the suites it
+# The runs that execute unit, integration or e2e tests write the reports: each records the
+# placement of the tests it runs, and what its unit tests did (appinfra/_suite_behavior.py),
+# with the fixtures they share. That is the coverage run for the suites it
 # folds, and the suite's own run for the rest. The Test structure health line follows the last
 # of them to finish.
 HEALTH_MARKERS="unit integration e2e"

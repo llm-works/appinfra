@@ -277,13 +277,17 @@ def test_exempt(tmp_path):
     (tmp_path / "f").write_text("x")
 
 
+def test_runs_the_project():
+    subprocess.run([sys.executable, "-m", "myapp"], check=True)
+
+
 @pytest.mark.integration
-def test_integration_without_evidence():
-    pass
+def test_integration_is_not_recorded(tmp_path):
+    (tmp_path / "f").write_text("x")
 
 
 @pytest.mark.e2e
-def test_e2e_runs_the_project():
+def test_e2e_is_not_recorded():
     subprocess.run([sys.executable, "-m", "myapp"], check=True)
 """
 
@@ -310,8 +314,7 @@ def test_the_report_records_what_each_test_does(
         "test_first_user_of_a_module_fixture": ("unit", ["fs-write"], None),
         "test_second_user_of_a_module_fixture": ("unit", ["fs-write"], None),
         "test_exempt": ("unit", ["fs-write"], "checks the real file system on purpose"),
-        "test_integration_without_evidence": ("integration", [], None),
-        "test_e2e_runs_the_project": ("e2e", ["entry-point"], None),
+        "test_runs_the_project": ("unit", ["entry-point"], None),
     }
 
 
@@ -461,7 +464,8 @@ def test_the_check_prints_the_health_then_the_findings(
     # 2 of the 6 tests run in their directory's suite
     assert result.stdout.splitlines() == [
         "33.3",
-        "misfiled\ttests/unit/test_checked.py::TestMisplaced\t4 integration ➜ unit",
+        "placement\ttests/unit/test_checked.py::TestMisplaced\t4 of 4 tests (100%) are "
+        "integration, the majority: move them to tests/integration/",
         "leak\ttests/unit/test_checked.py::test_leak\tleft changed: $SUITE_HEALTH_LEAK",
     ]
 

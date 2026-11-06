@@ -19,11 +19,11 @@ pytest-xdist worker) writes one JSON report there at the end of the session, ``<
   before its setup to after its teardown; an environment variable a module sets while being
   imported is the library's, not the test's;
 - ``suited``: the number of tests collected, each with its suite;
-- ``behavior``: what the unit, integration and e2e tests this process ran did
+- ``behavior``: what the unit tests this process ran were seen doing
   (appinfra/_suite_behavior.py), by node id: the ``suite``, the ``directory`` suite it sits
   under ("" for none), the ``evidence`` (category -> first detail), and the ``exempt`` reason
-  of a test marked ``suite_exempt``. A unit test appears only
-  with evidence or an exemption; every integration and e2e test appears.
+  of a test marked ``suite_exempt``. Only a test with evidence or an exemption appears; other
+  suites are not recorded, since only what a test was seen doing is judged.
 
 The rules applied to these figures live in appinfra/scripts/check_suite_health.py.
 """
@@ -46,9 +46,6 @@ import pytest
 from . import _suite_behavior
 
 REPORT_DIR_ENV = "_APPINFRA_CHECK_SUITE_HEALTH_DIR"
-
-# The suites whose tests' behavior is recorded; security and performance tests are not judged
-_JUDGED = frozenset({"unit", "integration", "e2e"})
 
 # Set by pytest for each test phase and removed after it; not the test's doing
 _PYTEST_ENV = frozenset({"PYTEST_CURRENT_TEST"})
@@ -271,33 +268,29 @@ class SuiteHealth:
     def pytest_runtest_protocol(
         self, item: pytest.Item, nextitem: pytest.Item | None
     ) -> Generator[None, object, object]:
-        """Record what a judged test does; compare the process-wide state from before a unit
-        test's setup to after its teardown."""
-        suite = self._suite_of.get(item.nodeid)
-        if suite not in _JUDGED:
+        """Record what a unit test does, and compare the process-wide state from before its
+        setup to after its teardown."""
+        if self._suite_of.get(item.nodeid) != "unit":
             return (yield)
-        before: dict[str, Any] | None = None
-        if suite == "unit":
-            _import_env.clear()
-            before = _snapshot()
+        _import_env.clear()
+        before = _snapshot()
         try:
             with self._recorder.running(item.nodeid):
                 return (yield)
         finally:
-            self._record_behavior(item, suite)
-            if before is not None:
-                changed = _changed(before, _snapshot(), _import_env)
-                if changed:
-                    self._leaks.append({"test": item.nodeid, "changed": changed})
+            self._record_behavior(item)
+            changed = _changed(before, _snapshot(), _import_env)
+            if changed:
+                self._leaks.append({"test": item.nodeid, "changed": changed})
 
-    def _record_behavior(self, item: pytest.Item, suite: str) -> None:
-        """Keep the evidence of an integration or e2e test, and of a unit test that has any."""
+    def _record_behavior(self, item: pytest.Item) -> None:
+        """Keep the evidence of a unit test that has any, or is exempt."""
         evidence = self._recorder.evidence(item.nodeid, charged_fixtures(item))
         exempt = exempt_reason(item)
-        if suite == "unit" and not evidence and exempt is None:
+        if not evidence and exempt is None:
             return
         entry: dict[str, Any] = {
-            "suite": suite,
+            "suite": "unit",
             "directory": self._home_of.get(item.nodeid, ""),
             "evidence": evidence,
         }

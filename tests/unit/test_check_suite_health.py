@@ -197,29 +197,20 @@ class TestBehavior:
         }
         assert _judge(_report(behavior=behavior)) == []
 
-    def test_an_e2e_test_must_run_the_project(self) -> None:
+    def test_an_e2e_test_is_not_judged_by_what_was_not_seen(self) -> None:
+        """An entry point the recording does not recognize (a shell script, a container)
+        leaves no evidence: missing evidence is no finding."""
         behavior = {
-            "e.py::test_ok": _ran("e2e", entry_point="python -m myapp"),
             "e.py::test_files": _ran("e2e", fs_write="/tmp/x"),
             "f.py::test_nothing": _ran("e2e"),
         }
-        assert _judge(_report(behavior=behavior)) == [
-            (
-                "misfiled",
-                "e.py",
-                "1 e2e ➜ integration (fs-write /tmp/x)",
-            ),
-            ("misfiled", "f.py", "1 e2e ➜ unit"),
-        ]
+        assert _judge(_report(behavior=behavior)) == []
 
-    def test_an_integration_test_without_integration_work_belongs_in_unit(self) -> None:
-        behavior = {
-            "i.py::A::test_a": _ran("integration"),
-            "i.py::A::test_b": _ran("integration", fs_read="/srv/x"),
-        }
-        assert _judge(_report(behavior=behavior)) == [
-            ("misfiled", "i.py::A", "1 integration ➜ unit")
-        ]
+    def test_an_integration_test_without_evidence_is_not_judged(self) -> None:
+        """Work the recording cannot see (a C extension's I/O, another DB driver) leaves no
+        evidence: missing evidence is no finding."""
+        behavior = {"i.py::A::test_a": _ran("integration")}
+        assert _judge(_report(behavior=behavior)) == []
 
     def test_a_test_reported_by_two_processes_counts_once(self) -> None:
         behavior = {"t.py::test_a": _ran("unit", chdir="/tmp")}
@@ -227,7 +218,7 @@ class TestBehavior:
         ((_, _, detail),) = _judge(report, report)
         assert detail.startswith("1 unit ➜")
 
-    def test_tests_whose_work_fits_their_directory_are_not_placed_elsewhere(
+    def test_integration_tests_without_evidence_are_placed_by_their_marker(
         self,
     ) -> None:
         behavior = {
@@ -235,7 +226,7 @@ class TestBehavior:
             for i in range(4)
         }
         report = _report(_scope("u.py::A", "unit", integration=4), behavior=behavior)
-        assert _judge(report) == [("misfiled", "u.py::A", "4 integration ➜ unit")]
+        assert _kinds(report) == ["placement"]
 
     def test_only_tests_whose_work_fits_their_directory_leave_the_scope_finding(
         self,
@@ -264,7 +255,7 @@ class TestBehavior:
             leaks=[{"test": "a.py::test_z", "changed": ["cwd"]}],
             behavior={
                 "d.py::test_a": _ran("unit", db="sqlite3 /tmp/a.db"),
-                "i.py::test_b": _ran("integration"),
+                "p.py::test_b": _ran("unit", process="subprocess.Popen git"),
             },
         )
         assert _kinds(report) == ["placement", "misfiled", "misfiled", "leak"]

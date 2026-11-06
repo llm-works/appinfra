@@ -245,24 +245,33 @@ class Recorder:
 
     One per process: the audit hook it installs cannot be removed, so it only runs under make
     check's health check. Evidence goes to the test or fixture ``running`` names; operations
-    outside one (collection, the session's own setup) are not recorded.
+    outside one (collection, the session's own setup) are not recorded, nor are those of other
+    threads: a thread an earlier test left running would charge its work to whichever test
+    runs. Work in threads a test starts goes unrecorded; a missed operation is no finding, a
+    wrongly charged one is a false one.
     """
 
     def __init__(self, project: Project) -> None:
         """Record evidence judged against ``project``."""
         self._project = project
         self._key: str | None = None
+        self._thread: int | None = None  # the thread that runs the test or fixture
         self._evidence: dict[str, dict[str, str]] = {}
         self._local = threading.local()  # set while the recorder itself runs
 
     @contextlib.contextmanager
     def running(self, key: str | None) -> Iterator[None]:
-        """Record the evidence of what runs inside, under ``key``."""
-        previous, self._key = self._key, key
+        """Record the evidence of what runs inside, in this thread, under ``key``."""
+        previous = (self._key, self._thread)
+        self._key, self._thread = key, threading.get_ident()
         try:
             yield
         finally:
-            self._key = previous
+            self._key, self._thread = previous
+
+    def _recording(self) -> bool:
+        """Whether an operation now belongs to the running test or fixture."""
+        return self._key is not None and threading.get_ident() == self._thread
 
     def evidence(self, key: str, fixtures: Iterable[str]) -> dict[str, str]:
         """A test's evidence, its own and that of the fixtures it uses: category -> detail."""
@@ -274,12 +283,12 @@ class Recorder:
 
     def note(self, found: Evidence | None) -> None:
         """Keep the first detail of each category for what is running."""
-        if found is not None and self._key is not None:
+        if found is not None and self._key is not None and self._recording():
             self._evidence.setdefault(self._key, {}).setdefault(found[0], found[1])
 
     def audit(self, event: str, args: tuple[Any, ...]) -> None:
         """The audit hook: map an event to evidence."""
-        if self._key is None or getattr(self._local, "busy", False):
+        if not self._recording() or getattr(self._local, "busy", False):
             return
         self._local.busy = True
         try:
