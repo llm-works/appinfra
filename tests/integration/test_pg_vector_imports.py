@@ -38,8 +38,9 @@ class TestDeferredPgvectorImport:
             [sys.executable, "-c", script],
             capture_output=True,
             text=True,
-            check=True,
+            check=False,
         )
+        assert result.returncode == 0, result.stderr
         return set(result.stdout.split()) if result.stdout.strip() else set()
 
     def test_db_utils_import_does_not_load_pgvector(self):
@@ -85,6 +86,7 @@ class TestDeferredPgvectorImport:
             [sys.executable, "-c", script],
             capture_output=True,
             text=True,
-            check=True,
+            check=False,
         )
+        assert result.returncode == 0, result.stderr
         assert result.stdout.strip() == "ok", result.stderr

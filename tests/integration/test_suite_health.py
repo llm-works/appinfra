@@ -395,6 +395,67 @@ def test_a_fixture_teardown_is_charged_to_the_tests_it_belongs_to(
     ]
 
 
+_WRITES_DATA = """\
+import pytest
+
+
+@pytest.fixture(scope="module")
+def data(tmp_path_factory):
+    path = tmp_path_factory.mktemp("data") / "f"
+    path.write_text("x")
+    return path
+
+
+def test_uses_written_data(data):
+    pass
+"""
+
+_PURE_DATA = """\
+import pytest
+
+
+@pytest.fixture(scope="module")
+def data():
+    return "x"
+
+
+def test_uses_pure_data(data):
+    pass
+"""
+
+_PARAMETRIZED = """\
+import pytest
+
+
+@pytest.fixture(scope="module", params=["write", "pure"])
+def source(request, tmp_path_factory):
+    if request.param == "write":
+        (tmp_path_factory.mktemp("source") / "f").write_text("x")
+    return request.param
+
+
+def test_uses_source(source):
+    pass
+"""
+
+
+def test_a_fixture_setup_is_charged_only_to_the_tests_that_used_it(
+    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Same-named fixtures of two files, and the parameters of one fixture, are separate
+    setups: what one did is not charged to the tests of another."""
+    layout = {
+        "tests/unit/test_a_writes.py": _WRITES_DATA,
+        "tests/unit/test_b_pure.py": _PURE_DATA,
+        "tests/unit/test_c_parametrized.py": _PARAMETRIZED,
+    }
+    behavior = _report(_run(pytester, monkeypatch, layout))["behavior"]
+    assert sorted(nodeid.split("::")[-1] for nodeid in behavior) == [
+        "test_uses_source[write]",
+        "test_uses_written_data",
+    ]
+
+
 def test_an_exemption_needs_a_reason(
     pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
 ) -> None:

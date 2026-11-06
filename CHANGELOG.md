@@ -20,7 +20,7 @@ For API stability guarantees and deprecation policy, see
 - `make check` keeps its coverage data in its run directory instead of `.coverage` in the
   project root.
 - The package declares its license as the SPDX expression `Apache-2.0`; building from source
-  needs setuptools 77 or later.
+  needs setuptools 77.0.3 or later.
 
 ## [0.14.1] - 2026-11-03
 

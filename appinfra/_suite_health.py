@@ -160,17 +160,24 @@ def exempt_reason(item: pytest.Item) -> str | None:
     return str(reason).strip()
 
 
+def fixture_key(fixturedef: pytest.FixtureDef[Any], param_index: int) -> str:
+    """The recorder key of one setup of one fixture definition: same-named fixtures of different
+    files, and the parameters of one fixture, are kept apart."""
+    return f"fixture:{fixturedef.baseid}::{fixturedef.argname}[{param_index}]"
+
+
 def charged_fixtures(item: pytest.Item) -> set[str]:
-    """The fixtures whose evidence counts for a test: those it asks for (arguments,
-    ``usefixtures``), its function-scoped autouse fixtures, and what they depend on.
+    """The recorder keys (fixture_key) of the fixtures whose evidence counts for a test: those
+    it asks for (arguments, ``usefixtures``), its function-scoped autouse fixtures, and what they
+    depend on, each as the definition and parameter the test resolved.
 
     An autouse fixture wider than one test sets up for every test, not for this one; whether it
     does anything can even depend on pytest-xdist (a session fixture only the main process
     runs), so neither it nor what only it depends on is charged.
     """
     info = getattr(item, "_fixtureinfo", None)
-    if info is None:  # not a pytest Function
-        return set(getattr(item, "fixturenames", ()))
+    if info is None:  # not a pytest Function: no fixture definitions to charge
+        return set()
     defs = info.name2fixturedefs
     asked = set(info.argnames) | {
         name for marker in item.iter_markers("usefixtures") for name in marker.args
@@ -180,14 +187,19 @@ def charged_fixtures(item: pytest.Item) -> set[str]:
         for name in info.initialnames
         if name in asked or (name in defs and defs[name][-1].scope == "function")
     ]
-    charged: set[str] = set()
+    indices: dict[str, int] = getattr(getattr(item, "callspec", None), "indices", {})
+    seen: set[str] = set()
+    keys: set[str] = set()
     while pending:
         name = pending.pop()
-        if name not in charged:
-            charged.add(name)
-            if name in defs:
-                pending.extend(defs[name][-1].argnames)
-    return charged
+        if name in seen:
+            continue
+        seen.add(name)
+        if name in defs:
+            fixturedef = defs[name][-1]
+            keys.add(fixture_key(fixturedef, indices.get(name, 0)))
+            pending.extend(fixturedef.argnames)
+    return keys
 
 
 class SuiteHealth:
@@ -242,8 +254,10 @@ class SuiteHealth:
     def pytest_fixture_setup(
         self, fixturedef: pytest.FixtureDef[Any], request: pytest.FixtureRequest
     ) -> Generator[None, object, object]:
-        """Record the setup and teardown of a fixture wider than one test under its own name,
-        charged to the tests that use it (charged_fixtures).
+        """Record the setup and teardown of a fixture wider than one test under its own key,
+        charged to the tests that use it (charged_fixtures). Each setup replaces what the
+        previous setup of the same definition and parameter recorded, as only the current one
+        is in use.
 
         A function-scoped fixture is made for one test and stays on that test's record: under
         its own name, what one test's instance did (a monkeypatch undoing a chdir) would be
@@ -254,7 +268,8 @@ class SuiteHealth:
         """
         if fixturedef.scope == "function":
             return (yield)
-        key = f"fixture:{fixturedef.argname}"
+        key = fixture_key(fixturedef, getattr(request, "param_index", 0))
+        self._recorder.reset(key)
         teardown = contextlib.ExitStack()
         fixturedef.addfinalizer(teardown.close)
         with self._recorder.running(key):

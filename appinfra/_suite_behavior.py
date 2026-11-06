@@ -275,12 +275,17 @@ class Recorder:
         return self._key is not None and threading.get_ident() == self._thread
 
     def evidence(self, key: str, fixtures: Iterable[str]) -> dict[str, str]:
-        """A test's evidence, its own and that of the fixtures it uses: category -> detail."""
+        """A test's evidence, its own and that of the fixtures it uses, given by their keys:
+        category -> detail."""
         found = dict(self._evidence.get(key, {}))
-        for name in fixtures:
-            for category, detail in self._evidence.get(f"fixture:{name}", {}).items():
+        for fixture in fixtures:
+            for category, detail in self._evidence.get(fixture, {}).items():
                 found.setdefault(category, detail)
         return found
+
+    def reset(self, key: str) -> None:
+        """Drop what was recorded under ``key``: a fixture set up again starts a new record."""
+        self._evidence.pop(key, None)
 
     def note(self, found: Evidence | None) -> None:
         """Keep the first detail of each category for what is running."""
