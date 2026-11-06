@@ -8,9 +8,11 @@ from __future__ import annotations
 import os
 import sys
 import threading
+import types
 
 import pytest
 
+from appinfra import _suite_behavior
 from appinfra._suite_behavior import (
     CHDIR,
     DB,
@@ -172,6 +174,58 @@ class TestRunsProject:
     def test_a_shell_command_string(self) -> None:
         assert runs_project(PROJECT, "python -m myapp run")
         assert not runs_project(PROJECT, "ls -l")
+
+
+def _fake_psycopg() -> types.ModuleType:
+    """A psycopg whose connection classes inherit connect from a shared base class."""
+
+    class _BaseConnection:
+        @classmethod
+        def connect(cls, conninfo: str) -> tuple[str, str]:
+            return (cls.__name__, conninfo)
+
+    class Connection(_BaseConnection):
+        pass
+
+    class AsyncConnection(_BaseConnection):
+        pass
+
+    class Cursor:
+        def execute(self, query: str) -> str:
+            return query
+
+        def executemany(self, query: str) -> str:
+            return query
+
+    class AsyncCursor(Cursor):
+        pass
+
+    module = types.ModuleType("psycopg")
+    module.Connection = Connection  # type: ignore[attr-defined]
+    module.AsyncConnection = AsyncConnection  # type: ignore[attr-defined]
+    module.Cursor = Cursor  # type: ignore[attr-defined]
+    module.AsyncCursor = AsyncCursor  # type: ignore[attr-defined]
+    module.connect = Connection.connect  # type: ignore[attr-defined]
+    return module
+
+
+class TestWrapPsycopg:
+    def test_connect_inherited_from_a_base_class_is_wrapped(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """psycopg 3.x may define connect on a base class rather than on each class."""
+        fake = _fake_psycopg()
+        monkeypatch.setitem(sys.modules, "psycopg", fake)
+        # Under make check's health check the process has a live recorder: the fake connects
+        # the wrappers note would be charged to this test
+        monkeypatch.setattr(_suite_behavior, "_recorder", None)
+        _suite_behavior._wrap_psycopg()
+        assert fake.connect("db") == ("Connection", "db")
+        assert fake.AsyncConnection.connect("db") == ("AsyncConnection", "db")
+        assert (
+            fake.Connection.connect.__qualname__
+            == f"{fake.Connection.__qualname__}.connect"
+        )
 
 
 class TestRecorder:

@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import contextlib
 import importlib
+import inspect
 import os
 import re
 import shlex
@@ -376,7 +377,8 @@ def _wrap_psycopg() -> None:
     except (ImportError, OSError):  # not installed, or libpq missing
         return
     for cls in (psycopg.Connection, psycopg.AsyncConnection):
-        wrapper = _noting_connect(cls.__dict__["connect"].__func__)
+        # The classmethod itself, unbound, wherever in the class hierarchy it is defined
+        wrapper = _noting_connect(inspect.getattr_static(cls, "connect").__func__)
         wrapper.__qualname__ = f"{cls.__qualname__}.connect"
         wrapper.__module__ = cls.__module__
         cls.connect = classmethod(wrapper)

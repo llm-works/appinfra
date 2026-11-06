@@ -10,6 +10,8 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any
 
+from appinfra import _suite_behavior
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CHECK_SUITE_HEALTH_PY = REPO_ROOT / "appinfra" / "scripts" / "check_suite_health.py"
 
@@ -259,6 +261,21 @@ class TestBehavior:
             },
         )
         assert _kinds(report) == ["placement", "misfiled", "misfiled", "leak"]
+
+
+def test_the_rules_know_every_evidence_category() -> None:
+    """The script names the categories itself, to stay standard library only; a category it
+    does not know would leave the tests that show it unjudged."""
+    # The module's public string constants are its categories, a new one included
+    recorded = {
+        value
+        for name, value in vars(_suite_behavior).items()
+        if name.isupper() and isinstance(value, str)
+    }
+    judged = set(check_suite_health._INTEGRATION_WORK) | {
+        check_suite_health._ENTRY_POINT
+    }
+    assert judged == recorded
 
 
 class TestHealth:
