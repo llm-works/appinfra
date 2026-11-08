@@ -195,8 +195,14 @@ def _zone(tz: str | datetime.tzinfo | None) -> datetime.tzinfo | None:
         return tz
     try:
         return ZoneInfo(tz)
-    except (ZoneInfoNotFoundError, ValueError) as e:
-        raise InvalidConfigError(f"unknown timezone: {tz!r}") from e
+    except ZoneInfoNotFoundError as e:
+        # Also what a valid name gives where neither the system nor tzdata has zone data
+        raise InvalidConfigError(
+            f"unknown timezone: {tz!r} (not an IANA zone name, or no zone database: install "
+            "the system's zone data or the tzdata package)"
+        ) from e
+    except ValueError as e:  # a malformed key, such as a path outside the zone database
+        raise InvalidConfigError(f"invalid timezone: {tz!r}") from e
 
 
 def _wall_ts(

@@ -934,9 +934,14 @@ class TestTimezone:
         assert status["next_execution"] == "2030-01-01T11:00:00-05:00"
         assert status["tz"] == ny
 
-    @pytest.mark.parametrize("tz", ["Mars/Olympus_Mons", "../etc/passwd", ""])
-    def test_an_unknown_zone_is_a_config_error(self, mock_logger, tz):
-        with pytest.raises(InvalidConfigError, match="timezone"):
+    def test_a_zone_not_found_names_the_zone_database_as_a_cause(self, mock_logger):
+        """A valid name fails the same way where no zone database is installed."""
+        with pytest.raises(InvalidConfigError, match="unknown timezone.*tzdata"):
+            Sched(mock_logger, Period.DAILY, "11:00", tz="Mars/Olympus_Mons")
+
+    @pytest.mark.parametrize("tz", ["../etc/passwd", ""])
+    def test_a_malformed_zone_name_is_invalid(self, mock_logger, tz):
+        with pytest.raises(InvalidConfigError, match="^invalid timezone"):
             Sched(mock_logger, Period.DAILY, "11:00", tz=tz)
 
 
