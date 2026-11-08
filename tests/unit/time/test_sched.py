@@ -750,14 +750,26 @@ class _Clock:
         self.t = 0.0
 
 
+@contextlib.contextmanager
+def _local_zone(zone: str) -> Iterator[None]:
+    """The process's local zone is ``zone`` inside; on exit TZ is back to what it was (set or
+    unset) before time.tzset() reloads it. Only TZ is restored: the test's own monkeypatch keeps
+    its patches until its own teardown."""
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setenv("TZ", zone)
+        time.tzset()
+        try:
+            yield
+        finally:
+            mp.undo()
+            time.tzset()
+
+
 @pytest.fixture
-def new_york(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+def new_york() -> Iterator[None]:
     """Local time is America/New_York: fall-back 2026-11-01, spring-forward 2027-03-14."""
-    monkeypatch.setenv("TZ", "America/New_York")
-    time.tzset()
-    yield
-    monkeypatch.undo()
-    time.tzset()
+    with _local_zone("America/New_York"):
+        yield
 
 
 def _install_clock(monkeypatch: pytest.MonkeyPatch) -> _Clock:
@@ -778,11 +790,8 @@ def clock(monkeypatch: pytest.MonkeyPatch, new_york: None) -> _Clock:
 @pytest.fixture
 def utc_clock(monkeypatch: pytest.MonkeyPatch) -> Iterator[_Clock]:
     """Sched's time.time() reads clock.t; local time is UTC."""
-    monkeypatch.setenv("TZ", "UTC")
-    time.tzset()
-    yield _install_clock(monkeypatch)
-    monkeypatch.undo()
-    time.tzset()
+    with _local_zone("UTC"):
+        yield _install_clock(monkeypatch)
 
 
 def _ts(*wall: int, fold: int = 0) -> float:
