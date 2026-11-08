@@ -5,10 +5,13 @@
 
 from __future__ import annotations
 
+import importlib.abc
+import importlib.util
 import os
 import sys
 import threading
 import types
+from typing import Any
 
 import pytest
 
@@ -20,6 +23,7 @@ from appinfra._suite_behavior import (
     FS_READ,
     FS_WRITE,
     PROCESS,
+    SIGNAL,
     SOCKET,
     Project,
     Recorder,
@@ -143,6 +147,37 @@ class TestEvents:
         assert found is not None and "git" in found[1]
 
 
+def _frames(*filenames: str) -> Any:
+    """A frame chain, innermost first, with each frame's code from a file."""
+    frame = None
+    for filename in reversed(filenames):
+        frame = types.SimpleNamespace(
+            f_code=types.SimpleNamespace(co_filename=filename), f_back=frame
+        )
+    return frame
+
+
+class TestImporting:
+    @pytest.mark.parametrize(
+        "machinery",
+        [
+            "<frozen importlib._bootstrap>",
+            "<frozen importlib._bootstrap_external>",
+            "/usr/lib/python3.12/importlib/_bootstrap.py",  # -X frozen_modules=off
+        ],
+    )
+    def test_the_import_machinery_on_the_stack_is_an_import(
+        self, machinery: str
+    ) -> None:
+        frames = _frames("/venv/lib/somelib/config.py", machinery, "/proj/t.py")
+        assert _suite_behavior.importing(frames)
+
+    def test_a_call_outside_an_import_is_not(self) -> None:
+        assert not _suite_behavior.importing(
+            _frames("/usr/lib/python3.12/os.py", "/proj/t.py")
+        )
+
+
 class TestRunsProject:
     @pytest.mark.parametrize(
         "argv",
@@ -254,4 +289,34 @@ class TestRecorder:
             thread = threading.Thread(target=elsewhere)
             thread.start()
             thread.join()
+        assert recorder.evidence("t.py::test_a", []) == {}
+
+    def test_what_a_module_does_while_being_imported_is_not_charged(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A module does its import-time work for whichever test imports it first: the work is
+        the module's, not the test's."""
+        recorder = Recorder(PROJECT)
+        name = "_suite_behavior_imported_probe"
+
+        class Loader(importlib.abc.Loader):
+            def create_module(self, spec: Any) -> None:
+                return None
+
+            def exec_module(self, module: types.ModuleType) -> None:
+                recorder.audit("os.mkdir", ("/tmp/made_on_import", 0o777, -1))
+                recorder.note((SIGNAL, "signal.signal 10"))
+
+        class Finder(importlib.abc.MetaPathFinder):
+            def find_spec(self, fullname: str, path: Any, target: Any = None) -> Any:
+                if fullname != name:
+                    return None
+                return importlib.util.spec_from_loader(fullname, Loader())
+
+        monkeypatch.setattr(sys, "meta_path", [Finder(), *sys.meta_path])
+        try:
+            with recorder.running("t.py::test_a"):
+                importlib.import_module(name)
+        finally:
+            sys.modules.pop(name, None)
         assert recorder.evidence("t.py::test_a", []) == {}

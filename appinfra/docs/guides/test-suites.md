@@ -129,7 +129,7 @@ one of:
 A unit test that left process-wide state changed is a **leak**, a finding of its own: a signal
 handler, the `ITIMER_REAL` timer, an environment variable or the working directory, compared from
 before its setup to after its teardown. An environment variable a module sets while being
-imported, as torch or vllm do on first import, is not the test's.
+imported is the module's, not the test's.
 
 A unit test seen doing what its suite does not allow is **misfiled**, one finding per class and
 target suite, with the first test's evidence:
@@ -159,6 +159,8 @@ Not evidence: reading the project's own files, the interpreter's or the system's
 `/proc`, `/usr`, ...), or code anywhere, which is an import; what a tool writes to its cache
 (`__pycache__`, `.hypothesis`); writes to a device; `sqlite3` in memory; sleeps; environment
 changes, which the leak check covers; and the SIGINT handler `asyncio.run` installs and restores.
+Nor is what a module does while being imported, such as making its cache directory: it does that
+for whichever test imports it first.
 
 A finding comes only from what a test was seen doing, never from what it was not seen doing.
 Integration and e2e tests are not judged: an integration test with no evidence, or an e2e test
