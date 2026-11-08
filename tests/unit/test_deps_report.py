@@ -12,6 +12,7 @@ import subprocess
 import sys
 from pathlib import Path
 from types import ModuleType
+from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -309,6 +310,45 @@ class TestCiVersion:
 
         assert ci_cell("1.9") == "\033[1;95m1.9\033[0m"
         assert ci_cell("✓") == "\033[0;32m✓\033[0m"
+        assert ci_cell("-") == "\033[0;90m-\033[0m"  # not installed in CI: gray
+
+
+class TestCiProject:
+    PROJECT = {
+        "name": "proj",
+        "dependencies": ["a"],
+        "optional-dependencies": {"dev": ["b"], "cuda": ["c"]},
+    }
+
+    def test_keeps_only_the_groups_ci_installs(self, dr: ModuleType) -> None:
+        project = dr.ci_project(self.PROJECT, ["dev"])
+        assert project["optional-dependencies"] == {"dev": ["b"]}
+        assert project["dependencies"] == ["a"]
+        assert self.PROJECT["optional-dependencies"] == {"dev": ["b"], "cuda": ["c"]}
+
+    def test_an_unknown_group_is_an_error(self, dr: ModuleType) -> None:
+        with pytest.raises(ValueError, match="'gpu'"):
+            dr.ci_project(self.PROJECT, ["dev", "gpu"])
+
+    @pytest.mark.parametrize(
+        ("argv", "expected"),
+        [
+            ([], None),  # every group
+            (["--ci-extras", "dev,runtime"], ["dev", "runtime"]),
+            (["--ci-extras", ""], []),  # no optional group
+        ],
+    )
+    def test_ci_extras_option(self, dr: ModuleType, argv, expected) -> None:  # type: ignore[no-untyped-def]
+        assert dr._parse_args(argv).ci_extras == expected
+
+    def test_main_rejects_an_unknown_group(
+        self, dr: ModuleType, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        with patch.object(dr, "_load_project", lambda: self.PROJECT):
+            assert dr.main(["--ci-extras", "dev,gpu", "--no-color"]) == 2
+        assert "--ci-extras: no such optional-dependency group: 'gpu'" in (
+            capsys.readouterr().err
+        )
 
 
 class TestDistance:
@@ -435,8 +475,13 @@ class TestReport:
         color: bool = False,
         requires: dict[str, list[str]] | None = None,
         asked: list[str] | None = None,
+        project: dict[str, Any] | None = None,
+        ci_extras: list[str] | None = None,
     ) -> list[str]:
         asked = [] if asked is None else asked
+        project = self.PROJECT if project is None else project
+        groups = list(project.get("optional-dependencies", {}))
+        ci_extras = groups if ci_extras is None else ci_extras
 
         def versions(name: str) -> list[Version] | None:
             asked.append(name)
@@ -450,9 +495,34 @@ class TestReport:
             # appinfra versions do not follow it
             patch.dict(dr.collect_deps.__globals__, FRAMEWORK_TOOLS="appinfra[check]"),
         ):
-            text = dr.report(self.PROJECT, deep, False, color, versions)
+            text = dr.report(project, ci_extras, deep, False, color, versions)
         assert "local" not in asked  # a direct install is not looked up
         return text.splitlines()
+
+    def test_a_package_only_in_a_group_ci_skips_is_not_in_ci(
+        self, dr: ModuleType
+    ) -> None:
+        """CI installs no optional group here: x's packages show "-", the rest as before."""
+        cols = {
+            row[0]: row[1:] for row in self.table(self.run(dr, False, ci_extras=[]))
+        }
+        # floor, ceil, installed, ci, available, status
+        assert cols["gone"][3] == "-" and cols["offline"][3] == "-"
+        assert cols["local"][3] == "-"  # not in CI: no "index" either
+        assert cols["lib"][3] == "1.1" and cols["web"][3] == "✓"
+
+    def test_ci_resolves_within_its_own_ranges(self, dr: ModuleType) -> None:
+        """A group CI skips cannot cap what CI installs: lib<1.1 is in gpu only."""
+        project = {
+            "name": "proj",
+            "dependencies": ["lib>=1"],
+            "optional-dependencies": {"gpu": ["lib<1.1"]},
+        }
+        every = self.table(self.run(dr, False, project=project))
+        ci_only = self.table(self.run(dr, False, project=project, ci_extras=[]))
+        # with gpu, a fresh install keeps lib 1.0; without it, CI gets 1.1
+        assert {r[0]: r[4] for r in every}["lib"] == "✓"
+        assert {r[0]: r[4] for r in ci_only}["lib"] == "1.1"
 
     def test_a_cap_from_another_dependency_counts_without_deep(
         self, dr: ModuleType
@@ -524,7 +594,8 @@ class TestReport:
             "status",
         ]
         assert lines[-2:] == [
-            "ci: ✓ = CI installs the same version, else the version it installs",
+            "ci: ✓ = CI installs the same version, - = CI does not install it, else "
+            "the version it installs",
             "available: newest release outside the range",
         ]
 
