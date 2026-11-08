@@ -24,7 +24,8 @@ its file, so an attribute assigned in several places needs the directive once.
 
 A definition under a registering decorator is kept the same way: the decorator
 hands it to a framework that calls it, never by name. pydantic's validators and
-serializers (REGISTERING_DECORATORS) are built in; ``--keep-decorator`` adds
+serializers and SQLAlchemy's ``validates``, ``reconstructor`` and ``listens_for``
+(REGISTERING_DECORATORS) are built in; ``--keep-decorator`` adds
 others, matched as the decorator's dotted name or a suffix of it, so
 ``router.get`` covers ``@api.router.get("/x")``. A decorator that only wraps
 (``staticmethod``, ``property``, ``functools.cache``) keeps nothing.
@@ -54,13 +55,17 @@ from .common import (
     read_source,
 )
 
-# Decorators whose framework collects the definition and calls it itself: pydantic's model
-# metaclass runs these during validation and serialization
+# Decorators whose framework collects the definition and calls it itself
 REGISTERING_DECORATORS = (
+    # pydantic's model metaclass runs these during validation and serialization
     "field_validator",
     "model_validator",
     "field_serializer",
     "model_serializer",
+    # SQLAlchemy calls these on attribute set, on load and on the event
+    "validates",
+    "reconstructor",
+    "listens_for",
 )
 
 
@@ -288,7 +293,7 @@ class CheckDeadTool(Tool):
             help=(
                 "Decorator that registers what it decorates, so its definitions count as "
                 "used: its dotted name or a suffix of it (can be used multiple times). "
-                "pydantic's " + ", ".join(REGISTERING_DECORATORS) + " are built in"
+                "Built in: " + ", ".join(REGISTERING_DECORATORS)
             ),
         )
 

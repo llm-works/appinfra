@@ -21,6 +21,7 @@ import time
 from collections.abc import Iterator
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -749,24 +750,48 @@ class _Clock:
         self.t = 0.0
 
 
+@contextlib.contextmanager
+def _local_zone(zone: str) -> Iterator[None]:
+    """The process's local zone is ``zone`` inside; on exit TZ is back to what it was (set or
+    unset) before time.tzset() reloads it. Only TZ is restored: the test's own monkeypatch keeps
+    its patches until its own teardown."""
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setenv("TZ", zone)
+        time.tzset()
+        try:
+            yield
+        finally:
+            mp.undo()
+            time.tzset()
+
+
 @pytest.fixture
-def new_york(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+def new_york() -> Iterator[None]:
     """Local time is America/New_York: fall-back 2026-11-01, spring-forward 2027-03-14."""
-    monkeypatch.setenv("TZ", "America/New_York")
-    time.tzset()
-    yield
-    monkeypatch.undo()
-    time.tzset()
+    with _local_zone("America/New_York"):
+        yield
 
 
-@pytest.fixture
-def clock(monkeypatch: pytest.MonkeyPatch, new_york: None) -> _Clock:
-    """Sched's time.time() reads clock.t."""
+def _install_clock(monkeypatch: pytest.MonkeyPatch) -> _Clock:
+    """Make Sched's time.time() read the returned clock's t."""
     c = _Clock()
     monkeypatch.setattr(
         sched_module, "time", SimpleNamespace(time=lambda: c.t, sleep=lambda _: None)
     )
     return c
+
+
+@pytest.fixture
+def clock(monkeypatch: pytest.MonkeyPatch, new_york: None) -> _Clock:
+    """Sched's time.time() reads clock.t; local time is America/New_York."""
+    return _install_clock(monkeypatch)
+
+
+@pytest.fixture
+def utc_clock(monkeypatch: pytest.MonkeyPatch) -> Iterator[_Clock]:
+    """Sched's time.time() reads clock.t; local time is UTC."""
+    with _local_zone("UTC"):
+        yield _install_clock(monkeypatch)
 
 
 def _ts(*wall: int, fold: int = 0) -> float:
@@ -842,6 +867,82 @@ class TestDaylightSaving:
         sched = Sched(mock_logger, Period.WEEKLY, "09:00", weekday=6)
         sched.sync()
         assert _fire(sched, clock) == _ts(2026, 11, 1, 9, 0)  # Sunday 09:00 EST
+
+
+def _zoned(zone: str, *wall: int) -> float:
+    """Timestamp of a wall time in ``zone``."""
+    return datetime.datetime(*wall, tzinfo=ZoneInfo(zone)).timestamp()  # type: ignore[misc]
+
+
+class TestTimezone:
+    """Times are read in the given zone, DST included, whatever the process's local zone."""
+
+    def test_daily_runs_at_the_zone_s_wall_time_across_fall_back(
+        self, mock_logger, utc_clock
+    ):
+        ny = "America/New_York"
+        utc_clock.t = _zoned(ny, 2026, 10, 31, 8, 0)
+        sched = Sched(mock_logger, Period.DAILY, "11:00", tz=ny)
+        sched.sync()
+        assert sched.next_t == _zoned(ny, 2026, 10, 31, 11, 0)
+        assert _fire(sched, utc_clock) == _zoned(ny, 2026, 11, 1, 11, 0)  # 25h later
+        assert _fire(sched, utc_clock) == _zoned(ny, 2026, 11, 2, 11, 0)
+
+    def test_daily_runs_at_the_zone_s_wall_time_across_spring_forward(
+        self, mock_logger, utc_clock
+    ):
+        ny = "America/New_York"
+        utc_clock.t = _zoned(ny, 2027, 3, 13, 8, 0)
+        sched = Sched(mock_logger, Period.DAILY, "11:00", tz=ny)
+        sched.sync()
+        assert sched.next_t == _zoned(ny, 2027, 3, 13, 11, 0)
+        assert _fire(sched, utc_clock) == _zoned(ny, 2027, 3, 14, 11, 0)  # 23h later
+
+    def test_hourly_minute_is_the_zone_s(self, mock_logger, utc_clock):
+        """Kolkata is UTC+05:30: its :00 is UTC's :30."""
+        utc_clock.t = datetime.datetime(
+            2030, 1, 1, 12, 10, tzinfo=datetime.UTC
+        ).timestamp()
+        sched = Sched(mock_logger, Period.HOURLY, "0", tz="Asia/Kolkata")
+        sched.sync()
+        assert (
+            sched.next_t
+            == datetime.datetime(2030, 1, 1, 12, 30, tzinfo=datetime.UTC).timestamp()
+        )
+
+    def test_weekly_day_is_the_zone_s(self, mock_logger, utc_clock):
+        """Wednesday 02:00 UTC is still Tuesday evening in New York."""
+        ny = "America/New_York"
+        utc_clock.t = _zoned(ny, 2030, 1, 1, 21, 0)  # Tuesday 21:00 NY
+        sched = Sched(mock_logger, Period.WEEKLY, "22:00", weekday=1, tz=ny)
+        sched.sync()
+        assert sched.next_t == _zoned(ny, 2030, 1, 1, 22, 0)
+
+    def test_a_tzinfo_is_accepted(self, mock_logger, utc_clock):
+        ny = ZoneInfo("America/New_York")
+        utc_clock.t = _zoned("America/New_York", 2030, 1, 1, 8, 0)
+        sched = Sched(mock_logger, Period.DAILY, "11:00", tz=ny)
+        sched.sync()
+        assert sched.next_t == _zoned("America/New_York", 2030, 1, 1, 11, 0)
+
+    def test_status_shows_the_next_run_in_the_zone(self, mock_logger, utc_clock):
+        ny = "America/New_York"
+        utc_clock.t = _zoned(ny, 2030, 1, 1, 8, 0)
+        sched = Sched(mock_logger, Period.DAILY, "11:00", tz=ny)
+        sched.sync()
+        status = sched.get_status()
+        assert status["next_execution"] == "2030-01-01T11:00:00-05:00"
+        assert status["tz"] == ny
+
+    def test_a_zone_not_found_names_the_zone_database_as_a_cause(self, mock_logger):
+        """A valid name fails the same way where no zone database is installed."""
+        with pytest.raises(InvalidConfigError, match="unknown timezone.*tzdata"):
+            Sched(mock_logger, Period.DAILY, "11:00", tz="Mars/Olympus_Mons")
+
+    @pytest.mark.parametrize("tz", ["../etc/passwd", ""])
+    def test_a_malformed_zone_name_is_invalid(self, mock_logger, tz):
+        with pytest.raises(InvalidConfigError, match="^invalid timezone"):
+            Sched(mock_logger, Period.DAILY, "11:00", tz=tz)
 
 
 class TestMonthlyRuns:

@@ -512,7 +512,7 @@ Each setting has a type, and a value that does not fit it stops make:
 | `APPINFRA_DEV_CQ_LINT_SELECT` | `C90,SIM,RET,PIE,PERF,FURB,C4` | Extra ruff rule codes the Linting check reports as warnings, never failing (`false` to turn off) |
 | `APPINFRA_DEV_CQ_DUP` | `warn` | Duplicated code in the Code quality check (pylint): `false`, `warn` or `strict` |
 | `APPINFRA_DEV_CQ_DEAD` | `warn` | Dead private code in the Code quality check: `false`, `warn` or `strict` |
-| `APPINFRA_DEV_CQ_DEAD_KEEP_DECORATORS` | (empty) | Space-separated decorators that register what they decorate, so dead private code counts their definitions as used: a dotted name or a suffix of it (e.g. `router.get cli.command`). pydantic's validator and serializer decorators are built in |
+| `APPINFRA_DEV_CQ_DEAD_KEEP_DECORATORS` | (empty) | Space-separated decorators that register what they decorate, so dead private code counts their definitions as used: a dotted name or a suffix of it (e.g. `router.get cli.command`). pydantic's validator and serializer decorators and SQLAlchemy's `validates`, `reconstructor` and `listens_for` are built in |
 | `APPINFRA_DEV_TEST_HEALTH` | `false` | The Test structure health line of `make check`, for a project that loads `appinfra.pytest_suites`: off, or `warn` or `strict` on any finding ([Test suites](test-suites.md)) |
 | `APPINFRA_DEV_TEST_HEALTH_THRESHOLD` | `15` | Percent of a class's tests that may belong to another suite before the Test structure health line asks to split them off |
 | `APPINFRA_DEV_TEST_HEALTH_OUTLIERS` | `3` | Tests of another suite any class may hold, whatever its size, before the Test structure health line reports it |

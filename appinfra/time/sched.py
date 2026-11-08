@@ -36,6 +36,9 @@ Example Usage:
     # Every hour at 15 minutes past the hour
     sched = Sched(lg, Period.HOURLY, "15")
 
+    # Daily at 11:00 New York time, whatever the process's local zone
+    sched = Sched(lg, Period.DAILY, "11:00", tz="America/New_York")
+
     # Run the scheduler
     for timestamp in sched.run():
         lg.info(f"Task executed at {timestamp}")
@@ -47,6 +50,7 @@ import time
 from collections.abc import Generator
 from enum import Enum
 from typing import Any, Self
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from ..log import LoggerFactory
 from .delta import delta_str
@@ -185,14 +189,33 @@ def _parse_hhmm_format(when: str) -> tuple[int, int]:
     raise InvalidTimeFormatError(f"Unsupported time format: {when}")
 
 
-def _wall_ts(day: datetime.date, hour: int, minute: int) -> float:
-    """Timestamp of a local wall-clock time on ``day``.
+def _zone(tz: str | datetime.tzinfo | None) -> datetime.tzinfo | None:
+    """The zone schedule times are read in: an IANA name or a tzinfo; None for local time."""
+    if not isinstance(tz, str):
+        return tz
+    try:
+        return ZoneInfo(tz)
+    except ZoneInfoNotFoundError as e:
+        # Also what a valid name gives where neither the system nor tzdata has zone data
+        raise InvalidConfigError(
+            f"unknown timezone: {tz!r} (not an IANA zone name, or no zone database: install "
+            "the system's zone data or the tzdata package)"
+        ) from e
+    except ValueError as e:  # a malformed key, such as a path outside the zone database
+        raise InvalidConfigError(f"invalid timezone: {tz!r}") from e
+
+
+def _wall_ts(
+    day: datetime.date, hour: int, minute: int, tz: datetime.tzinfo | None
+) -> float:
+    """Timestamp of a wall-clock time on ``day`` in ``tz``, local time for None.
 
     A time the fall-back hour repeats resolves to its first pass. A time the
     spring-forward gap skips resolves as if the offset before the change still
     held: 02:30 in a gap from 02:00 to 03:00 runs at 03:30.
     """
-    return datetime.datetime.combine(day, datetime.time(hour, minute)).timestamp()
+    wall = datetime.datetime.combine(day, datetime.time(hour, minute), tzinfo=tz)
+    return wall.timestamp()
 
 
 class Sched:
@@ -221,6 +244,7 @@ class Sched:
         when: str,
         weekday: int | None = None,
         sleep_interval: int = DEFAULT_SLEEP_INTERVAL,
+        tz: str | datetime.tzinfo | None = None,
     ) -> None:
         """
         Initialize the scheduler.
@@ -231,6 +255,8 @@ class Sched:
             when: Time specification (format depends on period)
             weekday: Day of week for weekly scheduling (0=Monday, 6=Sunday)
             sleep_interval: Seconds to sleep between checks in run() method
+            tz: Zone ``when`` and ``weekday`` are read in, an IANA name such as
+                "America/New_York" or a tzinfo; None for the process's local time
 
         Raises:
             InvalidConfigError: If configuration is invalid
@@ -241,6 +267,7 @@ class Sched:
         self._period = _normalize_period(period)
         self._hour, self._minute = self._parse_time(when, self._period)
         self._weekday = _validate_weekday(self._period, weekday)
+        self._tz = _zone(tz)
 
         self._next_t: float | None = None
         self._lg = LoggerFactory.derive(lg, ["time", "sched"])
@@ -325,17 +352,21 @@ class Sched:
             "scheduler configured",
             extra={
                 "period": self._period.value,
-                "next": datetime.datetime.fromtimestamp(self._next_t).isoformat(),
+                "next": self._iso(self._next_t),
                 "in": delta_str(self._next_t - now, precise=False),
             },
         )
+
+    def _iso(self, ts: float) -> str:
+        """A timestamp as ISO 8601 in the schedule's zone."""
+        return datetime.datetime.fromtimestamp(ts, self._tz).isoformat()
 
     def _next_after(self, now: float) -> float:
         """The first run strictly after the timestamp ``now``.
 
         Minutely and hourly runs step through real time, so they keep their pace
-        across a DST change. Daily, weekly and monthly runs fall on a local
-        wall-clock time, which a DST change moves in real time.
+        across a DST change. Daily, weekly and monthly runs fall on a wall-clock
+        time in the schedule's zone, which a DST change moves in real time.
         """
         if self._period == Period.MINUTELY:
             # UTC offsets are whole minutes: a second of the minute is the same in
@@ -343,13 +374,15 @@ class Sched:
             t = now - now % SECONDS_PER_MINUTE + self._minute
             return t if t > now else t + SECONDS_PER_MINUTE
         if self._period == Period.HOURLY:
-            # The local offset in effect at now: the minute of the hour is local
-            local = datetime.datetime.fromtimestamp(now, datetime.UTC).astimezone()
-            t = local.replace(minute=self._minute, second=0, microsecond=0).timestamp()
+            # The zone's offset in effect at now: the minute of the hour is the zone's
+            wall = datetime.datetime.fromtimestamp(now, datetime.UTC).astimezone(
+                self._tz
+            )
+            t = wall.replace(minute=self._minute, second=0, microsecond=0).timestamp()
             return t if t > now else t + SECONDS_PER_HOUR
-        today = datetime.datetime.fromtimestamp(now).date()
+        today = datetime.datetime.fromtimestamp(now, self._tz).date()
         for day in self._candidate_days(today):
-            t = _wall_ts(day, self._hour, self._minute)
+            t = _wall_ts(day, self._hour, self._minute, self._tz)
             if t > now:
                 return t
         raise AssertionError("the later candidate day always follows now")
@@ -401,7 +434,7 @@ class Sched:
                 "scheduler triggered",
                 extra={
                     "period": self._period.value,
-                    "next": datetime.datetime.fromtimestamp(self.next_t).isoformat(),
+                    "next": self._iso(self.next_t),
                 },
             )
             return True, self.next_t - now
@@ -415,11 +448,7 @@ class Sched:
             extra={
                 "period": self._period.value,
                 "in": delta_str(delay, precise=False),
-                "next": (
-                    datetime.datetime.fromtimestamp(self.next_t).isoformat()
-                    if self.next_t
-                    else None
-                ),
+                "next": self._iso(self.next_t) if self.next_t else None,
             },
         )
 
@@ -489,14 +518,11 @@ class Sched:
         """
         return {
             "period": self._period.value,
-            "next_execution": (
-                datetime.datetime.fromtimestamp(self.next_t).isoformat()
-                if self.next_t
-                else None
-            ),
+            "next_execution": self._iso(self.next_t) if self.next_t else None,
             "is_running": self._running,
             "sleep_interval": self._sleep_interval,
             "weekday": self._weekday if self._period == Period.WEEKLY else None,
+            "tz": str(self._tz) if self._tz is not None else None,
         }
 
     def __enter__(self) -> Self:

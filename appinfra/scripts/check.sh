@@ -203,13 +203,19 @@ PYTEST_PLUGINS="-p pytest_hang -p pytest_exit_warnings"
 # How a warning in a passing check ends, whichever check printed it (tests, examples, a tool's
 # own "warning:" line): strict when the project's pytest filterwarnings has a bare "error" (every
 # warning an error), so the check fails; warn otherwise, so the check passes with a warning.
-# Asked once from pytest_exit_warnings, in a run that only reads the configuration.
-WARNINGS_MODE=$({ cd "$PROJECT_ROOT" && eval "COVERAGE_FILE=${STATUS_DIR}/probe.coverage ${PYTEST_PLUGIN_PATH}${PYTHON} -m pytest -p pytest_exit_warnings --collect-only -q --noconftest --ignore-glob='*'" 2>&1 || true; } \
-    | sed -nE 's/^=== exit warnings: (strict|warn) ===$/\1/p' | tail -1)
-if [ -z "$WARNINGS_MODE" ]; then
-    echo "check.sh: pytest could not read the project's configuration (run: ${PYTHON} -m pytest --collect-only)" >&2
-    exit 1
-fi
+# Set by read_warnings_mode, which main calls once the checklist is on screen: the pytest run it
+# takes would otherwise hold back the first display.
+WARNINGS_MODE=""
+
+# Ask pytest_exit_warnings for WARNINGS_MODE, in a run that only reads the configuration
+read_warnings_mode() {
+    WARNINGS_MODE=$({ cd "$PROJECT_ROOT" && eval "COVERAGE_FILE=${STATUS_DIR}/probe.coverage ${PYTEST_PLUGIN_PATH}${PYTHON} -m pytest -p pytest_exit_warnings --collect-only -q --noconftest --ignore-glob='*'" 2>&1 || true; } \
+        | sed -nE 's/^=== exit warnings: (strict|warn) ===$/\1/p' | tail -1)
+    if [ -z "$WARNINGS_MODE" ]; then
+        echo "check.sh: pytest could not read the project's configuration (run: ${PYTHON} -m pytest --collect-only)" >&2
+        exit 1
+    fi
+}
 
 # Terminal width for fit_slow_row, read here because stdout is the terminal only at the top
 # level: inside $(...) it is a pipe. Empty without a terminal (CI), where rows are not cut.
@@ -610,13 +616,14 @@ close_display() {
     } 200>"$DISPLAY_LOCK"
 }
 
-# A line's text in the color of its mark: bright yellow under a warning, red under a failure. The
-# detail after it keeps its own color.
+# A line's text in the color of its mark: bright yellow under a warning, red under a failure, gray
+# under an empty box, a check with nothing to run. The detail after it keeps its own color.
 status_tint() {
     local status="$1" text="$2" color=""
     case "$status" in
         "$UI_MARK_WARN") color="$UI_BRIGHT_YELLOW" ;;
         "$UI_MARK_FAIL") color="$UI_RED" ;;
+        "$UI_MARK_PENDING") color="$UI_GRAY" ;;
     esac
     if [ -n "$color" ]; then
         printf '%s%s%s' "$color" "$text" "$UI_RESET"
@@ -1146,7 +1153,7 @@ run_raw_test_structure() {
     local out rc=0
     out=$(suite_health_report 2>&1) || rc=$?
     if [ "$rc" -eq 3 ]; then
-        echo "  ${UI_GRAY}[ ]${UI_RESET} ${HEALTH_NAME} ${UI_GRAY}(no report: is appinfra.pytest_suites loaded?)${UI_RESET}"
+        echo "  ${UI_GRAY}[ ] ${HEALTH_NAME} (no report: is appinfra.pytest_suites loaded?)${UI_RESET}"
         return 0
     elif [ "$rc" -ne 0 ]; then
         printf '%s\n' "$out"
@@ -1608,7 +1615,7 @@ run_raw_check() {
     fi
     [ "$rc" -ne "$EXIT_CODE_WARNING" ] || raw_warned "$warnings"
     if [ "$rc" -eq 5 ] && [ -n "$indent" ]; then
-        echo "${indent}${UI_GRAY}[ ]${UI_RESET} $name ${UI_GRAY}(no tests)${UI_RESET}"
+        echo "${indent}${UI_GRAY}[ ] $name (no tests)${UI_RESET}"
     elif [ "$rc" -eq 0 ]; then
         echo "${indent}${UI_MARK_OK} $name passed"
     elif [ "$rc" -eq "$EXIT_CODE_WARNING" ] && [ -z "$found" ]; then
@@ -1637,7 +1644,7 @@ main() {
     cd "$PROJECT_ROOT"
     rm -rf "$KEPT_LOG_DIR"
 
-    [ "$RAW" = true ] && { run_raw; return $?; }
+    [ "$RAW" = true ] && { read_warnings_mode; run_raw; return $?; }
 
     # The lines under Test suite: the subchecks, with Test structure health after the pytest
     # ones, before Examples
@@ -1680,6 +1687,9 @@ main() {
             done
         fi
     done
+
+    # With the checklist up; an error prints below it, the cursor still shown
+    read_warnings_mode
 
     # Hide cursor during updates
     tput civis 2>/dev/null || printf "\033[?25l"
