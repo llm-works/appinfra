@@ -203,13 +203,19 @@ PYTEST_PLUGINS="-p pytest_hang -p pytest_exit_warnings"
 # How a warning in a passing check ends, whichever check printed it (tests, examples, a tool's
 # own "warning:" line): strict when the project's pytest filterwarnings has a bare "error" (every
 # warning an error), so the check fails; warn otherwise, so the check passes with a warning.
-# Asked once from pytest_exit_warnings, in a run that only reads the configuration.
-WARNINGS_MODE=$({ cd "$PROJECT_ROOT" && eval "COVERAGE_FILE=${STATUS_DIR}/probe.coverage ${PYTEST_PLUGIN_PATH}${PYTHON} -m pytest -p pytest_exit_warnings --collect-only -q --noconftest --ignore-glob='*'" 2>&1 || true; } \
-    | sed -nE 's/^=== exit warnings: (strict|warn) ===$/\1/p' | tail -1)
-if [ -z "$WARNINGS_MODE" ]; then
-    echo "check.sh: pytest could not read the project's configuration (run: ${PYTHON} -m pytest --collect-only)" >&2
-    exit 1
-fi
+# Set by read_warnings_mode, which main calls once the checklist is on screen: the pytest run it
+# takes would otherwise hold back the first display.
+WARNINGS_MODE=""
+
+# Ask pytest_exit_warnings for WARNINGS_MODE, in a run that only reads the configuration
+read_warnings_mode() {
+    WARNINGS_MODE=$({ cd "$PROJECT_ROOT" && eval "COVERAGE_FILE=${STATUS_DIR}/probe.coverage ${PYTEST_PLUGIN_PATH}${PYTHON} -m pytest -p pytest_exit_warnings --collect-only -q --noconftest --ignore-glob='*'" 2>&1 || true; } \
+        | sed -nE 's/^=== exit warnings: (strict|warn) ===$/\1/p' | tail -1)
+    if [ -z "$WARNINGS_MODE" ]; then
+        echo "check.sh: pytest could not read the project's configuration (run: ${PYTHON} -m pytest --collect-only)" >&2
+        exit 1
+    fi
+}
 
 # Terminal width for fit_slow_row, read here because stdout is the terminal only at the top
 # level: inside $(...) it is a pipe. Empty without a terminal (CI), where rows are not cut.
@@ -1637,7 +1643,7 @@ main() {
     cd "$PROJECT_ROOT"
     rm -rf "$KEPT_LOG_DIR"
 
-    [ "$RAW" = true ] && { run_raw; return $?; }
+    [ "$RAW" = true ] && { read_warnings_mode; run_raw; return $?; }
 
     # The lines under Test suite: the subchecks, with Test structure health after the pytest
     # ones, before Examples
@@ -1680,6 +1686,9 @@ main() {
             done
         fi
     done
+
+    # With the checklist up; an error prints below it, the cursor still shown
+    read_warnings_mode
 
     # Hide cursor during updates
     tput civis 2>/dev/null || printf "\033[?25l"
