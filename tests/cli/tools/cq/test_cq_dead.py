@@ -262,6 +262,21 @@ class TestIsRegistered:
         assert is_registered(node, REGISTERING_DECORATORS) is True
 
     @pytest.mark.parametrize(
+        "decorator",
+        [
+            '@validates("email")',
+            '@orm.validates("email", include_removes=True)',
+            "@reconstructor",
+            "@orm.reconstructor",
+            '@event.listens_for(User, "before_insert")',
+            '@listens_for(engine, "connect")',
+        ],
+    )
+    def test_sqlalchemy_decorators_register(self, decorator: str):
+        node = _first_def(f"{decorator}\ndef _hook(self, *args): pass\n")
+        assert is_registered(node, REGISTERING_DECORATORS) is True
+
+    @pytest.mark.parametrize(
         "decorator", ["@staticmethod", "@property", "@functools.cache", ""]
     )
     def test_wrapping_or_no_decorator_does_not_register(self, decorator: str):

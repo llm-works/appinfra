@@ -21,6 +21,8 @@ For API stability guarantees and deprecation policy, see
   project root.
 - The package declares its license as the SPDX expression `Apache-2.0`; building from source
   needs setuptools 77.0.3 or later.
+- `cq dead` also counts methods under SQLAlchemy's `validates`, `reconstructor` and
+  `listens_for` as used.
 
 ## [0.14.1] - 2026-11-03
 
