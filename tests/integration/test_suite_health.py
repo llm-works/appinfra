@@ -281,6 +281,10 @@ def test_runs_the_project():
     subprocess.run([sys.executable, "-m", "myapp"], check=True)
 
 
+def test_imports_a_module_that_writes_on_import():
+    import writes_on_import  # noqa: F401
+
+
 @pytest.mark.integration
 def test_integration_is_not_recorded(tmp_path):
     (tmp_path / "f").write_text("x")
@@ -295,7 +299,15 @@ def test_e2e_is_not_recorded():
 def test_the_report_records_what_each_test_does(
     pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    layout = {**_PROJECT, "tests/unit/test_behavior.py": _BEHAVIOR}
+    layout = {
+        **_PROJECT,
+        "tests/unit/test_behavior.py": _BEHAVIOR,
+        # a module that makes a directory at import, for whichever test imports it first
+        "tests/unit/writes_on_import.py": (
+            "import os\n"
+            "os.makedirs(os.path.join(os.path.dirname(__file__), 'made'), exist_ok=True)\n"
+        ),
+    }
     behavior = _report(_run(pytester, monkeypatch, layout))["behavior"]
     found = {
         nodeid.split("::")[-1]: (

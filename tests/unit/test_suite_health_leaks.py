@@ -5,47 +5,15 @@
 
 from __future__ import annotations
 
-from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
-from appinfra import _suite_health
-
-
-def _frames(*filenames: str) -> Any:
-    """A frame chain, innermost first, with each frame's code from a file."""
-    frame = None
-    for filename in reversed(filenames):
-        frame = SimpleNamespace(
-            f_code=SimpleNamespace(co_filename=filename), f_back=frame
-        )
-    return frame
+from appinfra import _suite_behavior, _suite_health
 
 
 def _state(**env: str) -> dict[str, Any]:
     return {"signals": {}, "timer": False, "env": env, "cwd": "/"}
-
-
-class TestImporting:
-    @pytest.mark.parametrize(
-        "machinery",
-        [
-            "<frozen importlib._bootstrap>",
-            "<frozen importlib._bootstrap_external>",
-            "/usr/lib/python3.12/importlib/_bootstrap.py",  # -X frozen_modules=off
-        ],
-    )
-    def test_the_import_machinery_on_the_stack_is_an_import(
-        self, machinery: str
-    ) -> None:
-        frames = _frames("/venv/lib/torch/_inductor/config.py", machinery, "/proj/t.py")
-        assert _suite_health._importing(frames)
-
-    def test_a_test_setting_env_itself_is_not(self) -> None:
-        assert not _suite_health._importing(
-            _frames("/usr/lib/python3.12/os.py", "/proj/t.py")
-        )
 
 
 class TestChanged:
@@ -79,7 +47,7 @@ class TestNoteImportEnv:
     def test_keeps_the_value_an_import_set_or_removed(
         self, monkeypatch: pytest.MonkeyPatch, written: dict[str, str | None]
     ) -> None:
-        monkeypatch.setattr(_suite_health, "_importing", lambda frame: True)
+        monkeypatch.setattr(_suite_behavior, "importing", lambda frame: True)
         _suite_health._note_import_env("os.putenv", (b"VLLM_LOGGING_LEVEL", b"INFO"))
         _suite_health._note_import_env("os.unsetenv", (b"VLLM_HOST_IP",))
         assert written == {"VLLM_LOGGING_LEVEL": "INFO", "VLLM_HOST_IP": None}
@@ -87,14 +55,14 @@ class TestNoteImportEnv:
     def test_ignores_a_var_set_outside_an_import(
         self, monkeypatch: pytest.MonkeyPatch, written: dict[str, str | None]
     ) -> None:
-        monkeypatch.setattr(_suite_health, "_importing", lambda frame: False)
+        monkeypatch.setattr(_suite_behavior, "importing", lambda frame: False)
         _suite_health._note_import_env("os.putenv", (b"X", b"1"))
         assert written == {}
 
     def test_ignores_other_events_and_pytest_s_own_var(
         self, monkeypatch: pytest.MonkeyPatch, written: dict[str, str | None]
     ) -> None:
-        monkeypatch.setattr(_suite_health, "_importing", lambda frame: True)
+        monkeypatch.setattr(_suite_behavior, "importing", lambda frame: True)
         _suite_health._note_import_env("open", ("/tmp/x", "r", 0))
         _suite_health._note_import_env("os.putenv", (b"PYTEST_CURRENT_TEST", b"t"))
         assert written == {}

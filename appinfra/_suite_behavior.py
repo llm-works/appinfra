@@ -21,7 +21,8 @@ an e2e test runs the project's code as its own process. While the health check r
 - ``chdir``: the working directory changed.
 
 Reading the project's own files, ``sqlite3 :memory:``, real sleeps and environment changes are
-allowed in every suite. check_suite_health.py turns the evidence into findings.
+allowed in every suite. What a module does while being imported is not recorded: it does it for
+whichever test imports it first. check_suite_health.py turns the evidence into findings.
 """
 
 from __future__ import annotations
@@ -40,6 +41,7 @@ import tomllib
 from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
+from types import FrameType
 from typing import Any
 
 FS_WRITE = "fs-write"
@@ -93,6 +95,19 @@ _DETAIL_MAX = 160
 # Directories a tool writes to on its own, whichever test happens to trigger it first: the
 # bytecode an import compiles, and Hypothesis's example database
 _TOOL_CACHES = frozenset({"__pycache__", ".hypothesis"})
+
+# The import machinery's files, frozen ("<frozen importlib._bootstrap>") or from source
+_IMPORT_MACHINERY = ("importlib._bootstrap", os.path.join("importlib", "_bootstrap"))
+
+
+def importing(frame: FrameType | None) -> bool:
+    """Whether the import machinery is on the stack from ``frame`` up: a module is loading."""
+    while frame is not None:
+        filename = frame.f_code.co_filename
+        if any(part in filename for part in _IMPORT_MACHINERY):
+            return True
+        frame = frame.f_back
+    return False
 
 
 @dataclass(frozen=True)
@@ -248,8 +263,9 @@ class Recorder:
     check's health check. Evidence goes to the test or fixture ``running`` names; operations
     outside one (collection, the session's own setup) are not recorded, nor are those of other
     threads: a thread an earlier test left running would charge its work to whichever test
-    runs. Work in threads a test starts goes unrecorded; a missed operation is no finding, a
-    wrongly charged one is a false one.
+    runs. Work in threads a test starts goes unrecorded, and so does what a module does while
+    being imported, which falls to whichever test imports it first; a missed operation is no
+    finding, a wrongly charged one is a false one.
     """
 
     def __init__(self, project: Project) -> None:
@@ -288,8 +304,11 @@ class Recorder:
         self._evidence.pop(key, None)
 
     def note(self, found: Evidence | None) -> None:
-        """Keep the first detail of each category for what is running."""
-        if found is not None and self._key is not None and self._recording():
+        """Keep the first detail of each category for what is running, unless a module is being
+        imported; the stack is walked only for evidence."""
+        if found is None or self._key is None or not self._recording():
+            return
+        if not importing(sys._getframe(1)):
             self._evidence.setdefault(self._key, {}).setdefault(found[0], found[1])
 
     def audit(self, event: str, args: tuple[Any, ...]) -> None:

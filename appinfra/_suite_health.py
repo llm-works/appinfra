@@ -17,7 +17,7 @@ pytest-xdist worker) writes one JSON report there at the end of the session, ``<
 - ``leaks``: each unit test that left process-wide state changed (signal handlers, the
   ``ITIMER_REAL`` timer, environment variables by name, the working directory), compared from
   before its setup to after its teardown; an environment variable a module sets while being
-  imported is the library's, not the test's;
+  imported is the module's, not the test's;
 - ``suited``: the number of tests collected, each with its suite;
 - ``behavior``: what the unit tests this process ran were seen doing
   (appinfra/_suite_behavior.py), by node id: the ``suite``, the ``directory`` suite it sits
@@ -38,7 +38,6 @@ import sys
 from collections import Counter
 from collections.abc import Callable, Generator, Mapping
 from pathlib import Path
-from types import FrameType
 from typing import Any
 
 import pytest
@@ -53,25 +52,11 @@ _PYTEST_ENV = frozenset({"PYTEST_CURRENT_TEST"})
 _SIGNALS = sorted(signal.valid_signals())
 
 # The value each environment variable was last given while a module was being imported during
-# the running unit test (_note_import_env), None for removed: a library configuring itself on
-# first import, as torch or vllm do. A variable the test leaves at that value is the library's,
-# not the test's. pytest_runtest_protocol empties it before each unit test, so a value an
+# the running unit test (_note_import_env), None for removed: a module configuring itself on
+# first import. A variable the test leaves at that value is the module's, not the test's. pytest_runtest_protocol empties it before each unit test, so a value an
 # earlier test's import set excuses nothing.
 _import_env: dict[str, str | None] = {}
 _env_hook_installed = False
-
-# The import machinery's files, frozen ("<frozen importlib._bootstrap>") or from source
-_IMPORT_MACHINERY = ("importlib._bootstrap", os.path.join("importlib", "_bootstrap"))
-
-
-def _importing(frame: FrameType | None) -> bool:
-    """Whether the import machinery is on the stack from ``frame`` up: a module is loading."""
-    while frame is not None:
-        filename = frame.f_code.co_filename
-        if any(part in filename for part in _IMPORT_MACHINERY):
-            return True
-        frame = frame.f_back
-    return False
 
 
 def _note_import_env(event: str, args: tuple[Any, ...]) -> None:
@@ -80,7 +65,7 @@ def _note_import_env(event: str, args: tuple[Any, ...]) -> None:
     if event not in ("os.putenv", "os.unsetenv"):
         return
     name = os.fsdecode(args[0])
-    if name not in _PYTEST_ENV and _importing(sys._getframe(1)):
+    if name not in _PYTEST_ENV and _suite_behavior.importing(sys._getframe(1)):
         _import_env[name] = os.fsdecode(args[1]) if event == "os.putenv" else None
 
 
