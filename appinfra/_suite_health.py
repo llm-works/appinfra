@@ -53,8 +53,9 @@ _SIGNALS = sorted(signal.valid_signals())
 
 # The value each environment variable was last given while a module was being imported during
 # the running unit test (_note_import_env), None for removed: a module configuring itself on
-# first import. A variable the test leaves at that value is the module's, not the test's. pytest_runtest_protocol empties it before each unit test, so a value an
-# earlier test's import set excuses nothing.
+# first import. A variable the test leaves at that value is the module's, not the test's.
+# pytest_runtest_protocol empties it before each unit test, so a value an earlier test's import
+# set excuses nothing.
 _import_env: dict[str, str | None] = {}
 _env_hook_installed = False
 
