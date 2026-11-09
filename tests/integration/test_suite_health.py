@@ -214,6 +214,8 @@ import socket
 import sqlite3
 import subprocess
 import sys
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -257,6 +259,21 @@ def test_signal():
 def test_socket():
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
+
+
+def test_thread():
+    thread = threading.Thread(target=print)
+    thread.start()
+    thread.join()
+
+
+def test_thread_pool():
+    with ThreadPoolExecutor(1) as pool:
+        pool.submit(print).result()
+
+
+def test_to_thread():
+    asyncio.run(asyncio.to_thread(print))
 
 
 @pytest.fixture(scope="module")
@@ -323,6 +340,9 @@ def test_the_report_records_what_each_test_does(
         "test_multiprocessing": ("unit", ["process"], None),
         "test_signal": ("unit", ["signal"], None),
         "test_socket": ("unit", ["socket"], None),
+        "test_thread": ("unit", ["thread"], None),
+        "test_thread_pool": ("unit", ["thread"], None),
+        "test_to_thread": ("unit", ["thread"], None),
         "test_first_user_of_a_module_fixture": ("unit", ["fs-write"], None),
         "test_second_user_of_a_module_fixture": ("unit", ["fs-write"], None),
         "test_exempt": ("unit", ["fs-write"], "checks the real file system on purpose"),
@@ -466,6 +486,38 @@ def test_a_fixture_setup_is_charged_only_to_the_tests_that_used_it(
         "test_uses_source[write]",
         "test_uses_written_data",
     ]
+
+
+_RUNNER_THREAD = """\
+import threading
+
+import pytest
+
+
+@pytest.hookimpl(wrapper=True)
+def pytest_runtest_protocol(item):
+    timer = threading.Timer(3600, lambda: None)
+    timer.daemon = True
+    timer.start()
+    try:
+        return (yield)
+    finally:
+        timer.cancel()
+        timer.join()
+"""
+
+
+def test_a_runner_plugin_wrapping_the_test_is_not_charged(
+    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A plugin that wraps each test, as make check's hang watchdog does with its timer
+    thread, is the runner's bookkeeping, however the plugins are ordered."""
+    layout = {
+        "runner_thread.py": _RUNNER_THREAD,
+        "tests/unit/test_pure.py": "def test_pure():\n    pass\n",
+    }
+    report = _report(_run(pytester, monkeypatch, layout, "-p", "runner_thread"))
+    assert report["behavior"] == {}
 
 
 def test_an_exemption_needs_a_reason(

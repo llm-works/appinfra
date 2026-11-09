@@ -162,6 +162,7 @@ wrappers around what raises no audit event (`signal.signal`, `signal.setitimer`,
 | `db` | a database connection other than `sqlite3` in memory, a psycopg query | integration |
 | `signal` | a signal handler installed or a timer armed | integration |
 | `chdir` | the working directory changed | integration |
+| `thread` | a thread started, directly or by a thread pool, `run_in_executor` or `asyncio.to_thread` | integration |
 | `entry-point` | a process running the project itself: `-m <package>`, a `.py` file of one of its packages, or one of its `[project.scripts]` | e2e |
 
 Not evidence: reading the project's own files, the interpreter's or the system's (`/etc`,
@@ -176,8 +177,9 @@ Integration and e2e tests are not judged: an integration test with no evidence, 
 that starts the project through a shell script or a container, may be doing work the recording
 cannot see. For the same reason some work goes unrecorded and is never a finding:
 
-- work in threads the test starts; only the thread running the test and its fixtures is recorded,
-  so a thread an earlier test left running is not charged to the current one;
+- the work a thread does once started: only the thread running the test and its fixtures is
+  recorded, so a thread an earlier test left running is not charged to the current one. That a
+  test started a thread is recorded;
 - I/O done in C code that raises no audit event, and database drivers other than `sqlite3` and
   psycopg.
 

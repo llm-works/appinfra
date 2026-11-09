@@ -25,6 +25,7 @@ from appinfra._suite_behavior import (
     PROCESS,
     SIGNAL,
     SOCKET,
+    THREAD,
     Project,
     Recorder,
     event_evidence,
@@ -133,6 +134,21 @@ class TestEvents:
 
     def test_an_unwatched_event_is_no_evidence(self) -> None:
         assert event_evidence(PROJECT, "import", ("json", None, [], [], [])) is None
+
+    @pytest.mark.parametrize(
+        "event", ["_thread.start_new_thread", "_thread.start_joinable_thread"]
+    )
+    def test_starting_a_thread_is_a_thread(self, event: str) -> None:
+        """The event of the interpreter's version: start_joinable_thread from 3.13 on."""
+        assert _category(event_evidence(PROJECT, event, (print, (), {}))) == THREAD
+
+    def test_a_thread_is_named_by_its_threading_thread(self) -> None:
+        """threading starts the thread's _bootstrap method: the detail is the Thread's name."""
+        thread = threading.Thread(target=print, name="worker-1")
+        found = event_evidence(
+            PROJECT, "_thread.start_new_thread", (thread._bootstrap,)
+        )
+        assert found == (THREAD, "worker-1")
 
     def test_a_process_running_the_project_is_an_entry_point(self) -> None:
         args = (sys.executable, [sys.executable, "-m", "myapp", "run"], None, None)

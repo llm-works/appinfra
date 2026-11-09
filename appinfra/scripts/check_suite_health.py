@@ -24,7 +24,7 @@ A unit test that left process-wide state changed is a ``leak``, a finding of its
 What the unit tests did (appinfra/_suite_behavior.py) is judged against their suite, by scope:
 
 ``misfiled``: unit tests seen doing integration work (files, processes, sockets, databases,
-signals, the working directory) or running the project as its own process; they move to the
+signals, the working directory, threads) or running the project as its own process; they move to the
 suite their work needs. Only what a test was seen doing is a finding: what the recording did
 not see is no evidence, so no test is judged by what it did not do. A test whose work belongs
 to its directory's suite counts as that suite for placement and overrides: its marker is wrong,
@@ -63,6 +63,7 @@ _INTEGRATION_WORK = (
     "db",
     "signal",
     "chdir",
+    "thread",
     "fs-read",
 )
 _ENTRY_POINT = "entry-point"
