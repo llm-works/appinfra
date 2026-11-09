@@ -13,9 +13,9 @@ SETTINGS_SH = (
 )
 
 
-def _suites(project: Path, *args: str) -> set[str]:
+def _suites(project: Path) -> set[str]:
     result = subprocess.run(
-        ["bash", "-c", f'. "{SETTINGS_SH}"; appinfra_suite_markers "$@"', "_", *args],
+        ["bash", "-c", f'. "{SETTINGS_SH}"; appinfra_suite_markers'],
         cwd=project,
         capture_output=True,
         text=True,
