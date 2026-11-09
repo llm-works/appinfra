@@ -98,7 +98,7 @@ CQ_KEEP_DECORATORS="$(appinfra_setting APPINFRA_DEV_CQ_DEAD_KEEP_DECORATORS "" d
 # ruff config.
 CQ_LINT_SELECT="$(appinfra_setting APPINFRA_DEV_CQ_LINT_SELECT C90,SIM,RET,PIE,PERF,FURB,C4 rules)" || exit 2
 # Where performance tests live (default tests/)
-PERF_DIR="$(appinfra_setting APPINFRA_PYTEST_PERF_DIR tests path)" || exit 2
+BOUND_SUITES="$(appinfra_setting APPINFRA_PYTEST_BOUND_SUITES "" suites)" || exit 2
 
 # Coverage's marker expression can subsume standalone test suites. When
 # check.sh runs both a standalone suite and coverage over the same marker
@@ -433,26 +433,34 @@ fi
 # usage (`@pytest.mark.X`) and module-level `pytestmark = pytest.mark.X`
 # (including lists) — and suite directories (tests/<suite>/), whose tests
 # take the suite's marker without naming it (_settings.sh).
-_MARKERS_FOUND=$(appinfra_suite_markers "$PERF_DIR" | tr '\n' ' ')
+_MARKERS_FOUND=$(appinfra_suite_markers | tr '\n' ' ')
 
-# Emit the pytest command for a marker if any test uses it; otherwise a
+# Emit the pytest command for a marker if it has tests; otherwise a
 # fast `(exit 5)` subshell that hits run_check's "no tests" branch
 # without paying pytest's discovery cost. The subshell parens matter:
 # bare `exit 5` under ``eval`` would kill run_check's own subshell
 # before it could inspect the exit code, so ``wait -n`` in the parent
-# would count the check as a failure. The optional fourth argument is the
-# directory to collect from (default tests/).
+# would count the check as a failure. A suite in APPINFRA_PYTEST_BOUND_SUITES
+# collects from tests/<suite>/ alone and has tests when that directory holds
+# test files; the suite plugin stops a run that finds one of its tests
+# elsewhere. Any other suite collects the whole tree for its marker.
 _pytest_cmd_for() {
-    local suite="$1" marker="$2" flags="$3" path="${4:-tests/}" health_env=""
+    local suite="$1" marker="$2" flags="$3" path="tests/" found=false health_env=""
     case " $HEALTH_MARKERS " in *" $marker "*) health_env="$HEALTH_ENV" ;; esac
-    case " $_MARKERS_FOUND " in
+    case " ${BOUND_SUITES//[[:space:]]/ } " in
         *" $marker "*)
-            echo "${PYTEST_PLUGIN_PATH}${health_env}_APPINFRA_CHECK_PYTEST_SUITE=$suite ${PYTHON} -m pytest $path -m $marker ${PYTEST_PLUGINS} $flags"
+            path="tests/$marker/"
+            appinfra_has_test_files "$path" && found=true
             ;;
         *)
-            echo "(exit 5)"
+            case " $_MARKERS_FOUND " in *" $marker "*) found=true ;; esac
             ;;
     esac
+    if [ "$found" = true ]; then
+        echo "${PYTEST_PLUGIN_PATH}${health_env}_APPINFRA_CHECK_PYTEST_SUITE=$suite ${PYTHON} -m pytest $path -m $marker ${PYTEST_PLUGINS} $flags"
+    else
+        echo "(exit 5)"
+    fi
 }
 
 # _APPINFRA_CHECK_PYTEST_SUITE prevents schema collisions when test suites run in parallel.
@@ -500,9 +508,8 @@ _standalone_suite security    "Security tests"    test.security    sec
 # process rather than sibling workers, and only one process re-imports the test
 # tree. A worker rather than in-process: a test that leaves a non-daemon thread
 # running costs the controller's 10s exit timeout instead of hanging the run.
-# APPINFRA_PYTEST_PERF_DIR narrows collection to where the performance tests live.
-TEST_SUBCHECKS+=("Performance tests|test.perf|$(_pytest_cmd_for perf performance "--tb=short --no-header -q -rEfs -n 1" "${PERF_DIR}/")|")
-TEST_SUBCHECKS_RAW+=("Performance tests|test.perf.v|$(_pytest_cmd_for perf performance "-v --tb=short -rEfs -n 1" "${PERF_DIR}/")|")
+TEST_SUBCHECKS+=("Performance tests|test.perf|$(_pytest_cmd_for perf performance "--tb=short --no-header -q -rEfs -n 1")|")
+TEST_SUBCHECKS_RAW+=("Performance tests|test.perf.v|$(_pytest_cmd_for perf performance "-v --tb=short -rEfs -n 1")|")
 
 # Run the example scripts as the last test subcheck when opted in
 # (APPINFRA_DEV_CHECK_EXAMPLES=true) and an examples directory exists. Same

@@ -76,7 +76,7 @@ def _check(project: Path, settings: dict[str, str]) -> subprocess.CompletedProce
         ("APPINFRA_DEV_PKG_NAME", "pkg;touch {marker}", "a package name"),
         ("APPINFRA_DEV_CQ_LINT_SELECT", "C90;touch {marker}", "ruff rule codes"),
         ("APPINFRA_DEV_DOCSTRING_THRESHOLD", "0;touch {marker}", "a percent"),
-        ("APPINFRA_PYTEST_PERF_DIR", "tests;touch {marker}", "a path"),
+        ("APPINFRA_PYTEST_BOUND_SUITES", "e2e;touch {marker}", "a list of suites"),
         ("APPINFRA_PYTEST_COVERAGE_THRESHOLD", "150", "a percent"),
     ],
 )
@@ -100,7 +100,7 @@ def test_a_bad_setting_stops_check_sh_and_runs_nothing(
         ("APPINFRA_DEV_DOCSTRING_THRESHOLD", "high"),
         ("APPINFRA_DEV_CQ_DEAD_KEEP_DECORATORS", "*"),
         ("APPINFRA_DEV_CQ_LINT_SELECT", "C90, SIM"),
-        ("APPINFRA_PYTEST_PERF_DIR", "perf tests"),
+        ("APPINFRA_PYTEST_BOUND_SUITES", "e2e smoke"),
     ],
 )
 def test_a_bad_setting_stops_check_sh_before_any_command(

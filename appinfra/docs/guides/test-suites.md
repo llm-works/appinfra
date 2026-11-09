@@ -86,6 +86,10 @@ which is an integration test.
   on the test, its class or its module.
 - **One suite only**: collection stops on a test with no suite, or with two suite markers on the
   same level.
+- **Bound suites**: a project may bind a suite to its directory (`APPINFRA_PYTEST_BOUND_SUITES`,
+  e.g. `e2e security performance`). Every test of a bound suite then lives under
+  `tests/<suite>/`: the suite's runs collect only that directory, and collection stops on a test
+  of the suite found elsewhere, which would otherwise never run.
 - **Placement**: a class lives in the directory of the suite most of its tests belong to, and
   module-level tests in the directory of the suite most of their file's tests belong to. A class
   or file of another suite never carries a class- or module-wide marker instead.

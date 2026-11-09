@@ -23,6 +23,8 @@ For API stability guarantees and deprecation policy, see
 - The CAS conformance suite comes in two parts, `StoreSerialConformance` and
   `StoreConcurrencyConformance`, so a store's single-threaded tests can run in the unit suite and
   its multi-threaded ones in integration. `StoreConformance` still runs both.
+- `APPINFRA_PYTEST_BOUND_SUITES` binds suites to their `tests/<suite>/` directory: `make check`
+  and `test.<suite>` collect them from it alone, and a test of a bound suite elsewhere is an error.
 
 ### Changed
 - `make check` keeps its coverage data in its run directory instead of `.coverage` in the
@@ -39,6 +41,12 @@ For API stability guarantees and deprecation policy, see
 - Test structure health charges every unit test that allocates `multiprocessing` shared memory (a
   `Value`, `Array` or `Barrier`), not only the first in its worker process, so the finding no
   longer depends on test order.
+- A `tests/<suite>/` directory holding only `__init__.py` or `conftest.py` no longer counts as
+  having tests: `make check` reports the suite as "no tests" without starting pytest.
+
+### Removed
+- `APPINFRA_PYTEST_PERF_DIR`: performance tests live in `tests/performance/`; add `performance` to
+  `APPINFRA_PYTEST_BOUND_SUITES` to collect only that directory.
 
 ## [0.14.1] - 2026-11-03
 

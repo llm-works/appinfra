@@ -28,8 +28,9 @@ APPINFRA_DEV_CHECK_EXAMPLES ?= true
 # sockets is covered by integration tests
 APPINFRA_PYTEST_COVERAGE_MARKERS ?= unit or integration
 
-# Performance tests all live here; collecting only this directory skips importing the rest
-APPINFRA_PYTEST_PERF_DIR ?= tests/performance
+# These suites all live in their tests/<suite>/ directory; collecting only it skips importing
+# the rest. Unit and integration tests may override each other's directory with a marker
+APPINFRA_PYTEST_BOUND_SUITES ?= e2e security performance
 
 # Coverage threshold (framework default is 80%)
 APPINFRA_PYTEST_COVERAGE_THRESHOLD ?= 95
