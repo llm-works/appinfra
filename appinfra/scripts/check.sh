@@ -1065,7 +1065,7 @@ check_warnings() {
     if [ "$distinct" -gt "$shown" ]; then
         # after status_tint's color, whose leading 0 would reset the bold
         add_display_row "$mark" \
-            "${UI_BOLD}${name}: $((distinct - shown)) more${kept:+ in ${kept}}" ""
+            "${UI_BOLD}$(fit_warning_row "$name" "$((distinct - shown)) more${kept:+ in ${kept}}" 0)" ""
     fi
     local text="${total} warning"
     if [ "$total" -gt 1 ]; then
@@ -1141,7 +1141,7 @@ show_health_rows() {
     if [ "$count" -gt "$REPORT_ROWS" ]; then
         # after status_tint's color, whose leading 0 would reset the bold
         add_display_row "$mark" \
-            "${UI_BOLD}${HEALTH_NAME}: $((count - REPORT_ROWS)) more in ${kept}" ""
+            "${UI_BOLD}$(fit_warning_row "$HEALTH_NAME" "$((count - REPORT_ROWS)) more in ${kept}" 0)" ""
     fi
 }
 

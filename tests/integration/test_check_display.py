@@ -8,10 +8,13 @@ import fcntl
 import os
 import pty
 import re
+import select
+import signal
 import struct
 import subprocess
 import sys
 import termios
+import time
 from pathlib import Path
 
 import pytest
@@ -19,6 +22,8 @@ import pytest
 REPO = Path(__file__).resolve().parents[2]
 CHECK_SH = REPO / "appinfra" / "scripts" / "check.sh"
 HEIGHT = 12
+NARROW = 50
+DEADLINE_S = 300
 
 # Eight tests, each with a warning of its own: more distinct warnings than rows are shown for
 _WARNING_TESTS = "".join(
@@ -61,11 +66,11 @@ def _env(root: Path) -> dict[str, str]:
     }
 
 
-def _run_in_terminal(script: Path, root: Path) -> str:
+def _run_in_terminal(script: Path, root: Path, cols: int) -> str:
     """check.sh's output in a pseudo-terminal HEIGHT lines tall. Its stdin is not the terminal,
     so the terminal is not its controlling one: the size has to come from stdout."""
     controller, terminal = pty.openpty()
-    fcntl.ioctl(terminal, termios.TIOCSWINSZ, struct.pack("HHHH", HEIGHT, 200, 0, 0))
+    fcntl.ioctl(terminal, termios.TIOCSWINSZ, struct.pack("HHHH", HEIGHT, cols, 0, 0))
     proc = subprocess.Popen(
         ["bash", str(script), "--sequential"],
         cwd=root,
@@ -76,8 +81,25 @@ def _run_in_terminal(script: Path, root: Path) -> str:
         start_new_session=True,
     )
     os.close(terminal)
+    try:
+        output = _read_all(controller, proc)
+    finally:
+        os.close(controller)
+    proc.wait(timeout=DEADLINE_S)
+    return output.decode(errors="replace")
+
+
+def _read_all(controller: int, proc: subprocess.Popen[bytes]) -> bytes:
+    """Everything written to the terminal until the last process holding it exits; past the
+    deadline, check.sh's session is killed and the test fails."""
+    deadline = time.monotonic() + DEADLINE_S
     chunks = []
     while True:
+        remaining = deadline - time.monotonic()
+        ready, _, _ = select.select([controller], [], [], max(remaining, 0))
+        if not ready:
+            os.killpg(proc.pid, signal.SIGKILL)
+            pytest.fail(f"check.sh still running after {DEADLINE_S}s")
         try:
             chunk = os.read(controller, 65536)
         except OSError:  # the terminal closed: check.sh and its children are done
@@ -85,16 +107,23 @@ def _run_in_terminal(script: Path, root: Path) -> str:
         if not chunk:
             break
         chunks.append(chunk)
-    proc.wait(timeout=300)
-    os.close(controller)
-    return b"".join(chunks).decode(errors="replace")
+    return b"".join(chunks)
 
 
 @pytest.fixture(scope="module")
 def output(tmp_path_factory: pytest.TempPathFactory) -> str:
+    """A terminal wide enough that no row below the checklist is cut."""
     root = tmp_path_factory.mktemp("display")
     _project(root)
-    return _run_in_terminal(CHECK_SH, root)
+    return _run_in_terminal(CHECK_SH, root, 200)
+
+
+@pytest.fixture(scope="module")
+def narrow_output(tmp_path_factory: pytest.TempPathFactory) -> str:
+    """A terminal narrower than the rows below the checklist."""
+    root = tmp_path_factory.mktemp("narrow")
+    _project(root)
+    return _run_in_terminal(CHECK_SH, root, NARROW)
 
 
 def _plain(text: str) -> str:
@@ -129,3 +158,15 @@ def test_warnings_beyond_the_first_rows_are_counted_not_listed(output: str) -> N
         r"Unit tests: (\d+) more in \.build/check/unit-tests\.log", _plain(output)
     )
     assert more is not None and int(more.group(1)) >= 3
+
+
+def test_rows_below_the_checklist_fit_a_narrow_terminal(narrow_output: str) -> None:
+    """A row that wraps takes two lines but is counted as one, so every redraw after it lands
+    on the wrong line. The row counting the rest carries the kept log's path, the longest."""
+    rows = [
+        line
+        for line in _plain(narrow_output).splitlines()
+        if line.startswith("[⚠] Unit tests: ")
+    ]
+    assert any(" more" in row for row in rows)
+    assert [row for row in rows if len(row) >= NARROW] == []
