@@ -166,6 +166,12 @@ class TestMyStore(StoreConformance):
         return age
 ```
 
+`StoreConformance` is made of two parts that can also run on their own:
+`StoreSerialConformance` calls the store from the test's thread only, and
+`StoreConcurrencyConformance` calls it from several threads at once and needs only the `store`
+fixture. A store tested in the unit suite subclasses the serial part there and the concurrency
+part in its integration suite, since a unit test runs on one thread.
+
 A store subclass passes the logger to `Store.__init__(lg)`.
 
 ## Logging

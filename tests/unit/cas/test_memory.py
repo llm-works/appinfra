@@ -1,21 +1,21 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright 2026 The appinfra Authors
 
-"""MemoryStore against the store conformance suite."""
+"""MemoryStore against the serial part of the store conformance suite."""
 
 from __future__ import annotations
 
 import pytest
 
 from appinfra.cas import Blob, MemoryStore
-from appinfra.cas.conformance import Age, StoreConformance
+from appinfra.cas.conformance import Age, StoreSerialConformance
 from appinfra.log import Logger
 
 LG = Logger("test-cas")
 
 
-class TestMemoryStore(StoreConformance):
-    """MemoryStore passes the conformance suite."""
+class TestMemoryStore(StoreSerialConformance):
+    """MemoryStore passes the serial conformance tests."""
 
     @pytest.fixture
     def store(self) -> MemoryStore:

@@ -22,7 +22,13 @@ past::
                 ...  # move the object's stored write time back by `seconds`
             return age
 
-The class name has no ``Test`` prefix, so pytest collects it only through subclasses.
+:class:`StoreConformance` is the whole suite, made of two parts a test module can also run
+on their own: :class:`StoreSerialConformance` calls the store from the test's thread only,
+and :class:`StoreConcurrencyConformance` calls it from several threads at once. A unit test
+runs on one thread, so a store that runs in the unit suite subclasses the serial part there
+and the concurrency part in its integration suite.
+
+The class names have no ``Test`` prefix, so pytest collects them only through subclasses.
 Requires pytest.
 """
 
@@ -127,8 +133,9 @@ def _blocked_while(store: Store, exclusive: bool, call: Callable[[], object]) ->
     return blocked
 
 
-class StoreConformance:
-    """Store tests; subclasses supply the ``store`` and ``age`` fixtures."""
+class StoreSerialConformance:
+    """Store tests that call the store from the test's thread only; subclasses supply the
+    ``store`` and ``age`` fixtures."""
 
     # -- objects ----------------------------------------------------------------
 
@@ -258,18 +265,6 @@ class StoreConformance:
                 store.repo(name)
             with pytest.raises(InvalidNameError):
                 store.repo("r").get_ref(name)
-
-    def test_concurrent_moves_have_one_winner(self, store: Store) -> None:
-        """Of writers moving a ref from the same commit, exactly one lands."""
-        repo = store.repo("r")
-        base = repo.commit("main", _tree(repo, f=b"base"))
-        heads = [
-            repo.put(Commit(_tree(repo, f=str(i).encode()), (base,))) for i in range(16)
-        ]
-        with ThreadPoolExecutor(max_workers=8) as pool:
-            results = list(pool.map(lambda h: repo.set_ref("main", h, base), heads))
-        assert results.count(True) == 1
-        assert repo.get_ref("main") == heads[results.index(True)]
 
     # -- commit -----------------------------------------------------------------
 
@@ -449,31 +444,6 @@ class StoreConformance:
         with pytest.raises(ObjectNotFoundError):
             repo.put(Tree((TreeEntry("f", "blob", blob_id),)))
 
-    # -- locking ----------------------------------------------------------------
-
-    def test_writes_wait_for_the_exclusive_lock(self, store: Store) -> None:
-        """put, set_ref and delete_ref block while prune or delete holds the repository."""
-        repo = store.repo("r")
-        tree_id = _tree(repo, f=b"x")
-        commit_id = repo.put(Commit(tree_id))
-        assert _blocked_while(store, True, lambda: repo.put(Blob(b"y")))
-        assert _blocked_while(
-            store, True, lambda: repo.set_ref("main", commit_id, None)
-        )
-        assert _blocked_while(store, True, lambda: repo.delete_ref("main", commit_id))
-
-    def test_shared_holders_do_not_wait(self, store: Store) -> None:
-        """Writers do not exclude each other."""
-        repo = store.repo("r")
-        assert not _blocked_while(store, False, lambda: repo.put(Blob(b"y")))
-
-    def test_prune_and_delete_wait_for_writers(self, store: Store) -> None:
-        """prune and delete_repo block while a writer holds the shared lock."""
-        repo = store.repo("r")
-        repo.put(Blob(b"x"))
-        assert _blocked_while(store, False, lambda: repo.prune(expire=0))
-        assert _blocked_while(store, False, lambda: store.delete_repo("r"))
-
     # -- isolation and names ----------------------------------------------------
 
     def test_same_bytes_as_blob_and_tree_are_two_objects(self, store: Store) -> None:
@@ -542,78 +512,6 @@ class StoreConformance:
         large = bytes(range(256)) * (4 * 4096)
         for data in (b"", large):
             assert repo.get(repo.put(Blob(data))) == Blob(data)
-
-    # -- contention -------------------------------------------------------------
-
-    def test_concurrent_puts_of_one_object(self, store: Store) -> None:
-        """Many writers storing the same object all succeed; it is stored once."""
-        repo = store.repo("r")
-        with ThreadPoolExecutor(max_workers=8) as pool:
-            ids = set(pool.map(lambda _: repo.put(Blob(b"same")), range(32)))
-        assert ids == {Blob(b"same").id}
-        assert list(store.list_objects("r")) == [Blob(b"same").id]
-
-    def test_interleaved_reads_and_writes_lose_nothing(self, store: Store) -> None:
-        """Readers running beside writers neither raise nor hide a completed write."""
-        repo = store.repo("r")
-        commit_id = repo.put(Commit(_tree(repo, f=b"x")))
-
-        def work(i: int) -> None:
-            if i % 2:
-                repo.put(Blob(str(i).encode()))
-                repo.set_ref(f"ref-{i}", commit_id, None)
-            else:
-                repo.get_ref(f"ref-{i - 1}")
-                _ = Blob(str(i - 1).encode()).id in repo
-
-        with ThreadPoolExecutor(max_workers=8) as pool:
-            list(pool.map(work, range(200)))
-        odd = range(1, 200, 2)
-        assert all(repo.get_ref(f"ref-{i}") == commit_id for i in odd)
-        assert all(Blob(str(i).encode()).id in repo for i in odd)
-
-    def test_concurrent_commits_form_one_chain(self, store: Store) -> None:
-        """Writers that retry on RefConflictError line up into one linear history."""
-        repo = store.repo("r")
-
-        def commit(i: int) -> str:
-            tree_id = _tree(repo, f=str(i).encode())
-            while True:
-                try:
-                    return repo.commit("main", tree_id, str(i).encode())
-                except RefConflictError:
-                    continue
-
-        with ThreadPoolExecutor(max_workers=8) as pool:
-            ids = set(pool.map(commit, range(16)))
-        tip = repo.get_ref("main")
-        assert tip is not None
-        chain = list(repo.ancestors(tip))
-        assert {c.id for c in chain} == ids
-        assert all(len(c.parents) <= 1 for c in chain)
-
-    def test_prune_racing_writers_leaves_no_dangling_link(self, store: Store) -> None:
-        """Writers committing while prune runs with expire=0 never leave a broken link."""
-        repo = store.repo("r")
-        repo.put(Blob(b"seed"))
-
-        def writer(i: int) -> None:
-            for n in range(10):
-                try:
-                    tree_id = _tree(repo, f=f"{i}-{n}".encode())
-                    if n % 2 == 0:
-                        # Let a prune run between storing the tree and committing it; only
-                        # every other commit, so half of them still succeed and leave history
-                        time.sleep(0)
-                    repo.commit(f"w{i}", tree_id)
-                except ObjectNotFoundError:
-                    pass  # prune took an object this writer had not referenced yet
-
-        with _pruning(repo), ThreadPoolExecutor(max_workers=4) as pool:
-            list(pool.map(writer, range(4)))
-        assert dangling_links(store, "r") == []
-        for tip in repo.refs().values():
-            list(repo.ancestors(tip))
 
     # -- lifecycle --------------------------------------------------------------
 
@@ -704,3 +602,123 @@ class StoreConformance:
         name = "a" * 100
         store.repo(name).commit(name, _tree(store.repo(name), f=b"x"))
         assert store.repo(name).get_ref(name) is not None
+
+
+class StoreConcurrencyConformance:
+    """Store tests that call the store from several threads at once; subclasses supply the
+    ``store`` fixture."""
+
+    # -- refs -------------------------------------------------------------------
+
+    def test_concurrent_moves_have_one_winner(self, store: Store) -> None:
+        """Of writers moving a ref from the same commit, exactly one lands."""
+        repo = store.repo("r")
+        base = repo.commit("main", _tree(repo, f=b"base"))
+        heads = [
+            repo.put(Commit(_tree(repo, f=str(i).encode()), (base,))) for i in range(16)
+        ]
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            results = list(pool.map(lambda h: repo.set_ref("main", h, base), heads))
+        assert results.count(True) == 1
+        assert repo.get_ref("main") == heads[results.index(True)]
+
+    # -- locking ----------------------------------------------------------------
+
+    def test_writes_wait_for_the_exclusive_lock(self, store: Store) -> None:
+        """put, set_ref and delete_ref block while prune or delete holds the repository."""
+        repo = store.repo("r")
+        tree_id = _tree(repo, f=b"x")
+        commit_id = repo.put(Commit(tree_id))
+        assert _blocked_while(store, True, lambda: repo.put(Blob(b"y")))
+        assert _blocked_while(
+            store, True, lambda: repo.set_ref("main", commit_id, None)
+        )
+        assert _blocked_while(store, True, lambda: repo.delete_ref("main", commit_id))
+
+    def test_shared_holders_do_not_wait(self, store: Store) -> None:
+        """Writers do not exclude each other."""
+        repo = store.repo("r")
+        assert not _blocked_while(store, False, lambda: repo.put(Blob(b"y")))
+
+    def test_prune_and_delete_wait_for_writers(self, store: Store) -> None:
+        """prune and delete_repo block while a writer holds the shared lock."""
+        repo = store.repo("r")
+        repo.put(Blob(b"x"))
+        assert _blocked_while(store, False, lambda: repo.prune(expire=0))
+        assert _blocked_while(store, False, lambda: store.delete_repo("r"))
+
+    # -- contention -------------------------------------------------------------
+
+    def test_concurrent_puts_of_one_object(self, store: Store) -> None:
+        """Many writers storing the same object all succeed; it is stored once."""
+        repo = store.repo("r")
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            ids = set(pool.map(lambda _: repo.put(Blob(b"same")), range(32)))
+        assert ids == {Blob(b"same").id}
+        assert list(store.list_objects("r")) == [Blob(b"same").id]
+
+    def test_interleaved_reads_and_writes_lose_nothing(self, store: Store) -> None:
+        """Readers running beside writers neither raise nor hide a completed write."""
+        repo = store.repo("r")
+        commit_id = repo.put(Commit(_tree(repo, f=b"x")))
+
+        def work(i: int) -> None:
+            if i % 2:
+                repo.put(Blob(str(i).encode()))
+                repo.set_ref(f"ref-{i}", commit_id, None)
+            else:
+                repo.get_ref(f"ref-{i - 1}")
+                _ = Blob(str(i - 1).encode()).id in repo
+
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            list(pool.map(work, range(200)))
+        odd = range(1, 200, 2)
+        assert all(repo.get_ref(f"ref-{i}") == commit_id for i in odd)
+        assert all(Blob(str(i).encode()).id in repo for i in odd)
+
+    def test_concurrent_commits_form_one_chain(self, store: Store) -> None:
+        """Writers that retry on RefConflictError line up into one linear history."""
+        repo = store.repo("r")
+
+        def commit(i: int) -> str:
+            tree_id = _tree(repo, f=str(i).encode())
+            while True:
+                try:
+                    return repo.commit("main", tree_id, str(i).encode())
+                except RefConflictError:
+                    continue
+
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            ids = set(pool.map(commit, range(16)))
+        tip = repo.get_ref("main")
+        assert tip is not None
+        chain = list(repo.ancestors(tip))
+        assert {c.id for c in chain} == ids
+        assert all(len(c.parents) <= 1 for c in chain)
+
+    def test_prune_racing_writers_leaves_no_dangling_link(self, store: Store) -> None:
+        """Writers committing while prune runs with expire=0 never leave a broken link."""
+        repo = store.repo("r")
+        repo.put(Blob(b"seed"))
+
+        def writer(i: int) -> None:
+            for n in range(10):
+                try:
+                    tree_id = _tree(repo, f=f"{i}-{n}".encode())
+                    if n % 2 == 0:
+                        # Let a prune run between storing the tree and committing it; only
+                        # every other commit, so half of them still succeed and leave history
+                        time.sleep(0)
+                    repo.commit(f"w{i}", tree_id)
+                except ObjectNotFoundError:
+                    pass  # prune took an object this writer had not referenced yet
+
+        with _pruning(repo), ThreadPoolExecutor(max_workers=4) as pool:
+            list(pool.map(writer, range(4)))
+        assert dangling_links(store, "r") == []
+        for tip in repo.refs().values():
+            list(repo.ancestors(tip))
+
+
+class StoreConformance(StoreSerialConformance, StoreConcurrencyConformance):
+    """Every store test; subclasses supply the ``store`` and ``age`` fixtures."""
