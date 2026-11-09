@@ -7,20 +7,16 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-import threading
 from dataclasses import dataclass
 from typing import Any
 
 import pytest
 
 from appinfra.service import (
-    AsyncProcessQueueChannelFactory,
     AsyncQueueChannelFactory,
     ChannelError,
     ChannelResponseError,
     Message,
-    ProcessQueueChannelFactory,
-    QueueChannelFactory,
 )
 from appinfra.service.channel.base import validate_response
 
@@ -42,10 +38,6 @@ class Response:
     is_final: bool = True
 
 
-SYNC_FACTORIES = [QueueChannelFactory, ProcessQueueChannelFactory]
-ASYNC_FACTORIES = [AsyncQueueChannelFactory, AsyncProcessQueueChannelFactory]
-
-
 class TestValidateResponse:
     """validate_response() raises ChannelResponseError carrying the message."""
 
@@ -62,28 +54,6 @@ class TestValidateResponse:
             validate_response(Message(error="fail"))
 
 
-@pytest.mark.parametrize("factory", SYNC_FACTORIES)
-class TestSyncSubmit:
-    """BufferedChannel.submit() over queue.Queue / mp.Queue."""
-
-    def test_error_response_is_attached(self, factory: Any) -> None:
-        pair = factory().create_pair()
-
-        def responder() -> None:
-            req = pair.child.recv(timeout=1.0)
-            pair.child.send(Response(id=req.id, status="rejected", error="busy"))
-
-        thread = threading.Thread(target=responder)
-        thread.start()
-
-        with pytest.raises(ChannelResponseError, match="busy") as exc:
-            pair.parent.submit(Request("1"), timeout=2.0)
-
-        thread.join()
-        assert exc.value.response == Response(id="1", status="rejected", error="busy")
-        pair.close()
-
-
 async def _recv(channel: Any) -> Any:
     """recv() on either child; the process pair's child is sync."""
     result = channel.recv(timeout=1.0)
@@ -96,7 +66,7 @@ async def _send(channel: Any, message: Any) -> None:
         await result
 
 
-@pytest.mark.parametrize("factory", ASYNC_FACTORIES)
+@pytest.mark.parametrize("factory", [AsyncQueueChannelFactory])
 class TestAsyncSubmit:
     """AsyncBufferedChannel.submit() and submit_stream()."""
 

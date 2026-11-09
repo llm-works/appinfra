@@ -38,6 +38,18 @@ SYNC_FACTORIES = [QueueChannelFactory, ProcessQueueChannelFactory]
 ASYNC_FACTORIES = [AsyncQueueChannelFactory, AsyncProcessQueueChannelFactory]
 
 
+async def _recv(channel: Any, timeout: float) -> Any:
+    """recv() on either side of a pair; the process pair's child is sync."""
+    result = channel.recv(timeout=timeout)
+    return await result if inspect.isawaitable(result) else result
+
+
+async def _close(channel: Any) -> None:
+    result = channel.close()
+    if inspect.isawaitable(result):
+        await result
+
+
 @pytest.mark.parametrize("factory", SYNC_FACTORIES)
 class TestSyncSendOnFullChannel:
     """BufferedChannel.send() over a full queue.Queue / mp.Queue."""
@@ -90,18 +102,6 @@ class TestSyncSendOnFullChannel:
             pair.parent.submit(Request("2"), timeout=0.3)
         assert time.monotonic() - started < 1.0
         pair.close()
-
-
-async def _recv(channel: Any, timeout: float) -> Any:
-    """recv() on either side of a pair; the process pair's child is sync."""
-    result = channel.recv(timeout=timeout)
-    return await result if inspect.isawaitable(result) else result
-
-
-async def _close(channel: Any) -> None:
-    result = channel.close()
-    if inspect.isawaitable(result):
-        await result
 
 
 @pytest.mark.parametrize("factory", ASYNC_FACTORIES)
