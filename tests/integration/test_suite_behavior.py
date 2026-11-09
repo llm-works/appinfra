@@ -7,15 +7,8 @@ from __future__ import annotations
 
 import threading
 
-from appinfra._suite_behavior import (
-    SOCKET,
-    Project,
-    Recorder,
-)
-
-PROJECT = Project(
-    root="/proj", packages=frozenset({"myapp"}), scripts=frozenset({"myapp-cli"})
-)
+from appinfra._suite_behavior import SOCKET, Recorder
+from tests.helpers.suite_behavior import PROJECT
 
 
 class TestRecorder:

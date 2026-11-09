@@ -5,7 +5,6 @@
 
 import asyncio
 import threading
-from dataclasses import dataclass
 
 import pytest
 
@@ -15,23 +14,7 @@ from appinfra.service import (
     ChannelClosedError,
     ChannelTimeoutError,
 )
-
-
-@dataclass
-class Request:
-    """Test request message."""
-
-    id: str
-    data: str
-
-
-@dataclass
-class Response:
-    """Test response message."""
-
-    id: str
-    result: str
-    error: str | None = None
+from tests.helpers.service.channel import Request, Response
 
 
 def _consume_without_reply(channel: Channel, count: int) -> asyncio.Future[None]:

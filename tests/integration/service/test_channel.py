@@ -4,7 +4,6 @@
 """Tests for service channels with a peer on another thread."""
 
 import threading
-from dataclasses import dataclass
 
 import pytest
 
@@ -14,23 +13,7 @@ from appinfra.service import (
     ProcessQueueChannelFactory,
     QueueChannelFactory,
 )
-
-
-@dataclass
-class Request:
-    """Test request message."""
-
-    id: str
-    data: str
-
-
-@dataclass
-class Response:
-    """Test response message."""
-
-    id: str
-    result: str
-    error: str | None = None
+from tests.helpers.service.channel import Request, Response
 
 
 class TestQueueChannel:

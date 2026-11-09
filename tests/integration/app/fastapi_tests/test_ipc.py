@@ -6,39 +6,13 @@ thread."""
 
 import asyncio
 import multiprocessing as mp
-from dataclasses import dataclass
 
 import pytest
 
 from appinfra.app.fastapi.config.ipc import IPCConfig
 from appinfra.app.fastapi.runtime.ipc import IPCChannel
 from appinfra.service import ChannelTimeoutError
-
-
-@dataclass
-class MockRequest:
-    """Mock request for testing."""
-
-    id: str
-    data: str
-
-
-@dataclass
-class MockResponse:
-    """Mock response for testing."""
-
-    id: str
-    result: str
-    error: str | None = None
-
-
-@dataclass
-class MockStreamChunk:
-    """Mock stream chunk for testing."""
-
-    id: str
-    data: str
-    is_final: bool = False
+from tests.helpers.ipc import MockRequest, MockResponse, MockStreamChunk
 
 
 @pytest.fixture

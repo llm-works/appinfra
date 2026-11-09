@@ -28,29 +28,9 @@ from appinfra.service import (
     ServiceRegistration,
     ThreadRunner,
 )
+from tests.helpers.service.factory import SimpleService
 
 # Test fixtures
-
-
-class SimpleService(Service):
-    """Simple test service."""
-
-    def __init__(self, lg: Logger) -> None:
-        self._lg = lg
-        self._stop = threading.Event()
-
-    @property
-    def name(self) -> str:
-        return "simple"
-
-    def execute(self) -> None:
-        self._stop.wait()
-
-    def teardown(self) -> None:
-        self._stop.set()
-
-    def is_healthy(self) -> bool:
-        return True
 
 
 class ConfigurableService(Service):

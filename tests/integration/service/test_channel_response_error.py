@@ -5,10 +5,7 @@
 
 from __future__ import annotations
 
-import asyncio
-import inspect
 import threading
-from dataclasses import dataclass
 from typing import Any
 
 import pytest
@@ -19,24 +16,7 @@ from appinfra.service import (
     ProcessQueueChannelFactory,
     QueueChannelFactory,
 )
-
-
-@dataclass
-class Request:
-    """Request message."""
-
-    id: str
-
-
-@dataclass
-class Response:
-    """Response message with a field beyond the error text."""
-
-    id: str
-    status: str = "ok"
-    error: str | None = None
-    is_final: bool = True
-
+from tests.helpers.service.response_error import AsyncSubmitTests, Request, Response
 
 SYNC_FACTORIES = [QueueChannelFactory, ProcessQueueChannelFactory]
 
@@ -63,56 +43,6 @@ class TestSyncSubmit:
         pair.close()
 
 
-async def _recv(channel: Any) -> Any:
-    """recv() on either child; the process pair's child is sync."""
-    result = channel.recv(timeout=1.0)
-    return await result if inspect.isawaitable(result) else result
-
-
-async def _send(channel: Any, message: Any) -> None:
-    result = channel.send(message)
-    if inspect.isawaitable(result):
-        await result
-
-
 @pytest.mark.parametrize("factory", [AsyncProcessQueueChannelFactory])
-class TestAsyncSubmit:
-    """AsyncBufferedChannel.submit() and submit_stream()."""
-
-    @pytest.mark.asyncio
-    async def test_error_response_is_attached(self, factory: Any) -> None:
-        pair = factory().create_pair()
-        pending = asyncio.create_task(pair.parent.submit(Request("1"), timeout=2.0))
-        await asyncio.sleep(0.1)  # let submit() send the request
-
-        req = await _recv(pair.child)
-        await _send(pair.child, Response(id=req.id, status="rejected", error="busy"))
-
-        with pytest.raises(ChannelResponseError, match="busy") as exc:
-            await pending
-        assert exc.value.response == Response(id="1", status="rejected", error="busy")
-        await pair.close()
-
-    @pytest.mark.asyncio
-    async def test_error_chunk_mid_stream_is_attached(self, factory: Any) -> None:
-        pair = factory().create_pair()
-        chunks: list[Response] = []
-
-        async def consume() -> None:
-            # A loop, not a comprehension: the chunks before the error must stay collected
-            async for chunk in pair.parent.submit_stream(Request("1"), timeout=2.0):
-                chunks.append(chunk)  # noqa: PERF401
-
-        pending = asyncio.create_task(consume())
-        await asyncio.sleep(0.1)  # let submit_stream() send the request
-
-        req = await _recv(pair.child)
-        await _send(pair.child, Response(id=req.id, is_final=False))
-        failed = Response(id=req.id, status="failed", error="lost", is_final=False)
-        await _send(pair.child, failed)
-
-        with pytest.raises(ChannelResponseError, match="lost") as exc:
-            await pending
-        assert chunks == [Response(id="1", is_final=False)]
-        assert exc.value.response == failed
-        await pair.close()
+class TestAsyncSubmit(AsyncSubmitTests):
+    """AsyncBufferedChannel.submit() and submit_stream() over mp.Queue."""

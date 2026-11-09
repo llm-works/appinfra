@@ -4,20 +4,12 @@
 """Tests for IPCChannel."""
 
 import multiprocessing as mp
-from dataclasses import dataclass
 
 import pytest
 
 from appinfra.app.fastapi.config.ipc import IPCConfig
 from appinfra.app.fastapi.runtime.ipc import IPCChannel
-
-
-@dataclass
-class MockRequest:
-    """Mock request for testing."""
-
-    id: str
-    data: str
+from tests.helpers.ipc import MockRequest
 
 
 @pytest.fixture

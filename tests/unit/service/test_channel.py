@@ -3,8 +3,6 @@
 
 """Tests for service channel communication."""
 
-from dataclasses import dataclass
-
 import pytest
 
 from appinfra.service import (
@@ -18,23 +16,7 @@ from appinfra.service import (
     QueueChannelFactory,
 )
 from appinfra.service.channel.base import RedeliveryBuffer, validate_response
-
-
-@dataclass
-class Request:
-    """Test request message."""
-
-    id: str
-    data: str
-
-
-@dataclass
-class Response:
-    """Test response message."""
-
-    id: str
-    result: str
-    error: str | None = None
+from tests.helpers.service.channel import Request, Response
 
 
 class TestMessage:

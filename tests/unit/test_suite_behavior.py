@@ -26,16 +26,12 @@ from appinfra._suite_behavior import (
     SIGNAL,
     SOCKET,
     THREAD,
-    Project,
     Recorder,
     event_evidence,
     open_evidence,
     runs_project,
 )
-
-PROJECT = Project(
-    root="/proj", packages=frozenset({"myapp"}), scripts=frozenset({"myapp-cli"})
-)
+from tests.helpers.suite_behavior import PROJECT
 
 
 def _category(evidence: tuple[str, str] | None) -> str | None:

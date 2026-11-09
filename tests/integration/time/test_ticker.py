@@ -15,10 +15,10 @@ from unittest.mock import Mock
 
 import pytest
 
-import appinfra.time.ticker
 from appinfra.errors import TickerAPIError, TickerStateError
 from appinfra.log import create_lg
 from appinfra.time.ticker import Ticker, TickerHandler
+from tests.helpers.ticker import SimpleHandler, spy_on_waits
 
 
 @pytest.fixture
@@ -46,22 +46,6 @@ def mock_handler():
 @pytest.fixture
 def simple_handler():
     """Create simple TickerHandler implementation."""
-
-    class SimpleHandler(TickerHandler):
-        def __init__(self):
-            self.tick_count = 0
-            self.started = False
-            self.stopped = False
-
-        def ticker_start(self, *args, **kwargs):
-            self.started = True
-
-        def ticker_tick(self):
-            self.tick_count += 1
-
-        def ticker_stop(self):
-            self.stopped = True
-
     return SimpleHandler()
 
 
@@ -95,32 +79,6 @@ def _signal_after(event: threading.Event, ticks: int) -> Callable[[], None]:
             event.set()
 
     return tick
-
-
-class _TimeSpy:
-    """Stands in for a module's ``time`` (real or the fake clock's): records the sleep()
-    calls and passes everything on to it."""
-
-    def __init__(self, inner) -> None:
-        self.inner = inner
-        self.sleeps: list[float] = []
-
-    def sleep(self, secs: float) -> None:
-        self.sleeps.append(secs)
-        self.inner.sleep(secs)
-
-    def __getattr__(self, name: str):
-        return getattr(self.inner, name)
-
-
-def _spy_on_waits(ticker: Ticker, monkeypatch) -> tuple[_TimeSpy, Mock]:
-    """Record every sleep in the ticker module and every wait on ``ticker``'s stop event,
-    which is how run() waits for its next tick."""
-    sleeps = _TimeSpy(appinfra.time.ticker.time)
-    monkeypatch.setattr(appinfra.time.ticker, "time", sleeps)
-    waits = Mock(wraps=ticker._stop_event.wait)
-    ticker._stop_event.wait = waits  # type: ignore[method-assign]
-    return sleeps, waits
 
 
 def _also_signal(handler: TickerHandler, event: threading.Event, ticks: int) -> None:
@@ -369,7 +327,7 @@ class TestContinuousMode:
         ticker = Ticker(mock_logger, simple_handler)
         # Rapidly: the loop never waits, neither on the stop event nor in a sleep
         assert ticker._sched is None
-        sleeps, waits = _spy_on_waits(ticker, monkeypatch)
+        sleeps, waits = spy_on_waits(ticker, monkeypatch)
 
         thread = _start(ticker)
         assert ticked_often.wait(timeout=_TIMEOUT)
@@ -705,7 +663,7 @@ class TestCallableWrapper:
         ticker = Ticker(mock_logger, my_tick)  # No secs = continuous
         # Back to back: the loop never waits, neither on the stop event nor in a sleep
         assert ticker._sched is None
-        sleeps, waits = _spy_on_waits(ticker, monkeypatch)
+        sleeps, waits = spy_on_waits(ticker, monkeypatch)
 
         thread = _start(ticker)
         assert ticked_often.wait(timeout=_TIMEOUT)

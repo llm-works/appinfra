@@ -5,11 +5,8 @@
 
 from __future__ import annotations
 
-import importlib.util
 import json
 import subprocess
-import sys
-from pathlib import Path
 from types import ModuleType
 from unittest.mock import patch
 
@@ -17,7 +14,7 @@ import pytest
 from packaging.specifiers import SpecifierSet
 from packaging.version import Version
 
-SCRIPTS = Path(__file__).resolve().parents[2] / "appinfra" / "scripts"
+from tests.helpers.deps_report import V, load_deps_report, v
 
 # Distance colors: within a major, one major behind, two or more
 GAP0, GAP1, GAP2, RESET = "\033[0;93m", "\033[1;93m", "\033[1;91m", "\033[0m"
@@ -26,25 +23,8 @@ CI = "\033[1;95m"  # the ci column: CI installs another version
 
 @pytest.fixture
 def dr(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
-    """Load the script as a module; it imports install_deps from its own directory."""
-    monkeypatch.syspath_prepend(str(SCRIPTS))
-    spec = importlib.util.spec_from_file_location(
-        "deps_report", SCRIPTS / "deps_report.py"
-    )
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    # @dataclass resolves the module's names through sys.modules
-    monkeypatch.setitem(sys.modules, "deps_report", module)
-    spec.loader.exec_module(module)
-    return module
-
-
-def V(*versions: str) -> list[Version]:
-    return [Version(v) for v in versions]
-
-
-def v(text: str | None) -> Version | None:
-    return Version(text) if text else None
+    """The script, loaded as a module."""
+    return load_deps_report(monkeypatch)
 
 
 class TestGraph:
