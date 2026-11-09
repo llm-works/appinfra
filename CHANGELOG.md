@@ -28,6 +28,8 @@ For API stability guarantees and deprecation policy, see
   needs setuptools 77.0.3 or later.
 - `cq dead` also counts methods under SQLAlchemy's `validates`, `reconstructor` and
   `listens_for` as used.
+- The test suite rules no longer forbid sleeping in a unit test; waiting on real time falls under
+  the timing rules, which apply to every suite.
 
 ## [0.14.1] - 2026-11-03
 

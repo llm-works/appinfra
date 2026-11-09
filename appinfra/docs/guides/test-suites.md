@@ -17,14 +17,17 @@ integration test.
 ### Unit
 
 A unit test stays in one process and, in principle, could run at the same time as any other unit
-test in that process. The rules below follow from that: a test that does I/O, blocks, or touches
-process-wide state depends on something outside its control or changes what another test sees. A
-unit test must not:
+test in that process. The rules below follow from that: a test that does I/O, waits on other
+threads or processes, or touches process-wide state depends on something outside its control or
+changes what another test sees. A unit test must not:
 
 - **perform I/O**: files (`tmp_path` included), sockets, subprocesses, databases, file watchers;
-- **block**: sleep, wait on real time, or wait on another thread or process;
+- **wait on another thread or process**;
 - **use or change process-wide state that outlives the test**: signal handlers, interval timers
   (`setitimer`, `alarm`).
+
+A sleep does not make a test an integration test: it depends on nothing outside the test. Waiting
+on real time is a matter of [timing](#timing), which applies to every suite alike.
 
 The criterion enforced is narrower than the principle: a unit test neither depends on
 process-wide state nor leaves it changed. Test-scoped patching (`unittest.mock.patch`,
@@ -220,6 +223,11 @@ Martin Fowler takes a looser view: talking to a resource in a unit test is fine 
 and fast enough. These suites follow the stricter definitions because a unit test that shares
 process-wide state can make an unrelated later test fail, and a unit run that touches no I/O or
 global state stays fast and order-independent.
+
+These suites depart from Google's small tests on sleep. A sleep makes a test slow or flaky, but
+not dependent on anything outside it, so the [timing](#timing) rules cover it in every suite
+rather than the unit rules alone: moving a sleeping test to the integration suite would not make
+it faster or less flaky.
 
 ## References
 
