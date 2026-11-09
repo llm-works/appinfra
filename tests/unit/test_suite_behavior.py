@@ -153,8 +153,8 @@ class TestEvents:
         assert found == (THREAD, "worker-1")
 
     def test_shared_memory_is_a_file_write(self) -> None:
-        """A Value or Array's memory lives in the process's arena file: each allocation is
-        charged, not only the one that creates the file."""
+        """A Value, Array or Barrier's memory lives in the process's arena file: each
+        allocation is charged, not only the one that creates the file."""
         found = _suite_behavior._shared_memory_evidence(
             "multiprocessing.heap", None, 16
         )

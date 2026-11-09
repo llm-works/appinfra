@@ -151,12 +151,12 @@ target suite, with the first test's evidence:
 
 While the unit tests run, an audit hook ([PEP 578](https://peps.python.org/pep-0578/)) and
 wrappers around what raises no audit event (`signal.signal`, `signal.setitimer`, the start of a
-`multiprocessing` process, a `multiprocessing` `Value` or `Array` allocated, psycopg's connect
-and `execute`) record what each test does:
+`multiprocessing` process, shared memory `multiprocessing` allocates, psycopg's connect and
+`execute`) record what each test does:
 
 | Evidence | Recorded for | Misfiled to |
 |----------|--------------|-------------|
-| `fs-write` | a file written, created, removed or renamed; a `multiprocessing` `Value` or `Array`, whose memory is in a file shared with other processes | integration |
+| `fs-write` | a file written, created, removed or renamed; shared memory `multiprocessing` allocates for a `Value`, `Array` or `Barrier`, which lives in a file shared with other processes | integration |
 | `fs-read` | a file read outside the project, the interpreter and the system directories | integration |
 | `process` | a process started, `multiprocessing` included | integration |
 | `socket` | a socket connected or bound | integration |

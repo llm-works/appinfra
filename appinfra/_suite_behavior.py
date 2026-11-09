@@ -10,8 +10,9 @@ an e2e test runs the project's code as its own process. While the health check r
 (PEP 578) and a few wrappers record each operation a test performs as a category and a detail:
 
 - ``fs-write``: a file written, created, removed or renamed, anywhere but a device or a tool's
-  cache: the bytecode an import writes, Hypothesis's example database; and a ``multiprocessing``
-  Value or Array, whose memory is in a file the process creates once for all of them;
+  cache: the bytecode an import writes, Hypothesis's example database; and shared memory
+  ``multiprocessing`` allocates for a Value, Array or Barrier, which lives in a file the process
+  creates once for all of them;
 - ``fs-read``: a file read outside the project, the interpreter and the system directories;
 - ``process``: a process started, ``multiprocessing`` included;
 - ``entry-point``: a process that runs the project's own code: ``-m <package>``, a ``.py`` file of
@@ -403,8 +404,9 @@ def _start_evidence(caller: str, process: Any, *_: Any, **__: Any) -> Evidence:
 
 
 def _shared_memory_evidence(caller: str, *_: Any, **__: Any) -> Evidence:
-    """Shared memory allocated for a multiprocessing Value or Array. It comes from an arena
-    file the process creates once, so the file's creation would charge only the first test."""
+    """Shared memory allocated for a multiprocessing Value, Array or Barrier. It comes from an
+    arena file the process creates once, so the file's creation would charge only the first
+    test."""
     return (FS_WRITE, "multiprocessing shared memory")
 
 
