@@ -622,10 +622,50 @@ def _direct_install(name: str) -> bool:
         return False
 
 
-def ci_project(project: dict[str, Any], ci_extras: list[str]) -> dict[str, Any]:
-    """The [project] table as CI installs it: only the optional groups in ``ci_extras``.
+def _own_extras(requirements: Iterable[str], own_name: str) -> set[str]:
+    """The extras named by requirements on the project itself: ``proj[a,b]`` gives a and b."""
+    extras: set[str] = set()
+    for line in requirements:
+        try:
+            requirement = Requirement(line)
+        except InvalidRequirement:
+            continue
+        if canonicalize_name(requirement.name) == own_name:
+            extras |= {canonicalize_name(extra) for extra in requirement.extras}
+    return extras
 
-    Raises ValueError for a group the project does not declare.
+
+def _installed_groups(project: dict[str, Any], named: list[str]) -> set[str]:
+    """``named`` and every group they or the base dependencies require through the
+    project's own name, recursively, as pip expands ``proj[...]``. An extra the project
+    does not declare is skipped, as pip skips it."""
+    groups = project.get("optional-dependencies", {})
+    by_extra = {canonicalize_name(name): name for name in groups}
+    own_name = canonicalize_name(project["name"])
+    pending = list(named) + [
+        by_extra[extra]
+        for extra in _own_extras(project.get("dependencies", []), own_name)
+        if extra in by_extra
+    ]
+    found: set[str] = set()
+    while pending:
+        name = pending.pop()
+        if name in found:
+            continue
+        found.add(name)
+        pending += [
+            by_extra[extra]
+            for extra in _own_extras(groups[name], own_name)
+            if extra in by_extra
+        ]
+    return found
+
+
+def ci_project(project: dict[str, Any], ci_extras: list[str]) -> dict[str, Any]:
+    """The [project] table as CI installs it: the optional groups in ``ci_extras``
+    and those they bring in through the project's own extras.
+
+    Raises ValueError for a named group the project does not declare.
     """
     groups = dict(project.get("optional-dependencies", {}))
     unknown = [name for name in ci_extras if name not in groups]
@@ -633,9 +673,12 @@ def ci_project(project: dict[str, Any], ci_extras: list[str]) -> dict[str, Any]:
         raise ValueError(
             f"no such optional-dependency group: {', '.join(map(repr, unknown))}"
         )
+    installed = _installed_groups(project, ci_extras)
     return {
         **project,
-        "optional-dependencies": {name: groups[name] for name in ci_extras},
+        "optional-dependencies": {
+            name: deps for name, deps in groups.items() if name in installed
+        },
     }
 
 

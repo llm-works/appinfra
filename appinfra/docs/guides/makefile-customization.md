@@ -182,6 +182,9 @@ installs fewer names them, and the packages only the other groups need show `-`:
 APPINFRA_DEV_DEPS_ARGS := --ci-extras dev,runtime
 ```
 
+A named group that requires the project's own extras (`client = ["myproj[gcp,saia]"]`) brings
+those groups in too, as pip does.
+
 ### Dry-Run Mode
 
 Preview what commands would run without executing them:
