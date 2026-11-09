@@ -217,12 +217,17 @@ read_warnings_mode() {
     fi
 }
 
-# Terminal width for fit_slow_row, read here because stdout is the terminal only at the top
-# level: inside $(...) it is a pipe. Empty without a terminal (CI), where rows are not cut.
+# Terminal size, read here because stdout is the terminal only at the top level: inside $(...)
+# it is a pipe. The width is for fit_slow_row, the height for update_line, which cannot reach a
+# row scrolled off the screen. Both empty without a terminal (CI), where rows are not cut and
+# every row is redrawn.
 DISPLAY_COLS=""
+DISPLAY_HEIGHT=""
 if [ -t 1 ]; then
-    DISPLAY_COLS=$(stty size < /dev/tty 2>/dev/null | awk '{print $2}')
-    [ "$DISPLAY_COLS" != 0 ] || DISPLAY_COLS=""  # a pseudo-terminal with no size set
+    read -r DISPLAY_HEIGHT DISPLAY_COLS < <(stty size < /dev/tty 2>/dev/null) || true
+    # a pseudo-terminal with no size set
+    [ "$DISPLAY_COLS" != 0 ] || DISPLAY_COLS=""
+    [ "$DISPLAY_HEIGHT" != 0 ] || DISPLAY_HEIGHT=""
 fi
 
 # Coverage tracer: on Python 3.12+, use sys.monitoring (PEP 669) via
@@ -632,24 +637,61 @@ status_tint() {
     fi
 }
 
+# Each line's latest text, by line number, for reprint_display
+DISPLAY_LINES="${STATUS_DIR}/display-lines"
+# The lines update_line could not redraw: scrolled off the screen
+DISPLAY_SKIPPED="${STATUS_DIR}/display-skipped"
+
+# Keep a line's text for reprint_display. Call while holding the display lock.
+remember_line() {
+    mkdir -p "$DISPLAY_LINES" && printf '%s' "$2" > "${DISPLAY_LINES}/$1"
+}
+
 # The optional fifth argument separates the mark from the text: two spaces on the checklist
-# (the default), one on the report rows below it (add_display_row)
+# (the default), one on the report rows below it (add_display_row). A line scrolled off the
+# screen is not drawn: the cursor cannot move above the screen, so it would overwrite another
+# line. It is noted for reprint_display instead.
 update_line() {
     local line_num=$1 status=$2 name=$3 extra=$4 sep=${5:-  }
     name=$(status_tint "$status" "$name")
+    local text
+    text=$(printf "%b%s%s%b" "$status" "$sep" "$name" "$extra")
     {
         lock_display
         if display_open; then
             local added
             added=$(cat "$DISPLAY_ROWS" 2>/dev/null) || added=0
             local lines_up=$((TOTAL_LINES + added - line_num))
-            [ $lines_up -gt 0 ] && printf "\033[${lines_up}A"
-            printf "\r%b%s%s%s%b\n" "$UI_CLEAR" "$status" "$sep" "$name" "$extra"
-            [ $lines_up -gt 1 ] && printf "\033[$((lines_up - 1))B"
-            printf "\r"
+            remember_line "$line_num" "$text"
+            if [ -n "$DISPLAY_HEIGHT" ] && [ "$lines_up" -ge "$DISPLAY_HEIGHT" ]; then
+                echo "$line_num" >> "$DISPLAY_SKIPPED"
+            else
+                [ $lines_up -gt 0 ] && printf "\033[${lines_up}A"
+                printf "\r%b%s\n" "$UI_CLEAR" "$text"
+                [ $lines_up -gt 1 ] && printf "\033[$((lines_up - 1))B"
+                printf "\r"
+            fi
         fi
         unlock_display
     } 200>"$DISPLAY_LOCK"
+}
+
+# After the display closes, when a line could not be redrawn: the checklist again, as it ends,
+# then each row below it whose last redraw was skipped
+reprint_display() {
+    [ -s "$DISPLAY_SKIPPED" ] || return 0
+    echo ""
+    local line
+    for ((line = 1; line < TOTAL_LINES; line++)); do
+        cat "${DISPLAY_LINES}/${line}" 2>/dev/null
+        echo ""
+    done
+    while read -r line; do
+        if [ "$line" -gt "$TOTAL_LINES" ]; then
+            cat "${DISPLAY_LINES}/${line}" 2>/dev/null
+            echo ""
+        fi
+    done < <(sort -nu "$DISPLAY_SKIPPED")
 }
 
 # Add a row below the checklist, the first after a blank line that sets the rows apart, and set
@@ -994,10 +1036,11 @@ warning_note() {
     echo "$note"
 }
 
-# A passing check's warnings: a row below the checklist for each distinct one, like the
-# slow-test rows, and the check's own line left to the caller. Warn records a warning and keeps
-# the log for display_slow_logs. Strict returns 1 and sets warning_failure, a local of the
-# caller, to the reason, so the caller records one failure even when coverage fails the check too.
+# A passing check's warnings: a row below the checklist for each of the first REPORT_ROWS
+# distinct ones, like the slow-test rows, then a bold row for the rest, in the kept log; the
+# check's own line is left to the caller. Warn records a warning and has the log listed by
+# display_slow_logs. Strict returns 1 and sets warning_failure, a local of the caller, to the
+# reason, so the caller records one failure even when coverage fails the check too.
 check_warnings() {
     local name="$1" make_target="$2" logfile="$3" mode="$4"
     local found
@@ -1007,13 +1050,23 @@ check_warnings() {
     if [ "$mode" = strict ]; then
         mark="${UI_MARK_FAIL}"
     fi
-    local count kind message note total=0
+    local kept=""
+    kept=$(keep_log "$logfile" "$name") || kept=""
+    local count kind message note total=0 shown=0 distinct=0
     while IFS=$'\t' read -r count kind message; do
+        distinct=$((distinct + 1))
+        total=$((total + count))
+        [ "$shown" -lt "$REPORT_ROWS" ] || continue
+        shown=$((shown + 1))
         note=$(warning_note "$kind" "$count")
         add_display_row "$mark" "$(fit_warning_row "$name" "$message" "$((${#note} ? ${#note} + 1 : 0))")" \
             "${note:+ ${UI_GRAY}${note}${UI_RESET}}"
-        total=$((total + count))
     done <<< "$found"
+    if [ "$distinct" -gt "$shown" ]; then
+        # after status_tint's color, whose leading 0 would reset the bold
+        add_display_row "$mark" \
+            "${UI_BOLD}${name}: $((distinct - shown)) more${kept:+ in ${kept}}" ""
+    fi
     local text="${total} warning"
     if [ "$total" -gt 1 ]; then
         text="${text}s"
@@ -1023,8 +1076,7 @@ check_warnings() {
         return 1
     fi
     record_warning "$name" "$text"
-    local kept
-    if kept=$(keep_log "$logfile" "$name"); then
+    if [ -n "$kept" ]; then
         echo "${name}|${kept}|warnings" >> "${STATUS_DIR}/slow"
     fi
     return 0
@@ -1037,9 +1089,11 @@ suite_health_report() {
     eval "${PYTHON} $(printf '%q ' "${SCRIPT_DIR}/check_suite_health.py" "$HEALTH_DIR" --root "$PROJECT_ROOT" --threshold "$TEST_HEALTH_THRESHOLD" --outliers "$TEST_HEALTH_OUTLIERS")"
 }
 
-# The line's name, and the findings shown as rows below the checklist; the rest are in the kept log
+# The line's name
 HEALTH_NAME="Test structure health"
-HEALTH_ROWS=5
+# The rows a check's warnings, or the health findings, get below the checklist; the rest are in
+# the kept log, with a row that says how many
+REPORT_ROWS=5
 
 # Whether a run that writes the health reports (HEALTH_TARGETS) completes the set: it marks
 # itself done, and the one that sees every target done, and takes the lock, builds the line.
@@ -1075,7 +1129,7 @@ health_summary() {
     esac
 }
 
-# Rows below the checklist for the first HEALTH_ROWS of the $3 findings in the log $1, then a bold
+# Rows below the checklist for the first REPORT_ROWS of the $3 findings in the log $1, then a bold
 # row for the rest, in the kept log $2. A misfiled row drops its evidence, "(fs-write /tmp/...)",
 # which the kept log keeps.
 show_health_rows() {
@@ -1083,11 +1137,11 @@ show_health_rows() {
     while IFS=$'\t' read -r kind where detail; do
         [ "$kind" = misfiled ] && detail="${detail%% (*}"
         add_display_row "$mark" "$(fit_warning_row "$HEALTH_NAME" "${where}: ${detail}" 0 end)" ""
-    done < <(sed -n "2,$((HEALTH_ROWS + 1))p" "$log")
-    if [ "$count" -gt "$HEALTH_ROWS" ]; then
+    done < <(sed -n "2,$((REPORT_ROWS + 1))p" "$log")
+    if [ "$count" -gt "$REPORT_ROWS" ]; then
         # after status_tint's color, whose leading 0 would reset the bold
         add_display_row "$mark" \
-            "${UI_BOLD}${HEALTH_NAME}: $((count - HEALTH_ROWS)) more in ${kept}" ""
+            "${UI_BOLD}${HEALTH_NAME}: $((count - REPORT_ROWS)) more in ${kept}" ""
     fi
 }
 
@@ -1676,14 +1730,19 @@ main() {
     done
     TOTAL_LINES=$current_line
 
-    # Print initial checkboxes
+    # Print initial checkboxes, kept as each line's text until a check redraws it
+    local text
     for check_def in "${CHECKS[@]}"; do
         IFS='|' read -r name _ _ _ <<< "$check_def"
-        printf "%b  %s\n" "$UI_MARK_PENDING" "$name"
+        text=$(printf "%b  %s" "$UI_MARK_PENDING" "$name")
+        printf "%s\n" "$text"
+        remember_line "${CHECK_LINES[$name]}" "$text"
 
         if [[ "$name" == "Test suite" ]]; then
             for subname in "${subline_names[@]}"; do
-                printf "%b    %s\n" "$UI_MARK_PENDING" "$subname"
+                text=$(printf "%b    %s" "$UI_MARK_PENDING" "$subname")
+                printf "%s\n" "$text"
+                remember_line "${SUBCHECK_LINES[$subname]}" "$text"
             done
         fi
     done
@@ -1704,6 +1763,7 @@ main() {
 
     # Show cursor and display results
     tput cnorm 2>/dev/null || printf "\033[?25h"
+    reprint_display
     local elapsed=$(printf "%.1f" $(echo "$(date +%s.%N) - $start_time" | bc))
 
     # The report below the checklist, each block ending in a blank line, then the result: the
