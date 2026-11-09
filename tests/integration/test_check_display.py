@@ -62,14 +62,15 @@ def _env(root: Path) -> dict[str, str]:
 
 
 def _run_in_terminal(script: Path, root: Path) -> str:
-    """check.sh's output in a pseudo-terminal HEIGHT lines tall."""
+    """check.sh's output in a pseudo-terminal HEIGHT lines tall. Its stdin is not the terminal,
+    so the terminal is not its controlling one: the size has to come from stdout."""
     controller, terminal = pty.openpty()
     fcntl.ioctl(terminal, termios.TIOCSWINSZ, struct.pack("HHHH", HEIGHT, 200, 0, 0))
     proc = subprocess.Popen(
         ["bash", str(script), "--sequential"],
         cwd=root,
         env=_env(root),
-        stdin=terminal,
+        stdin=subprocess.DEVNULL,
         stdout=terminal,
         stderr=terminal,
         start_new_session=True,

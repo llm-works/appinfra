@@ -217,14 +217,14 @@ read_warnings_mode() {
     fi
 }
 
-# Terminal size, read here because stdout is the terminal only at the top level: inside $(...)
-# it is a pipe. The width is for fit_slow_row, the height for update_line, which cannot reach a
-# row scrolled off the screen. Both empty without a terminal (CI), where rows are not cut and
-# every row is redrawn.
+# Size of the terminal on stdout, the one the display is drawn on. stty reports the terminal on
+# its stdin, so it gets stdout, saved as fd 3: inside < <(...) stdout is a pipe. The width is for
+# fit_slow_row, the height for update_line, which cannot reach a row scrolled off the screen.
+# Both empty without a terminal (CI), where rows are not cut and every row is redrawn.
 DISPLAY_COLS=""
 DISPLAY_HEIGHT=""
 if [ -t 1 ]; then
-    read -r DISPLAY_HEIGHT DISPLAY_COLS < <(stty size < /dev/tty 2>/dev/null) || true
+    { read -r DISPLAY_HEIGHT DISPLAY_COLS < <(stty size <&3 2>/dev/null) || true; } 3>&1
     # a pseudo-terminal with no size set
     [ "$DISPLAY_COLS" != 0 ] || DISPLAY_COLS=""
     [ "$DISPLAY_HEIGHT" != 0 ] || DISPLAY_HEIGHT=""
