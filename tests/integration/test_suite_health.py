@@ -276,6 +276,14 @@ def test_to_thread():
     asyncio.run(asyncio.to_thread(print))
 
 
+def test_shared_value():
+    multiprocessing.Value("i", 0)
+
+
+def test_shared_value_from_the_same_arena():
+    multiprocessing.Array("i", 4)
+
+
 @pytest.fixture(scope="module")
 def made_dir(tmp_path_factory):
     return tmp_path_factory.mktemp("made")
@@ -343,6 +351,10 @@ def test_the_report_records_what_each_test_does(
         "test_thread": ("unit", ["thread"], None),
         "test_thread_pool": ("unit", ["thread"], None),
         "test_to_thread": ("unit", ["thread"], None),
+        # the process creates its shared memory arena once; each test allocating from it
+        # is charged, not only the first
+        "test_shared_value": ("unit", ["fs-write"], None),
+        "test_shared_value_from_the_same_arena": ("unit", ["fs-write"], None),
         "test_first_user_of_a_module_fixture": ("unit", ["fs-write"], None),
         "test_second_user_of_a_module_fixture": ("unit", ["fs-write"], None),
         "test_exempt": ("unit", ["fs-write"], "checks the real file system on purpose"),
