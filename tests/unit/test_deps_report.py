@@ -330,6 +330,47 @@ class TestCiProject:
         with pytest.raises(ValueError, match="'gpu'"):
             dr.ci_project(self.PROJECT, ["dev", "gpu"])
 
+    def test_a_group_brings_in_the_groups_it_requires_through_the_project(
+        self, dr: ModuleType
+    ) -> None:
+        """As pip expands proj[...]: recursively, whatever the spelling of the name."""
+        project = {
+            "name": "my_proj",
+            "dependencies": ["a"],
+            "optional-dependencies": {
+                "dev": ["b"],
+                "anthropic": ["x"],
+                "saia": ["y"],
+                "cuda": ["c"],
+                "client": ["My-Proj[anthropic,saia]"],
+                "ci": ["my.proj[dev,client]"],
+            },
+        }
+        groups = dr.ci_project(project, ["ci"])["optional-dependencies"]
+        assert set(groups) == {"ci", "dev", "client", "anthropic", "saia"}
+
+    def test_groups_requiring_each_other_end(self, dr: ModuleType) -> None:
+        project = {
+            "name": "proj",
+            "optional-dependencies": {
+                "a": ["x", "proj[b]"],
+                "b": ["y", "proj[a]"],
+                "c": ["z"],
+            },
+        }
+        groups = dr.ci_project(project, ["a"])["optional-dependencies"]
+        assert set(groups) == {"a", "b"}
+
+    def test_the_base_dependencies_bring_in_groups_too(self, dr: ModuleType) -> None:
+        """Every install gets the base dependencies, so the groups they name are always in."""
+        project = {
+            "name": "proj",
+            "dependencies": ["proj[core]"],
+            "optional-dependencies": {"core": ["x"], "dev": ["b"], "cuda": ["c"]},
+        }
+        groups = dr.ci_project(project, ["dev"])["optional-dependencies"]
+        assert set(groups) == {"dev", "core"}
+
     @pytest.mark.parametrize(
         ("argv", "expected"),
         [
