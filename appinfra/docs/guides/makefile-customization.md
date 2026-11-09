@@ -175,6 +175,13 @@ rich        13.0.0  14.0.0  13.9.4     ✓         15.0.0     capped (2 majors)
 from the indexes pip is configured with. Both targets query the index, so they are not part of
 `make check`. Flags such as `--include-pre` or `--no-color` go in `APPINFRA_DEV_DEPS_ARGS`.
 
+`ci` assumes CI installs every optional-dependency group, as `make setup` does. A project whose CI
+installs fewer names them, and the packages only the other groups need show `-`:
+
+```makefile
+APPINFRA_DEV_DEPS_ARGS := --ci-extras dev,runtime
+```
+
 ### Dry-Run Mode
 
 Preview what commands would run without executing them:
@@ -521,7 +528,7 @@ Each setting has a type, and a value that does not fit it stops make:
 | `APPINFRA_DEV_PROJECT_ROOT` | `$(CURDIR)` | Project root for check.sh |
 | `APPINFRA_DEV_INSTALL_EXTRAS` | (empty) | Optional extras for install (e.g., `ui,fastapi`) |
 | `APPINFRA_DEV_MYPY_FLAGS` | (empty) | Extra mypy flags (e.g., `--follow-imports=skip` for large deps) |
-| `APPINFRA_DEV_DEPS_ARGS` | (empty) | Extra flags for `make deps` / `make deps.deep` (e.g., `--include-pre`) |
+| `APPINFRA_DEV_DEPS_ARGS` | (empty) | Extra flags for `make deps` / `make deps.deep` (e.g., `--include-pre`, `--ci-extras dev,runtime`) |
 | `APPINFRA_DEV_SKIP_TARGETS` | (empty) | Targets to skip so project can override (e.g., `type`, `test.e2e`, `deps`) |
 | `APPINFRA_DRY_RUN` | `false` | `true` previews commands without executing them |
 

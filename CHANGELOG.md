@@ -13,6 +13,8 @@ For API stability guarantees and deprecation policy, see
 ### Added
 - `Sched` takes `tz`, an IANA zone name or a `tzinfo`: its times are read in that zone, daylight
   saving included, instead of the process's local one.
+- `make deps --ci-extras dev,runtime` (via `APPINFRA_DEV_DEPS_ARGS`) names the optional groups CI
+  installs: the ci column shows `-` for packages only the other groups need.
 - Test structure health in `make check` reports misfiled unit tests: those seen writing files,
   starting processes, opening sockets or databases, installing signal handlers or running the
   project itself, with the evidence. `@pytest.mark.suite_exempt(reason=...)` exempts a test;
