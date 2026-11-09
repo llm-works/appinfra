@@ -20,6 +20,9 @@ For API stability guarantees and deprecation policy, see
   starting processes, opening sockets or databases, installing signal handlers or running the
   project itself, with the evidence. `@pytest.mark.suite_exempt(reason=...)` exempts a test;
   see the test-suites guide.
+- The CAS conformance suite comes in two parts, `StoreSerialConformance` and
+  `StoreConcurrencyConformance`, so a store's single-threaded tests can run in the unit suite and
+  its multi-threaded ones in integration. `StoreConformance` still runs both.
 
 ### Changed
 - `make check` keeps its coverage data in its run directory instead of `.coverage` in the

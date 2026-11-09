@@ -26,16 +26,12 @@ from appinfra._suite_behavior import (
     SIGNAL,
     SOCKET,
     THREAD,
-    Project,
     Recorder,
     event_evidence,
     open_evidence,
     runs_project,
 )
-
-PROJECT = Project(
-    root="/proj", packages=frozenset({"myapp"}), scripts=frozenset({"myapp-cli"})
-)
+from tests.helpers.suite_behavior import PROJECT
 
 
 def _category(evidence: tuple[str, str] | None) -> str | None:
@@ -297,21 +293,6 @@ class TestRecorder:
             CHDIR: "/x",
             SOCKET: "socket.bind",
         }
-
-    def test_another_thread_is_not_charged(self) -> None:
-        """A thread left running by an earlier test works on its own time: its events are
-        not the running test's."""
-        recorder = Recorder(PROJECT)
-
-        def elsewhere() -> None:
-            recorder.audit("os.chdir", ("/x",))
-            recorder.note((SOCKET, "socket.bind"))
-
-        with recorder.running("t.py::test_a"):
-            thread = threading.Thread(target=elsewhere)
-            thread.start()
-            thread.join()
-        assert recorder.evidence("t.py::test_a", []) == {}
 
     def test_what_a_module_does_while_being_imported_is_not_charged(
         self, monkeypatch: pytest.MonkeyPatch
