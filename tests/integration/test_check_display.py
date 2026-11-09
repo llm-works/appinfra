@@ -95,9 +95,9 @@ def _read_all(controller: int, proc: subprocess.Popen[bytes]) -> bytes:
     deadline = time.monotonic() + DEADLINE_S
     chunks = []
     while True:
+        # Checked before select: a terminal that keeps producing output is always readable
         remaining = deadline - time.monotonic()
-        ready, _, _ = select.select([controller], [], [], max(remaining, 0))
-        if not ready:
+        if remaining <= 0 or not select.select([controller], [], [], remaining)[0]:
             os.killpg(proc.pid, signal.SIGKILL)
             pytest.fail(f"check.sh still running after {DEADLINE_S}s")
         try:
