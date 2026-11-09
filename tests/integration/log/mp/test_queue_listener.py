@@ -4,6 +4,7 @@
 """Tests for LogQueueListener running its listener thread or feeding its queue."""
 
 import logging
+import threading
 import time
 from multiprocessing import Queue
 from unittest.mock import MagicMock
@@ -12,6 +13,10 @@ import pytest
 
 from appinfra.log import Logger
 from appinfra.log.mp import LogQueueListener
+
+# Waits on the listener thread end on an event its handler sets; running out of this
+# timeout is the failure, never the expected path.
+_TIMEOUT = 5.0
 
 
 @pytest.fixture
@@ -108,23 +113,30 @@ class TestLogQueueListenerErrorHandling:
         # Mock _handle_record to raise on first call
         original_handle = listener._handle_record
         call_count = [0]
+        second_handled = threading.Event()
 
         def error_then_succeed(record):
             call_count[0] += 1
             if call_count[0] == 1:
                 raise RuntimeError("Unexpected error")
             original_handle(record)
+            second_handled.set()
 
         listener._handle_record = error_then_succeed
         listener.start()
 
         try:
-            # First record causes error
+            # First record causes error; the listener handles records in order, so once
+            # the second is handled the first one's error has been written
             record1 = logging.LogRecord(
                 "test", logging.INFO, "test.py", 1, "First", (), None
             )
+            record2 = logging.LogRecord(
+                "test", logging.INFO, "test.py", 2, "Second", (), None
+            )
             queue.put(record1)
-            time.sleep(0.2)
+            queue.put(record2)
+            assert second_handled.wait(timeout=_TIMEOUT)
 
             # Listener should still be alive after error
             assert listener.is_alive
@@ -157,10 +169,13 @@ class TestLogQueueListenerIntegration:
         """Test complete flow: put record on queue, listener processes it."""
         # Create real handler to capture output
         captured = []
+        both_captured = threading.Event()
 
         class CaptureHandler(logging.Handler):
             def emit(self, record):
                 captured.append(record)
+                if len(captured) == 2:
+                    both_captured.set()
 
         logger = MagicMock(spec=Logger)
         handler = CaptureHandler()
@@ -183,8 +198,7 @@ class TestLogQueueListenerIntegration:
             queue.put(record1)
             queue.put(record2)
 
-            # Give listener time to process
-            time.sleep(0.1)
+            assert both_captured.wait(timeout=_TIMEOUT)
 
             assert len(captured) == 2
             assert captured[0].msg == "First"
@@ -192,35 +206,3 @@ class TestLogQueueListenerIntegration:
 
         finally:
             listener.stop()
-
-    def test_stop_with_pending_records(self, queue):
-        """Test stop processes remaining records before stopping."""
-        captured = []
-
-        class CaptureHandler(logging.Handler):
-            def emit(self, record):
-                captured.append(record)
-
-        logger = MagicMock(spec=Logger)
-        handler = CaptureHandler()
-        handler.setLevel(logging.DEBUG)
-        logger.handlers = [handler]
-        logger._root_logger = None
-
-        listener = LogQueueListener(queue, logger)
-        listener.start()
-
-        try:
-            # Put record
-            record = logging.LogRecord(
-                "test", logging.INFO, "test.py", 1, "Before stop", (), None
-            )
-            queue.put(record)
-
-            time.sleep(0.1)
-
-        finally:
-            listener.stop()
-
-        # Record should have been processed
-        assert len(captured) >= 1

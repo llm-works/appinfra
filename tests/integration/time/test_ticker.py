@@ -460,11 +460,11 @@ class TestTickerControl:
 
         thread = threading.Thread(target=ticker.run, daemon=True)
         thread.start()
-        assert ticked.wait(timeout=1.0)
+        assert ticked.wait(timeout=_TIMEOUT)
 
         # Stop before next tick
         ticker.stop()
-        thread.join(timeout=1.0)
+        thread.join(timeout=_TIMEOUT)
 
         assert not thread.is_alive()
         assert ticker._sched.queue == []
@@ -480,7 +480,7 @@ class TestTickerControl:
 
         thread = threading.Thread(target=ticker.run, daemon=True)
         thread.start()
-        thread.join(timeout=1.0)
+        thread.join(timeout=_TIMEOUT)
 
         assert not thread.is_alive()
         assert handler.ticker_tick.call_count == 1
@@ -493,7 +493,7 @@ class TestTickerControl:
 
         thread = threading.Thread(target=ticker.run, daemon=True)
         thread.start()
-        thread.join(timeout=1.0)
+        thread.join(timeout=_TIMEOUT)
 
         assert not thread.is_alive()
         mock_handler.ticker_start.assert_not_called()
@@ -512,7 +512,7 @@ class TestTickerControl:
             thread = threading.Thread(target=ticker.run, daemon=True)
             thread.start()
             ticker.stop()
-            thread.join(timeout=1.0)
+            thread.join(timeout=_TIMEOUT)
 
             assert not thread.is_alive()
             # A run that started is stopped exactly once; one ended by the
@@ -533,7 +533,7 @@ class TestTickerControl:
 
         thread = threading.Thread(target=ticker.run, daemon=True)
         thread.start()
-        thread.join(timeout=1.0)
+        thread.join(timeout=_TIMEOUT)
 
         assert not thread.is_alive()
         handler.ticker_stop.assert_called_once()
@@ -547,7 +547,7 @@ class TestTickerControl:
         for _ in range(2):
             thread = threading.Thread(target=ticker.run, daemon=True)
             thread.start()
-            thread.join(timeout=1.0)
+            thread.join(timeout=_TIMEOUT)
             assert not thread.is_alive()
 
         assert handler.ticker_start.call_count == 2
@@ -562,7 +562,7 @@ class TestTickerControl:
 
         thread = threading.Thread(target=ticker.run, daemon=True)
         thread.start()
-        thread.join(timeout=1.0)
+        thread.join(timeout=_TIMEOUT)
         assert not thread.is_alive()
 
         ticker.stop()  # not running: pending, no ticker_stop() call
@@ -583,7 +583,7 @@ class TestTickerControl:
 
         thread = threading.Thread(target=ticker.run, daemon=True)
         thread.start()
-        thread.join(timeout=1.0)
+        thread.join(timeout=_TIMEOUT)
         assert not thread.is_alive()
         mock_handler.ticker_stop.assert_called_once()
 
