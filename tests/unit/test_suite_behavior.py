@@ -142,6 +142,12 @@ class TestEvents:
         """The event of the interpreter's version: start_joinable_thread from 3.13 on."""
         assert _category(event_evidence(PROJECT, event, (print, (), {}))) == THREAD
 
+    def test_a_started_thread_is_a_thread_without_the_audit_event(self) -> None:
+        """Python 3.11 raises no audit event for a thread start: Thread.start is wrapped."""
+        thread = threading.Thread(target=print, name="worker-2")
+        found = _suite_behavior._started_thread_evidence("myapp.pool", thread)
+        assert found == (THREAD, "worker-2")
+
     def test_a_thread_is_named_by_its_threading_thread(self) -> None:
         """threading starts the thread's _bootstrap method: the detail is the Thread's name."""
         thread = threading.Thread(target=print, name="worker-1")
