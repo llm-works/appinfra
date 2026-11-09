@@ -9,22 +9,27 @@ integration test.
 | Suite | Runs in | May touch | Directory |
 |-------|---------|-----------|-----------|
 | `unit` | one process | memory only | `tests/unit/` |
-| `integration` | one machine | processes, files, localhost services, databases, signals, timers | `tests/integration/` |
+| `integration` | one machine | processes, threads, files, localhost services, databases, signals, timers | `tests/integration/` |
 | `e2e` | one machine | an entry point started as its own process | `tests/e2e/` |
 | `security` | by purpose | security behaviour (injection, validation) | `tests/security/` |
 | `performance` | by purpose | benchmarks | `tests/performance/` |
 
 ### Unit
 
-A unit test stays in one process and, in principle, could run at the same time as any other unit
-test in that process. The rules below follow from that: a test that does I/O, blocks, or touches
-process-wide state depends on something outside its control or changes what another test sees. A
-unit test must not:
+A unit test stays in one process and one thread and, in principle, could run at the same time as
+any other unit test in that process. The rules below follow from that: a test that does I/O, uses
+other threads, or touches process-wide state depends on something outside its control or changes
+what another test sees. A unit test must not:
 
 - **perform I/O**: files (`tmp_path` included), sockets, subprocesses, databases, file watchers;
-- **block**: sleep, wait on real time, or wait on another thread or process;
+- **use another thread**: start one, hand work to one (a thread pool, `run_in_executor`,
+  `asyncio.to_thread`) or wait on one, including the threads the code under test starts. An
+  `asyncio` event loop runs on the test's own thread and is allowed;
 - **use or change process-wide state that outlives the test**: signal handlers, interval timers
   (`setitimer`, `alarm`).
+
+A sleep does not make a test an integration test: it depends on nothing outside the test. Waiting
+on real time is a matter of [timing](#timing), which applies to every suite alike.
 
 The criterion enforced is narrower than the principle: a unit test neither depends on
 process-wide state nor leaves it changed. Test-scoped patching (`unittest.mock.patch`,
@@ -65,6 +70,10 @@ event or a condition. It polls with a deadline only when nothing can signal, and
 the failure path, never the expected one. Logic that depends on time runs against a fake clock:
 the [`fake_clock` fixture](pytest-plugin.md#fake_clock) of `appinfra.testing`, which only takes
 the waiting out. Every test on it passes on the real clock as well.
+
+A unit test runs code that depends on time on the fake clock and asserts what the code does. A
+bound on real elapsed time belongs to a test that waits on a real thread, process or timeout,
+which is an integration test.
 
 ## Assigning a suite
 
@@ -153,6 +162,7 @@ wrappers around what raises no audit event (`signal.signal`, `signal.setitimer`,
 | `db` | a database connection other than `sqlite3` in memory, a psycopg query | integration |
 | `signal` | a signal handler installed or a timer armed | integration |
 | `chdir` | the working directory changed | integration |
+| `thread` | a thread started, directly or by a thread pool, `run_in_executor` or `asyncio.to_thread` | integration |
 | `entry-point` | a process running the project itself: `-m <package>`, a `.py` file of one of its packages, or one of its `[project.scripts]` | e2e |
 
 Not evidence: reading the project's own files, the interpreter's or the system's (`/etc`,
@@ -167,8 +177,9 @@ Integration and e2e tests are not judged: an integration test with no evidence, 
 that starts the project through a shell script or a container, may be doing work the recording
 cannot see. For the same reason some work goes unrecorded and is never a finding:
 
-- work in threads the test starts; only the thread running the test and its fixtures is recorded,
-  so a thread an earlier test left running is not charged to the current one;
+- the work a thread does once started: only the thread running the test and its fixtures is
+  recorded, so a thread an earlier test left running is not charged to the current one. That a
+  test started a thread is recorded;
 - I/O done in C code that raises no audit event, and database drivers other than `sqlite3` and
   psycopg.
 
@@ -211,15 +222,22 @@ The definitions follow the two most widely used ones:
   time as any of your other unit tests", or needs special environment setup. Process-wide state
   such as signal handlers is excluded by the fourth rule: two tests that install handlers in the
   same process cannot run at the same time.
-- **Google's test sizes.** Small tests "must run in a single process", often a single thread, and
-  "aren't allowed to sleep, perform I/O operations, or make any other blocking calls", to keep out
-  "the main sources of test slowness or nondeterminism". Medium tests may span processes on one
-  machine and call localhost. `unit` corresponds to small, `integration` to medium.
+- **Google's test sizes.** Small tests "must run in a single process"; "in many languages, we
+  restrict this even further to say that they must run on a single thread". They "aren't allowed
+  to sleep, perform I/O operations, or make any other blocking calls", to keep out "the main
+  sources of test slowness or nondeterminism", thread scheduling among them. Medium tests "can
+  span multiple processes, use threads, and can make blocking calls", on one machine. `unit`
+  corresponds to small, with the single thread, and `integration` to medium.
 
 Martin Fowler takes a looser view: talking to a resource in a unit test is fine if it is stable
 and fast enough. These suites follow the stricter definitions because a unit test that shares
 process-wide state can make an unrelated later test fail, and a unit run that touches no I/O or
 global state stays fast and order-independent.
+
+These suites depart from Google's small tests on sleep. A sleep makes a test slow or flaky, but
+not dependent on anything outside it, so the [timing](#timing) rules cover it in every suite
+rather than the unit rules alone: moving a sleeping test to the integration suite would not make
+it faster or less flaky.
 
 ## References
 

@@ -52,6 +52,7 @@ SOCKET = "socket"
 DB = "db"
 SIGNAL = "signal"
 CHDIR = "chdir"
+THREAD = "thread"
 
 Evidence = tuple[str, str]
 
@@ -89,6 +90,11 @@ _PROCESS_EVENTS = frozenset(
         "os.spawn",
         "os.fork",
     }
+)
+# A thread starting: start_new_thread on 3.12, start_joinable_thread from 3.13 on. Python 3.11
+# raises no audit event for it: install() wraps threading.Thread.start there instead.
+_THREAD_EVENTS = frozenset(
+    {"_thread.start_new_thread", "_thread.start_joinable_thread"}
 )
 _DETAIL_MAX = 160
 
@@ -212,10 +218,22 @@ def _process_evidence(project: Project, event: str, args: tuple[Any, ...]) -> Ev
     return (category, _detail(f"{event} {command}"))
 
 
+def _thread_evidence(args: tuple[Any, ...]) -> Evidence:
+    """A started thread, named by its threading.Thread when there is one: threading starts the
+    Thread's _bootstrap method, a pool's workers included."""
+    function = args[0] if args else None
+    owner = getattr(function, "__self__", None)
+    if isinstance(owner, threading.Thread):
+        return (THREAD, _detail(owner.name))
+    return (THREAD, _detail(getattr(function, "__qualname__", function)))
+
+
 def event_evidence(
     project: Project, event: str, args: tuple[Any, ...]
 ) -> Evidence | None:
     """The evidence of an audit event other than ``open``, if any."""
+    if event in _THREAD_EVENTS:
+        return _thread_evidence(args)
     if event in _FS_EVENTS:
         target = args[0] if args else ""
         return None if _tool_cache(target) else (FS_WRITE, _detail(f"{event} {target}"))
@@ -263,7 +281,7 @@ class Recorder:
     check's health check. Evidence goes to the test or fixture ``running`` names; operations
     outside one (collection, the session's own setup) are not recorded, nor are those of other
     threads: a thread an earlier test left running would charge its work to whichever test
-    runs. Work in threads a test starts goes unrecorded, and so does what a module does while
+    runs. Starting a thread is recorded, the work in it is not, and neither is what a module does while
     being imported, which falls to whichever test imports it first; a missed operation is no
     finding, a wrongly charged one is a false one.
     """
@@ -383,6 +401,11 @@ def _start_evidence(caller: str, process: Any, *_: Any, **__: Any) -> Evidence:
     return (PROCESS, f"multiprocessing {getattr(process, 'name', '')}")
 
 
+def _started_thread_evidence(caller: str, thread: Any, *_: Any, **__: Any) -> Evidence:
+    """A threading.Thread started, where the interpreter raises no audit event for it (3.11)."""
+    return (THREAD, _detail(getattr(thread, "name", "")))
+
+
 def _connect_evidence(caller: str, *_: Any, **__: Any) -> Evidence:
     """A psycopg connection made."""
     return (DB, "psycopg connect")
@@ -438,5 +461,7 @@ def install(project: Project) -> Recorder:
             "start",
             _start_evidence,
         )
+        if sys.version_info < (3, 12):  # no audit event for a thread start before 3.12
+            _wrap(threading.Thread, "start", _started_thread_evidence)
         _wrap_psycopg()
     return _recorder

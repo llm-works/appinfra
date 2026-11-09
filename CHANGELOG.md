@@ -28,6 +28,11 @@ For API stability guarantees and deprecation policy, see
   needs setuptools 77.0.3 or later.
 - `cq dead` also counts methods under SQLAlchemy's `validates`, `reconstructor` and
   `listens_for` as used.
+- A sleep no longer counts against a unit test's suite: waiting on real time is a timing problem
+  in every suite, solved with the fake clock.
+- A unit test runs on one thread: a test that starts a thread, hands work to one or waits on one,
+  directly or through the code under test, belongs to the integration suite. Test structure
+  health reports a unit test seen starting a thread as misfiled.
 
 ## [0.14.1] - 2026-11-03
 

@@ -265,7 +265,10 @@ class SuiteHealth:
         )
         return result
 
-    @pytest.hookimpl(wrapper=True)
+    # trylast: the innermost wrapper, around the test's own setup, call and teardown only. A
+    # plugin wrapping each test (make check's hang watchdog starts a timer thread) is the
+    # runner's bookkeeping, not the test's work.
+    @pytest.hookimpl(wrapper=True, trylast=True)
     def pytest_runtest_protocol(
         self, item: pytest.Item, nextitem: pytest.Item | None
     ) -> Generator[None, object, object]:
