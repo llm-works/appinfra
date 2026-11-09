@@ -9,20 +9,22 @@ integration test.
 | Suite | Runs in | May touch | Directory |
 |-------|---------|-----------|-----------|
 | `unit` | one process | memory only | `tests/unit/` |
-| `integration` | one machine | processes, files, localhost services, databases, signals, timers | `tests/integration/` |
+| `integration` | one machine | processes, threads, files, localhost services, databases, signals, timers | `tests/integration/` |
 | `e2e` | one machine | an entry point started as its own process | `tests/e2e/` |
 | `security` | by purpose | security behaviour (injection, validation) | `tests/security/` |
 | `performance` | by purpose | benchmarks | `tests/performance/` |
 
 ### Unit
 
-A unit test stays in one process and, in principle, could run at the same time as any other unit
-test in that process. The rules below follow from that: a test that does I/O, waits on other
-threads or processes, or touches process-wide state depends on something outside its control or
-changes what another test sees. A unit test must not:
+A unit test stays in one process and one thread and, in principle, could run at the same time as
+any other unit test in that process. The rules below follow from that: a test that does I/O, uses
+other threads, or touches process-wide state depends on something outside its control or changes
+what another test sees. A unit test must not:
 
 - **perform I/O**: files (`tmp_path` included), sockets, subprocesses, databases, file watchers;
-- **wait on another thread or process**;
+- **use another thread**: start one, hand work to one (a thread pool, `run_in_executor`,
+  `asyncio.to_thread`) or wait on one, including the threads the code under test starts. An
+  `asyncio` event loop runs on the test's own thread and is allowed;
 - **use or change process-wide state that outlives the test**: signal handlers, interval timers
   (`setitimer`, `alarm`).
 
@@ -68,6 +70,10 @@ event or a condition. It polls with a deadline only when nothing can signal, and
 the failure path, never the expected one. Logic that depends on time runs against a fake clock:
 the [`fake_clock` fixture](pytest-plugin.md#fake_clock) of `appinfra.testing`, which only takes
 the waiting out. Every test on it passes on the real clock as well.
+
+A unit test runs code that depends on time on the fake clock and asserts what the code does. A
+bound on real elapsed time belongs to a test that waits on a real thread, process or timeout,
+which is an integration test.
 
 ## Assigning a suite
 
@@ -214,10 +220,12 @@ The definitions follow the two most widely used ones:
   time as any of your other unit tests", or needs special environment setup. Process-wide state
   such as signal handlers is excluded by the fourth rule: two tests that install handlers in the
   same process cannot run at the same time.
-- **Google's test sizes.** Small tests "must run in a single process", often a single thread, and
-  "aren't allowed to sleep, perform I/O operations, or make any other blocking calls", to keep out
-  "the main sources of test slowness or nondeterminism". Medium tests may span processes on one
-  machine and call localhost. `unit` corresponds to small, `integration` to medium.
+- **Google's test sizes.** Small tests "must run in a single process"; "in many languages, we
+  restrict this even further to say that they must run on a single thread". They "aren't allowed
+  to sleep, perform I/O operations, or make any other blocking calls", to keep out "the main
+  sources of test slowness or nondeterminism", thread scheduling among them. Medium tests "can
+  span multiple processes, use threads, and can make blocking calls", on one machine. `unit`
+  corresponds to small, with the single thread, and `integration` to medium.
 
 Martin Fowler takes a looser view: talking to a resource in a unit test is fine if it is stable
 and fast enough. These suites follow the stricter definitions because a unit test that shares
