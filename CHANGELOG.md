@@ -36,6 +36,9 @@ For API stability guarantees and deprecation policy, see
 - A unit test runs on one thread: a test that starts a thread, hands work to one or waits on one,
   directly or through the code under test, belongs to the integration suite. Test structure
   health reports a unit test seen starting a thread as misfiled.
+- Test structure health charges every unit test that allocates `multiprocessing` shared memory (a
+  `Value`, `Array` or `Barrier`), not only the first in its worker process, so the finding no
+  longer depends on test order.
 
 ## [0.14.1] - 2026-11-03
 

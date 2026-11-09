@@ -152,6 +152,14 @@ class TestEvents:
         )
         assert found == (THREAD, "worker-1")
 
+    def test_shared_memory_is_a_file_write(self) -> None:
+        """A Value, Array or Barrier's memory lives in the process's arena file: each
+        allocation is charged, not only the one that creates the file."""
+        found = _suite_behavior._shared_memory_evidence(
+            "multiprocessing.heap", None, 16
+        )
+        assert found == (FS_WRITE, "multiprocessing shared memory")
+
     def test_a_process_running_the_project_is_an_entry_point(self) -> None:
         args = (sys.executable, [sys.executable, "-m", "myapp", "run"], None, None)
         assert (
