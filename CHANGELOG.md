@@ -25,6 +25,8 @@ For API stability guarantees and deprecation policy, see
   its multi-threaded ones in integration. `StoreConformance` still runs both.
 - `APPINFRA_PYTEST_BOUND_SUITES` binds suites to their `tests/<suite>/` directory: `make check`
   and `test.<suite>` collect them from it alone, and a test of a bound suite elsewhere is an error.
+- A FastAPI server in subprocess mode accepts port 0: the subprocess binds a port the OS picks,
+  and `Server.port` gives it once `start_subprocess()` returns.
 
 ### Changed
 - `make check` keeps its coverage data in its run directory instead of `.coverage` in the

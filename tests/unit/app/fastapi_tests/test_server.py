@@ -649,8 +649,10 @@ class TestUvicornServiceSetup:
         with pytest.raises(ConfigError, match="workers"):
             service.setup()
 
-    def test_accepts_single_worker(self):
-        """The default single worker passes setup."""
+    def test_rejects_negative_port(self):
+        from appinfra.app.fastapi.errors import ConfigError
         from appinfra.app.fastapi.runtime.service import UvicornService
 
-        UvicornService(MagicMock(), MagicMock(), ApiConfig()).setup()
+        service = UvicornService(MagicMock(), MagicMock(), ApiConfig(port=-1))
+        with pytest.raises(ConfigError, match="port"):
+            service.setup()

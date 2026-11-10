@@ -68,13 +68,9 @@ async def _wait_on_ipc(request: Request) -> dict[str, str]:
     return {"status": "answered"}
 
 
-def _free_port() -> int:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.bind(("127.0.0.1", 0))
-        return int(sock.getsockname()[1])
-
-
-def _build_server(port: int) -> Any:
+def _build_server() -> Any:
+    """A server on a port the OS picks when its subprocess binds; read it from
+    server.port once start_subprocess() returns."""
     from appinfra.app.fastapi.builder.server import ServerBuilder
     from appinfra.log import Logger
 
@@ -82,7 +78,7 @@ def _build_server(port: int) -> Any:
     return (
         ServerBuilder(lg, "test-subprocess-exit")
         .with_host("127.0.0.1")
-        .with_port(port)
+        .with_port(0)
         .routes.with_route("/ping", _ping_handler, methods=["GET"])
         .with_route("/wait", _wait_on_ipc, methods=["GET"])
         .done()
@@ -158,12 +154,13 @@ def _port_bindable(port: int) -> bool:
     return True
 
 
-def _run_parent(method: str, port: int, pid_q: mp.Queue[int]) -> None:
-    """Start the server subprocess with the given start method, then idle."""
+def _run_parent(method: str, started_q: mp.Queue[tuple[int, int]]) -> None:
+    """Start the server subprocess with the given start method, report its pid and
+    port, then idle."""
     mp.set_start_method(method, force=True)
-    server = _build_server(port)
+    server = _build_server()
     proc = server.start_subprocess()
-    pid_q.put(proc.pid)
+    started_q.put((proc.pid, server.port))
     time.sleep(120)
 
 
@@ -181,8 +178,8 @@ def _make_shutdown_marker_callback(marker_path_str: str) -> Any:
     return _write_marker
 
 
-def _build_server_with_shutdown_callback(port: int, marker_path: Path) -> Any:
-    """Build a server that writes a marker file on shutdown."""
+def _build_server_with_shutdown_callback(marker_path: Path) -> Any:
+    """Build a server, on an OS-picked port, that writes a marker file on shutdown."""
     from appinfra.app.fastapi.builder.server import ServerBuilder
     from appinfra.log import Logger
     from appinfra.subprocess import Lazy
@@ -191,7 +188,7 @@ def _build_server_with_shutdown_callback(port: int, marker_path: Path) -> Any:
     return (
         ServerBuilder(lg, "test-shutdown-callback")
         .with_host("127.0.0.1")
-        .with_port(port)
+        .with_port(0)
         .routes.with_route("/ping", _ping_handler, methods=["GET"])
         .done()
         .with_on_shutdown(
@@ -212,10 +209,9 @@ class TestSubprocessExit:
     @forks_in_xdist_worker
     def test_stop_does_not_escalate(self) -> None:
         """stop() returns well before its timeout and the child exits cleanly."""
-        port = _free_port()
-        server = _build_server(port)
+        server = _build_server()
         proc = server.start_subprocess()
-        _wait_ready(port)
+        _wait_ready(server.port)
 
         started = time.monotonic()
         server.stop(timeout=5.0)
@@ -226,13 +222,12 @@ class TestSubprocessExit:
     @forks_in_xdist_worker
     def test_shutdown_callback_executes_on_stop(self) -> None:
         """Shutdown callbacks registered via the builder run when stop() is called."""
-        port = _free_port()
         with tempfile.TemporaryDirectory() as tmp:
             marker = Path(tmp) / "shutdown_marker"
-            server = _build_server_with_shutdown_callback(port, marker)
+            server = _build_server_with_shutdown_callback(marker)
             proc = server.start_subprocess()
             try:
-                _wait_ready(port)
+                _wait_ready(server.port)
                 assert not marker.exists(), "marker should not exist before shutdown"
 
                 server.stop(timeout=5.0)
@@ -246,12 +241,11 @@ class TestSubprocessExit:
     @forks_in_xdist_worker
     def test_stop_fails_request_waiting_on_ipc(self) -> None:
         """A request waiting on IPC fails at once instead of blocking stop()."""
-        port = _free_port()
-        server = _build_server(port)
+        server = _build_server()
         proc = server.start_subprocess()
         try:
-            _wait_ready(port)
-            thread, result = _start_pending_request(port)
+            _wait_ready(server.port)
+            thread, result = _start_pending_request(server.port)
 
             started = time.monotonic()
             server.stop(timeout=5.0)
@@ -271,12 +265,11 @@ class TestSubprocessExit:
     )
     def test_child_exits_when_parent_is_killed(self, method: str) -> None:
         """SIGKILL of the parent frees the port and ends the child within seconds."""
-        port = _free_port()
         ctx = mp.get_context("spawn")
-        pid_q: mp.Queue[int] = ctx.Queue()
-        parent = ctx.Process(target=_run_parent, args=(method, port, pid_q))
+        started_q: mp.Queue[tuple[int, int]] = ctx.Queue()
+        parent = ctx.Process(target=_run_parent, args=(method, started_q))
         parent.start()
-        child_pid = pid_q.get(timeout=30.0)
+        child_pid, port = started_q.get(timeout=30.0)
         try:
             _wait_ready(port)
             thread, result = _start_pending_request(port)

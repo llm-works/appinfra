@@ -108,6 +108,7 @@ class Server:
         self._response_q = response_q
         self._lg = lg
         self._runner: ProcessRunner | None = None
+        self._service: UvicornService | None = None
         self._app: FastAPI | None = None
 
     @property
@@ -119,6 +120,18 @@ class Server:
     def config(self) -> ApiConfig:
         """Server configuration."""
         return self._config
+
+    @property
+    def port(self) -> int:
+        """The port the server listens on.
+
+        In subprocess mode, the port the subprocess bound, once start_subprocess() has
+        returned: with port 0 in the config, the one the OS picked. Otherwise the
+        configured port.
+        """
+        if self._service is not None and self._service.bound_port:
+            return self._service.bound_port
+        return self._config.port
 
     @property
     def app(self) -> FastAPI:
@@ -200,6 +213,7 @@ class Server:
             request_q=self._request_q,
             response_q=self._response_q,
         )
+        self._service = service
 
         # Map config to RestartPolicy
         policy = RestartPolicy(
@@ -243,7 +257,7 @@ class Server:
                 "server": self._name,
                 "pid": self._runner.pid,
                 "host": self._config.host,
-                "port": self._config.port,
+                "port": self.port,
             },
         )
 
