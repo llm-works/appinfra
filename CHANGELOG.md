@@ -48,6 +48,10 @@ For API stability guarantees and deprecation policy, see
 - `APPINFRA_PYTEST_PERF_DIR`: performance tests live in `tests/performance/`; add `performance` to
   `APPINFRA_PYTEST_BOUND_SUITES` to collect only that directory.
 
+### Fixed
+- `start_subprocess()` waits for its own uvicorn server to start: another process listening on the
+  port no longer counts as the server being up while the app's startup runs.
+
 ## [0.14.1] - 2026-11-03
 
 ### Added

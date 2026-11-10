@@ -6,7 +6,6 @@
 from __future__ import annotations
 
 import multiprocessing as mp
-import socket
 from multiprocessing.synchronize import Event as MPEvent
 from typing import TYPE_CHECKING, Any
 
@@ -16,6 +15,7 @@ if TYPE_CHECKING:
     from ....log import Logger
     from ..config.api import ApiConfig
     from .adapter import FastAPIAdapter
+    from .watched_server import WatchedServer
 
 # uvicorn's exit status for a failed startup (its STARTUP_FAILURE). uvicorn moved the constant
 # from uvicorn.main to uvicorn.config, so no one import path holds it across supported versions.
@@ -27,7 +27,7 @@ class UvicornService(Service):
 
     Integrates with ProcessRunner to provide:
     - Subprocess isolation for uvicorn
-    - Health checking via TCP connection test
+    - Health from its own uvicorn server having started
     - Proper logging forwarding to parent process
 
     The service setup() validates configuration in the parent process.
@@ -65,6 +65,8 @@ class UvicornService(Service):
         self._response_q = response_q
         # Injected by ProcessRunner in subprocess
         self._shutdown_event: MPEvent | None = None
+        # Set by execute() in the subprocess
+        self._server: WatchedServer | None = None
 
     @property
     def name(self) -> str:
@@ -156,6 +158,7 @@ class UvicornService(Service):
             app = self._adapter.build(ipc_channel=ipc_channel)
             config = self._build_uvicorn_config(app)
             server = WatchedServer(config, self._shutdown_event, ipc_channel)
+            self._server = server
             server.run()
             if not server.started:
                 raise SystemExit(_UVICORN_STARTUP_FAILURE)
@@ -164,14 +167,12 @@ class UvicornService(Service):
         """Cleanup - uvicorn shuts itself down (see ``execute``)."""
 
     def is_healthy(self) -> bool:
-        """Check if uvicorn is accepting connections."""
-        try:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            try:
-                sock.settimeout(0.5)
-                result = sock.connect_ex((self._config.host, self._config.port))
-                return result == 0
-            finally:
-                sock.close()
-        except Exception:
-            return False
+        """Whether this service's uvicorn server has started: ran the app's startup and
+        bound its socket.
+
+        Not a probe of the port: uvicorn runs the startup before it binds, so while
+        another process holds the port, that process would answer the probe for a
+        server that is still starting and about to fail its bind.
+        """
+        server = self._server
+        return server is not None and server.started
