@@ -125,7 +125,11 @@ class ServerBuilder:
         return self
 
     def with_port(self, port: int) -> Self:
-        """Set the bind port (default: 8000)."""
+        """Set the bind port (default: 8000).
+
+        In subprocess mode, 0 lets the OS pick the port when the subprocess binds;
+        Server.port gives it once start_subprocess() returns.
+        """
         self._api.port = port
         return self
 

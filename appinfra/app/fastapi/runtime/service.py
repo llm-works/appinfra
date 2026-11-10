@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 import multiprocessing as mp
-import socket
+from ctypes import c_int
 from multiprocessing.synchronize import Event as MPEvent
 from typing import TYPE_CHECKING, Any
 
@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from ....log import Logger
     from ..config.api import ApiConfig
     from .adapter import FastAPIAdapter
+    from .watched_server import WatchedServer
 
 # uvicorn's exit status for a failed startup (its STARTUP_FAILURE). uvicorn moved the constant
 # from uvicorn.main to uvicorn.config, so no one import path holds it across supported versions.
@@ -27,23 +28,25 @@ class UvicornService(Service):
 
     Integrates with ProcessRunner to provide:
     - Subprocess isolation for uvicorn
-    - Health checking via TCP connection test
+    - Health from its own uvicorn server having started
     - Proper logging forwarding to parent process
 
     The service setup() validates configuration in the parent process.
     The execute() method runs in the subprocess and starts uvicorn.
 
     Example:
-        service = UvicornService(lg, adapter, config, request_q, response_q)
+        service = UvicornService(lg, "myapi", adapter, config, request_q, response_q)
         runner = ProcessRunner(service, policy=RestartPolicy(max_retries=5))
         runner.start()
         runner.wait_healthy(timeout=30.0)
         runner.start_monitor()  # Enable auto-restart
+        port = service.bound_port
     """
 
     def __init__(
         self,
         lg: Logger,
+        server_name: str,
         adapter: FastAPIAdapter,
         config: ApiConfig,
         request_q: mp.Queue[Any] | None = None,
@@ -53,29 +56,45 @@ class UvicornService(Service):
 
         Args:
             lg: Logger instance (for parent process, subprocess gets its own)
+            server_name: Name of the server it runs; the service is named after it
             adapter: FastAPI adapter with route definitions
-            config: API configuration
+            config: API configuration; port 0 lets the OS pick the port
             request_q: IPC request queue (optional, for subprocess mode)
             response_q: IPC response queue (optional, for subprocess mode)
         """
         self._lg = lg
+        self._server_name = server_name
         self._adapter = adapter
         self._config = config
+        # Created by setup() in the parent; the subprocess writes the port it bound
+        self._bound_port: c_int | None = None
         self._request_q = request_q
         self._response_q = response_q
         # Injected by ProcessRunner in subprocess
         self._shutdown_event: MPEvent | None = None
+        # Set by execute() in the subprocess
+        self._server: WatchedServer | None = None
 
     @property
     def name(self) -> str:
-        """Service name."""
-        return f"uvicorn-{self._config.port}"
+        """Service name, after the server's: it names the subprocess, its logger and the
+        runner's errors, and stays the same whichever port the server binds."""
+        return f"uvicorn-{self._server_name}"
+
+    @property
+    def bound_port(self) -> int:
+        """The port the subprocess's server bound, or 0 until it is ready.
+
+        With port 0 in the config, the port the OS picked.
+        """
+        return 0 if self._bound_port is None else int(self._bound_port.value)
 
     def setup(self) -> None:
-        """Validate configuration (runs in parent process)."""
+        """Validate configuration and create the shared bound port (runs in parent
+        process)."""
         from ..errors import ConfigError
 
-        if self._config.port <= 0 or self._config.port > 65535:
+        if self._config.port < 0 or self._config.port > 65535:
             raise ConfigError(f"Invalid port: {self._config.port}")
         if not self._config.host:
             raise ConfigError("Host is required")
@@ -83,6 +102,10 @@ class UvicornService(Service):
         # this service passes the built app object.
         if self._config.uvicorn.workers != 1:
             raise ConfigError("uvicorn workers must be 1 in subprocess mode")
+        # From the context ProcessRunner starts the subprocess with; a new one per
+        # start, so a restarted server is not taken for ready on the old port
+        context = mp.get_context(self._config.start_method)
+        self._bound_port = context.RawValue("i", 0)
 
     def _setup_subprocess_logging(self) -> None:
         """Set up logging for subprocess."""
@@ -145,6 +168,9 @@ class UvicornService(Service):
 
         if self._shutdown_event is None:
             raise RuntimeError("_shutdown_event must be injected by ProcessRunner")
+        if self._bound_port is None:
+            raise RuntimeError("setup() must run before execute()")
+        bound_port = self._bound_port
         self._setup_subprocess_logging()
 
         with SubprocessContext(
@@ -155,7 +181,10 @@ class UvicornService(Service):
             ipc_channel = self._create_ipc_channel()
             app = self._adapter.build(ipc_channel=ipc_channel)
             config = self._build_uvicorn_config(app)
-            server = WatchedServer(config, self._shutdown_event, ipc_channel)
+            server = WatchedServer(
+                config, self._shutdown_event, ipc_channel, bound_port
+            )
+            self._server = server
             server.run()
             if not server.started:
                 raise SystemExit(_UVICORN_STARTUP_FAILURE)
@@ -164,14 +193,12 @@ class UvicornService(Service):
         """Cleanup - uvicorn shuts itself down (see ``execute``)."""
 
     def is_healthy(self) -> bool:
-        """Check if uvicorn is accepting connections."""
-        try:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            try:
-                sock.settimeout(0.5)
-                result = sock.connect_ex((self._config.host, self._config.port))
-                return result == 0
-            finally:
-                sock.close()
-        except Exception:
-            return False
+        """Whether this service's uvicorn server is ready: ran the app's startup, bound
+        its socket and published the bound port.
+
+        Not a probe of the port: uvicorn runs the startup before it binds, so while
+        another process holds the port, that process would answer the probe for a
+        server that is still starting and about to fail its bind.
+        """
+        server = self._server
+        return server is not None and server.ready

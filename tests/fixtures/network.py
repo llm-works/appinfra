@@ -7,7 +7,6 @@ Network fixtures for testing.
 Provides fixtures for mock servers, network connections, and HTTP testing.
 """
 
-import socket
 from collections.abc import Generator
 from typing import Any
 from unittest.mock import Mock
@@ -93,17 +92,3 @@ def mock_http_client() -> Mock:
     client.close = Mock()
 
     return client
-
-
-@pytest.fixture
-def available_port() -> int:
-    """
-    Find an available port for testing.
-
-    Returns:
-        int: Available port number
-    """
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.bind(("", 0))
-        s.listen(1)
-        return s.getsockname()[1]

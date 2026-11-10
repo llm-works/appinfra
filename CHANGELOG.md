@@ -25,6 +25,8 @@ For API stability guarantees and deprecation policy, see
   its multi-threaded ones in integration. `StoreConformance` still runs both.
 - `APPINFRA_PYTEST_BOUND_SUITES` binds suites to their `tests/<suite>/` directory: `make check`
   and `test.<suite>` collect them from it alone, and a test of a bound suite elsewhere is an error.
+- A FastAPI server in subprocess mode accepts port 0: the subprocess binds a port the OS picks,
+  and `Server.port` gives it once `start_subprocess()` returns.
 
 ### Changed
 - `make check` keeps its coverage data in its run directory instead of `.coverage` in the
@@ -43,10 +45,16 @@ For API stability guarantees and deprecation policy, see
   longer depends on test order.
 - A `tests/<suite>/` directory holding only `__init__.py` or `conftest.py` no longer counts as
   having tests: `make check` reports the suite as "no tests" without starting pytest.
+- A FastAPI server's subprocess, its logger and its runner errors are named after the server,
+  `uvicorn-<name>`, instead of its port.
 
 ### Removed
 - `APPINFRA_PYTEST_PERF_DIR`: performance tests live in `tests/performance/`; add `performance` to
   `APPINFRA_PYTEST_BOUND_SUITES` to collect only that directory.
+
+### Fixed
+- `start_subprocess()` waits for its own uvicorn server to start: another process listening on the
+  port no longer counts as the server being up while the app's startup runs.
 
 ## [0.14.1] - 2026-11-03
 
