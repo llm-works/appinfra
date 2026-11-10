@@ -97,8 +97,9 @@ def _stop_on_misplaced(
 ) -> None:
     """Stop on a test of a bound suite outside its directory: the bound suite's run never
     collects it and every other run leaves it out, so it would never run. Checked on the
-    tests already collected; a run that collects the whole tree (unit, integration,
-    coverage) is where such a test shows up."""
+    tests already collected: such a test shows up in a run that collects the whole tree
+    (coverage, an unbound suite) or, when make check has none, in its Suite placement
+    collection of the files outside the bound directories."""
     bound = _bound_suites()
     misplaced = [
         item.nodeid

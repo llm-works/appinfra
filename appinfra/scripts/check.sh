@@ -511,6 +511,40 @@ _standalone_suite security    "Security tests"    test.security    sec
 TEST_SUBCHECKS+=("Performance tests|test.perf|$(_pytest_cmd_for perf performance "--tb=short --no-header -q -rEfs -n 1")|")
 TEST_SUBCHECKS_RAW+=("Performance tests|test.perf.v|$(_pytest_cmd_for perf performance "-v --tb=short -rEfs -n 1")|")
 
+# Whether a test run reads the whole tree: coverage does, and so does every unbound suite
+# that has tests
+_whole_tree_runs() {
+    awk "BEGIN {exit !($COVERAGE_TARGET > 0)}" 2>/dev/null && return 0
+    local marker
+    for marker in unit integration e2e security performance; do
+        case " ${BOUND_SUITES//[[:space:]]/ } " in *" $marker "*) continue ;; esac
+        case " $_MARKERS_FOUND " in *" $marker "*) return 0 ;; esac
+    done
+    return 1
+}
+
+# The --ignore options for the bound suite directories, when files that may hold tests lie
+# outside them; fails when there are none
+_outside_bound_args() {
+    local suite args=() prune=()
+    for suite in $BOUND_SUITES; do
+        args+=("--ignore=tests/$suite/")
+        prune+=(-path "tests/$suite" -prune -o)
+    done
+    [ -n "$(find tests "${prune[@]}" -name '*.py' ! -name __init__.py ! -name conftest.py \
+        -print -quit 2>/dev/null)" ] || return 1
+    echo "${args[*]}"
+}
+
+# A bound suite's run reads its directory alone. When no run reads the whole tree, a test
+# outside the bound directories would never be collected, so neither run nor stopped on by the
+# suite plugin: Suite placement collects those files, in one process, without running them.
+if [ -n "${BOUND_SUITES//[[:space:]]/}" ] && ! _whole_tree_runs && _outside=$(_outside_bound_args); then
+    _PLACEMENT_CMD="${PYTEST_PLUGIN_PATH}_APPINFRA_CHECK_PYTEST_SUITE=place ${PYTHON} -m pytest tests/ ${_outside} --collect-only -q ${PYTEST_PLUGINS}"
+    TEST_SUBCHECKS+=("Suite placement||${_PLACEMENT_CMD}|")
+    TEST_SUBCHECKS_RAW+=("Suite placement||${_PLACEMENT_CMD}|")
+fi
+
 # Run the example scripts as the last test subcheck when opted in
 # (APPINFRA_DEV_CHECK_EXAMPLES=true) and an examples directory exists. Same
 # runner and flags as `make examples.check`; raw mode adds -v.
