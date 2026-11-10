@@ -13,9 +13,9 @@ SETTINGS_SH = (
 )
 
 
-def _suites(project: Path, *args: str) -> set[str]:
+def _suites(project: Path) -> set[str]:
     result = subprocess.run(
-        ["bash", "-c", f'. "{SETTINGS_SH}"; appinfra_suite_markers "$@"', "_", *args],
+        ["bash", "-c", f'. "{SETTINGS_SH}"; appinfra_suite_markers'],
         cwd=project,
         capture_output=True,
         text=True,
@@ -44,15 +44,20 @@ def test_a_suite_directory_is_found_without_markers(tmp_path: Path) -> None:
     assert "performance" in _suites(tmp_path)
 
 
+def test_a_suite_directory_without_test_files_is_not_found(tmp_path: Path) -> None:
+    """A directory holding only package and fixture files declares no suite."""
+    _write(tmp_path / "tests" / "e2e" / "__init__.py", "")
+    _write(tmp_path / "tests" / "e2e" / "conftest.py", "")
+    assert "e2e" not in _suites(tmp_path)
+
+
+def test_a_test_file_below_a_suite_directory_is_found(tmp_path: Path) -> None:
+    _write(
+        tmp_path / "tests" / "e2e" / "cli" / "test_c.py", "def test_c():\n    pass\n"
+    )
+    assert "e2e" in _suites(tmp_path)
+
+
 def test_a_suite_with_neither_is_not_found(tmp_path: Path) -> None:
     _write(tmp_path / "tests" / "unit" / "test_u.py", "def test_u():\n    pass\n")
     assert "performance" not in _suites(tmp_path)
-
-
-def test_markers_in_the_performance_directory_are_found(tmp_path: Path) -> None:
-    _write(
-        tmp_path / "bench" / "test_b.py",
-        "import pytest\n\n\n@pytest.mark.performance\ndef test_b():\n    pass\n",
-    )
-    _write(tmp_path / "tests" / "unit" / "test_u.py", "def test_u():\n    pass\n")
-    assert "performance" in _suites(tmp_path, "bench")

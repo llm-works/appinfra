@@ -897,7 +897,7 @@ class TestSettingSh:
         ("package", ["appinfra", "my_pkg", "_x", "Pkg2"]),
         ("decorators", ["", "router.get", "router.get  cli.command"]),
         ("rules", ["", "false", "C90,SIM,E501", "ALL"]),
-        ("path", ["tests", "tests/perf", "./tests-perf_1"]),
+        ("suites", ["", "e2e", "e2e security performance", " unit  integration "]),
     ]
     INVALID = [
         (
@@ -908,7 +908,7 @@ class TestSettingSh:
         ("package", "a package name", ["", "my-pkg", "a.b", "src/pkg", "1pkg", "a;b"]),
         ("decorators", "a list of decorator names", ["a$(x)", "*", "router.", "a;b"]),
         ("rules", "a list of ruff rule codes", ["C90, SIM", "c90", "C90,", "C90;x"]),
-        ("path", "a path", ["", "a b", "a;b", "a'b", "$x"]),
+        ("suites", "a list of suites", ["smoke", "e2e,security", "E2E", "e2e;x"]),
     ]
 
     @pytest.mark.parametrize(
