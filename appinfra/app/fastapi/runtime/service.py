@@ -35,7 +35,7 @@ class UvicornService(Service):
     The execute() method runs in the subprocess and starts uvicorn.
 
     Example:
-        service = UvicornService(lg, adapter, config, request_q, response_q)
+        service = UvicornService(lg, "myapi", adapter, config, request_q, response_q)
         runner = ProcessRunner(service, policy=RestartPolicy(max_retries=5))
         runner.start()
         runner.wait_healthy(timeout=30.0)
@@ -46,6 +46,7 @@ class UvicornService(Service):
     def __init__(
         self,
         lg: Logger,
+        server_name: str,
         adapter: FastAPIAdapter,
         config: ApiConfig,
         request_q: mp.Queue[Any] | None = None,
@@ -55,12 +56,14 @@ class UvicornService(Service):
 
         Args:
             lg: Logger instance (for parent process, subprocess gets its own)
+            server_name: Name of the server it runs; the service is named after it
             adapter: FastAPI adapter with route definitions
             config: API configuration; port 0 lets the OS pick the port
             request_q: IPC request queue (optional, for subprocess mode)
             response_q: IPC response queue (optional, for subprocess mode)
         """
         self._lg = lg
+        self._server_name = server_name
         self._adapter = adapter
         self._config = config
         # Created by setup() in the parent; the subprocess writes the port it bound
@@ -74,8 +77,9 @@ class UvicornService(Service):
 
     @property
     def name(self) -> str:
-        """Service name."""
-        return f"uvicorn-{self._config.port}"
+        """Service name, after the server's: it names the subprocess, its logger and the
+        runner's errors, and stays the same whichever port the server binds."""
+        return f"uvicorn-{self._server_name}"
 
     @property
     def bound_port(self) -> int:

@@ -208,6 +208,7 @@ class Server:
 
         service = UvicornService(
             lg=self._lg,
+            server_name=self._name,
             adapter=self._adapter,
             config=self._config,
             request_q=self._request_q,

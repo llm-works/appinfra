@@ -30,17 +30,17 @@ def test_a_service_without_a_started_server_is_not_healthy_while_another_listens
         other.bind(("127.0.0.1", 0))
         other.listen()
         config = ApiConfig(host="127.0.0.1", port=other.getsockname()[1])
-        service = UvicornService(MagicMock(), MagicMock(), config)
+        service = UvicornService(MagicMock(), "api", MagicMock(), config)
         assert not service.is_healthy()
 
 
 @pytest.mark.parametrize("port", [8000, 0], ids=["fixed", "OS-picked"])
 def test_setup_accepts_the_port(port: int) -> None:
-    service = UvicornService(MagicMock(), MagicMock(), ApiConfig(port=port))
+    service = UvicornService(MagicMock(), "api", MagicMock(), ApiConfig(port=port))
     service.setup()
     assert service.bound_port == 0, "no port is bound before the subprocess runs"
 
 
 def test_setup_accepts_a_single_worker() -> None:
     """The default single worker passes setup."""
-    UvicornService(MagicMock(), MagicMock(), ApiConfig()).setup()
+    UvicornService(MagicMock(), "api", MagicMock(), ApiConfig()).setup()

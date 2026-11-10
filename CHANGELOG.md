@@ -45,6 +45,8 @@ For API stability guarantees and deprecation policy, see
   longer depends on test order.
 - A `tests/<suite>/` directory holding only `__init__.py` or `conftest.py` no longer counts as
   having tests: `make check` reports the suite as "no tests" without starting pytest.
+- A FastAPI server's subprocess, its logger and its runner errors are named after the server,
+  `uvicorn-<name>`, instead of its port.
 
 ### Removed
 - `APPINFRA_PYTEST_PERF_DIR`: performance tests live in `tests/performance/`; add `performance` to
