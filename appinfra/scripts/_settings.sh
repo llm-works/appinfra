@@ -100,7 +100,8 @@ appinfra_pytest_args() {
 # appinfra_has_test_files DIR: succeeds when DIR holds a .py file other than
 # __init__.py and conftest.py, at any depth. Any such file counts, whatever the
 # project's python_files: a wrongly counted directory costs a pytest run, a
-# missed one would skip its tests.
+# missed one would skip its tests. _APPINFRA_SUITE_RUN in make/Makefile.pytest
+# applies the same find.
 appinfra_has_test_files() {
     [ -n "$(find "$1" -name '*.py' ! -name __init__.py ! -name conftest.py \
         -print -quit 2>/dev/null)" ]
