@@ -203,19 +203,36 @@ PYTEST_PLUGINS="-p pytest_hang -p pytest_exit_warnings"
 # How a warning in a passing check ends, whichever check printed it (tests, examples, a tool's
 # own "warning:" line): strict when the project's pytest filterwarnings has a bare "error" (every
 # warning an error), so the check fails; warn otherwise, so the check passes with a warning.
-# Set by read_warnings_mode, which main calls once the checklist is on screen: the pytest run it
-# takes would otherwise hold back the first display.
-WARNINGS_MODE=""
-
-# Ask pytest_exit_warnings for WARNINGS_MODE, in a run that only reads the configuration
-read_warnings_mode() {
-    WARNINGS_MODE=$({ cd "$PROJECT_ROOT" && eval "COVERAGE_FILE=${STATUS_DIR}/probe.coverage ${PYTEST_PLUGIN_PATH}${PYTHON} -m pytest -p pytest_exit_warnings --collect-only -q --noconftest --ignore-glob='*'" 2>&1 || true; } \
-        | sed -nE 's/^=== exit warnings: (strict|warn) ===$/\1/p' | tail -1)
-    if [ -z "$WARNINGS_MODE" ]; then
-        echo "check.sh: pytest could not read the project's configuration (run: ${PYTHON} -m pytest --collect-only)" >&2
-        exit 1
+#
+# warnings_mode LOG prints it, for a check that passed with warnings in LOG; no other check needs
+# it. A pytest check finds it in its own log: pytest_exit_warnings prints "=== exit warnings:
+# <mode> ===" in every run. Any other check asks pytest then, in a run that only reads the
+# configuration, and keeps the answer in STATUS_DIR for the checks after it, so a run without
+# warnings starts no pytest run for it. Prints nothing when pytest cannot read the configuration.
+warnings_mode() {
+    local cache="${STATUS_DIR}/warnings-mode" mode
+    mode=$(_mode_line < "$1")
+    if [ -z "$mode" ] && [ -f "$cache" ]; then
+        mode=$(cat "$cache")
     fi
+    if [ -z "$mode" ]; then
+        mode=$({ cd "$PROJECT_ROOT" && eval "COVERAGE_FILE=${STATUS_DIR}/probe.coverage ${PYTEST_PLUGIN_PATH}${PYTHON} -m pytest -p pytest_exit_warnings --collect-only -q --noconftest --ignore-glob='*'" 2>&1 || true; } \
+            | _mode_line)
+        # Written whole, then moved: checks finishing together each see the answer or none
+        if [ -n "$mode" ]; then
+            { echo "$mode" > "${cache}.${BASHPID}" && mv "${cache}.${BASHPID}" "$cache"; } 2>/dev/null || true
+        fi
+    fi
+    echo "$mode"
 }
+
+# The mode in pytest_exit_warnings' line on stdin, the last one if several
+_mode_line() {
+    sed -nE 's/^=== exit warnings: (strict|warn) ===$/\1/p' | tail -1
+}
+
+# The failure for warnings whose mode could not be read
+_MODE_UNREAD="pytest could not read the project's configuration (run: ${PYTHON} -m pytest --collect-only)"
 
 # Size of the terminal on stdout, the one the display is drawn on. stty reports the terminal on
 # its stdin, so it gets stdout, saved as fd 3: inside < <(...) stdout is a pipe. The width is for
@@ -1080,15 +1097,17 @@ warning_note() {
 # A passing check's warnings: a row below the checklist for each of the first REPORT_ROWS
 # distinct ones, like the slow-test rows, then a bold row for the rest, in the kept log; the
 # check's own line is left to the caller. Warn records a warning and has the log listed by
-# display_slow_logs. Strict returns 1 and sets warning_failure, a local of the caller, to the
-# reason, so the caller records one failure even when coverage fails the check too.
+# display_slow_logs. Strict, or a mode that could not be read, returns 1 and sets
+# warning_failure, a local of the caller, to the reason, so the caller records one failure even
+# when coverage fails the check too.
 check_warnings() {
-    local name="$1" make_target="$2" logfile="$3" mode="$4"
+    local name="$1" make_target="$2" logfile="$3"
     local found
     found=$(found_warnings "$logfile")
     [ -n "$found" ] || return 0
-    local mark="${UI_MARK_WARN}"
-    if [ "$mode" = strict ]; then
+    local mode mark="${UI_MARK_WARN}"
+    mode=$(warnings_mode "$logfile")
+    if [ "$mode" != warn ]; then
         mark="${UI_MARK_FAIL}"
     fi
     local kept=""
@@ -1114,6 +1133,10 @@ check_warnings() {
     fi
     if [ "$mode" = strict ]; then
         warning_failure="${text}: filterwarnings makes every warning an error"
+        return 1
+    fi
+    if [ "$mode" != warn ]; then
+        warning_failure="${text}: ${_MODE_UNREAD}"
         return 1
     fi
     record_warning "$name" "$text"
@@ -1367,7 +1390,7 @@ run_check() {
             # Warnings get rows below the checklist; in strict mode they also fail the check,
             # whose line then shows its usual text with the failure mark
             local warning_failure="" pass_mark="${UI_MARK_OK}"
-            if ! check_warnings "$name" "$make_target" "$tmpfile" "$WARNINGS_MODE"; then
+            if ! check_warnings "$name" "$make_target" "$tmpfile"; then
                 pass_mark="${UI_MARK_FAIL}"
             fi
 
@@ -1677,7 +1700,7 @@ run_raw() {
 
 # Run one check for run_raw and print its result: a check (indent "") or a test subcheck (indent
 # "  "). With scan (check.ci), a copy of its output goes to a log; its warnings (see
-# check_warnings) follow the result and, in strict mode (WARNINGS_MODE), fail the check. Without
+# check_warnings) follow the result and, in strict mode (warnings_mode), fail the check. Without
 # (check.raw), the plain command runs, so the outcome is the tools' own. Returns 0, 5 (a subcheck
 # with no tests collected), EXIT_CODE_WARNING (passed with warnings, or a tool's own warning
 # exit) or a failing code.
@@ -1704,9 +1727,11 @@ run_raw_check() {
         warnings=$(awk -F'\t' '{ n += $1 } END { print n }' <<< "$found")
         note=" (${warnings} warnings)"
         rc=$EXIT_CODE_WARNING
-        if [ "$WARNINGS_MODE" = strict ]; then
-            rc=1
-        fi
+        case "$(warnings_mode "$log")" in
+            warn) ;;
+            strict) rc=1 ;;
+            *) rc=1; note=" (${warnings} warnings; ${_MODE_UNREAD})" ;;
+        esac
     fi
     [ "$rc" -ne "$EXIT_CODE_WARNING" ] || raw_warned "$warnings"
     if [ "$rc" -eq 5 ] && [ -n "$indent" ]; then
@@ -1739,7 +1764,7 @@ main() {
     cd "$PROJECT_ROOT"
     rm -rf "$KEPT_LOG_DIR"
 
-    [ "$RAW" = true ] && { read_warnings_mode; run_raw; return $?; }
+    [ "$RAW" = true ] && { run_raw; return $?; }
 
     # The lines under Test suite: the subchecks, with Test structure health after the pytest
     # ones, before Examples
@@ -1787,9 +1812,6 @@ main() {
             done
         fi
     done
-
-    # With the checklist up; an error prints below it, the cursor still shown
-    read_warnings_mode
 
     # Hide cursor during updates
     tput civis 2>/dev/null || printf "\033[?25l"
