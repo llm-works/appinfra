@@ -12,12 +12,27 @@ import os
 import shutil
 import subprocess
 import sys
+import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from ...app.tools import Tool, ToolConfig
 from ...app.tracing.traceable import Traceable
+from .cq.spdx import derive_package_name
+
+_PKG_NAME_SOURCES = "--pkg-name, APPINFRA_DEV_PKG_NAME or pyproject.toml [project] name"
+
+
+def _pyproject_problem(e: Exception) -> str:
+    """What kept pyproject.toml from naming the package."""
+    if isinstance(e, FileNotFoundError):
+        return "no pyproject.toml in the project root"
+    if isinstance(e, tomllib.TOMLDecodeError):
+        return f"pyproject.toml is not valid TOML ({e})"
+    if isinstance(e, OSError):
+        return f"cannot read pyproject.toml ({e.strerror})"
+    return "pyproject.toml has no [project] name"
 
 
 @dataclass
@@ -37,7 +52,7 @@ class DoctorTool(Tool):
     Performs checks for:
     - Python version compatibility
     - Required tools (ruff, pytest, mypy)
-    - Package configuration (APPINFRA_DEV_PKG_NAME validity)
+    - Package configuration (the package directory the project names)
     - Project structure (tests/ directory)
     - Config file syntax (Makefile.local)
     """
@@ -61,7 +76,10 @@ class DoctorTool(Tool):
         parser.add_argument(
             "--pkg-name",
             default=None,
-            help="Package name to validate (default: from APPINFRA_DEV_PKG_NAME env var)",
+            help=(
+                "Package name to validate (default: APPINFRA_DEV_PKG_NAME, then the "
+                "[project] name of pyproject.toml)"
+            ),
         )
         parser.add_argument(
             "--project-root",
@@ -171,19 +189,23 @@ class DoctorTool(Tool):
         return "installed"
 
     def _check_package_name(self) -> CheckResult:
-        """Validate APPINFRA_DEV_PKG_NAME."""
+        """Validate the package named by the first of --pkg-name, APPINFRA_DEV_PKG_NAME and
+        the [project] name of pyproject.toml, whose dashes become underscores."""
+        project_root = Path(getattr(self.args, "project_root", "."))
         pkg_name = getattr(self.args, "pkg_name", None) or os.environ.get(
             "APPINFRA_DEV_PKG_NAME"
         )
         if not pkg_name:
-            return CheckResult(
-                name="Package name",
-                passed=False,
-                message="APPINFRA_DEV_PKG_NAME not set",
-                suggestion="Set APPINFRA_DEV_PKG_NAME in your Makefile or environment",
-            )
-
-        project_root = Path(getattr(self.args, "project_root", "."))
+            try:
+                pkg_name = derive_package_name(project_root).replace("-", "_")
+            except (OSError, tomllib.TOMLDecodeError, KeyError, TypeError) as e:
+                return CheckResult(
+                    name="Package name",
+                    passed=False,
+                    message=f"no package name from {_PKG_NAME_SOURCES}",
+                    suggestion=f"{_pyproject_problem(e)}: pass --pkg-name or set "
+                    "APPINFRA_DEV_PKG_NAME",
+                )
         return self._validate_package_structure(pkg_name, project_root)
 
     def _validate_package_structure(

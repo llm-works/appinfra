@@ -58,6 +58,8 @@ For API stability guarantees and deprecation policy, see
 ### Fixed
 - `start_subprocess()` waits for its own uvicorn server to start: another process listening on the
   port no longer counts as the server being up while the app's startup runs.
+- `appinfra doctor` run outside make finds the package from the `[project]` name of
+  `pyproject.toml` when neither `--pkg-name` nor `APPINFRA_DEV_PKG_NAME` is given.
 
 ## [0.14.1] - 2026-11-03
 

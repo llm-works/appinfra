@@ -3,7 +3,7 @@
 
 """Tests for the DoctorTool CLI module."""
 
-import os
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -148,22 +148,6 @@ class TestDoctorTool:
         result = tool._validate_package_structure("mypackage", tmp_path)
         assert result.passed is False
         assert "__init__.py" in result.message
-
-    @pytest.mark.unit
-    def test_check_package_name_not_set(self):
-        """Test package name check when not set."""
-        tool = DoctorTool()
-        mock_args = MagicMock()
-        mock_args.pkg_name = None
-        mock_args.project_root = "."
-        tool._parsed_args = mock_args
-
-        with patch.dict(os.environ, {}, clear=True):
-            # Remove APPINFRA_DEV_PKG_NAME if present
-            os.environ.pop("APPINFRA_DEV_PKG_NAME", None)
-            result = tool._check_package_name()
-            assert result.passed is False
-            assert "not set" in result.message
 
     def test_check_tests_directory_exists(self, tmp_path):
         """Test tests directory check when exists with tests."""
@@ -397,3 +381,73 @@ class TestDoctorTool:
             result = tool._validate_config_with_make(config_file, tmp_path)
             assert result.passed is True
             assert "timed out" in result.message
+
+
+def _doctor(project_root: Path, pkg_name: str | None = None) -> DoctorTool:
+    """A doctor over a project root, as if run with these arguments."""
+    tool = DoctorTool()
+    args = MagicMock()
+    args.pkg_name = pkg_name
+    args.project_root = str(project_root)
+    tool._parsed_args = args
+    return tool
+
+
+def _package(root: Path, name: str) -> None:
+    (root / name).mkdir()
+    (root / name / "__init__.py").write_text("")
+
+
+@pytest.mark.integration
+class TestPackageNameSources:
+    """The package name comes from --pkg-name, then APPINFRA_DEV_PKG_NAME, then the
+    [project] name of pyproject.toml."""
+
+    def test_pyproject_name_names_the_package(self, tmp_path, monkeypatch):
+        """A distribution name's dashes become the import name's underscores."""
+        monkeypatch.delenv("APPINFRA_DEV_PKG_NAME", raising=False)
+        (tmp_path / "pyproject.toml").write_text('[project]\nname = "my-pkg"\n')
+        _package(tmp_path, "my_pkg")
+        result = _doctor(tmp_path)._check_package_name()
+        assert result.passed, result
+        assert result.message == "'my_pkg/' is valid Python package"
+
+    @pytest.mark.parametrize(
+        ("arg", "env", "expected"),
+        [
+            ("from_arg", "from_env", "from_arg"),
+            (None, "from_env", "from_env"),
+            (None, None, "from_pyproject"),
+        ],
+        ids=["arg", "env", "pyproject"],
+    )
+    def test_first_source_given_wins(self, tmp_path, monkeypatch, arg, env, expected):
+        (tmp_path / "pyproject.toml").write_text('[project]\nname = "from-pyproject"\n')
+        for name in ("from_arg", "from_env", "from_pyproject"):
+            _package(tmp_path, name)
+        if env:
+            monkeypatch.setenv("APPINFRA_DEV_PKG_NAME", env)
+        else:
+            monkeypatch.delenv("APPINFRA_DEV_PKG_NAME", raising=False)
+        result = _doctor(tmp_path, arg)._check_package_name()
+        assert result.message == f"'{expected}/' is valid Python package"
+
+    @pytest.mark.parametrize(
+        ("pyproject", "reason"),
+        [
+            (None, "no pyproject.toml"),
+            ("[project\n", "pyproject.toml is not valid TOML"),
+            ('[project]\nversion = "1"\n', "pyproject.toml has no [project] name"),
+            ("[project]\nname = 3\n", "pyproject.toml has no [project] name"),
+        ],
+        ids=["missing", "malformed", "no-name", "name-not-a-string"],
+    )
+    def test_no_source_names_all_three(self, tmp_path, monkeypatch, pyproject, reason):
+        monkeypatch.delenv("APPINFRA_DEV_PKG_NAME", raising=False)
+        if pyproject is not None:
+            (tmp_path / "pyproject.toml").write_text(pyproject)
+        result = _doctor(tmp_path)._check_package_name()
+        assert result.passed is False
+        for source in ("--pkg-name", "APPINFRA_DEV_PKG_NAME", "pyproject.toml"):
+            assert source in result.message, result.message
+        assert result.suggestion is not None and reason in result.suggestion, result
