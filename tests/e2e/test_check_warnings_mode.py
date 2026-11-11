@@ -115,16 +115,23 @@ _MODES = pytest.mark.parametrize(
 )
 
 
-@_MODES
+@pytest.mark.parametrize(
+    ("args", "failure"),
+    [
+        # The display gives the failure's reason below the checklist
+        ((), "1 warning: filterwarnings makes every warning an error"),
+        # Raw mode puts the warnings on the failure line itself
+        (("--raw", "--summary"), "Formatting check failed (1 warnings)"),
+    ],
+    ids=["display", "raw"],
+)
 def test_a_tool_warning_fails_its_check_in_strict_mode(
-    tmp_path: Path, args: tuple[str, ...]
+    tmp_path: Path, args: tuple[str, ...], failure: str
 ) -> None:
     result, calls = _check(tmp_path, "error", pyproject=_RUFF_TOP_LEVEL, args=args)
     output = result.stdout + result.stderr
     assert result.returncode != 0, output
-    assert "Formatting check failed" in output or "filterwarnings makes" in output, (
-        output
-    )
+    assert failure in output, output
     assert _probes(calls), "the mode was read without asking pytest"
 
 
