@@ -32,6 +32,11 @@ APPINFRA_PYTEST_COVERAGE_MARKERS ?= unit or integration
 # the rest. Unit and integration tests may override each other's directory with a marker
 APPINFRA_PYTEST_BOUND_SUITES ?= e2e security performance
 
+# make check's pytest workers (framework defaults): a fraction is a share of the CPUs, a whole
+# number that many workers. Coverage takes in unit and integration, so it gets the larger share
+APPINFRA_PYTEST_CHECK_WORKERS ?= 0.25
+APPINFRA_PYTEST_COVERAGE_WORKERS ?= 0.5
+
 # Coverage threshold (framework default is 80%)
 APPINFRA_PYTEST_COVERAGE_THRESHOLD ?= 95
 

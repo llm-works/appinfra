@@ -898,6 +898,7 @@ class TestSettingSh:
         ("decorators", ["", "router.get", "router.get  cli.command"]),
         ("rules", ["", "false", "C90,SIM,E501", "ALL"]),
         ("suites", ["", "e2e", "e2e security performance", " unit  integration "]),
+        ("share", ["0.25", ".5", "0.05", "1", "8", "16"]),
     ]
     INVALID = [
         (
@@ -909,6 +910,11 @@ class TestSettingSh:
         ("decorators", "a list of decorator names", ["a$(x)", "*", "router.", "a;b"]),
         ("rules", "a list of ruff rule codes", ["C90, SIM", "c90", "C90,", "C90;x"]),
         ("suites", "a list of suites", ["smoke", "e2e,security", "E2E", "e2e;x"]),
+        (
+            "share",
+            "a worker share",
+            ["", "0", "0.0", ".0", "0.", "1.5", "04", "-0.5", "many", "0.5;x"],
+        ),
     ]
 
     @pytest.mark.parametrize(
@@ -1094,6 +1100,10 @@ class TestSettingTypes:
             ("APPINFRA_PYTEST_WORKERS", "auto", "auto"),
             ("APPINFRA_PYTEST_WORKERS", "logical", "logical"),
             ("APPINFRA_PYTEST_WORKERS", "8", "8"),
+            ("APPINFRA_PYTEST_CHECK_WORKERS", "0.25", "0.25"),
+            ("APPINFRA_PYTEST_CHECK_WORKERS", ".5", ".5"),
+            ("APPINFRA_PYTEST_COVERAGE_WORKERS", "1", "1"),
+            ("APPINFRA_PYTEST_COVERAGE_WORKERS", "12", "12"),
         ],
     )
     def test_valid(self, tmp_path: Path, name: str, value: str, expected: str) -> None:
@@ -1118,6 +1128,12 @@ class TestSettingTypes:
             ("APPINFRA_PYTEST_WORKERS", "0", "a worker count"),
             ("APPINFRA_PYTEST_WORKERS", "04", "a worker count"),
             ("APPINFRA_PYTEST_WORKERS", "many", "a worker count"),
+            ("APPINFRA_PYTEST_CHECK_WORKERS", "0", "a worker share"),
+            ("APPINFRA_PYTEST_CHECK_WORKERS", "0.0", "a worker share"),
+            ("APPINFRA_PYTEST_CHECK_WORKERS", "1.5", "a worker share"),
+            ("APPINFRA_PYTEST_COVERAGE_WORKERS", "04", "a worker share"),
+            ("APPINFRA_PYTEST_COVERAGE_WORKERS", "0.", "a worker share"),
+            ("APPINFRA_PYTEST_COVERAGE_WORKERS", "auto", "a worker share"),
         ],
     )
     def test_invalid(self, tmp_path: Path, name: str, value: str, kind: str) -> None:

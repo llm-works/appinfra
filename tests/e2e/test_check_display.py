@@ -19,6 +19,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.helpers.check_sh import FIXTURE_WORKERS
+
 REPO = Path(__file__).resolve().parents[2]
 CHECK_SH = REPO / "appinfra" / "scripts" / "check.sh"
 HEIGHT = 12
@@ -56,6 +58,7 @@ def _env(root: Path) -> dict[str, str]:
     }
     return {
         **env,
+        **FIXTURE_WORKERS,
         "PYTHON": sys.executable,
         "PYTHONPATH": str(REPO),
         "APPINFRA_DEV_PKG_NAME": "pkg",
