@@ -128,16 +128,17 @@ class TestDoctorTool:
         (pkg_dir / "__init__.py").write_text("")
 
         tool = DoctorTool()
-        result = tool._validate_package_structure("mypackage", tmp_path)
+        result = tool._validate_package_structure("mypackage", tmp_path, "unused")
         assert result.passed is True
         assert "valid Python package" in result.message
 
     def test_validate_package_structure_missing_dir(self, tmp_path):
         """Test package validation with missing directory."""
         tool = DoctorTool()
-        result = tool._validate_package_structure("nonexistent", tmp_path)
+        result = tool._validate_package_structure("nonexistent", tmp_path, "the hint")
         assert result.passed is False
         assert "does not exist" in result.message
+        assert result.suggestion == "the hint"
 
     def test_validate_package_structure_missing_init(self, tmp_path):
         """Test package validation with missing __init__.py."""
@@ -145,7 +146,7 @@ class TestDoctorTool:
         pkg_dir.mkdir()
 
         tool = DoctorTool()
-        result = tool._validate_package_structure("mypackage", tmp_path)
+        result = tool._validate_package_structure("mypackage", tmp_path, "unused")
         assert result.passed is False
         assert "__init__.py" in result.message
 
@@ -431,6 +432,33 @@ class TestPackageNameSources:
             monkeypatch.delenv("APPINFRA_DEV_PKG_NAME", raising=False)
         result = _doctor(tmp_path, arg)._check_package_name()
         assert result.message == f"'{expected}/' is valid Python package"
+
+    @pytest.mark.parametrize(
+        ("arg", "env", "suggestion"),
+        [
+            ("absent", None, "Create absent/ directory or fix --pkg-name"),
+            (None, "absent", "Create absent/ directory or fix APPINFRA_DEV_PKG_NAME"),
+            (
+                None,
+                None,
+                "'python_absent' is the [project] name of pyproject.toml: when the import "
+                "package is named differently, pass --pkg-name or set APPINFRA_DEV_PKG_NAME",
+            ),
+        ],
+        ids=["arg", "env", "pyproject"],
+    )
+    def test_missing_directory_points_at_the_source(
+        self, tmp_path, monkeypatch, arg, env, suggestion
+    ):
+        """A distribution name need not be the import name: the fix depends on the source."""
+        (tmp_path / "pyproject.toml").write_text('[project]\nname = "python-absent"\n')
+        if env:
+            monkeypatch.setenv("APPINFRA_DEV_PKG_NAME", env)
+        else:
+            monkeypatch.delenv("APPINFRA_DEV_PKG_NAME", raising=False)
+        result = _doctor(tmp_path, arg)._check_package_name()
+        assert result.passed is False
+        assert result.suggestion == suggestion
 
     @pytest.mark.parametrize(
         ("pyproject", "reason"),

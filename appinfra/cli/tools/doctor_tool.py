@@ -192,26 +192,44 @@ class DoctorTool(Tool):
         """Validate the package named by the first of --pkg-name, APPINFRA_DEV_PKG_NAME and
         the [project] name of pyproject.toml, whose dashes become underscores."""
         project_root = Path(getattr(self.args, "project_root", "."))
-        pkg_name = getattr(self.args, "pkg_name", None) or os.environ.get(
-            "APPINFRA_DEV_PKG_NAME"
+        given = self._given_package_name()
+        if given:
+            name, source = given
+            return self._validate_package_structure(
+                name, project_root, f"Create {name}/ directory or fix {source}"
+            )
+        try:
+            name = derive_package_name(project_root).replace("-", "_")
+        except (OSError, tomllib.TOMLDecodeError, KeyError, TypeError) as e:
+            return CheckResult(
+                name="Package name",
+                passed=False,
+                message=f"no package name from {_PKG_NAME_SOURCES}",
+                suggestion=f"{_pyproject_problem(e)}: pass --pkg-name or set "
+                "APPINFRA_DEV_PKG_NAME",
+            )
+        # The distribution name often differs from the import package (src/ layouts, a
+        # python- prefix): the fix is to name the package, not to create a directory
+        return self._validate_package_structure(
+            name,
+            project_root,
+            f"'{name}' is the [project] name of pyproject.toml: when the import package is "
+            "named differently, pass --pkg-name or set APPINFRA_DEV_PKG_NAME",
         )
-        if not pkg_name:
-            try:
-                pkg_name = derive_package_name(project_root).replace("-", "_")
-            except (OSError, tomllib.TOMLDecodeError, KeyError, TypeError) as e:
-                return CheckResult(
-                    name="Package name",
-                    passed=False,
-                    message=f"no package name from {_PKG_NAME_SOURCES}",
-                    suggestion=f"{_pyproject_problem(e)}: pass --pkg-name or set "
-                    "APPINFRA_DEV_PKG_NAME",
-                )
-        return self._validate_package_structure(pkg_name, project_root)
+
+    def _given_package_name(self) -> tuple[str, str] | None:
+        """The package name given by --pkg-name or APPINFRA_DEV_PKG_NAME, and which gave it."""
+        if arg := getattr(self.args, "pkg_name", None):
+            return arg, "--pkg-name"
+        if env := os.environ.get("APPINFRA_DEV_PKG_NAME"):
+            return env, "APPINFRA_DEV_PKG_NAME"
+        return None
 
     def _validate_package_structure(
-        self, pkg_name: str, project_root: Path
+        self, pkg_name: str, project_root: Path, missing_hint: str
     ) -> CheckResult:
-        """Validate that package directory exists and is a valid Python package."""
+        """Validate that package directory exists and is a valid Python package; a missing
+        directory gets missing_hint, which depends on where the name came from."""
         pkg_dir = project_root / pkg_name
 
         if not pkg_dir.exists():
@@ -219,7 +237,7 @@ class DoctorTool(Tool):
                 name="Package name",
                 passed=False,
                 message=f"Directory '{pkg_name}/' does not exist",
-                suggestion=f"Create {pkg_name}/ directory or fix APPINFRA_DEV_PKG_NAME",
+                suggestion=missing_hint,
             )
 
         if not (pkg_dir / "__init__.py").exists():
