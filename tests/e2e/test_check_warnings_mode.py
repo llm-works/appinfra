@@ -16,6 +16,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.helpers.check_sh import FIXTURE_WORKERS
+
 REPO = Path(__file__).resolve().parents[2]
 CHECK_SH = REPO / "appinfra" / "scripts" / "check.sh"
 
@@ -68,7 +70,7 @@ def _check(
         for k, v in os.environ.items()
         if not k.startswith(("INFRA_", "APPINFRA_", "_APPINFRA_", "MAKE", "PYTEST_"))
     }
-    env |= {
+    env |= FIXTURE_WORKERS | {
         "PYTHON": str(python),
         "PYTHONPATH": str(REPO),
         "APPINFRA_DEV_PROJECT_ROOT": str(project),
