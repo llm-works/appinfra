@@ -32,6 +32,8 @@ def _pyproject_problem(e: Exception) -> str:
         return f"pyproject.toml is not valid TOML ({e})"
     if isinstance(e, OSError):
         return f"cannot read pyproject.toml ({e.strerror})"
+    if isinstance(e, TypeError):
+        return "pyproject.toml [project] name is not a string"
     return "pyproject.toml has no [project] name"
 
 

@@ -466,7 +466,7 @@ class TestPackageNameSources:
             (None, "no pyproject.toml"),
             ("[project\n", "pyproject.toml is not valid TOML"),
             ('[project]\nversion = "1"\n', "pyproject.toml has no [project] name"),
-            ("[project]\nname = 3\n", "pyproject.toml has no [project] name"),
+            ("[project]\nname = 3\n", "pyproject.toml [project] name is not a string"),
         ],
         ids=["missing", "malformed", "no-name", "name-not-a-string"],
     )
