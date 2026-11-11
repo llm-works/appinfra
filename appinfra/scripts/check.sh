@@ -17,16 +17,10 @@ shopt -s nullglob
 
 PARALLEL=true
 NPROC=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 8)
-# --dist=worksteal (xdist ≥ 3.2): idle workers pull tests from busy peers,
-# smoothing the tail when one shard's tests are slower than others'.
-# Standalone suites use NPROC/4 workers so several suites in the parallel
-# group don't oversubscribe cores. Coverage gets NPROC/2 because it
-# absorbs one or more standalone suites (see FOLDED_MARKERS below), stays
-# alive longer, and benefits from more workers as the others drop out.
-PYTEST_JOBS=$(( NPROC / 4 > 2 ? NPROC / 4 : 2 ))
-PYTEST_PARALLEL="-n ${PYTEST_JOBS} --dist=worksteal"
-PYTEST_JOBS_COVERAGE=$(( NPROC / 2 > 2 ? NPROC / 2 : 2 ))
-PYTEST_PARALLEL_COVERAGE="-n ${PYTEST_JOBS_COVERAGE} --dist=worksteal"
+# The pytest runs' worker options: --sequential and --raw run them in-process (-n 0); otherwise
+# they come from APPINFRA_PYTEST_CHECK_WORKERS and APPINFRA_PYTEST_COVERAGE_WORKERS (below)
+PYTEST_PARALLEL=""
+PYTEST_PARALLEL_COVERAGE=""
 COVERAGE_TARGET=""
 FAIL_FAST=false
 RAW=false
@@ -97,8 +91,27 @@ CQ_KEEP_DECORATORS="$(appinfra_setting APPINFRA_DEV_CQ_DEAD_KEEP_DECORATORS "" d
 # of rule codes (empty or false = off). Rules that should fail the build belong in the project's
 # ruff config.
 CQ_LINT_SELECT="$(appinfra_setting APPINFRA_DEV_CQ_LINT_SELECT C90,SIM,RET,PIE,PERF,FURB,C4 rules)" || exit 2
-# Where performance tests live (default tests/)
+# Suites collected from their tests/<suite>/ directory alone
 BOUND_SUITES="$(appinfra_setting APPINFRA_PYTEST_BOUND_SUITES "" suites)" || exit 2
+
+# Workers for each standalone suite and for the coverage run. The default shares: standalone
+# suites take a quarter of the CPUs so several suites in the parallel group don't oversubscribe
+# cores; coverage takes half because it absorbs one or more standalone suites (see
+# FOLDED_MARKERS below), stays alive longer, and benefits from more workers as the others drop
+# out. --dist=worksteal (xdist >= 3.2): idle workers pull tests from busy peers, smoothing the
+# tail when one shard's tests are slower than others'.
+CHECK_WORKERS="$(appinfra_setting APPINFRA_PYTEST_CHECK_WORKERS 0.25 share)" || exit 2
+COVERAGE_WORKERS="$(appinfra_setting APPINFRA_PYTEST_COVERAGE_WORKERS 0.5 share)" || exit 2
+
+# The worker count for a share: a whole number as it is, a fraction of NPROC, at least 2
+worker_count() {
+    case "$1" in
+        *.*) awk -v cpus="$NPROC" -v share="$1" 'BEGIN { n = int(cpus * share); print (n > 2 ? n : 2) }' ;;
+        *) echo "$1" ;;
+    esac
+}
+PYTEST_PARALLEL="${PYTEST_PARALLEL:--n $(worker_count "$CHECK_WORKERS") --dist=worksteal}"
+PYTEST_PARALLEL_COVERAGE="${PYTEST_PARALLEL_COVERAGE:--n $(worker_count "$COVERAGE_WORKERS") --dist=worksteal}"
 
 # Coverage's marker expression can subsume standalone test suites. When
 # check.sh runs both a standalone suite and coverage over the same marker
@@ -499,7 +512,7 @@ declare -a TEST_SUBCHECKS_RAW=()
 # Coverage subcheck goes first — it subsumes at least one standalone
 # suite (see FOLDED_MARKERS above) and stays alive longest in the
 # parallel group; leading the list keeps its running/completed state
-# obvious. Uses NPROC/2 workers (see PYTEST_PARALLEL_COVERAGE above).
+# obvious. Its workers: APPINFRA_PYTEST_COVERAGE_WORKERS (see PYTEST_PARALLEL_COVERAGE above).
 # make check compares the coverage with the target in run_check; check.ci (--raw --summary)
 # runs the suite through run_raw, so pytest-cov applies the target there
 COVERAGE_FAIL_UNDER=""

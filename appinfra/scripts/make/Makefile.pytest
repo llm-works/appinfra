@@ -20,8 +20,9 @@
 #   APPINFRA_PYTEST_WORKERS            - pytest-xdist worker count, auto, logical or N (default: auto;
 #                                     empty in Makefile.local runs pytest in-process)
 #                                     Never applied to test.perf targets. Not read by check.sh
-#                                     (make check), which runs suites concurrently with its own
-#                                     per-suite worker heuristic
+#                                     (make check), which runs suites concurrently: see
+#                                     APPINFRA_PYTEST_CHECK_WORKERS and
+#                                     APPINFRA_PYTEST_COVERAGE_WORKERS (Makefile.config)
 #   APPINFRA_PYTEST_ARGS               - Additional pytest arguments (default: empty)
 #   APPINFRA_DEV_SKIP_TARGETS          - Space-separated list of targets to skip (project provides own)
 #                                     Supported: test.unit test.integration test.e2e test.perf test.security

@@ -493,6 +493,7 @@ Each setting has a type, and a value that does not fit it stops make:
 | percent | a number from 0 to 100, e.g. `80` or `95.5` | `APPINFRA_DEV_DOCSTRING_THRESHOLD`, `APPINFRA_PYTEST_COVERAGE_THRESHOLD`, `APPINFRA_DEV_TEST_HEALTH_THRESHOLD` |
 | integer | a whole number, 0 or more | `APPINFRA_PYTEST_HANG_DUMP_SECONDS`, `APPINFRA_DEV_TEST_HEALTH_OUTLIERS` |
 | worker count | empty, `auto`, `logical` or a whole number above 0 | `APPINFRA_PYTEST_WORKERS` |
+| worker share | a fraction below 1, e.g. `0.25` or `.5`, for that share of the CPUs (at least 2 workers), or a whole number above 0 for that many workers | `APPINFRA_PYTEST_CHECK_WORKERS`, `APPINFRA_PYTEST_COVERAGE_WORKERS` |
 | text | anything | every other setting |
 
 **Environment (ENV):**
@@ -544,8 +545,10 @@ Each setting has a type, and a value that does not fit it stops make:
 | `APPINFRA_PYTEST_COVERAGE_THRESHOLD` | `80` | Coverage threshold for `make check` (0 to disable) |
 | `APPINFRA_PYTEST_TESTS_DIR` | `tests` | Tests directory |
 | `APPINFRA_PYTEST_BOUND_SUITES` | (empty) | Suites bound to their `tests/<suite>/` directory, space-separated, e.g. `e2e security performance`. `make check` and `test.<suite>*` collect a bound suite from that directory alone, which skips importing the rest of the test tree, and report "no tests" when it holds no test files. A test of a bound suite outside its directory is an error (see the test-suites guide) |
-| `APPINFRA_PYTEST_WORKERS` | `auto` | pytest-xdist worker count (`auto`, `logical`, which needs `psutil`, or N) for `test.*` targets; empty (in `Makefile.local`) runs pytest in-process. Never applied to `test.perf*`. `make check` ignores it: `check.sh` runs suites concurrently with its own per-suite worker heuristic |
-| `APPINFRA_PYTEST_ARGS` | (empty) | Additional pytest arguments for the `make test*` targets and `make check`'s test runs, after their own. An xdist worker option (`-n`, `--numprocesses`, `--maxprocesses`, `--dist`) is an error: `make test*` take workers from `APPINFRA_PYTEST_WORKERS`, `make check` sets its own |
+| `APPINFRA_PYTEST_WORKERS` | `auto` | pytest-xdist worker count (`auto`, `logical`, which needs `psutil`, or N) for `test.*` targets; empty (in `Makefile.local`) runs pytest in-process. Never applied to `test.perf*`. `make check` ignores it: its suites run concurrently, with workers from `APPINFRA_PYTEST_CHECK_WORKERS` and `APPINFRA_PYTEST_COVERAGE_WORKERS` |
+| `APPINFRA_PYTEST_CHECK_WORKERS` | `0.25` | Workers of each standalone suite `make check` runs: a fraction below 1 for that share of the CPUs (at least 2), or a whole number for that many. Several suites run at once, hence a quarter by default |
+| `APPINFRA_PYTEST_COVERAGE_WORKERS` | `0.5` | Workers of `make check`'s coverage run, which takes in the suites its markers select and outlasts the other checks; same values as `APPINFRA_PYTEST_CHECK_WORKERS`. A project whose unit and integration tests dominate may raise it |
+| `APPINFRA_PYTEST_ARGS` | (empty) | Additional pytest arguments for the `make test*` targets and `make check`'s test runs, after their own. An xdist worker option (`-n`, `--numprocesses`, `--maxprocesses`, `--dist`) is an error: `make test*` take workers from `APPINFRA_PYTEST_WORKERS`, `make check` from `APPINFRA_PYTEST_CHECK_WORKERS` and `APPINFRA_PYTEST_COVERAGE_WORKERS` |
 | `APPINFRA_PYTEST_HANG_DUMP_SECONDS` | `120` | In `make check`, a test still running after this many seconds gets a row below the checklist and its process's stacks in the check's log; the test is neither stopped nor failed. `0` disables it |
 
 **Documentation (DOCS):**
