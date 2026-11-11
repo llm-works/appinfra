@@ -117,7 +117,8 @@ appinfra dr  # Alias
 Performs checks for:
 - Python version compatibility
 - Required tools (ruff, pytest, mypy)
-- Package configuration
+- Package configuration: the package named by `--pkg-name`, `APPINFRA_DEV_PKG_NAME` or the
+  `[project]` name of `pyproject.toml` (dashes as underscores), first given wins
 - Project structure (tests/ directory)
 - Config file syntax
 

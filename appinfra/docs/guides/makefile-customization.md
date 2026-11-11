@@ -150,7 +150,8 @@ All checks passed!
 The doctor checks:
 - Python version (>= 3.11 required)
 - Required tools installed (ruff, pytest, mypy)
-- `APPINFRA_DEV_PKG_NAME` points to a valid Python package
+- `APPINFRA_DEV_PKG_NAME` points to a valid Python package (run outside make, `appinfra doctor`
+  takes the `[project]` name of `pyproject.toml` when the setting is not in the environment)
 - `tests/` directory exists with test files
 
 Use `--json` for machine-readable output:
