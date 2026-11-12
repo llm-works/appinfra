@@ -10,6 +10,8 @@ For API stability guarantees and deprecation policy, see
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-11-11
+
 ### Added
 - `Sched` takes `tz`, an IANA zone name or a `tzinfo`: its times are read in that zone, daylight
   saving included, instead of the process's local one.
@@ -32,34 +34,35 @@ For API stability guarantees and deprecation policy, see
   share of the CPUs, a whole number a worker count.
 
 ### Changed
-- `make check` keeps its coverage data in its run directory instead of `.coverage` in the
-  project root.
-- The package declares its license as the SPDX expression `Apache-2.0`; building from source
-  needs setuptools 77.0.3 or later.
+- **Breaking:** `make check` keeps its coverage data in its run directory instead of `.coverage`
+  in the project root.
+- **Breaking:** the package declares its license as the SPDX expression `Apache-2.0`; building
+  from source needs setuptools 77.0.3 or later.
 - `cq dead` also counts methods under SQLAlchemy's `validates`, `reconstructor` and
   `listens_for` as used.
 - A sleep no longer counts against a unit test's suite: waiting on real time is a timing problem
   in every suite, solved with the fake clock.
-- A unit test runs on one thread: a test that starts a thread, hands work to one or waits on one,
-  directly or through the code under test, belongs to the integration suite. Test structure
-  health reports a unit test seen starting a thread as misfiled.
-- Test structure health charges every unit test that allocates `multiprocessing` shared memory (a
-  `Value`, `Array` or `Barrier`), not only the first in its worker process, so the finding no
-  longer depends on test order.
+- **Breaking:** a unit test runs on one thread: a test that starts a thread, hands work to one or
+  waits on one, directly or through the code under test, belongs to the integration suite. Test
+  structure health reports a unit test seen starting a thread as misfiled.
 - A `tests/<suite>/` directory holding only `__init__.py` or `conftest.py` no longer counts as
   having tests: `make check` reports the suite as "no tests" without starting pytest.
 - A FastAPI server's subprocess, its logger and its runner errors are named after the server,
   `uvicorn-<name>`, instead of its port.
+- A check in `make check` lists its first few distinct warnings, then one row counting the rest
+  with the path of the kept log.
 
 ### Removed
-- `APPINFRA_PYTEST_PERF_DIR`: performance tests live in `tests/performance/`; add `performance` to
-  `APPINFRA_PYTEST_BOUND_SUITES` to collect only that directory.
+- **Breaking:** `APPINFRA_PYTEST_PERF_DIR`: performance tests live in `tests/performance/`; add
+  `performance` to `APPINFRA_PYTEST_BOUND_SUITES` to collect only that directory.
 
 ### Fixed
 - `start_subprocess()` waits for its own uvicorn server to start: another process listening on the
   port no longer counts as the server being up while the app's startup runs.
 - `appinfra doctor` run outside make finds the package from the `[project]` name of
   `pyproject.toml` when neither `--pkg-name` nor `APPINFRA_DEV_PKG_NAME` is given.
+- `make check`'s display stays in place when it is taller than the terminal or when the process
+  has no controlling terminal: finished checks no longer overwrite other rows.
 
 ## [0.14.1] - 2026-11-03
 
@@ -1323,7 +1326,8 @@ as config. Affected: `ConfigValidator`, `PG.readonly`, `PG.migrate()`,
 ### Changed
 - Package renamed to `appinfra` (install and import both use `appinfra`)
 
-[Unreleased]: https://github.com/llm-works/appinfra/compare/v0.14.1...HEAD
+[Unreleased]: https://github.com/llm-works/appinfra/compare/v0.15.0...HEAD
+[0.15.0]: https://github.com/llm-works/appinfra/compare/v0.14.1...v0.15.0
 [0.14.1]: https://github.com/llm-works/appinfra/compare/v0.14.0...v0.14.1
 [0.14.0]: https://github.com/llm-works/appinfra/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/llm-works/appinfra/compare/v0.12.0...v0.13.0
