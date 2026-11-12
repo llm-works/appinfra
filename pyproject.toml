@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68.0", "wheel", "setuptools-scm>=8.0"]
+requires = ["setuptools>=77.0.3", "wheel", "setuptools-scm>=8.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -11,8 +11,8 @@ authors = [
     {name = "LLM Works LLC", email = "info@llm-works.ai"}
 ]
 requires-python = ">=3.11"
+license = "Apache-2.0"
 classifiers = [
-    "License :: OSI Approved :: Apache Software License",
     "Operating System :: POSIX :: Linux",
     "Operating System :: MacOS",
     "Programming Language :: Python :: 3",
@@ -214,6 +214,10 @@ markers = [
 source = ["appinfra"]
 # Pytest plugins are imported before coverage starts, so their module-level lines never count.
 omit = ["*/test/*", "*/tests/*", "*_test.py", "*/testing.py", "*/scripts/check_pytest/*"]
+# Python subprocesses the tests start count too: the pytest plugins are tested through pytest
+# runs in subprocesses, as their audit hook and patches cannot be undone in the test process.
+# _exit saves the data of processes that end through os._exit, as multiprocessing children do.
+patch = ["subprocess", "_exit"]
 
 [tool.coverage.report]
 precision = 2

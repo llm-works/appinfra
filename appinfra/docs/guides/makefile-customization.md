@@ -150,7 +150,8 @@ All checks passed!
 The doctor checks:
 - Python version (>= 3.11 required)
 - Required tools installed (ruff, pytest, mypy)
-- `APPINFRA_DEV_PKG_NAME` points to a valid Python package
+- `APPINFRA_DEV_PKG_NAME` points to a valid Python package (run outside make, `appinfra doctor`
+  takes the `[project]` name of `pyproject.toml` when the setting is not in the environment)
 - `tests/` directory exists with test files
 
 Use `--json` for machine-readable output:
@@ -174,6 +175,16 @@ rich        13.0.0  14.0.0  13.9.4     ✓         15.0.0     capped (2 majors)
 `available` is the newest release outside the range. Releases come from `pip index versions`, so
 from the indexes pip is configured with. Both targets query the index, so they are not part of
 `make check`. Flags such as `--include-pre` or `--no-color` go in `APPINFRA_DEV_DEPS_ARGS`.
+
+`ci` assumes CI installs every optional-dependency group, as `make setup` does. A project whose CI
+installs fewer names them, and the packages only the other groups need show `-`:
+
+```makefile
+APPINFRA_DEV_DEPS_ARGS := --ci-extras dev,runtime
+```
+
+A named group that requires the project's own extras (`client = ["myproj[gcp,saia]"]`) brings
+those groups in too, as pip does.
 
 ### Dry-Run Mode
 
@@ -483,6 +494,7 @@ Each setting has a type, and a value that does not fit it stops make:
 | percent | a number from 0 to 100, e.g. `80` or `95.5` | `APPINFRA_DEV_DOCSTRING_THRESHOLD`, `APPINFRA_PYTEST_COVERAGE_THRESHOLD`, `APPINFRA_DEV_TEST_HEALTH_THRESHOLD` |
 | integer | a whole number, 0 or more | `APPINFRA_PYTEST_HANG_DUMP_SECONDS`, `APPINFRA_DEV_TEST_HEALTH_OUTLIERS` |
 | worker count | empty, `auto`, `logical` or a whole number above 0 | `APPINFRA_PYTEST_WORKERS` |
+| worker share | a fraction below 1, e.g. `0.25` or `.5`, for that share of the CPUs (at least 2 workers), or a whole number above 0 for that many workers | `APPINFRA_PYTEST_CHECK_WORKERS`, `APPINFRA_PYTEST_COVERAGE_WORKERS` |
 | text | anything | every other setting |
 
 **Environment (ENV):**
@@ -512,7 +524,7 @@ Each setting has a type, and a value that does not fit it stops make:
 | `APPINFRA_DEV_CQ_LINT_SELECT` | `C90,SIM,RET,PIE,PERF,FURB,C4` | Extra ruff rule codes the Linting check reports as warnings, never failing (`false` to turn off) |
 | `APPINFRA_DEV_CQ_DUP` | `warn` | Duplicated code in the Code quality check (pylint): `false`, `warn` or `strict` |
 | `APPINFRA_DEV_CQ_DEAD` | `warn` | Dead private code in the Code quality check: `false`, `warn` or `strict` |
-| `APPINFRA_DEV_CQ_DEAD_KEEP_DECORATORS` | (empty) | Space-separated decorators that register what they decorate, so dead private code counts their definitions as used: a dotted name or a suffix of it (e.g. `router.get cli.command`). pydantic's validator and serializer decorators are built in |
+| `APPINFRA_DEV_CQ_DEAD_KEEP_DECORATORS` | (empty) | Space-separated decorators that register what they decorate, so dead private code counts their definitions as used: a dotted name or a suffix of it (e.g. `router.get cli.command`). pydantic's validator and serializer decorators and SQLAlchemy's `validates`, `reconstructor` and `listens_for` are built in |
 | `APPINFRA_DEV_TEST_HEALTH` | `false` | The Test structure health line of `make check`, for a project that loads `appinfra.pytest_suites`: off, or `warn` or `strict` on any finding ([Test suites](test-suites.md)) |
 | `APPINFRA_DEV_TEST_HEALTH_THRESHOLD` | `15` | Percent of a class's tests that may belong to another suite before the Test structure health line asks to split them off |
 | `APPINFRA_DEV_TEST_HEALTH_OUTLIERS` | `3` | Tests of another suite any class may hold, whatever its size, before the Test structure health line reports it |
@@ -521,7 +533,7 @@ Each setting has a type, and a value that does not fit it stops make:
 | `APPINFRA_DEV_PROJECT_ROOT` | `$(CURDIR)` | Project root for check.sh |
 | `APPINFRA_DEV_INSTALL_EXTRAS` | (empty) | Optional extras for install (e.g., `ui,fastapi`) |
 | `APPINFRA_DEV_MYPY_FLAGS` | (empty) | Extra mypy flags (e.g., `--follow-imports=skip` for large deps) |
-| `APPINFRA_DEV_DEPS_ARGS` | (empty) | Extra flags for `make deps` / `make deps.deep` (e.g., `--include-pre`) |
+| `APPINFRA_DEV_DEPS_ARGS` | (empty) | Extra flags for `make deps` / `make deps.deep` (e.g., `--include-pre`, `--ci-extras dev,runtime`) |
 | `APPINFRA_DEV_SKIP_TARGETS` | (empty) | Targets to skip so project can override (e.g., `type`, `test.e2e`, `deps`) |
 | `APPINFRA_DRY_RUN` | `false` | `true` previews commands without executing them |
 
@@ -533,9 +545,11 @@ Each setting has a type, and a value that does not fit it stops make:
 | `APPINFRA_PYTEST_COVERAGE_MARKERS` | `unit` | pytest marker expression the coverage run selects |
 | `APPINFRA_PYTEST_COVERAGE_THRESHOLD` | `80` | Coverage threshold for `make check` (0 to disable) |
 | `APPINFRA_PYTEST_TESTS_DIR` | `tests` | Tests directory |
-| `APPINFRA_PYTEST_PERF_DIR` | `tests` | Directory `test.perf*` and `make check`'s Performance group collect from. Pointing it at the directory holding the performance tests skips importing the rest of the test tree |
-| `APPINFRA_PYTEST_WORKERS` | `auto` | pytest-xdist worker count (`auto`, `logical`, which needs `psutil`, or N) for `test.*` targets; empty (in `Makefile.local`) runs pytest in-process. Never applied to `test.perf*`. `make check` ignores it: `check.sh` runs suites concurrently with its own per-suite worker heuristic |
-| `APPINFRA_PYTEST_ARGS` | (empty) | Additional pytest arguments for the `make test*` targets and `make check`'s test runs, after their own. An xdist worker option (`-n`, `--numprocesses`, `--maxprocesses`, `--dist`) is an error: `make test*` take workers from `APPINFRA_PYTEST_WORKERS`, `make check` sets its own |
+| `APPINFRA_PYTEST_BOUND_SUITES` | (empty) | Suites bound to their `tests/<suite>/` directory, space-separated, e.g. `e2e security performance`. `make check` and `test.<suite>*` collect a bound suite from that directory alone, which skips importing the rest of the test tree, and report "no tests" when it holds no test files. A test of a bound suite outside its directory is an error (see the test-suites guide) |
+| `APPINFRA_PYTEST_WORKERS` | `auto` | pytest-xdist worker count (`auto`, `logical`, which needs `psutil`, or N) for `test.*` targets; empty (in `Makefile.local`) runs pytest in-process. Never applied to `test.perf*`. `make check` ignores it: its suites run concurrently, with workers from `APPINFRA_PYTEST_CHECK_WORKERS` and `APPINFRA_PYTEST_COVERAGE_WORKERS` |
+| `APPINFRA_PYTEST_CHECK_WORKERS` | `0.25` | Workers of each standalone suite `make check` runs: a fraction below 1 for that share of the CPUs (at least 2), or a whole number for that many. Several suites run at once, hence a quarter by default |
+| `APPINFRA_PYTEST_COVERAGE_WORKERS` | `0.5` | Workers of `make check`'s coverage run, which takes in the suites its markers select and outlasts the other checks; same values as `APPINFRA_PYTEST_CHECK_WORKERS`. A project whose unit and integration tests dominate may raise it |
+| `APPINFRA_PYTEST_ARGS` | (empty) | Additional pytest arguments for the `make test*` targets and `make check`'s test runs, after their own. An xdist worker option (`-n`, `--numprocesses`, `--maxprocesses`, `--dist`) is an error: `make test*` take workers from `APPINFRA_PYTEST_WORKERS`, `make check` from `APPINFRA_PYTEST_CHECK_WORKERS` and `APPINFRA_PYTEST_COVERAGE_WORKERS` |
 | `APPINFRA_PYTEST_HANG_DUMP_SECONDS` | `120` | In `make check`, a test still running after this many seconds gets a row below the checklist and its process's stacks in the check's log; the test is neither stopped nor failed. `0` disables it |
 
 **Documentation (DOCS):**

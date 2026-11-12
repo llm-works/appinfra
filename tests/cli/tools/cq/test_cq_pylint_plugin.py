@@ -30,7 +30,7 @@ def _built_after_parse(
         cache.pop(mod, None)
 
 
-@pytest.mark.unit
+@pytest.mark.integration
 class TestPylintPlugin:
     """register() turns off astroid's attribute inference."""
 
@@ -48,6 +48,7 @@ class TestPylintPlugin:
         register(MagicMock())
         assert not _built_after_parse(tmp_path, monkeypatch, "cq_plugin_dep_patched")
 
+    @pytest.mark.unit
     def test_fails_when_astroid_lacks_the_method(self, monkeypatch: pytest.MonkeyPatch):
         monkeypatch.delattr(AstroidBuilder, "delayed_assattr")
         with pytest.raises(RuntimeError, match="delayed_assattr"):

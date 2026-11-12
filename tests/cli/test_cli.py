@@ -9,7 +9,7 @@ from unittest.mock import patch
 import pytest
 
 
-@pytest.mark.unit
+@pytest.mark.integration
 class TestCLI:
     """Test CLI entry point."""
 

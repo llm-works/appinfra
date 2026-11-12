@@ -99,7 +99,7 @@ class TestFunctionAnalyzerInit:
         assert analyzer.limit == 50
 
 
-@pytest.mark.unit
+@pytest.mark.integration
 class TestFunctionAnalyzerAnalyzeFile:
     """Test FunctionAnalyzer.analyze_file method."""
 
@@ -290,6 +290,7 @@ class TestFunctionAnalyzerAnalyzeFile:
             assert violations == []
             assert exempt == []
 
+    @pytest.mark.unit
     def test_handles_nonexistent_file(self):
         """Test returns empty tuple for nonexistent files."""
         analyzer = FunctionAnalyzer()
@@ -353,7 +354,7 @@ class TestFunctionAnalyzerAnalyzeFile:
 # =============================================================================
 
 
-@pytest.mark.unit
+@pytest.mark.integration
 class TestCqDirective:
     """Test # cq: directive parsing and handling."""
 
@@ -943,7 +944,7 @@ class TestCheckFunctionsToolAddArgs:
 # =============================================================================
 
 
-@pytest.mark.unit
+@pytest.mark.integration
 class TestCheckFunctionsToolRun:
     """Test CheckFunctionsTool.run method."""
 

@@ -79,7 +79,7 @@ class TestParsing:
         assert parse_groups(output, {}) == []
 
 
-@pytest.mark.unit
+@pytest.mark.integration
 class TestDropKept:
     """Test drop_kept()."""
 
@@ -144,7 +144,7 @@ def _make_tool(tmp_path: Path, strict: bool = False) -> CheckDupTool:
     return tool
 
 
-@pytest.mark.unit
+@pytest.mark.integration
 class TestCheckDupTool:
     """Test CheckDupTool.run() against pylint."""
 
@@ -204,6 +204,7 @@ class TestCheckDupTool:
         errors = tool._logger.error.call_args.kwargs["extra"]["errors"]
         assert errors == ["Plugin 'p' is impossible"]
 
+    @pytest.mark.unit
     def test_env_puts_this_appinfra_first_on_pythonpath(self, monkeypatch):
         root = str(Path(appinfra.__file__).resolve().parent.parent)
         monkeypatch.setenv("PYTHONPATH", "/elsewhere")
@@ -211,6 +212,7 @@ class TestCheckDupTool:
         monkeypatch.delenv("PYTHONPATH")
         assert pylint_env()["PYTHONPATH"] == root
 
+    @pytest.mark.unit
     def test_command_passes_threshold_jobs_and_files(self):
         cmd = pylint_command([Path("a.py")], 6, 4)
         assert "--min-similarity-lines=6" in cmd
@@ -218,6 +220,7 @@ class TestCheckDupTool:
         assert "--load-plugins=appinfra.cli.tools.cq.pylint_plugin" in cmd
         assert cmd[-1] == "a.py"
 
+    @pytest.mark.unit
     def test_args(self):
         parser = argparse.ArgumentParser()
         CheckDupTool(parent=None).add_args(parser)

@@ -644,13 +644,25 @@ class TestUvicornServiceSetup:
         from appinfra.app.fastapi.runtime.service import UvicornService
 
         config = ApiConfig(uvicorn=UvicornConfig(workers=4))
-        service = UvicornService(MagicMock(), MagicMock(), config)
+        service = UvicornService(MagicMock(), "api", MagicMock(), config)
 
         with pytest.raises(ConfigError, match="workers"):
             service.setup()
 
-    def test_accepts_single_worker(self):
-        """The default single worker passes setup."""
+    @pytest.mark.parametrize("port", [8000, 0])
+    def test_name_is_the_server_name_whatever_the_port(self, port: int):
+        """Two servers on OS-picked ports are told apart in process and log names."""
         from appinfra.app.fastapi.runtime.service import UvicornService
 
-        UvicornService(MagicMock(), MagicMock(), ApiConfig()).setup()
+        service = UvicornService(
+            MagicMock(), "myapi", MagicMock(), ApiConfig(port=port)
+        )
+        assert service.name == "uvicorn-myapi"
+
+    def test_rejects_negative_port(self):
+        from appinfra.app.fastapi.errors import ConfigError
+        from appinfra.app.fastapi.runtime.service import UvicornService
+
+        service = UvicornService(MagicMock(), "api", MagicMock(), ApiConfig(port=-1))
+        with pytest.raises(ConfigError, match="port"):
+            service.setup()

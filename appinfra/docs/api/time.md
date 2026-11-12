@@ -218,6 +218,7 @@ class Sched:
         when: str,  # Time spec: "HH:MM" or offset for hourly/minutely
         weekday: int | None = None,  # For WEEKLY (0=Monday, 6=Sunday)
         sleep_interval: int = 10,  # Seconds between checks
+        tz: str | tzinfo | None = None,  # Zone `when` is read in; None for local time
     ): ...
 
     def run(self, msg_intvl_secs=3600, instant=False) -> Generator[float]: ...
@@ -257,6 +258,18 @@ sched = Sched(lg, Period.WEEKLY, "09:00", weekday=0)
 
 for timestamp in sched.run():
     run_weekly_backup()
+```
+
+**In a Given Timezone:**
+
+`when` and `weekday` are read in the process's local zone unless `tz` names another, as an IANA
+name or a `tzinfo`. A run keeps its wall-clock time across daylight saving changes in that zone.
+
+```python
+from appinfra.time import Sched, Period
+
+# Daily at 11:00 New York time, also in a process that runs in UTC
+sched = Sched(lg, Period.DAILY, "11:00", tz="America/New_York")
 ```
 
 **Hourly/Minutely Execution:**

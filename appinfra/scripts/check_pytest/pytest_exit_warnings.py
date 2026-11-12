@@ -24,9 +24,10 @@ The main process also writes one line saying whether the project's filterwarning
 
     === exit warnings: strict ===     (or: warn)
 
-check.sh asks for that line once, from a run that only configures, and loads the plugin into
-its pytest checks with ``-p pytest_exit_warnings`` (this file's directory on PYTHONPATH);
-check_warnings.py then finds the warnings in each check's log. Interpreters the tests start are
+check.sh loads the plugin into its pytest checks with ``-p pytest_exit_warnings`` (this file's
+directory on PYTHONPATH); check_warnings.py then finds the warnings in each check's log. A
+pytest check that passed with warnings takes the mode from that line in its own log; any other
+check asks for it from a run that only configures. Interpreters the tests start are
 left alone. Like pytest_hang, the file imports nothing from appinfra, so loading it early does
 not run the package's ``__init__`` before pytest-cov measures it.
 """

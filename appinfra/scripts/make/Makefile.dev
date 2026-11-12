@@ -77,7 +77,9 @@ export APPINFRA_PYTEST_ARGS
 export APPINFRA_PYTEST_COVERAGE_MARKERS
 export APPINFRA_PYTEST_COVERAGE_THRESHOLD
 export APPINFRA_PYTEST_HANG_DUMP_SECONDS
-export APPINFRA_PYTEST_PERF_DIR
+export APPINFRA_PYTEST_BOUND_SUITES
+export APPINFRA_PYTEST_CHECK_WORKERS
+export APPINFRA_PYTEST_COVERAGE_WORKERS
 
 # Expand CQ_EXCLUDE patterns to --exclude flags (empty if no exclusions). Single-quoted, so the
 # shell passes each pattern through as written.

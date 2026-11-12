@@ -19,7 +19,8 @@ class ApiConfig:
 
     Attributes:
         host: Bind address (default: "0.0.0.0")
-        port: Bind port (default: 8000)
+        port: Bind port (default: 8000); in subprocess mode, 0 lets the OS pick one,
+            which Server.port gives once start_subprocess() returns
         title: API title for OpenAPI docs (default: "API Server")
         description: API description for OpenAPI docs
         version: API version (default: "0.1.0")

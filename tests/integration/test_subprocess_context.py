@@ -16,6 +16,10 @@ from pathlib import Path
 
 import pytest
 
+# How long a worker may take to start, answer or see the change before the test fails: spawned
+# workers start slowly on a loaded machine, more so under coverage. Only failure waits it out.
+_DEADLINE = 30.0
+
 
 def _worker_loop(
     config_path: str,
@@ -81,7 +85,7 @@ def _report_locations(check_events: list, result_queue: mp.Queue) -> dict[int, i
         event.set()
     locations = {}
     for _ in check_events:
-        worker_id, location = result_queue.get(timeout=2.0)
+        worker_id, location = result_queue.get(timeout=_DEADLINE)
         locations[worker_id] = location
     return locations
 
@@ -128,7 +132,9 @@ class TestSubprocessContextHotReload:
             try:
                 # Wait for both workers to be ready
                 for i, event in enumerate(ready_events):
-                    assert event.wait(timeout=5.0), f"Worker {i} did not become ready"
+                    assert event.wait(timeout=_DEADLINE), (
+                        f"Worker {i} did not become ready"
+                    )
 
                 # Give watchers time to start
                 time.sleep(0.3)
@@ -148,7 +154,7 @@ class TestSubprocessContextHotReload:
 
                 # Ask both workers for their location until both report the
                 # change or the deadline passes
-                deadline = time.monotonic() + 5.0
+                deadline = time.monotonic() + _DEADLINE
                 updated_locations = _report_locations(check_events, result_queue)
                 while updated_locations != {0: 3, 1: 3} and time.monotonic() < deadline:
                     time.sleep(0.05)

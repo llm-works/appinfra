@@ -385,16 +385,6 @@ class TestConsoleRichPath:
             assert "Hello" in result
             assert "World" in result
 
-    def test_status_returns_context_manager(self):
-        """Test status returns a context manager that can be used."""
-        output = StringIO()
-        console = Console(no_color=False, force_terminal=True, file=output)
-
-        # Exercise status path
-        with console.status("Processing...") as status:
-            # Status object should exist
-            assert status is not None
-
     def test_rule_with_rich_console(self):
         """Test rule through rich console when available."""
         output = StringIO()

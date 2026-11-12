@@ -328,6 +328,7 @@ TYPE_ROWS = {
     "percent": "_APPINFRA_PERCENTS",
     "integer": "_APPINFRA_INTEGERS",
     "worker count": "_APPINFRA_WORKERS",
+    "worker share": "_APPINFRA_SHARES",
 }
 
 

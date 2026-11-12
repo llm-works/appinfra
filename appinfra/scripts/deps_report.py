@@ -34,6 +34,11 @@ Behind and capped say how far that release is: "(3 majors)", "(2 minors)" or
 on each line is what its parent requires, its status uses every requirer's
 range combined. Pre-releases count only with ``--include-pre``. Ends with
 ``pip check``'s conflicts. Read-only: nothing is installed.
+
+The ci column assumes CI installs every optional-dependency group, as ``make
+setup`` does. ``--ci-extras dev,test`` names the groups it does install: a
+package it then does not need shows "-", and the rest resolve within the
+ranges of what CI installs.
 """
 
 from __future__ import annotations
@@ -49,6 +54,7 @@ from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from importlib import metadata
+from typing import Any
 
 from install_deps import collect_deps
 from packaging.requirements import InvalidRequirement, Requirement
@@ -264,13 +270,18 @@ def _with_gap(label: str, installed: Version, newer: Version) -> str:
 
 def build_rows(
     graph: Graph,
+    ci_graph: Graph,
     names: Iterable[str],
     installed: Callable[[str], Version | None],
     available: dict[str, list[Version] | None],
     direct: set[str],
     include_pre: bool,
 ) -> dict[str, Row]:
-    """A row per name; its range is every requirer's in ``graph``, as pip resolves it."""
+    """A row per name; its range is every requirer's in ``graph``, as pip resolves it.
+
+    The ci value comes from ``ci_graph``, what CI installs: a name not in it gets
+    NOT_IN_CI, the others the newest release within CI's own range.
+    """
     rows = {}
     for name in names:
         dep = graph.deps[name]
@@ -278,17 +289,26 @@ def build_rows(
         in_range = newest(versions, dep.spec, include_pre)
         latest = newest(versions, None, include_pre)
         have = installed(name)
+        ci_dep = ci_graph.deps.get(name)
+        ci = (
+            NOT_IN_CI
+            if ci_dep is None
+            else ci_version(
+                have, newest(versions, ci_dep.spec, include_pre), name in direct
+            )
+        )
         rows[name] = Row(
             have,
             in_range,
             latest,
             status(have, dep.spec, in_range, latest, name in direct),
-            ci_version(have, in_range, name in direct),
+            ci,
         )
     return rows
 
 
 CI_SAME = "✓"
+NOT_IN_CI = "-"  # CI does not install the package, see ci_project()
 
 
 def ci_version(
@@ -337,6 +357,8 @@ _STATUS_STYLES = {
     "local pre-release": "blue",
     "pre-release": "blue",
 }
+# The ci column: green when CI installs what is installed, gray when it installs nothing
+_CI_STYLES = {CI_SAME: "green", NOT_IN_CI: "gray"}
 
 
 MAJOR, MINOR, PATCH = 0, 1, 2
@@ -513,7 +535,7 @@ class _Tree:
             self._range(lead, name, spec, not lead)
             + [
                 [(installed, "")],
-                [(row.ci, "green" if row.ci == CI_SAME else "ci")],
+                [(row.ci, _CI_STYLES.get(row.ci, "ci"))],
                 available(row),
                 _status_cell(row),
             ]
@@ -540,7 +562,7 @@ class _Tree:
 
 _HEADER = ["package", "floor", "ceil", "installed", "ci", "available", "status"]
 _LEGEND = """\
-ci: ✓ = CI installs the same version, else the version it installs
+ci: ✓ = CI installs the same version, - = CI does not install it, else the version it installs
 available: newest release outside the range"""
 
 
@@ -600,28 +622,96 @@ def _direct_install(name: str) -> bool:
         return False
 
 
+def _own_extras(requirements: Iterable[str], own_name: str) -> set[str]:
+    """The extras named by requirements on the project itself: ``proj[a,b]`` gives a and b."""
+    extras: set[str] = set()
+    for line in requirements:
+        try:
+            requirement = Requirement(line)
+        except InvalidRequirement:
+            continue
+        if canonicalize_name(requirement.name) == own_name:
+            extras |= {canonicalize_name(extra) for extra in requirement.extras}
+    return extras
+
+
+def _installed_groups(project: dict[str, Any], named: list[str]) -> set[str]:
+    """``named`` and every group they or the base dependencies require through the
+    project's own name, recursively, as pip expands ``proj[...]``. An extra the project
+    does not declare is skipped, as pip skips it."""
+    groups = project.get("optional-dependencies", {})
+    by_extra = {canonicalize_name(name): name for name in groups}
+    own_name = canonicalize_name(project["name"])
+    pending = list(named) + [
+        by_extra[extra]
+        for extra in _own_extras(project.get("dependencies", []), own_name)
+        if extra in by_extra
+    ]
+    found: set[str] = set()
+    while pending:
+        name = pending.pop()
+        if name in found:
+            continue
+        found.add(name)
+        pending += [
+            by_extra[extra]
+            for extra in _own_extras(groups[name], own_name)
+            if extra in by_extra
+        ]
+    return found
+
+
+def ci_project(project: dict[str, Any], ci_extras: list[str]) -> dict[str, Any]:
+    """The [project] table as CI installs it: the optional groups in ``ci_extras``
+    and those they bring in through the project's own extras.
+
+    Raises ValueError for a named group the project does not declare.
+    """
+    groups = dict(project.get("optional-dependencies", {}))
+    unknown = [name for name in ci_extras if name not in groups]
+    if unknown:
+        raise ValueError(
+            f"no such optional-dependency group: {', '.join(map(repr, unknown))}"
+        )
+    installed = _installed_groups(project, ci_extras)
+    return {
+        **project,
+        "optional-dependencies": {
+            name: deps for name, deps in groups.items() if name in installed
+        },
+    }
+
+
+def _graph(project: dict[str, Any]) -> tuple[Graph, list[str]]:
+    """The project's requirements and the installed tree under them; and the direct ones."""
+    graph = declared(collect_deps(project), str(project["name"]))
+    roots = list(graph.deps)
+    return transitive(graph, _installed_requires), roots
+
+
 def report(
-    project: dict[str, object],
+    project: dict[str, Any],
+    ci_extras: list[str],
     deep: bool,
     include_pre: bool,
     color: bool,
     versions: VersionsLookup,
 ) -> str:
-    """The report for a loaded [project] table.
+    """The report for a loaded [project] table, CI installing the groups in ``ci_extras``.
 
     The whole installed tree is read either way (local metadata only), so a
     range is every requirer's, as a fresh install (CI) resolves it; only the
     lines shown are looked up on the index.
     """
-    graph = declared(collect_deps(project), str(project["name"]))
-    roots = list(graph.deps)
-    transitive(graph, _installed_requires)
+    graph, roots = _graph(project)
+    ci_graph, _ = _graph(ci_project(project, ci_extras))
     shown = list(graph.deps) if deep else roots
     direct = {name for name in shown if _direct_install(name)}
     # missing packages too: the ci column shows what a fresh install gets for them
     wanted = [n for n in shown if n not in direct]
     rows = build_rows(
         graph,
+        ci_graph,
         shown,
         _installed_version,
         lookup_all(wanted, versions),
@@ -636,8 +726,13 @@ def use_color(no_color: bool) -> bool:
     return not no_color and not os.environ.get("NO_COLOR") and sys.stdout.isatty()
 
 
+def _groups(value: str) -> list[str]:
+    """argparse type for --ci-extras: comma-separated group names; empty for none."""
+    return [name.strip() for name in value.split(",") if name.strip()]
+
+
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:
-    """--deep, --include-pre and --no-color."""
+    """--deep, --include-pre, --no-color and --ci-extras."""
     parser = argparse.ArgumentParser(
         description="Report installed versus newest dependencies."
     )
@@ -646,13 +741,20 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     )
     parser.add_argument("--include-pre", action="store_true", help="count pre-releases")
     parser.add_argument("--no-color", action="store_true", help="plain text, no colors")
+    parser.add_argument(
+        "--ci-extras",
+        type=_groups,
+        metavar="GROUPS",
+        help="the optional-dependency groups CI installs, comma-separated "
+        "(default: every group)",
+    )
     return parser.parse_args(argv)
 
 
-def _load_project() -> dict[str, object]:
+def _load_project() -> dict[str, Any]:
     """The [project] table of ./pyproject.toml."""
     with open("pyproject.toml", "rb") as f:
-        project: dict[str, object] = tomllib.load(f)["project"]
+        project: dict[str, Any] = tomllib.load(f)["project"]
     return project
 
 
@@ -673,15 +775,24 @@ def main(argv: list[str] | None = None) -> int:
     color = use_color(args.no_color)
     try:
         project = _load_project()
+    except (OSError, tomllib.TOMLDecodeError, KeyError) as e:
+        print(f"deps: cannot read pyproject.toml: {e!r}", file=sys.stderr)
+        return 2
+    groups = list(project.get("optional-dependencies", {}))
+    try:
         text = report(
             project,
+            groups if args.ci_extras is None else args.ci_extras,
             args.deep,
             args.include_pre,
             color,
             lambda name: pip_versions(name, args.include_pre),
         )
-    except (OSError, tomllib.TOMLDecodeError, KeyError, InvalidRequirement) as e:
+    except (KeyError, InvalidRequirement) as e:
         print(f"deps: cannot read pyproject.toml: {e!r}", file=sys.stderr)
+        return 2
+    except ValueError as e:  # a --ci-extras group the project does not declare
+        print(f"deps: --ci-extras: {e}", file=sys.stderr)
         return 2
     print(text)
     check = _pip_check()

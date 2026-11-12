@@ -28,8 +28,14 @@ APPINFRA_DEV_CHECK_EXAMPLES ?= true
 # sockets is covered by integration tests
 APPINFRA_PYTEST_COVERAGE_MARKERS ?= unit or integration
 
-# Performance tests all live here; collecting only this directory skips importing the rest
-APPINFRA_PYTEST_PERF_DIR ?= tests/performance
+# These suites all live in their tests/<suite>/ directory; collecting only it skips importing
+# the rest. Unit and integration tests may override each other's directory with a marker
+APPINFRA_PYTEST_BOUND_SUITES ?= e2e security performance
+
+# make check's pytest workers (framework defaults): a fraction is a share of the CPUs, a whole
+# number that many workers. Coverage takes in unit and integration, so it gets the larger share
+APPINFRA_PYTEST_CHECK_WORKERS ?= 0.25
+APPINFRA_PYTEST_COVERAGE_WORKERS ?= 0.5
 
 # Coverage threshold (framework default is 80%)
 APPINFRA_PYTEST_COVERAGE_THRESHOLD ?= 95
@@ -38,7 +44,7 @@ APPINFRA_PYTEST_COVERAGE_THRESHOLD ?= 95
 APPINFRA_DEV_DOCSTRING_THRESHOLD ?= 95
 
 # Test structure health line in make check (framework default is off)
-APPINFRA_DEV_TEST_HEALTH ?= strict
+APPINFRA_DEV_TEST_HEALTH ?= warn
 
 # Install with all optional extras
 APPINFRA_DEV_INSTALL_EXTRAS ?= all

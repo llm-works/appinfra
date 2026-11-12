@@ -18,7 +18,9 @@ fixed at ``tests/<suite>/`` under the rootdir, where the Makefile framework's ``
 looks for them as well.
 
 ``-m`` selects by each test's resolved suite, so an integration test in a class marked unit is
-left out of ``-m unit``. The rules: appinfra's docs/guides/test-suites.md.
+left out of ``-m unit``. A suite named in ``APPINFRA_PYTEST_BOUND_SUITES`` is bound to its
+directory: its tests must all sit under ``tests/<suite>/``, and collection stops on one that
+does not. The rules: appinfra's docs/guides/test-suites.md.
 """
 
 import os
@@ -28,11 +30,14 @@ import pytest
 from _pytest.mark import MarkMatcher
 from _pytest.mark.expression import Expression
 
-from ._suite_health import REPORT_DIR_ENV, SuiteHealth
+from ._suite_health import REPORT_DIR_ENV, SuiteHealth, exempt_reason
 
 _HEALTH_KEY = pytest.StashKey[SuiteHealth]()
 
 SUITES = ("unit", "integration", "e2e", "security", "performance")
+
+# Suites bound to their tests/<suite>/ directory, set by the Makefile framework's setting
+BOUND_SUITES_ENV = "APPINFRA_PYTEST_BOUND_SUITES"
 
 _MARKER_HELP = {
     "unit": "stays in one process, no I/O or process-wide state; default under tests/unit/",
@@ -51,9 +56,14 @@ def pytest_configure(config: pytest.Config) -> None:
     """
     for suite in SUITES:
         config.addinivalue_line("markers", f"{suite}: {_MARKER_HELP[suite]}")
+    config.addinivalue_line(
+        "markers",
+        "suite_exempt(reason): the test may do what its suite does not allow; "
+        "Test structure health leaves its behavior unjudged",
+    )
     report_dir = os.environ.get(REPORT_DIR_ENV)
     if report_dir:
-        health = SuiteHealth(Path(report_dir))
+        health = SuiteHealth(Path(report_dir), config.rootpath)
         config.stash[_HEALTH_KEY] = health
         config.pluginmanager.register(health, "appinfra-suite-health")
 
@@ -67,6 +77,41 @@ def _directory_suite(item: pytest.Item, root: Path) -> str | None:
     if len(parts) > 2 and parts[0] == "tests" and parts[1] in SUITES:
         return parts[1]
     return None
+
+
+def _bound_suites() -> set[str]:
+    """The suites bound to their directory: make check and the test.<suite> targets collect
+    them from tests/<suite>/ alone (BOUND_SUITES_ENV, space-separated)."""
+    bound = set(os.environ.get(BOUND_SUITES_ENV, "").split())
+    unknown = bound - set(SUITES)
+    if unknown:
+        raise pytest.UsageError(
+            f"{BOUND_SUITES_ENV} names no suite: {' '.join(sorted(unknown))}; "
+            f"the suites are {' '.join(SUITES)}"
+        )
+    return bound
+
+
+def _stop_on_misplaced(
+    items: list[pytest.Item], suite_of: dict[str, str], root: Path
+) -> None:
+    """Stop on a test of a bound suite outside its directory: the bound suite's run never
+    collects it and every other run leaves it out, so it would never run. Checked on the
+    tests already collected: such a test shows up in a run that collects the whole tree
+    (coverage, an unbound suite) or, when make check has none, in its Suite placement
+    collection of the files outside the bound directories."""
+    bound = _bound_suites()
+    misplaced = [
+        item.nodeid
+        for item in items
+        if suite_of.get(item.nodeid) in bound
+        and _directory_suite(item, root) != suite_of[item.nodeid]
+    ]
+    if misplaced:
+        raise pytest.UsageError(
+            f"tests of a suite {BOUND_SUITES_ENV} binds to tests/<suite>/, outside that "
+            "directory: " + ", ".join(misplaced)
+        )
 
 
 def _nearest_suites(item: pytest.Item) -> set[str]:
@@ -134,7 +179,8 @@ def _deselect_by_suite(
 def pytest_collection_modifyitems(
     config: pytest.Config, items: list[pytest.Item]
 ) -> None:
-    """Give every test one suite, stop on tests with none or two, then apply -m by suite."""
+    """Give every test one suite, stop on tests with none, two or a misplaced bound one, then
+    apply -m by suite."""
     suite_of, unmarked, conflicting = _resolve_suites(items, config.rootpath)
     if unmarked:
         raise pytest.UsageError(
@@ -144,6 +190,13 @@ def pytest_collection_modifyitems(
     if conflicting:
         raise pytest.UsageError(
             "tests with more than one suite marker: " + ", ".join(conflicting)
+        )
+    _stop_on_misplaced(items, suite_of, config.rootpath)
+    unexplained = [i.nodeid for i in items if exempt_reason(i) == ""]
+    if unexplained:
+        raise pytest.UsageError(
+            "suite_exempt needs a reason, as suite_exempt(reason=...): "
+            + ", ".join(unexplained)
         )
     health = config.stash.get(_HEALTH_KEY, None)
     if health is not None:

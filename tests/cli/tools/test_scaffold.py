@@ -167,7 +167,7 @@ class TestScaffoldToolAddArgs:
 # =============================================================================
 
 
-@pytest.mark.unit
+@pytest.mark.integration
 class TestScaffoldToolRun:
     """Test ScaffoldTool.run method."""
 
@@ -214,6 +214,7 @@ class TestScaffoldToolRun:
             project_path = Path(tmpdir) / "myproject"
             assert project_path.exists()
 
+    @pytest.mark.unit
     def test_handles_exception_gracefully(self):
         """Test handles exceptions and returns 1."""
         tool = ScaffoldTool()
@@ -239,7 +240,7 @@ class TestScaffoldToolRun:
 # =============================================================================
 
 
-@pytest.mark.unit
+@pytest.mark.integration
 class TestCreateStructure:
     """Test ScaffoldTool._create_structure method."""
 
@@ -334,7 +335,7 @@ class TestConfigServerSection:
 # =============================================================================
 
 
-@pytest.mark.unit
+@pytest.mark.integration
 class TestGenerateConfig:
     """Test ScaffoldTool._generate_config method."""
 
@@ -468,7 +469,7 @@ class TestAppMainFunction:
 # =============================================================================
 
 
-@pytest.mark.unit
+@pytest.mark.integration
 class TestGenerateApp:
     """Test ScaffoldTool._generate_app method."""
 
@@ -504,7 +505,7 @@ class TestGenerateApp:
 # =============================================================================
 
 
-@pytest.mark.unit
+@pytest.mark.integration
 class TestGenerateTests:
     """Test ScaffoldTool._generate_tests method."""
 
@@ -535,7 +536,7 @@ class TestGenerateTests:
 # =============================================================================
 
 
-@pytest.mark.unit
+@pytest.mark.integration
 class TestGenerateReadme:
     """Test ScaffoldTool._generate_readme method."""
 
@@ -556,7 +557,7 @@ class TestGenerateReadme:
             assert "Setup" in content
 
 
-@pytest.mark.unit
+@pytest.mark.integration
 class TestGeneratePyproject:
     """Test ScaffoldTool._generate_pyproject method."""
 
@@ -579,7 +580,7 @@ class TestGeneratePyproject:
             assert 'myproject = ["etc/*.yaml"]' in content
 
 
-@pytest.mark.unit
+@pytest.mark.integration
 class TestGenerateGitignore:
     """Test ScaffoldTool._generate_gitignore method."""
 
@@ -600,7 +601,7 @@ class TestGenerateGitignore:
             assert ".coverage" in content
 
 
-@pytest.mark.unit
+@pytest.mark.integration
 class TestGenerateMakefile:
     """Test ScaffoldTool._generate_makefile method."""
 
@@ -648,7 +649,7 @@ class TestGenerateMakefile:
                 assert "myproject" in content
 
 
-@pytest.mark.unit
+@pytest.mark.integration
 class TestGenerateSupportingFiles:
     """Test ScaffoldTool._generate_supporting_files method."""
 

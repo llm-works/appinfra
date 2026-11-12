@@ -5,12 +5,8 @@
 
 from __future__ import annotations
 
-import importlib.util
 import json
-import re
 import subprocess
-import sys
-from pathlib import Path
 from types import ModuleType
 from unittest.mock import patch
 
@@ -18,7 +14,7 @@ import pytest
 from packaging.specifiers import SpecifierSet
 from packaging.version import Version
 
-SCRIPTS = Path(__file__).resolve().parents[2] / "appinfra" / "scripts"
+from tests.helpers.deps_report import V, load_deps_report, v
 
 # Distance colors: within a major, one major behind, two or more
 GAP0, GAP1, GAP2, RESET = "\033[0;93m", "\033[1;93m", "\033[1;91m", "\033[0m"
@@ -27,25 +23,8 @@ CI = "\033[1;95m"  # the ci column: CI installs another version
 
 @pytest.fixture
 def dr(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
-    """Load the script as a module; it imports install_deps from its own directory."""
-    monkeypatch.syspath_prepend(str(SCRIPTS))
-    spec = importlib.util.spec_from_file_location(
-        "deps_report", SCRIPTS / "deps_report.py"
-    )
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    # @dataclass resolves the module's names through sys.modules
-    monkeypatch.setitem(sys.modules, "deps_report", module)
-    spec.loader.exec_module(module)
-    return module
-
-
-def V(*versions: str) -> list[Version]:
-    return [Version(v) for v in versions]
-
-
-def v(text: str | None) -> Version | None:
-    return Version(text) if text else None
+    """The script, loaded as a module."""
+    return load_deps_report(monkeypatch)
 
 
 class TestGraph:
@@ -309,6 +288,86 @@ class TestCiVersion:
 
         assert ci_cell("1.9") == "\033[1;95m1.9\033[0m"
         assert ci_cell("✓") == "\033[0;32m✓\033[0m"
+        assert ci_cell("-") == "\033[0;90m-\033[0m"  # not installed in CI: gray
+
+
+class TestCiProject:
+    PROJECT = {
+        "name": "proj",
+        "dependencies": ["a"],
+        "optional-dependencies": {"dev": ["b"], "cuda": ["c"]},
+    }
+
+    def test_keeps_only_the_groups_ci_installs(self, dr: ModuleType) -> None:
+        project = dr.ci_project(self.PROJECT, ["dev"])
+        assert project["optional-dependencies"] == {"dev": ["b"]}
+        assert project["dependencies"] == ["a"]
+        assert self.PROJECT["optional-dependencies"] == {"dev": ["b"], "cuda": ["c"]}
+
+    def test_an_unknown_group_is_an_error(self, dr: ModuleType) -> None:
+        with pytest.raises(ValueError, match="'gpu'"):
+            dr.ci_project(self.PROJECT, ["dev", "gpu"])
+
+    def test_a_group_brings_in_the_groups_it_requires_through_the_project(
+        self, dr: ModuleType
+    ) -> None:
+        """As pip expands proj[...]: recursively, whatever the spelling of the name."""
+        project = {
+            "name": "my_proj",
+            "dependencies": ["a"],
+            "optional-dependencies": {
+                "dev": ["b"],
+                "anthropic": ["x"],
+                "saia": ["y"],
+                "cuda": ["c"],
+                "client": ["My-Proj[anthropic,saia]"],
+                "ci": ["my.proj[dev,client]"],
+            },
+        }
+        groups = dr.ci_project(project, ["ci"])["optional-dependencies"]
+        assert set(groups) == {"ci", "dev", "client", "anthropic", "saia"}
+
+    def test_groups_requiring_each_other_end(self, dr: ModuleType) -> None:
+        project = {
+            "name": "proj",
+            "optional-dependencies": {
+                "a": ["x", "proj[b]"],
+                "b": ["y", "proj[a]"],
+                "c": ["z"],
+            },
+        }
+        groups = dr.ci_project(project, ["a"])["optional-dependencies"]
+        assert set(groups) == {"a", "b"}
+
+    def test_the_base_dependencies_bring_in_groups_too(self, dr: ModuleType) -> None:
+        """Every install gets the base dependencies, so the groups they name are always in."""
+        project = {
+            "name": "proj",
+            "dependencies": ["proj[core]"],
+            "optional-dependencies": {"core": ["x"], "dev": ["b"], "cuda": ["c"]},
+        }
+        groups = dr.ci_project(project, ["dev"])["optional-dependencies"]
+        assert set(groups) == {"dev", "core"}
+
+    @pytest.mark.parametrize(
+        ("argv", "expected"),
+        [
+            ([], None),  # every group
+            (["--ci-extras", "dev,runtime"], ["dev", "runtime"]),
+            (["--ci-extras", ""], []),  # no optional group
+        ],
+    )
+    def test_ci_extras_option(self, dr: ModuleType, argv, expected) -> None:  # type: ignore[no-untyped-def]
+        assert dr._parse_args(argv).ci_extras == expected
+
+    def test_main_rejects_an_unknown_group(
+        self, dr: ModuleType, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        with patch.object(dr, "_load_project", lambda: self.PROJECT):
+            assert dr.main(["--ci-extras", "dev,gpu", "--no-color"]) == 2
+        assert "--ci-extras: no such optional-dependency group: 'gpu'" in (
+            capsys.readouterr().err
+        )
 
 
 class TestDistance:
@@ -403,133 +462,3 @@ class TestColor:
             Version("1.5"), Version("1.9"), Version("3.0"), "behind, capped", ""
         )
         assert dr._paint(dr._status_cell(row), color=False) == "behind, capped"
-
-
-class TestReport:
-    PROJECT = {
-        "name": "proj",
-        "dependencies": ["web<2", "lib>=1"],
-        "optional-dependencies": {"x": ["gone", "offline", "local", "proj[x]"]},
-    }
-    INSTALLED = {
-        "web": "1.9",
-        "lib": "1.0",
-        "core": "2.0",
-        "offline": "1.0",
-        "local": "0.1",
-        "appinfra": "0.13.0",
-    }
-    REQUIRES = {"web": ["lib>=1", "core<3"], "lib": ["core>=2"]}
-    INDEX = {
-        "web": V("1.9", "2.0"),
-        "lib": V("1.0", "1.1"),
-        "core": V("2.0"),
-        "appinfra": V("0.13.0"),
-        "local": V("9.9"),  # never asked: a direct install
-    }
-
-    def run(
-        self,
-        dr: ModuleType,
-        deep: bool,
-        color: bool = False,
-        requires: dict[str, list[str]] | None = None,
-        asked: list[str] | None = None,
-    ) -> list[str]:
-        asked = [] if asked is None else asked
-
-        def versions(name: str) -> list[Version] | None:
-            asked.append(name)
-            return self.INDEX.get(name)
-
-        with (
-            patch.object(dr, "_installed_version", lambda n: v(self.INSTALLED.get(n))),
-            patch.object(dr, "_installed_requires", (requires or self.REQUIRES).get),
-            patch.object(dr, "_direct_install", lambda n: n == "local"),
-            # the framework's tools without install_deps' floor, so the fixture's
-            # appinfra versions do not follow it
-            patch.dict(dr.collect_deps.__globals__, FRAMEWORK_TOOLS="appinfra[check]"),
-        ):
-            text = dr.report(self.PROJECT, deep, False, color, versions)
-        assert "local" not in asked  # a direct install is not looked up
-        return text.splitlines()
-
-    def test_a_cap_from_another_dependency_counts_without_deep(
-        self, dr: ModuleType
-    ) -> None:
-        """web caps lib below 1.1, so a fresh install (CI) gets lib 1.0 too: capped, not behind."""
-        asked: list[str] = []
-        requires = {"web": ["lib<1.1", "core<3"], "lib": ["core>=2"]}
-        lines = self.run(dr, deep=False, requires=requires, asked=asked)
-        cols = {row[0]: row[1:] for row in self.table(lines)}
-        # floor, ceil, installed, ci, available, status: the flat list shows the
-        # combined range, so web's cap is the ceil, and CI gets 1.0 as installed
-        assert cols["lib"] == ["1", "1.1", "1.0", "✓", "1.1", "capped (1 minor)"]
-        # only the lines shown are looked up
-        assert "core" not in asked and "lib" in asked
-
-    def table(self, lines: list[str]) -> list[list[str]]:
-        """Each line cut at the header's column starts."""
-        header = lines[0]
-        starts = [header.index(h) for h in header.split()]
-        ends = starts[1:] + [None]
-        rows = []
-        for line in lines[1:]:
-            if not line.strip():
-                break
-            rows.append([line[s:e].strip() for s, e in zip(starts, ends, strict=True)])
-        return rows
-
-    def test_direct_dependencies_with_their_status(self, dr: ModuleType) -> None:
-        cols = {row[0]: row[1:] for row in self.table(self.run(dr, deep=False))}
-        # floor, ceil, installed, ci, available, status
-        assert cols["web"] == ["", "2", "1.9", "✓", "2.0", "capped (1 major)"]
-        assert cols["lib"] == ["1", "", "1.0", "1.1", "", "behind (1 minor)"]
-        assert cols["gone"] == ["", "", "-", "?", "", "missing"]
-        assert cols["offline"][3:] == ["?", "", "unknown"]
-        assert cols["local"][3:] == ["index", "", "local"]
-        # the framework's check tools, which make setup adds to every other project
-        assert cols["appinfra"][3:] == ["✓", "", "✓"]  # CI matches, up to date
-        assert "proj" not in cols and "core" not in cols
-
-    def test_installed_without_the_local_label(self, dr: ModuleType) -> None:
-        """A build's local label (+g<sha>.d<date>) is not shown; it is on no index."""
-        with patch.dict(self.INSTALLED, {"local": "0.1.dev29+ga47dbd027.d20261031"}):
-            cols = {row[0]: row[1:] for row in self.table(self.run(dr, deep=False))}
-        assert cols["local"][2] == "0.1.dev29"
-
-    def test_ci_shows_what_a_missing_package_gets(self, dr: ModuleType) -> None:
-        with patch.dict(self.INDEX, {"gone": V("4.2")}):
-            cols = {row[0]: row[1:] for row in self.table(self.run(dr, deep=False))}
-        assert cols["gone"][2:] == ["-", "4.2", "", "missing"]
-
-    def test_deep_shows_the_tree(self, dr: ModuleType) -> None:
-        rows = self.table(self.run(dr, deep=True))
-        names = [row[0] for row in rows]
-        lib = names.index("lib")
-        assert names[lib + 1] == "└── core" and rows[lib + 1][3] == "2.0"
-        web = names.index("web")
-        assert rows[web + 1][0] == "├── core" and rows[web + 1][3] == "(above)"
-        assert rows[web + 2][0] == "└── lib" and rows[web + 2][3] == "(top level)"
-
-    def test_header_and_legend(self, dr: ModuleType) -> None:
-        lines = self.run(dr, deep=False)
-        assert lines[0].split() == [
-            "package",
-            "floor",
-            "ceil",
-            "installed",
-            "ci",
-            "available",
-            "status",
-        ]
-        assert lines[-2:] == [
-            "ci: ✓ = CI installs the same version, else the version it installs",
-            "available: newest release outside the range",
-        ]
-
-    def test_color_keeps_the_columns_aligned(self, dr: ModuleType) -> None:
-        plain = self.run(dr, deep=True)
-        colored = self.run(dr, deep=True, color=True)
-        assert any("\033[" in line for line in colored)
-        assert [re.sub(r"\033\[[0-9;]*m", "", line) for line in colored] == plain

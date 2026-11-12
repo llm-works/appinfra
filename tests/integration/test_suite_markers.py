@@ -15,6 +15,12 @@ _SUITES = ("unit", "integration", "e2e", "security", "performance")
 _PLAIN = "def test_plain():\n    pass\n"
 
 
+@pytest.fixture(autouse=True)
+def _unbound(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The fixture projects bind no suite unless a test says so: not the surrounding make's."""
+    monkeypatch.delenv("APPINFRA_PYTEST_BOUND_SUITES", raising=False)
+
+
 def _marked(suite: str) -> str:
     return f"import pytest\n\n\n@pytest.mark.{suite}\ndef test_marked():\n    pass\n"
 
@@ -169,3 +175,38 @@ def test_a_test_outside_the_suite_directories_must_name_its_suite(
     result = _run(pytester, monkeypatch, layout)
     assert result.ret == pytest.ExitCode.USAGE_ERROR
     assert "tests/cli/test_cli_plain.py::test_plain" in result.stderr.str()
+
+
+_BOUND_LAYOUT = {
+    "tests/e2e/test_e2e_plain.py": _PLAIN,
+    "tests/cli/test_cli_marked.py": _marked("e2e"),
+}
+
+
+def test_a_bound_suite_test_outside_its_directory_stops_collection(
+    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A bound suite's run collects only its directory: a test of that suite elsewhere would
+    never run, so collection stops on it instead of leaving it out."""
+    monkeypatch.setenv("APPINFRA_PYTEST_BOUND_SUITES", "e2e security")
+    result = _run(pytester, monkeypatch, _BOUND_LAYOUT, "-m", "unit")
+    assert result.ret == pytest.ExitCode.USAGE_ERROR
+    assert "tests/cli/test_cli_marked.py::test_marked" in result.stderr.str()
+
+
+def test_an_unbound_suite_may_be_marked_outside_its_directory(
+    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("APPINFRA_PYTEST_BOUND_SUITES", "security")
+    result = _run(pytester, monkeypatch, _BOUND_LAYOUT, "-m", "e2e")
+    assert result.ret == pytest.ExitCode.OK
+    assert "tests/cli/test_cli_marked.py::test_marked" in _ids(result)
+
+
+def test_a_bound_suite_name_must_be_a_suite(
+    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("APPINFRA_PYTEST_BOUND_SUITES", "e2e smoke")
+    result = _run(pytester, monkeypatch, {"tests/e2e/test_e2e_plain.py": _PLAIN})
+    assert result.ret == pytest.ExitCode.USAGE_ERROR
+    assert "smoke" in result.stderr.str()

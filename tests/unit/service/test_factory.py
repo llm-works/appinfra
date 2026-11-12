@@ -28,29 +28,9 @@ from appinfra.service import (
     ServiceRegistration,
     ThreadRunner,
 )
+from tests.helpers.service.factory import SimpleService
 
 # Test fixtures
-
-
-class SimpleService(Service):
-    """Simple test service."""
-
-    def __init__(self, lg: Logger) -> None:
-        self._lg = lg
-        self._stop = threading.Event()
-
-    @property
-    def name(self) -> str:
-        return "simple"
-
-    def execute(self) -> None:
-        self._stop.wait()
-
-    def teardown(self) -> None:
-        self._stop.set()
-
-    def is_healthy(self) -> bool:
-        return True
 
 
 class ConfigurableService(Service):
@@ -158,22 +138,6 @@ class TestQueueChannelFactory:
 class TestProcessQueueChannelFactory:
     """Tests for ProcessQueueChannelFactory."""
 
-    def test_create_pair(self) -> None:
-        """Creates connected Channel pair."""
-        factory = ProcessQueueChannelFactory()
-        pair = factory.create_pair()
-
-        assert isinstance(pair, ChannelPair)
-        assert isinstance(pair.parent, Channel)
-        assert isinstance(pair.child, Channel)
-
-        # Verify connectivity
-        pair.parent.send(Message(payload="test"))
-        msg = pair.child.recv(timeout=0.1)
-        assert msg.payload == "test"
-
-        pair.close()
-
     def test_create_pair_with_max_queue_size(self) -> None:
         """Process pair respects max queue size."""
         config = ChannelConfig(max_queue_size=10)
@@ -250,30 +214,6 @@ class TestRunnerFactory:
 
         assert isinstance(runner, ProcessRunner)
         assert runner.service is service
-
-    def test_create_process_runner_with_channel(self, lg: Logger) -> None:
-        """Creates ProcessRunner with channel pair."""
-        from appinfra.service import ProcessRunner
-
-        factory = RunnerFactory(lg)
-        service = SimpleService(lg)
-
-        result = factory.create_process_runner_with_channel(service)
-
-        try:
-            assert isinstance(result, RunnerWithChannel)
-            assert isinstance(result.runner, ProcessRunner)
-            assert isinstance(result.channel, Channel)
-            assert isinstance(result.service_channel, Channel)
-
-            # Verify channels are connected
-            result.channel.send(Message(payload="test"))
-            msg = result.service_channel.recv(timeout=0.5)
-            assert msg.payload == "test"
-        finally:
-            # Ensure both channels are closed to prevent resource leak
-            result.channel.close()
-            result.service_channel.close()
 
 
 # ServiceFactory tests

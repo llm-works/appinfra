@@ -17,16 +17,10 @@ shopt -s nullglob
 
 PARALLEL=true
 NPROC=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 8)
-# --dist=worksteal (xdist ≥ 3.2): idle workers pull tests from busy peers,
-# smoothing the tail when one shard's tests are slower than others'.
-# Standalone suites use NPROC/4 workers so several suites in the parallel
-# group don't oversubscribe cores. Coverage gets NPROC/2 because it
-# absorbs one or more standalone suites (see FOLDED_MARKERS below), stays
-# alive longer, and benefits from more workers as the others drop out.
-PYTEST_JOBS=$(( NPROC / 4 > 2 ? NPROC / 4 : 2 ))
-PYTEST_PARALLEL="-n ${PYTEST_JOBS} --dist=worksteal"
-PYTEST_JOBS_COVERAGE=$(( NPROC / 2 > 2 ? NPROC / 2 : 2 ))
-PYTEST_PARALLEL_COVERAGE="-n ${PYTEST_JOBS_COVERAGE} --dist=worksteal"
+# The pytest runs' worker options: --sequential and --raw run them in-process (-n 0); otherwise
+# they come from APPINFRA_PYTEST_CHECK_WORKERS and APPINFRA_PYTEST_COVERAGE_WORKERS (below)
+PYTEST_PARALLEL=""
+PYTEST_PARALLEL_COVERAGE=""
 COVERAGE_TARGET=""
 FAIL_FAST=false
 RAW=false
@@ -97,8 +91,27 @@ CQ_KEEP_DECORATORS="$(appinfra_setting APPINFRA_DEV_CQ_DEAD_KEEP_DECORATORS "" d
 # of rule codes (empty or false = off). Rules that should fail the build belong in the project's
 # ruff config.
 CQ_LINT_SELECT="$(appinfra_setting APPINFRA_DEV_CQ_LINT_SELECT C90,SIM,RET,PIE,PERF,FURB,C4 rules)" || exit 2
-# Where performance tests live (default tests/)
-PERF_DIR="$(appinfra_setting APPINFRA_PYTEST_PERF_DIR tests path)" || exit 2
+# Suites collected from their tests/<suite>/ directory alone
+BOUND_SUITES="$(appinfra_setting APPINFRA_PYTEST_BOUND_SUITES "" suites)" || exit 2
+
+# Workers for each standalone suite and for the coverage run. The default shares: standalone
+# suites take a quarter of the CPUs so several suites in the parallel group don't oversubscribe
+# cores; coverage takes half because it absorbs one or more standalone suites (see
+# FOLDED_MARKERS below), stays alive longer, and benefits from more workers as the others drop
+# out. --dist=worksteal (xdist >= 3.2): idle workers pull tests from busy peers, smoothing the
+# tail when one shard's tests are slower than others'.
+CHECK_WORKERS="$(appinfra_setting APPINFRA_PYTEST_CHECK_WORKERS 0.25 share)" || exit 2
+COVERAGE_WORKERS="$(appinfra_setting APPINFRA_PYTEST_COVERAGE_WORKERS 0.5 share)" || exit 2
+
+# The worker count for a share: a whole number as it is, a fraction of NPROC, at least 2
+worker_count() {
+    case "$1" in
+        *.*) awk -v cpus="$NPROC" -v share="$1" 'BEGIN { n = int(cpus * share); print (n > 2 ? n : 2) }' ;;
+        *) echo "$1" ;;
+    esac
+}
+PYTEST_PARALLEL="${PYTEST_PARALLEL:--n $(worker_count "$CHECK_WORKERS") --dist=worksteal}"
+PYTEST_PARALLEL_COVERAGE="${PYTEST_PARALLEL_COVERAGE:--n $(worker_count "$COVERAGE_WORKERS") --dist=worksteal}"
 
 # Coverage's marker expression can subsume standalone test suites. When
 # check.sh runs both a standalone suite and coverage over the same marker
@@ -175,7 +188,7 @@ mkdir -p "$STATUS_DIR"
 # Full output of failed checks and of checks with slow tests, copied out of STATUS_DIR (removed
 # on exit) so a failure or hang that does not reproduce on rerun can still be read. Each run, a
 # concurrent one included, replaces the previous run's logs; concurrent runs in one tree also
-# share .coverage and .mypy_cache.
+# share .mypy_cache.
 KEPT_LOG_DIR="${PROJECT_ROOT}/.build/check"
 # Rows added below the checklist (add_display_row). The count lives in a file because every
 # check draws from its own background process and needs the current count to find its line.
@@ -203,20 +216,48 @@ PYTEST_PLUGINS="-p pytest_hang -p pytest_exit_warnings"
 # How a warning in a passing check ends, whichever check printed it (tests, examples, a tool's
 # own "warning:" line): strict when the project's pytest filterwarnings has a bare "error" (every
 # warning an error), so the check fails; warn otherwise, so the check passes with a warning.
-# Asked once from pytest_exit_warnings, in a run that only reads the configuration.
-WARNINGS_MODE=$({ cd "$PROJECT_ROOT" && eval "COVERAGE_FILE=${STATUS_DIR}/probe.coverage ${PYTEST_PLUGIN_PATH}${PYTHON} -m pytest -p pytest_exit_warnings --collect-only -q --noconftest --ignore-glob='*'" 2>&1 || true; } \
-    | sed -nE 's/^=== exit warnings: (strict|warn) ===$/\1/p' | tail -1)
-if [ -z "$WARNINGS_MODE" ]; then
-    echo "check.sh: pytest could not read the project's configuration (run: ${PYTHON} -m pytest --collect-only)" >&2
-    exit 1
-fi
+#
+# warnings_mode LOG prints it, for a check that passed with warnings in LOG; no other check needs
+# it. A pytest check finds it in its own log: pytest_exit_warnings prints "=== exit warnings:
+# <mode> ===" in every run. Any other check asks pytest then, in a run that only reads the
+# configuration, and keeps the answer in STATUS_DIR for the checks after it, so a run without
+# warnings starts no pytest run for it. Prints nothing when pytest cannot read the configuration.
+warnings_mode() {
+    local cache="${STATUS_DIR}/warnings-mode" mode
+    mode=$(_mode_line < "$1")
+    if [ -z "$mode" ] && [ -f "$cache" ]; then
+        mode=$(cat "$cache")
+    fi
+    if [ -z "$mode" ]; then
+        mode=$({ cd "$PROJECT_ROOT" && eval "COVERAGE_FILE=${STATUS_DIR}/probe.coverage ${PYTEST_PLUGIN_PATH}${PYTHON} -m pytest -p pytest_exit_warnings --collect-only -q --noconftest --ignore-glob='*'" 2>&1 || true; } \
+            | _mode_line)
+        # Written whole, then moved: checks finishing together each see the answer or none
+        if [ -n "$mode" ]; then
+            { echo "$mode" > "${cache}.${BASHPID}" && mv "${cache}.${BASHPID}" "$cache"; } 2>/dev/null || true
+        fi
+    fi
+    echo "$mode"
+}
 
-# Terminal width for fit_slow_row, read here because stdout is the terminal only at the top
-# level: inside $(...) it is a pipe. Empty without a terminal (CI), where rows are not cut.
+# The mode in pytest_exit_warnings' line on stdin, the last one if several
+_mode_line() {
+    sed -nE 's/^=== exit warnings: (strict|warn) ===$/\1/p' | tail -1
+}
+
+# The failure for warnings whose mode could not be read
+_MODE_UNREAD="pytest could not read the project's configuration (run: ${PYTHON} -m pytest --collect-only)"
+
+# Size of the terminal on stdout, the one the display is drawn on. stty reports the terminal on
+# its stdin, so it gets stdout, saved as fd 3: inside < <(...) stdout is a pipe. The width is for
+# fit_slow_row, the height for update_line, which cannot reach a row scrolled off the screen.
+# Both empty without a terminal (CI), where rows are not cut and every row is redrawn.
 DISPLAY_COLS=""
+DISPLAY_HEIGHT=""
 if [ -t 1 ]; then
-    DISPLAY_COLS=$(stty size < /dev/tty 2>/dev/null | awk '{print $2}')
-    [ "$DISPLAY_COLS" != 0 ] || DISPLAY_COLS=""  # a pseudo-terminal with no size set
+    { read -r DISPLAY_HEIGHT DISPLAY_COLS < <(stty size <&3 2>/dev/null) || true; } 3>&1
+    # a pseudo-terminal with no size set
+    [ "$DISPLAY_COLS" != 0 ] || DISPLAY_COLS=""
+    [ "$DISPLAY_HEIGHT" != 0 ] || DISPLAY_HEIGHT=""
 fi
 
 # Coverage tracer: on Python 3.12+, use sys.monitoring (PEP 669) via
@@ -315,13 +356,20 @@ HEALTH_ENV=""
 if [ "$TEST_HEALTH" != false ]; then
     HEALTH_ENV="_APPINFRA_CHECK_SUITE_HEALTH_DIR=$(printf '%q' "$HEALTH_DIR") "
 fi
-# Only the run that executes the unit tests writes the reports: every run collects the same
-# tests, and only unit tests are watched for leaks. That is the coverage run when it folds the
-# unit suite, the Unit tests run otherwise; the Test structure health line follows it.
-HEALTH_TARGET="test.unit"
-case " $FOLDED_MARKERS " in
-    *" unit "*) HEALTH_TARGET="test.coverage" ;;
-esac
+# The runs that execute unit, integration or e2e tests write the reports: each records the
+# placement of the tests it runs, and what its unit tests did (appinfra/_suite_behavior.py),
+# with the fixtures they share. That is the coverage run for the suites it
+# folds, and the suite's own run for the rest. The Test structure health line follows the last
+# of them to finish.
+HEALTH_MARKERS="unit integration e2e"
+HEALTH_TARGETS=""
+for _m in $HEALTH_MARKERS; do
+    case " $FOLDED_MARKERS " in
+        *" $_m "*) case " $HEALTH_TARGETS " in *" test.coverage "*) ;; *) HEALTH_TARGETS="$HEALTH_TARGETS test.coverage" ;; esac ;;
+        *) HEALTH_TARGETS="$HEALTH_TARGETS test.$_m" ;;
+    esac
+done
+HEALTH_TARGETS="${HEALTH_TARGETS# }"
 
 # A check that warns ends its output with "Warnings: <summary>", which its line shows.
 
@@ -415,26 +463,34 @@ fi
 # usage (`@pytest.mark.X`) and module-level `pytestmark = pytest.mark.X`
 # (including lists) — and suite directories (tests/<suite>/), whose tests
 # take the suite's marker without naming it (_settings.sh).
-_MARKERS_FOUND=$(appinfra_suite_markers "$PERF_DIR" | tr '\n' ' ')
+_MARKERS_FOUND=$(appinfra_suite_markers | tr '\n' ' ')
 
-# Emit the pytest command for a marker if any test uses it; otherwise a
+# Emit the pytest command for a marker if it has tests; otherwise a
 # fast `(exit 5)` subshell that hits run_check's "no tests" branch
 # without paying pytest's discovery cost. The subshell parens matter:
 # bare `exit 5` under ``eval`` would kill run_check's own subshell
 # before it could inspect the exit code, so ``wait -n`` in the parent
-# would count the check as a failure. The optional fourth argument is the
-# directory to collect from (default tests/).
+# would count the check as a failure. A suite in APPINFRA_PYTEST_BOUND_SUITES
+# collects from tests/<suite>/ alone and has tests when that directory holds
+# test files; the suite plugin stops a run that finds one of its tests
+# elsewhere. Any other suite collects the whole tree for its marker.
 _pytest_cmd_for() {
-    local suite="$1" marker="$2" flags="$3" path="${4:-tests/}" health_env=""
-    [ "$marker" = unit ] && health_env="$HEALTH_ENV"
-    case " $_MARKERS_FOUND " in
+    local suite="$1" marker="$2" flags="$3" path="tests/" found=false health_env=""
+    case " $HEALTH_MARKERS " in *" $marker "*) health_env="$HEALTH_ENV" ;; esac
+    case " ${BOUND_SUITES//[[:space:]]/ } " in
         *" $marker "*)
-            echo "${PYTEST_PLUGIN_PATH}${health_env}_APPINFRA_CHECK_PYTEST_SUITE=$suite ${PYTHON} -m pytest $path -m $marker ${PYTEST_PLUGINS} $flags"
+            path="tests/$marker/"
+            appinfra_has_test_files "$path" && found=true
             ;;
         *)
-            echo "(exit 5)"
+            case " $_MARKERS_FOUND " in *" $marker "*) found=true ;; esac
             ;;
     esac
+    if [ "$found" = true ]; then
+        echo "${PYTEST_PLUGIN_PATH}${health_env}_APPINFRA_CHECK_PYTEST_SUITE=$suite ${PYTHON} -m pytest $path -m $marker ${PYTEST_PLUGINS} $flags"
+    else
+        echo "(exit 5)"
+    fi
 }
 
 # _APPINFRA_CHECK_PYTEST_SUITE prevents schema collisions when test suites run in parallel.
@@ -456,7 +512,7 @@ declare -a TEST_SUBCHECKS_RAW=()
 # Coverage subcheck goes first — it subsumes at least one standalone
 # suite (see FOLDED_MARKERS above) and stays alive longest in the
 # parallel group; leading the list keeps its running/completed state
-# obvious. Uses NPROC/2 workers (see PYTEST_PARALLEL_COVERAGE above).
+# obvious. Its workers: APPINFRA_PYTEST_COVERAGE_WORKERS (see PYTEST_PARALLEL_COVERAGE above).
 # make check compares the coverage with the target in run_check; check.ci (--raw --summary)
 # runs the suite through run_raw, so pytest-cov applies the target there
 COVERAGE_FAIL_UNDER=""
@@ -464,10 +520,14 @@ if [ "$RAW" = true ] && [ "$SUMMARY" = true ]; then
     COVERAGE_FAIL_UNDER=" --cov-fail-under=${COVERAGE_TARGET}"
 fi
 COVERAGE_HEALTH_ENV=""
-[ "$HEALTH_TARGET" = test.coverage ] && COVERAGE_HEALTH_ENV="$HEALTH_ENV"
+case " $HEALTH_TARGETS " in *" test.coverage "*) COVERAGE_HEALTH_ENV="$HEALTH_ENV" ;; esac
+# The coverage data goes to the status directory, not the project root: a measured subprocess
+# that exits after pytest-cov combines the data (a multiprocessing helper) still writes a file
+COVERAGE_DATA_ENV="COVERAGE_FILE=$(printf '%q' "${STATUS_DIR}/coverage") "
+COVERAGE_ENV="${COVERAGE_CORE_ENV}${COVERAGE_DATA_ENV}${COVERAGE_HEALTH_ENV}"
 if awk "BEGIN {exit !($COVERAGE_TARGET > 0)}" 2>/dev/null; then
-    TEST_SUBCHECKS+=("${COVERAGE_LABEL}|test.coverage|${PYTEST_PLUGIN_PATH}${COVERAGE_CORE_ENV}${COVERAGE_HEALTH_ENV}_APPINFRA_CHECK_PYTEST_SUITE=cov ${PYTHON} -m pytest tests/ ${COVERAGE_MARKER_ARG} ${PYTEST_PLUGINS} --cov=${PKG_NAME} --cov-report=term${COVERAGE_FAIL_UNDER} -q -rEfs ${PYTEST_PARALLEL_COVERAGE}|${COVERAGE_TARGET}")
-    TEST_SUBCHECKS_RAW+=("${COVERAGE_LABEL}|test.coverage|${PYTEST_PLUGIN_PATH}${COVERAGE_CORE_ENV}${COVERAGE_HEALTH_ENV}_APPINFRA_CHECK_PYTEST_SUITE=cov ${PYTHON} -m pytest tests/ ${COVERAGE_MARKER_ARG} ${PYTEST_PLUGINS} --cov=${PKG_NAME} --cov-report=term-missing -rEfs ${PYTEST_PARALLEL_COVERAGE}|${COVERAGE_TARGET}")
+    TEST_SUBCHECKS+=("${COVERAGE_LABEL}|test.coverage|${PYTEST_PLUGIN_PATH}${COVERAGE_ENV}_APPINFRA_CHECK_PYTEST_SUITE=cov ${PYTHON} -m pytest tests/ ${COVERAGE_MARKER_ARG} ${PYTEST_PLUGINS} --cov=${PKG_NAME} --cov-report=term${COVERAGE_FAIL_UNDER} -q -rEfs ${PYTEST_PARALLEL_COVERAGE}|${COVERAGE_TARGET}")
+    TEST_SUBCHECKS_RAW+=("${COVERAGE_LABEL}|test.coverage|${PYTEST_PLUGIN_PATH}${COVERAGE_ENV}_APPINFRA_CHECK_PYTEST_SUITE=cov ${PYTHON} -m pytest tests/ ${COVERAGE_MARKER_ARG} ${PYTEST_PLUGINS} --cov=${PKG_NAME} --cov-report=term-missing -rEfs ${PYTEST_PARALLEL_COVERAGE}|${COVERAGE_TARGET}")
 fi
 
 _standalone_suite unit        "Unit tests"        test.unit        unit
@@ -478,9 +538,42 @@ _standalone_suite security    "Security tests"    test.security    sec
 # process rather than sibling workers, and only one process re-imports the test
 # tree. A worker rather than in-process: a test that leaves a non-daemon thread
 # running costs the controller's 10s exit timeout instead of hanging the run.
-# APPINFRA_PYTEST_PERF_DIR narrows collection to where the performance tests live.
-TEST_SUBCHECKS+=("Performance tests|test.perf|$(_pytest_cmd_for perf performance "--tb=short --no-header -q -rEfs -n 1" "${PERF_DIR}/")|")
-TEST_SUBCHECKS_RAW+=("Performance tests|test.perf.v|$(_pytest_cmd_for perf performance "-v --tb=short -rEfs -n 1" "${PERF_DIR}/")|")
+TEST_SUBCHECKS+=("Performance tests|test.perf|$(_pytest_cmd_for perf performance "--tb=short --no-header -q -rEfs -n 1")|")
+TEST_SUBCHECKS_RAW+=("Performance tests|test.perf.v|$(_pytest_cmd_for perf performance "-v --tb=short -rEfs -n 1")|")
+
+# Whether a test run reads the whole tree: coverage does, and so does every unbound suite
+# that has tests
+_whole_tree_runs() {
+    awk "BEGIN {exit !($COVERAGE_TARGET > 0)}" 2>/dev/null && return 0
+    local marker
+    for marker in unit integration e2e security performance; do
+        case " ${BOUND_SUITES//[[:space:]]/ } " in *" $marker "*) continue ;; esac
+        case " $_MARKERS_FOUND " in *" $marker "*) return 0 ;; esac
+    done
+    return 1
+}
+
+# The --ignore options for the bound suite directories, when files that may hold tests lie
+# outside them; fails when there are none
+_outside_bound_args() {
+    local suite args=() prune=()
+    for suite in $BOUND_SUITES; do
+        args+=("--ignore=tests/$suite/")
+        prune+=(-path "tests/$suite" -prune -o)
+    done
+    [ -n "$(find tests "${prune[@]}" -name '*.py' ! -name __init__.py ! -name conftest.py \
+        -print -quit 2>/dev/null)" ] || return 1
+    echo "${args[*]}"
+}
+
+# A bound suite's run reads its directory alone. When no run reads the whole tree, a test
+# outside the bound directories would never be collected, so neither run nor stopped on by the
+# suite plugin: Suite placement collects those files, in one process, without running them.
+if [ -n "${BOUND_SUITES//[[:space:]]/}" ] && ! _whole_tree_runs && _outside=$(_outside_bound_args); then
+    _PLACEMENT_CMD="${PYTEST_PLUGIN_PATH}_APPINFRA_CHECK_PYTEST_SUITE=place ${PYTHON} -m pytest tests/ ${_outside} --collect-only -q ${PYTEST_PLUGINS}"
+    TEST_SUBCHECKS+=("Suite placement||${_PLACEMENT_CMD}|")
+    TEST_SUBCHECKS_RAW+=("Suite placement||${_PLACEMENT_CMD}|")
+fi
 
 # Run the example scripts as the last test subcheck when opted in
 # (APPINFRA_DEV_CHECK_EXAMPLES=true) and an examples directory exists. Same
@@ -599,13 +692,14 @@ close_display() {
     } 200>"$DISPLAY_LOCK"
 }
 
-# A line's text in the color of its mark: bright yellow under a warning, red under a failure. The
-# detail after it keeps its own color.
+# A line's text in the color of its mark: bright yellow under a warning, red under a failure, gray
+# under an empty box, a check with nothing to run. The detail after it keeps its own color.
 status_tint() {
     local status="$1" text="$2" color=""
     case "$status" in
         "$UI_MARK_WARN") color="$UI_BRIGHT_YELLOW" ;;
         "$UI_MARK_FAIL") color="$UI_RED" ;;
+        "$UI_MARK_PENDING") color="$UI_GRAY" ;;
     esac
     if [ -n "$color" ]; then
         printf '%s%s%s' "$color" "$text" "$UI_RESET"
@@ -614,24 +708,61 @@ status_tint() {
     fi
 }
 
+# Each line's latest text, by line number, for reprint_display
+DISPLAY_LINES="${STATUS_DIR}/display-lines"
+# The lines update_line could not redraw: scrolled off the screen
+DISPLAY_SKIPPED="${STATUS_DIR}/display-skipped"
+
+# Keep a line's text for reprint_display. Call while holding the display lock.
+remember_line() {
+    mkdir -p "$DISPLAY_LINES" && printf '%s' "$2" > "${DISPLAY_LINES}/$1"
+}
+
 # The optional fifth argument separates the mark from the text: two spaces on the checklist
-# (the default), one on the report rows below it (add_display_row)
+# (the default), one on the report rows below it (add_display_row). A line scrolled off the
+# screen is not drawn: the cursor cannot move above the screen, so it would overwrite another
+# line. It is noted for reprint_display instead.
 update_line() {
     local line_num=$1 status=$2 name=$3 extra=$4 sep=${5:-  }
     name=$(status_tint "$status" "$name")
+    local text
+    text=$(printf "%b%s%s%b" "$status" "$sep" "$name" "$extra")
     {
         lock_display
         if display_open; then
             local added
             added=$(cat "$DISPLAY_ROWS" 2>/dev/null) || added=0
             local lines_up=$((TOTAL_LINES + added - line_num))
-            [ $lines_up -gt 0 ] && printf "\033[${lines_up}A"
-            printf "\r%b%s%s%s%b\n" "$UI_CLEAR" "$status" "$sep" "$name" "$extra"
-            [ $lines_up -gt 1 ] && printf "\033[$((lines_up - 1))B"
-            printf "\r"
+            remember_line "$line_num" "$text"
+            if [ -n "$DISPLAY_HEIGHT" ] && [ "$lines_up" -ge "$DISPLAY_HEIGHT" ]; then
+                echo "$line_num" >> "$DISPLAY_SKIPPED"
+            else
+                [ $lines_up -gt 0 ] && printf "\033[${lines_up}A"
+                printf "\r%b%s\n" "$UI_CLEAR" "$text"
+                [ $lines_up -gt 1 ] && printf "\033[$((lines_up - 1))B"
+                printf "\r"
+            fi
         fi
         unlock_display
     } 200>"$DISPLAY_LOCK"
+}
+
+# After the display closes, when a line could not be redrawn: the checklist again, as it ends,
+# then each row below it whose last redraw was skipped
+reprint_display() {
+    [ -s "$DISPLAY_SKIPPED" ] || return 0
+    echo ""
+    local line
+    for ((line = 1; line < TOTAL_LINES; line++)); do
+        cat "${DISPLAY_LINES}/${line}" 2>/dev/null
+        echo ""
+    done
+    while read -r line; do
+        if [ "$line" -gt "$TOTAL_LINES" ]; then
+            cat "${DISPLAY_LINES}/${line}" 2>/dev/null
+            echo ""
+        fi
+    done < <(sort -nu "$DISPLAY_SKIPPED")
 }
 
 # Add a row below the checklist, the first after a blank line that sets the rows apart, and set
@@ -718,11 +849,14 @@ fit_slow_row() {
 # start says what was raised, its end where (the source location, a connection's dbname). Without
 # a terminal (CI) the row is kept whole.
 fit_warning_row() {
-    local name="$1" message="$2" extra_len="$3"
+    local name="$1" message="$2" extra_len="$3" cut="${4:-middle}"
     if [ -n "$DISPLAY_COLS" ]; then
         # 4: "[⚠] "; 2: ": "; 1: margin, so the row never touches the last column
         local room=$((DISPLAY_COLS - 4 - ${#name} - 2 - extra_len - 1))
-        if [ "${#message}" -gt "$room" ] && [ "$room" -gt 3 ]; then
+        if [ "${#message}" -gt "$room" ] && [ "$room" -gt 3 ] && [ "$cut" = end ]; then
+            # A row whose start says it all loses its end
+            message="${message:0:$((room - 3))}..."
+        elif [ "${#message}" -gt "$room" ] && [ "$room" -gt 3 ]; then
             # The start up to the object's repr ("connection "), the rest of the room to the end
             local head=$(((room - 3) / 2))
             if [[ "$message" == *" <"* ]]; then
@@ -859,9 +993,11 @@ record_failure() {
     echo "$name|$make_target|$fix_target|$logfile|$extra" >> "${STATUS_DIR}/failures"
 }
 
+# A check that warned: its name, its summary, and how many warnings it counts (1 when its
+# summary is free text)
 record_warning() {
-    local name="$1" count="${2:-}"
-    echo "$name|$count" >> "${STATUS_DIR}/warnings"
+    local name="$1" count="${2:-}" warnings="${3:-1}"
+    echo "$name|$count|$warnings" >> "${STATUS_DIR}/warnings"
 }
 
 # A status note: an [i] line in the report below the checklist, for something worth knowing that
@@ -971,26 +1107,39 @@ warning_note() {
     echo "$note"
 }
 
-# A passing check's warnings: a row below the checklist for each distinct one, like the
-# slow-test rows, and the check's own line left to the caller. Warn records a warning and keeps
-# the log for display_slow_logs. Strict returns 1 and sets warning_failure, a local of the
-# caller, to the reason, so the caller records one failure even when coverage fails the check too.
+# A passing check's warnings: a row below the checklist for each of the first REPORT_ROWS
+# distinct ones, like the slow-test rows, then a bold row for the rest, in the kept log; the
+# check's own line is left to the caller. Warn records a warning and has the log listed by
+# display_slow_logs. Strict, or a mode that could not be read, returns 1 and sets
+# warning_failure, a local of the caller, to the reason, so the caller records one failure even
+# when coverage fails the check too.
 check_warnings() {
-    local name="$1" make_target="$2" logfile="$3" mode="$4"
+    local name="$1" make_target="$2" logfile="$3"
     local found
     found=$(found_warnings "$logfile")
     [ -n "$found" ] || return 0
-    local mark="${UI_MARK_WARN}"
-    if [ "$mode" = strict ]; then
+    local mode mark="${UI_MARK_WARN}"
+    mode=$(warnings_mode "$logfile")
+    if [ "$mode" != warn ]; then
         mark="${UI_MARK_FAIL}"
     fi
-    local count kind message note total=0
+    local kept=""
+    kept=$(keep_log "$logfile" "$name") || kept=""
+    local count kind message note total=0 shown=0 distinct=0
     while IFS=$'\t' read -r count kind message; do
+        distinct=$((distinct + 1))
+        total=$((total + count))
+        [ "$shown" -lt "$REPORT_ROWS" ] || continue
+        shown=$((shown + 1))
         note=$(warning_note "$kind" "$count")
         add_display_row "$mark" "$(fit_warning_row "$name" "$message" "$((${#note} ? ${#note} + 1 : 0))")" \
             "${note:+ ${UI_GRAY}${note}${UI_RESET}}"
-        total=$((total + count))
     done <<< "$found"
+    if [ "$distinct" -gt "$shown" ]; then
+        # after status_tint's color, whose leading 0 would reset the bold
+        add_display_row "$mark" \
+            "${UI_BOLD}$(fit_warning_row "$name" "$((distinct - shown)) more${kept:+ in ${kept}}" 0)" ""
+    fi
     local text="${total} warning"
     if [ "$total" -gt 1 ]; then
         text="${text}s"
@@ -999,9 +1148,12 @@ check_warnings() {
         warning_failure="${text}: filterwarnings makes every warning an error"
         return 1
     fi
+    if [ "$mode" != warn ]; then
+        warning_failure="${text}: ${_MODE_UNREAD}"
+        return 1
+    fi
     record_warning "$name" "$text"
-    local kept
-    if kept=$(keep_log "$logfile" "$name"); then
+    if [ -n "$kept" ]; then
         echo "${name}|${kept}|warnings" >> "${STATUS_DIR}/slow"
     fi
     return 0
@@ -1014,23 +1166,37 @@ suite_health_report() {
     eval "${PYTHON} $(printf '%q ' "${SCRIPT_DIR}/check_suite_health.py" "$HEALTH_DIR" --root "$PROJECT_ROOT" --threshold "$TEST_HEALTH_THRESHOLD" --outliers "$TEST_HEALTH_OUTLIERS")"
 }
 
-# The line's name, and the findings shown as rows below the checklist; the rest are in the kept log
+# The line's name
 HEALTH_NAME="Test structure health"
-HEALTH_ROWS=10
+# The rows a check's warnings, or the health findings, get below the checklist; the rest are in
+# the kept log, with a row that says how many
+REPORT_ROWS=5
 
-# A test subcheck. The one that runs the unit tests (HEALTH_TARGET) then brings the Test structure
-# health line up to date from the reports it wrote, so the line does not wait for the other
-# subchecks.
+# Whether a run that writes the health reports (HEALTH_TARGETS) completes the set: it marks
+# itself done, and the one that sees every target done, and takes the lock, builds the line.
+# Parallel runs can finish together; mkdir is atomic, so the line is built once.
+health_reports_complete() {
+    local target="$1" t done_dir="${STATUS_DIR}/health-done"
+    case " $HEALTH_TARGETS " in *" $target "*) ;; *) return 1 ;; esac
+    mkdir -p "$done_dir" && : > "${done_dir}/${target}"
+    for t in $HEALTH_TARGETS; do
+        [ -f "${done_dir}/${t}" ] || return 1
+    done
+    mkdir "${STATUS_DIR}/health-line" 2>/dev/null
+}
+
+# A test subcheck. The last of the runs that write the health reports then brings the Test
+# structure health line up to date, so the line does not wait for the other subchecks.
 run_test_subcheck() {
     local rc=0
     run_check "$@" || rc=$?
-    if [ "$7" = "$HEALTH_TARGET" ]; then
+    if [ "$TEST_HEALTH" != false ] && [ -d "$STATUS_DIR" ] && health_reports_complete "$7"; then
         run_test_structure || rc=1
     fi
     return "$rc"
 }
 
-# The Test structure health summary from the share of tests in their directory's suite and the
+# The Test structure health summary from the share of tests that keep to the suite rules and the
 # count of findings: "98.2%, clean", "95.1%, 1 finding" or "90.4%, 17 findings"
 health_summary() {
     case "$2" in
@@ -1040,6 +1206,22 @@ health_summary() {
     esac
 }
 
+# Rows below the checklist for the first REPORT_ROWS of the $3 findings in the log $1, then a bold
+# row for the rest, in the kept log $2. A misfiled row drops its evidence, "(fs-write /tmp/...)",
+# which the kept log keeps.
+show_health_rows() {
+    local log="$1" kept="$2" count="$3" mark="$4" kind where detail
+    while IFS=$'\t' read -r kind where detail; do
+        [ "$kind" = misfiled ] && detail="${detail%% (*}"
+        add_display_row "$mark" "$(fit_warning_row "$HEALTH_NAME" "${where}: ${detail}" 0 end)" ""
+    done < <(sed -n "2,$((REPORT_ROWS + 1))p" "$log")
+    if [ "$count" -gt "$REPORT_ROWS" ]; then
+        # after status_tint's color, whose leading 0 would reset the bold
+        add_display_row "$mark" \
+            "${UI_BOLD}$(fit_warning_row "$HEALTH_NAME" "$((count - REPORT_ROWS)) more in ${kept}" 0)" ""
+    fi
+}
+
 # The Test structure health line: it passes with no finding. Each finding gets a row below the
 # checklist; warn records a warning, strict a failure. No report: the project does not load
 # appinfra.pytest_suites, or has no unit tests.
@@ -1047,6 +1229,7 @@ run_test_structure() {
     [ "$TEST_HEALTH" != false ] && [ -d "$STATUS_DIR" ] || return 0
     local name="$HEALTH_NAME" line_num=${SUBCHECK_LINES["$HEALTH_NAME"]}
     local log="${STATUS_DIR}/check-test-structure.log" rc=0
+    update_line "$line_num" "${UI_MARK_RUNNING}" "  ${name}" ""
     suite_health_report > "$log" 2>&1 || rc=$?
     if [ "$rc" -eq 3 ]; then
         update_line "$line_num" "${UI_MARK_PENDING}" "  ${name}" " ${UI_GRAY}(no report: is appinfra.pytest_suites loaded?)${UI_RESET}"
@@ -1066,22 +1249,30 @@ run_test_structure() {
         return 0
     fi
     kept=$(keep_log "$log" "$name") || kept=""
-    local mark="${UI_MARK_WARN}" kind where detail
+    local mark="${UI_MARK_WARN}"
     [ "$TEST_HEALTH" = strict ] && mark="${UI_MARK_FAIL}"
     update_line "$line_num" "$mark" "  ${name}" " ${UI_GRAY}(${summary})${UI_RESET}"
-    while IFS=$'\t' read -r kind where detail; do
-        add_display_row "$mark" "$(fit_warning_row "$name" "${where}: ${detail}" 0)" ""
-    done < <(sed -n "2,$((HEALTH_ROWS + 1))p" "$log")
-    if [ "$count" -gt "$HEALTH_ROWS" ]; then
-        add_display_row "$mark" "${name}: $((count - HEALTH_ROWS)) more in ${kept}" ""
-    fi
+    show_health_rows "$log" "$kept" "$count" "$mark"
     if [ "$TEST_HEALTH" = strict ]; then
         record_failure "$name" "" "" "$log" "$summary"
         return 1
     fi
-    record_warning "$name" "$summary"
+    record_warning "$name" "$summary" "$count"
     [ -z "$kept" ] || echo "${name}|${kept}|warnings" >> "${STATUS_DIR}/slow"
     return 0
+}
+
+# The last line when every check passed and $1 warnings were recorded: the pass mark, only the
+# warnings in yellow, then the time $2
+passed_with_warnings() {
+    local count="$1" elapsed="$2" noun="warnings"
+    [ "$count" -eq 1 ] && noun="warning"
+    echo -e "${UI_MARK_OK} All checks passed ${UI_BRIGHT_YELLOW}with ${count} ${noun}${UI_RESET} ${UI_GRAY}in ${elapsed}s${UI_RESET}"
+}
+
+# A run_raw check passed with $1 warnings: run_raw's last line sums them
+raw_warned() {
+    echo "$1" >> "${STATUS_DIR}/raw-warnings"
 }
 
 # run_raw's Test structure health: the summary and every finding. Returns 0 with no finding,
@@ -1093,7 +1284,7 @@ run_raw_test_structure() {
     local out rc=0
     out=$(suite_health_report 2>&1) || rc=$?
     if [ "$rc" -eq 3 ]; then
-        echo "  ${UI_GRAY}[ ]${UI_RESET} ${HEALTH_NAME} ${UI_GRAY}(no report: is appinfra.pytest_suites loaded?)${UI_RESET}"
+        echo "  ${UI_GRAY}[ ] ${HEALTH_NAME} (no report: is appinfra.pytest_suites loaded?)${UI_RESET}"
         return 0
     elif [ "$rc" -ne 0 ]; then
         printf '%s\n' "$out"
@@ -1113,6 +1304,8 @@ run_raw_test_structure() {
     if [ "$TEST_HEALTH" = strict ]; then
         rc=1
         mark="${UI_MARK_FAIL}"
+    else
+        raw_warned "$count"
     fi
     echo "  ${mark} ${HEALTH_NAME} (${summary})"
     raw_health_findings "$out"
@@ -1210,7 +1403,7 @@ run_check() {
             # Warnings get rows below the checklist; in strict mode they also fail the check,
             # whose line then shows its usual text with the failure mark
             local warning_failure="" pass_mark="${UI_MARK_OK}"
-            if ! check_warnings "$name" "$make_target" "$tmpfile" "$WARNINGS_MODE"; then
+            if ! check_warnings "$name" "$make_target" "$tmpfile"; then
                 pass_mark="${UI_MARK_FAIL}"
             fi
 
@@ -1476,8 +1669,8 @@ run_raw() {
                     [ "$FAIL_FAST" = true ] && break 2
                 fi
                 echo ""
-                # The raw unit target is test.unit.v
-                [ "${submake%.v}" = "$HEALTH_TARGET" ] || continue
+                # A raw target ends in .v (test.unit.v); the line follows the last report writer
+                [ "$TEST_HEALTH" != false ] && health_reports_complete "${submake%.v}" || continue
                 local health_exit_code=0
                 run_raw_test_structure || health_exit_code=$?
                 if [ $health_exit_code -eq "$EXIT_CODE_WARNING" ]; then
@@ -1510,7 +1703,9 @@ run_raw() {
         echo "${UI_MARK_FAIL} Some checks failed ${UI_GRAY}in ${elapsed}s${UI_RESET}"
         exit 1
     elif [ "$has_warnings" = true ]; then
-        echo "${UI_MARK_WARN} All checks passed with warnings ${UI_GRAY}in ${elapsed}s${UI_RESET}"
+        passed_with_warnings \
+            "$(awk '{ n += $1 } END { print n + 0 }' "${STATUS_DIR}/raw-warnings" 2>/dev/null)" \
+            "$elapsed"
     else
         echo "${UI_MARK_OK} All checks passed ${UI_GRAY}in ${elapsed}s${UI_RESET}"
     fi
@@ -1518,7 +1713,7 @@ run_raw() {
 
 # Run one check for run_raw and print its result: a check (indent "") or a test subcheck (indent
 # "  "). With scan (check.ci), a copy of its output goes to a log; its warnings (see
-# check_warnings) follow the result and, in strict mode (WARNINGS_MODE), fail the check. Without
+# check_warnings) follow the result and, in strict mode (warnings_mode), fail the check. Without
 # (check.raw), the plain command runs, so the outcome is the tools' own. Returns 0, 5 (a subcheck
 # with no tests collected), EXIT_CODE_WARNING (passed with warnings, or a tool's own warning
 # exit) or a failing code.
@@ -1537,19 +1732,23 @@ run_raw_check() {
         eval "$(with_pytest_args "$cmd")" || rc=$?
     fi
 
-    local found="" note=""
+    local found="" note="" warnings=1
     if [ "$scan" = scan ] && [ "$rc" -eq 0 ]; then
         found=$(found_warnings "$log")
     fi
     if [ -n "$found" ]; then
-        note=" ($(awk -F'\t' '{ n += $1 } END { print n }' <<< "$found") warnings)"
+        warnings=$(awk -F'\t' '{ n += $1 } END { print n }' <<< "$found")
+        note=" (${warnings} warnings)"
         rc=$EXIT_CODE_WARNING
-        if [ "$WARNINGS_MODE" = strict ]; then
-            rc=1
-        fi
+        case "$(warnings_mode "$log")" in
+            warn) ;;
+            strict) rc=1 ;;
+            *) rc=1; note=" (${warnings} warnings; ${_MODE_UNREAD})" ;;
+        esac
     fi
+    [ "$rc" -ne "$EXIT_CODE_WARNING" ] || raw_warned "$warnings"
     if [ "$rc" -eq 5 ] && [ -n "$indent" ]; then
-        echo "${indent}${UI_GRAY}[ ]${UI_RESET} $name ${UI_GRAY}(no tests)${UI_RESET}"
+        echo "${indent}${UI_GRAY}[ ] $name (no tests)${UI_RESET}"
     elif [ "$rc" -eq 0 ]; then
         echo "${indent}${UI_MARK_OK} $name passed"
     elif [ "$rc" -eq "$EXIT_CODE_WARNING" ] && [ -z "$found" ]; then
@@ -1610,14 +1809,19 @@ main() {
     done
     TOTAL_LINES=$current_line
 
-    # Print initial checkboxes
+    # Print initial checkboxes, kept as each line's text until a check redraws it
+    local text
     for check_def in "${CHECKS[@]}"; do
         IFS='|' read -r name _ _ _ <<< "$check_def"
-        printf "%b  %s\n" "$UI_MARK_PENDING" "$name"
+        text=$(printf "%b  %s" "$UI_MARK_PENDING" "$name")
+        printf "%s\n" "$text"
+        remember_line "${CHECK_LINES[$name]}" "$text"
 
         if [[ "$name" == "Test suite" ]]; then
             for subname in "${subline_names[@]}"; do
-                printf "%b    %s\n" "$UI_MARK_PENDING" "$subname"
+                text=$(printf "%b    %s" "$UI_MARK_PENDING" "$subname")
+                printf "%s\n" "$text"
+                remember_line "${SUBCHECK_LINES[$subname]}" "$text"
             done
         fi
     done
@@ -1635,6 +1839,7 @@ main() {
 
     # Show cursor and display results
     tput cnorm 2>/dev/null || printf "\033[?25h"
+    reprint_display
     local elapsed=$(printf "%.1f" $(echo "$(date +%s.%N) - $start_time" | bc))
 
     # The report below the checklist, each block ending in a blank line, then the result: the
@@ -1649,8 +1854,10 @@ main() {
         echo -e "${UI_MARK_FAIL} ${UI_RED}${failure_count} check(s) failed${UI_RESET} ${UI_GRAY}after ${elapsed}s${UI_RESET}"
         exit 1
     elif [ -f "${STATUS_DIR}/warnings" ]; then
-        local warning_count=$(wc -l < "${STATUS_DIR}/warnings")
-        echo -e "${UI_MARK_WARN} ${UI_BRIGHT_YELLOW}All checks passed with ${warning_count} warning(s)${UI_RESET} ${UI_GRAY}in ${elapsed}s${UI_RESET}"
+        # The warnings of every check that warned, each counting the warnings it recorded
+        passed_with_warnings \
+            "$(awk -F'|' '{n += ($3 == "" ? 1 : $3)} END {print n + 0}' "${STATUS_DIR}/warnings")" \
+            "$elapsed"
     else
         echo -e "${UI_MARK_OK} All checks passed ${UI_GRAY}in ${elapsed}s${UI_RESET}"
     fi

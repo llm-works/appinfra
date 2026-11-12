@@ -51,7 +51,7 @@ class TestIsPrivate:
         assert is_private(name) is False
 
 
-@pytest.mark.unit
+@pytest.mark.integration
 class TestDeadCodeAnalyzer:
     """Test which definitions DeadCodeAnalyzer reports."""
 
@@ -162,7 +162,7 @@ class TestDeadCodeAnalyzer:
         assert analyzer.unused() == []
 
 
-@pytest.mark.unit
+@pytest.mark.integration
 class TestFormatReport:
     """Test format_report()."""
 
@@ -188,7 +188,7 @@ def _make_tool(
     return tool
 
 
-@pytest.mark.unit
+@pytest.mark.integration
 class TestCheckDeadTool:
     """Test CheckDeadTool.run() exit codes."""
 
@@ -211,12 +211,14 @@ class TestCheckDeadTool:
         assert tool.run() == 0
         tool._logger.warning.assert_called()
 
+    @pytest.mark.unit
     def test_args(self):
         parser = argparse.ArgumentParser()
         CheckDeadTool(parent=None).add_args(parser)
         args = parser.parse_args(["pkg", "--strict", "--exclude", "x/*"])
         assert (args.dir, args.strict, args.exclude) == ("pkg", True, ["x/*"])
 
+    @pytest.mark.unit
     def test_keep_decorator_args(self):
         parser = argparse.ArgumentParser()
         CheckDeadTool(parent=None).add_args(parser)
@@ -225,6 +227,7 @@ class TestCheckDeadTool:
         )
         assert args.keep_decorator == ["router.get", "cli.command"]
 
+    @pytest.mark.unit
     @pytest.mark.parametrize(
         "value", ["a$(touch x)", "router.", ".get", "router..get", "1st", "*", "ré"]
     )
@@ -256,6 +259,21 @@ class TestIsRegistered:
     )
     def test_pydantic_decorators_register(self, decorator: str):
         node = _first_def(f"{decorator}\ndef _check(cls, v): return v\n")
+        assert is_registered(node, REGISTERING_DECORATORS) is True
+
+    @pytest.mark.parametrize(
+        "decorator",
+        [
+            '@validates("email")',
+            '@orm.validates("email", include_removes=True)',
+            "@reconstructor",
+            "@orm.reconstructor",
+            '@event.listens_for(User, "before_insert")',
+            '@listens_for(engine, "connect")',
+        ],
+    )
+    def test_sqlalchemy_decorators_register(self, decorator: str):
+        node = _first_def(f"{decorator}\ndef _hook(self, *args): pass\n")
         assert is_registered(node, REGISTERING_DECORATORS) is True
 
     @pytest.mark.parametrize(
