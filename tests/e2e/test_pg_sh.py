@@ -171,6 +171,12 @@ class TestAuth:
         first = _services(compose)[0]
         assert "POSTGRES_PASSWORD=pw" in first["environment"]
 
+    def test_the_standby_keeps_a_role_name_one_word(self, tmp_path: Path) -> None:
+        # Compose substitutes into the bash -c script before bash splits words
+        run = _up(tmp_path, "repl", _APPINFRA_PG_USER="app owner")
+        entrypoint = run.compose_file()["services"]["postgres-standby"]["entrypoint"]
+        assert entrypoint.count('-U \\"app owner\\"') == 2, entrypoint
+
     def test_the_standby_copies_with_the_password(self, tmp_path: Path) -> None:
         compose = _up(tmp_path, "repl", _APPINFRA_PG_PASS="pw").compose_file()
         standby = compose["services"]["postgres-standby"]
@@ -178,7 +184,7 @@ class TestAuth:
         assert "until pg_basebackup" in standby["entrypoint"]
         # The password is the configured role's, so the copy logs in as that role
         assert (
-            f"pg_basebackup -w -h postgres-primary -p {PORT} -U {ROLE} "
+            f'pg_basebackup -w -h postgres-primary -p {PORT} -U \\"{ROLE}\\" '
             in (standby["entrypoint"])
         )
 

@@ -89,14 +89,14 @@ services:
         # block traversal by the postgres user. Pre-create the parent as postgres.
         install -d -o postgres -g postgres -m 755 \"$$(dirname \"$$pgdata\")\"
         rm -rf \"$$pgdata\"/*
-        until pg_isready -h postgres-primary -p ${_APPINFRA_PG_PORT} -U ${_APPINFRA_PG_USER:?}; do
+        until pg_isready -h postgres-primary -p ${_APPINFRA_PG_PORT} -U \"${_APPINFRA_PG_USER:?}\"; do
           echo 'Waiting for primary to be ready...'
           sleep 2
         done
         echo 'Primary is ready, starting base backup...'
         # Retried: on an existing primary volume pg.sh sets the role's password
         # only once the primary is up, so the first attempt may be refused.
-        until pg_basebackup -w -h postgres-primary -p ${_APPINFRA_PG_PORT} -U ${_APPINFRA_PG_USER:?} -D \"$$pgdata\" -Fp -Xs -P -R; do
+        until pg_basebackup -w -h postgres-primary -p ${_APPINFRA_PG_PORT} -U \"${_APPINFRA_PG_USER:?}\" -D \"$$pgdata\" -Fp -Xs -P -R; do
           echo 'Base backup failed, retrying...'
           rm -rf \"$$pgdata\"/*
           sleep 2
