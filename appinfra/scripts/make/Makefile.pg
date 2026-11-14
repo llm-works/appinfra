@@ -62,7 +62,7 @@ _APPINFRA_PG_CONFIG_PATH = $(APPINFRA_ETC_DIR)/$(or $(APPINFRA_PG_CONFIG_FILE),$
 # Every pg target runs a pg.sh verb through pg_make, which loads the config file
 # and projects it into the _APPINFRA_PG_* wire variables, as `appinfra pg` does.
 # Loading it here, while make parses, would cost every make invocation ~0.1s.
-_APPINFRA_PG = $(PYTHON) -m appinfra.cli.tools.pg_make "$(_APPINFRA_PG_CONFIG_PATH)" $(APPINFRA_PG_CONFIG_KEY)
+_APPINFRA_PG = $(PYTHON) -m appinfra.cli.tools.pg_make "$(_APPINFRA_PG_CONFIG_PATH)" "$(APPINFRA_PG_CONFIG_KEY)"
 
 # Make's own settings reach pg_make as wire variables, and win over the config
 # (internal contract; the underscore prefix marks it as subject to change and

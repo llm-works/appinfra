@@ -219,7 +219,8 @@ def pg_endpoint_from_config(path: Path, key: str) -> Endpoint | None:
     except ConfigError as e:
         raise ValueError(f"--pg-config {path}: {e}") from e
     port = cfg.get(f"{key}.port")
-    if not port:
+    # Absent or declared empty is no port; any other value, 0 included, is parse_port's
+    if port is None or port == "":
         return None
     host = cfg.get(f"{key}.host") or _LOOPBACK
     return str(host), parse_port(str(port), f"{path}: {key}.port")

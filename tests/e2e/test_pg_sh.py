@@ -171,22 +171,37 @@ class TestAuth:
         first = _services(compose)[0]
         assert "POSTGRES_PASSWORD=pw" in first["environment"]
 
-    def test_the_standby_keeps_a_role_name_one_word(self, tmp_path: Path) -> None:
-        # Compose substitutes into the bash -c script before bash splits words
-        run = _up(tmp_path, "repl", _APPINFRA_PG_USER="app owner")
-        entrypoint = run.compose_file()["services"]["postgres-standby"]["entrypoint"]
-        assert entrypoint.count('-U \\"app owner\\"') == 2, entrypoint
+    def test_the_role_name_stays_out_of_the_standby_script(
+        self, tmp_path: Path
+    ) -> None:
+        # Compose substitutes into the bash -c script before bash parses it, so
+        # spaces, quotes or $ there would reach bash as code
+        role = 'app "$owner"'
+        run = _up(tmp_path, "repl", _APPINFRA_PG_USER=role)
+        standby = run.compose_file()["services"]["postgres-standby"]
+        assert f"PGUSER={role}" in standby["environment"]
+        assert "owner" not in standby["entrypoint"]
 
     def test_the_standby_copies_with_the_password(self, tmp_path: Path) -> None:
         compose = _up(tmp_path, "repl", _APPINFRA_PG_PASS="pw").compose_file()
         standby = compose["services"]["postgres-standby"]
-        assert "PGPASSWORD=pw" in standby["environment"]
-        assert "until pg_basebackup" in standby["entrypoint"]
         # The password is the configured role's, so the copy logs in as that role
+        assert "PGPASSWORD=pw" in standby["environment"]
+        assert f"PGUSER={ROLE}" in standby["environment"]
         assert (
-            f'pg_basebackup -w -h postgres-primary -p {PORT} -U \\"{ROLE}\\" '
+            f"until pg_basebackup -w -h postgres-primary -p {PORT} -D"
             in (standby["entrypoint"])
         )
+
+    def test_the_standby_stops_retrying_a_refused_copy(self, tmp_path: Path) -> None:
+        # A role or password the primary never accepts must not retry forever
+        compose = _up(tmp_path, "repl").compose_file()
+        entrypoint = compose["services"]["postgres-standby"]["entrypoint"]
+        assert 'if [ \\"$attempt\\" -ge 15 ]' in entrypoint
+        assert "Base backup failed 15 times; check pgserver.user and pgserver.pass" in (
+            entrypoint
+        )
+        assert "exit 1" in entrypoint
 
 
 class TestPasswordOnUp:
@@ -195,6 +210,13 @@ class TestPasswordOnUp:
     def test_up_sets_the_password(self, tmp_path: Path) -> None:
         run = _up(tmp_path, "single", _APPINFRA_PG_PASS="it's")
         assert f"ALTER ROLE \"{ROLE}\" PASSWORD 'it''s';" in run.exec_log
+
+    def test_the_password_is_stored_for_scram(self, tmp_path: Path) -> None:
+        # The scram pg_hba rule cannot check a password stored as md5
+        log = _up(tmp_path, "single", _APPINFRA_PG_PASS="pw").exec_log
+        encryption = "SET password_encryption = 'scram-sha-256';"
+        assert encryption in log
+        assert log.index(encryption) < log.index("ALTER ROLE")
 
     def test_up_without_password_clears_it(self, tmp_path: Path) -> None:
         run = _up(tmp_path, "single")
@@ -206,6 +228,25 @@ class TestPasswordOnUp:
             line for line in run.exec_log.splitlines() if line.startswith("exec ")
         ]
         assert not any("s3cret" in line for line in command_lines)
+
+    def test_no_wait_with_a_password_says_when_it_applies(self, tmp_path: Path) -> None:
+        run = _up(tmp_path, "single", _APPINFRA_PG_PASS="pw", _APPINFRA_PG_WAIT="0")
+        output = run.result.stdout + run.result.stderr
+        assert "applied once the server is ready" in output
+        assert "pg.server.wait.up" in output
+
+    @pytest.mark.parametrize(
+        "env",
+        [{"_APPINFRA_PG_WAIT": "0"}, {"_APPINFRA_PG_PASS": "pw"}],
+        ids=["no-wait-without-password", "wait-with-password"],
+    )
+    def test_no_password_note_otherwise(
+        self, tmp_path: Path, env: dict[str, str]
+    ) -> None:
+        run = _up(tmp_path, "single", **env)
+        assert "applied once the server is ready" not in (
+            run.result.stdout + run.result.stderr
+        )
 
     def test_no_wait_leaves_the_password_to_wait_up(self, tmp_path: Path) -> None:
         run = _up(tmp_path, "single", _APPINFRA_PG_PASS="pw", _APPINFRA_PG_WAIT="0")

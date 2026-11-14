@@ -582,7 +582,11 @@ fi
 # runner and flags as `make examples.check`; raw mode adds -v.
 if [ "$CHECK_EXAMPLES" = "true" ] && [ -n "$EXAMPLES_DIR" ]; then
     # --full-output: the runner prints a failed example's whole output, so the kept log has it
-    EXAMPLES_CMD="${PYTHON} ${SCRIPT_DIR}/run_examples.py ${EXAMPLES_DIR} --full-output${EXAMPLES_PG_CONFIG:+ --pg-config ${EXAMPLES_PG_CONFIG} --pg-key ${EXAMPLES_PG_KEY}}"
+    # Quoted for the eval that runs it: the paths may hold spaces
+    EXAMPLES_CMD="${PYTHON} $(printf '%q ' "${SCRIPT_DIR}/run_examples.py" "$EXAMPLES_DIR" --full-output)"
+    if [ -n "$EXAMPLES_PG_CONFIG" ]; then
+        EXAMPLES_CMD+="$(printf '%q ' --pg-config "$EXAMPLES_PG_CONFIG" --pg-key "$EXAMPLES_PG_KEY")"
+    fi
     TEST_SUBCHECKS+=("Examples|examples.check|${EXAMPLES_CMD}|")
     TEST_SUBCHECKS_RAW+=("Examples|examples.check|${EXAMPLES_CMD} -v|")
 fi

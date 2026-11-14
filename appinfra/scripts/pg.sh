@@ -268,6 +268,10 @@ _pg_up() {
 
     if [ "${_APPINFRA_PG_WAIT}" != "0" ]; then
         _pg_wait_up
+    elif [ -n "${_APPINFRA_PG_PASS:-}" ]; then
+        # The role's password can only be set on a ready server; a new volume
+        # has it from initialization, an existing one only after wait-up.
+        ui_warn "pgserver.pass is set: the role's password is applied once the server is ready; run make pg.server.wait.up (or appinfra pg up without --no-wait) before connecting"
     fi
 }
 
@@ -486,7 +490,9 @@ _pg_sync_password() {
     runtime="$(_pg_container_runtime)"
     role="${_APPINFRA_PG_USER//\"/\"\"}"
     if [ -n "${_APPINFRA_PG_PASS:-}" ]; then
-        sql="ALTER ROLE \"${role}\" PASSWORD '${_APPINFRA_PG_PASS//\'/\'\'}';"
+        # Stored as scram whatever the server's default: the scram pg_hba rule
+        # cannot check a password stored as md5
+        sql="SET password_encryption = 'scram-sha-256'; ALTER ROLE \"${role}\" PASSWORD '${_APPINFRA_PG_PASS//\'/\'\'}';"
     else
         sql="ALTER ROLE \"${role}\" PASSWORD NULL;"
     fi

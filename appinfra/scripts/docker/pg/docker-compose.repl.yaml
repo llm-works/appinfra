@@ -75,6 +75,9 @@ services:
       - ${_APPINFRA_PG_PUBLISH_HOST:?}:${_APPINFRA_PG_PORT_R:?}:${_APPINFRA_PG_PORT_R}
     environment:
       - POSTGRES_HOST_AUTH_METHOD=trust
+      # The role and its password reach pg_isready / pg_basebackup through
+      # libpq's environment, never through the script text below
+      - PGUSER=${_APPINFRA_PG_USER:?}
       - PGPASSWORD=${_APPINFRA_PG_PASS:-}
       - PGPORT=${_APPINFRA_PG_PORT_R}
     depends_on:
@@ -89,14 +92,23 @@ services:
         # block traversal by the postgres user. Pre-create the parent as postgres.
         install -d -o postgres -g postgres -m 755 \"$$(dirname \"$$pgdata\")\"
         rm -rf \"$$pgdata\"/*
-        until pg_isready -h postgres-primary -p ${_APPINFRA_PG_PORT} -U \"${_APPINFRA_PG_USER:?}\"; do
+        until pg_isready -h postgres-primary -p ${_APPINFRA_PG_PORT}; do
           echo 'Waiting for primary to be ready...'
           sleep 2
         done
         echo 'Primary is ready, starting base backup...'
         # Retried: on an existing primary volume pg.sh sets the role's password
-        # only once the primary is up, so the first attempt may be refused.
-        until pg_basebackup -w -h postgres-primary -p ${_APPINFRA_PG_PORT} -U \"${_APPINFRA_PG_USER:?}\" -D \"$$pgdata\" -Fp -Xs -P -R; do
+        # only once the primary is up, so the first attempts may be refused.
+        # Bounded at ~30s, pg.sh's readiness timeout: a role or password the
+        # primary never accepts exits, and the container restarts with the
+        # message in its log.
+        attempt=0
+        until pg_basebackup -w -h postgres-primary -p ${_APPINFRA_PG_PORT} -D \"$$pgdata\" -Fp -Xs -P -R; do
+          attempt=$$((attempt + 1))
+          if [ \"$$attempt\" -ge 15 ]; then
+            echo 'Base backup failed 15 times; check pgserver.user and pgserver.pass' >&2
+            exit 1
+          fi
           echo 'Base backup failed, retrying...'
           rm -rf \"$$pgdata\"/*
           sleep 2

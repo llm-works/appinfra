@@ -213,6 +213,13 @@ class TestPgEndpoint:
             )
         assert "1 passed, 0 failed" in result.stdout, result.stdout + result.stderr
 
+    def test_a_configured_port_of_zero_is_rejected(self, tmp_path: Path) -> None:
+        # A bad port is an error, not a missing endpoint that skips the examples
+        config = _pg_config(tmp_path, 0)
+        result = _run_pg_example(tmp_path, "--pg-config", str(config))
+        assert result.returncode == 2, result.stdout + result.stderr
+        assert "port must be 1-65535, got '0'" in result.stderr
+
     def test_without_an_endpoint_the_example_is_skipped(self, tmp_path: Path) -> None:
         # No config, no INFRA_PGSERVER_PORT: nothing is probed at a guessed port
         result = _run_pg_example(tmp_path)
