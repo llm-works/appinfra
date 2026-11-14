@@ -177,6 +177,30 @@ class TestProjectEnv:
         env = _project_env(cfg)
         assert env["_APPINFRA_PG_HOST"] == "127.0.0.1"
 
+    def test_bind_and_pass_empty_when_missing(self):
+        # Empty leaves the default to pg.sh: bind 127.0.0.1, no password
+        env = _project_env(self._cfg())
+        assert env["_APPINFRA_PG_BIND"] == ""
+        assert env["_APPINFRA_PG_PASS"] == ""
+
+    def test_bind_flows_through(self):
+        env = _project_env(self._cfg(bind="0.0.0.0"))
+        assert env["_APPINFRA_PG_BIND"] == "0.0.0.0"
+
+    def test_pass_flows_through(self):
+        env = _project_env(self._cfg(**{"pass": "s3cret"}))
+        assert env["_APPINFRA_PG_PASS"] == "s3cret"
+
+    def test_pass_in_an_envelope_is_revealed(self):
+        env = _project_env(self._cfg(**{"pass": Envelope("s3cret")}))
+        assert env["_APPINFRA_PG_PASS"] == "s3cret"
+
+    def test_reads_the_given_key(self):
+        cfg = DotDict({"db_server": self._cfg()["pgserver"]})
+        env = _project_env(cfg, key="db_server")
+        assert env["_APPINFRA_PG_CONTAINER_NAME"] == "test-pg"
+        assert env["_APPINFRA_PG_PORT"] == "25432"
+
 
 # =============================================================================
 # _pg_script_path & _exec_pg

@@ -2,15 +2,31 @@
 # Configure postgres via pgserver.postgres_conf (curated whitelist).
 #
 # pg.sh-orchestrated: reads the _APPINFRA_PG_* wire variables from the
-# environment. CONTAINER_NAME / IMAGE / PORT are required; the postgres_conf
-# slots default to postgres's built-in values when unset. Not intended for
-# direct `docker compose -f ...` invocation.
+# environment. CONTAINER_NAME / IMAGE / PORT / PUBLISH_HOST / HBA_FILE are
+# required; the postgres_conf slots default to postgres's built-in values when
+# unset. Not intended for direct `docker compose -f ...` invocation.
+#
+# Authentication comes from the mounted pg_hba.conf (trust, or scram when
+# pgserver.pass is set). POSTGRES_HOST_AUTH_METHOD=trust only lets the image
+# initialize a volume without a password; POSTGRES_PASSWORD sets one at
+# initialization, and pg.sh sets the role's password on every start.
+#
+# A bind mount keeps the host file's owner and mode, which the postgres user
+# may not be able to read (a checkout made under umask 077): root copies it to
+# a file postgres owns before the image's entrypoint starts the server.
 services:
   postgres:
     container_name: ${_APPINFRA_PG_CONTAINER_NAME:?}
     image: ${_APPINFRA_PG_IMAGE:?}
+    entrypoint:
+      - bash
+      - -c
+      - install -D -m 0600 -o postgres -g postgres /opt/appinfra/pg_hba.conf /etc/postgresql/pg_hba.conf && exec docker-entrypoint.sh "$$@"
+      - pg-entrypoint
     command:
       - postgres
+      - -c
+      - hba_file=/etc/postgresql/pg_hba.conf
       - -c
       - ${_APPINFRA_PG_MAX_CONNECTIONS:-max_connections=128}
       - -c
@@ -25,11 +41,13 @@ services:
       # Mount one level above PGDATA: pg18+ uses /var/lib/postgresql/<MAJOR>/docker
       # and refuses to start when the mount lands on /var/lib/postgresql/data.
       - pgdata:/var/lib/postgresql
+      - ${_APPINFRA_PG_HBA_FILE:?}:/opt/appinfra/pg_hba.conf:ro
     working_dir: $PWD
     ports:
-      - ${_APPINFRA_PG_PORT:?}:${_APPINFRA_PG_PORT}
+      - ${_APPINFRA_PG_PUBLISH_HOST:?}:${_APPINFRA_PG_PORT:?}:${_APPINFRA_PG_PORT}
     environment:
       - POSTGRES_HOST_AUTH_METHOD=trust
+      - POSTGRES_PASSWORD=${_APPINFRA_PG_PASS:-}
       - PGPORT=${_APPINFRA_PG_PORT}
 
 volumes:

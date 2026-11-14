@@ -3,13 +3,24 @@
 # fill the named slots below (curated whitelist; see docker-compose.single.yaml).
 #
 # pg.sh-orchestrated: reads the _APPINFRA_PG_* wire variables from the
-# environment. CONTAINER_NAME / IMAGE / PORT / PORT_R are required; the
-# postgres_conf slots default to postgres's built-in values when unset. Not
-# intended for direct `docker compose -f ...` invocation.
+# environment. CONTAINER_NAME / IMAGE / PORT / PORT_R / PUBLISH_HOST / HBA_FILE
+# are required; the postgres_conf slots default to postgres's built-in values
+# when unset. Not intended for direct `docker compose -f ...` invocation.
+#
+# Both servers take their authentication from the mounted pg_hba.conf: the
+# standby's data directory is a copy of the primary's and would otherwise keep
+# the file the image wrote at initialization. See docker-compose.single.yaml
+# for POSTGRES_HOST_AUTH_METHOD, POSTGRES_PASSWORD and why each container
+# copies the mounted file before starting postgres.
 services:
   postgres-primary:
     container_name: ${_APPINFRA_PG_CONTAINER_NAME:?}-primary
     image: ${_APPINFRA_PG_IMAGE:?}
+    entrypoint:
+      - bash
+      - -c
+      - install -D -m 0600 -o postgres -g postgres /opt/appinfra/pg_hba.conf /etc/postgresql/pg_hba.conf && exec docker-entrypoint.sh "$$@"
+      - pg-entrypoint
     command:
       - postgres
       - -c
@@ -36,12 +47,13 @@ services:
       # Mount one level above PGDATA: pg18+ uses /var/lib/postgresql/<MAJOR>/docker
       # and refuses to start when the mount lands on /var/lib/postgresql/data.
       - pgdata_primary:/var/lib/postgresql
-      - ${PWD}/scripts/docker/pg/pg_hba.conf:/etc/postgresql/pg_hba.conf:ro
+      - ${_APPINFRA_PG_HBA_FILE:?}:/opt/appinfra/pg_hba.conf:ro
     working_dir: $PWD
     ports:
-      - ${_APPINFRA_PG_PORT:?}:${_APPINFRA_PG_PORT}
+      - ${_APPINFRA_PG_PUBLISH_HOST:?}:${_APPINFRA_PG_PORT:?}:${_APPINFRA_PG_PORT}
     environment:
       - POSTGRES_HOST_AUTH_METHOD=trust
+      - POSTGRES_PASSWORD=${_APPINFRA_PG_PASS:-}
       - PGPORT=${_APPINFRA_PG_PORT}
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
@@ -57,33 +69,55 @@ services:
       - "$PWD:$PWD"
       # Mount one level above PGDATA (see primary comment).
       - pgdata_standby:/var/lib/postgresql
+      - ${_APPINFRA_PG_HBA_FILE:?}:/opt/appinfra/pg_hba.conf:ro
     working_dir: $PWD
     ports:
-      - ${_APPINFRA_PG_PORT_R:?}:${_APPINFRA_PG_PORT_R}
+      - ${_APPINFRA_PG_PUBLISH_HOST:?}:${_APPINFRA_PG_PORT_R:?}:${_APPINFRA_PG_PORT_R}
     environment:
       - POSTGRES_HOST_AUTH_METHOD=trust
+      # The role and its password reach pg_isready / pg_basebackup through
+      # libpq's environment, never through the script text below
+      - PGUSER=${_APPINFRA_PG_USER:?}
+      - PGPASSWORD=${_APPINFRA_PG_PASS:-}
       - PGPORT=${_APPINFRA_PG_PORT_R}
     depends_on:
       postgres-primary:
         condition: service_healthy
     entrypoint: >
       bash -c "
+        install -D -m 0600 -o postgres -g postgres /opt/appinfra/pg_hba.conf /etc/postgresql/pg_hba.conf
         pgdata=\"$${PGDATA:-/var/lib/postgresql/data}\"
         # pg18+ PGDATA is /var/lib/postgresql/<MAJOR>/docker; the <MAJOR>/ layer
         # is created root:root 0700 (from the image or by pg_basebackup) and would
         # block traversal by the postgres user. Pre-create the parent as postgres.
         install -d -o postgres -g postgres -m 755 \"$$(dirname \"$$pgdata\")\"
         rm -rf \"$$pgdata\"/*
-        until pg_isready -h postgres-primary -p ${_APPINFRA_PG_PORT} -U postgres; do
+        until pg_isready -h postgres-primary -p ${_APPINFRA_PG_PORT}; do
           echo 'Waiting for primary to be ready...'
           sleep 2
         done
         echo 'Primary is ready, starting base backup...'
-        PGPASSWORD='' pg_basebackup -h postgres-primary -p ${_APPINFRA_PG_PORT} -U postgres -D \"$$pgdata\" -Fp -Xs -P -R
+        # Retried: on an existing primary volume pg.sh sets the role's password
+        # only once the primary is up, so the first attempts may be refused.
+        # Bounded at ~30s, pg.sh's readiness timeout: a role or password the
+        # primary never accepts exits, and the container restarts with the
+        # message in its log.
+        attempt=0
+        until pg_basebackup -w -h postgres-primary -p ${_APPINFRA_PG_PORT} -D \"$$pgdata\" -Fp -Xs -P -R; do
+          attempt=$$((attempt + 1))
+          if [ \"$$attempt\" -ge 15 ]; then
+            echo 'Base backup failed 15 times; check pgserver.user and pgserver.pass' >&2
+            exit 1
+          fi
+          echo 'Base backup failed, retrying...'
+          rm -rf \"$$pgdata\"/*
+          sleep 2
+        done
         chown -R postgres:postgres \"$$pgdata\"
         chmod 0700 \"$$pgdata\"
         echo 'Base backup complete, starting standby server...'
         exec gosu postgres postgres \
+          -c hba_file=/etc/postgresql/pg_hba.conf \
           -c \"${_APPINFRA_PG_MAX_CONNECTIONS:-max_connections=128}\" \
           -c \"${_APPINFRA_PG_SHARED_PRELOAD_LIBRARIES:-shared_preload_libraries=}\" \
           -c \"${_APPINFRA_PG_WORK_MEM:-work_mem=4MB}\" \

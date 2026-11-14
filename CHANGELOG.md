@@ -10,6 +10,28 @@ For API stability guarantees and deprecation policy, see
 
 ## [Unreleased]
 
+### Added
+- `pgserver.bind` sets the host address the port of the local dev server (`make pg.server.up`,
+  `appinfra pg up`) listens on. `pgserver.pass`, set through `INFRA_PGSERVER_PASS`, makes the
+  server require that password on its port; it takes effect on the next start, existing volumes
+  included.
+
+### Changed
+- **Breaking:** the local dev server listens on `127.0.0.1` by default instead of every
+  interface; `pgserver.bind: 0.0.0.0` lets other hosts reach it.
+- **Breaking:** the `pg.*` targets load their config file when they run, as the application
+  does: `!include` resolves and `INFRA_PGSERVER_*` overrides apply. An `INFRA_*` override the
+  file does not declare stops the target.
+- **Breaking:** `make examples.check` probes `ci-requires: pg` examples at the `pgserver` host
+  and port of the config; with neither it nor `INFRA_PGSERVER_PORT` naming one, they are
+  skipped instead of probed at `127.0.0.1:25432`.
+- `pg.server.up.repl` and `pg.standby` are always defined; without `pgserver.replica.enabled`
+  they stop with a message naming the setting.
+
+### Fixed
+- `make pg.server.up.repl` starts from any project, not only from the appinfra repo: the
+  primary mounted its `pg_hba.conf` from a path under the project directory.
+
 ## [0.15.0] - 2026-11-11
 
 ### Added

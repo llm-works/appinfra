@@ -49,10 +49,6 @@ APPINFRA_DEV_TEST_HEALTH ?= warn
 # Install with all optional extras
 APPINFRA_DEV_INSTALL_EXTRAS ?= all
 
-# PostgreSQL configuration (filename only - resolved from APPINFRA_ETC_DIR)
-APPINFRA_PG_CONFIG_FILE ?= pg.yaml
-#APPINFRA_PG_CONFIG_KEY ?= pgserver
-
 # Documentation configuration (filename only - resolved from APPINFRA_ETC_DIR)
 APPINFRA_DOCS_CONFIG_FILE ?= mkdocs.yaml
 

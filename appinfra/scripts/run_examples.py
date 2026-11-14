@@ -31,9 +31,11 @@ Files declaring the same requirement share it, so they run one at a time
 while everything else stays concurrent around them. Two forms are known,
 any other is rejected:
 
-- ``pg``: a real Postgres connection. The endpoint (``--pg``, else
-  ``INFRA_PGSERVER_HOST`` / ``INFRA_PGSERVER_PORT``, else 127.0.0.1:25432)
-  must accept a TCP connect.
+- ``pg``: a real Postgres connection. The endpoint must accept a TCP
+  connect. It comes from ``--pg``, else from the ``--pg-key`` section
+  (``pgserver``) of ``--pg-config``, loaded as the application loads it, else
+  from ``INFRA_PGSERVER_HOST`` / ``INFRA_PGSERVER_PORT``. Without one, the
+  requirement is unmet.
 - ``port:N``: the file binds TCP port N. The probe binds it on all
   interfaces and releases it; a port another process holds is unavailable.
 
@@ -51,7 +53,7 @@ completes, so the report reads the same as a serial run.
 Usage::
 
     run_examples.py <examples-dir> [--jobs N] [--timeout N] [--only SUBSTRING]
-                    [--pg HOST:PORT] [-v]
+                    [--pg HOST:PORT | --pg-config FILE [--pg-key KEY]] [-v]
 """
 
 from __future__ import annotations
@@ -110,10 +112,8 @@ _MARKS = {
 _PG_REQUIREMENT = "pg"
 _PG_UNAVAILABLE = "pg-unavailable"
 _PORT_PREFIX = "port:"
-# Endpoint used when neither --pg nor INFRA_PGSERVER_* names one. Matches the
-# canonical port in etc/pg.yaml.
-_DEFAULT_PG_HOST = "127.0.0.1"
-_DEFAULT_PG_PORT = 25432
+# Host of an endpoint that names only its port
+_LOOPBACK = "127.0.0.1"
 _PROBE_TIMEOUT_S = 2.0
 
 
@@ -190,22 +190,66 @@ def parse_requirement(path: Path, value: str) -> str:
     )
 
 
-def resolve_pg_endpoint(override: str | None) -> tuple[str, int]:
-    """Pick the Postgres endpoint to probe: ``--pg``, else env, else default.
+Endpoint = tuple[str, int]
 
-    Raises ``ValueError`` on a malformed ``--pg`` or ``INFRA_PGSERVER_PORT``;
-    a bad value must not fall back to the default and probe the wrong port.
+
+def parse_pg_override(override: str) -> Endpoint:
+    """Parse ``--pg HOST:PORT``. Raises ``ValueError`` when malformed."""
+    host, sep, port_text = override.rpartition(":")
+    if not sep or not host:
+        raise ValueError(f"--pg expects HOST:PORT, got '{override}'")
+    return host, parse_port(port_text, "--pg")
+
+
+def pg_endpoint_from_config(path: Path, key: str) -> Endpoint | None:
+    """The endpoint the ``key`` section of a config file names, loaded as the
+    application loads it (includes, ``INFRA_*`` overrides); None when the file
+    or the section's port is missing.
+
+    Raises ``ValueError`` when the file does not load or the port is malformed.
     """
-    if override:
-        host, sep, port_text = override.rpartition(":")
-        if not sep or not host:
-            raise ValueError(f"--pg expects HOST:PORT, got '{override}'")
-        return host, parse_port(port_text, "--pg")
-    host = os.environ.get("INFRA_PGSERVER_HOST", _DEFAULT_PG_HOST)
+    if not path.is_file():
+        return None
+    # Imported here: loading Config costs ~0.1s, paid only when a file needs pg
+    from appinfra.config import Config
+    from appinfra.errors import ConfigError
+
+    try:
+        cfg = Config.from_path(path)
+    except ConfigError as e:
+        raise ValueError(f"--pg-config {path}: {e}") from e
+    port = cfg.get(f"{key}.port")
+    # Absent or declared empty is no port; any other value, 0 included, is parse_port's
+    if port is None or port == "":
+        return None
+    host = cfg.get(f"{key}.host") or _LOOPBACK
+    return str(host), parse_port(str(port), f"{path}: {key}.port")
+
+
+def pg_endpoint_from_env() -> Endpoint | None:
+    """The endpoint ``INFRA_PGSERVER_HOST`` / ``INFRA_PGSERVER_PORT`` name; None
+    without a port. Raises ``ValueError`` on a malformed port."""
     env_port = os.environ.get("INFRA_PGSERVER_PORT")
     if env_port is None:
-        return host, _DEFAULT_PG_PORT
+        return None
+    host = os.environ.get("INFRA_PGSERVER_HOST", _LOOPBACK)
     return host, parse_port(env_port, "INFRA_PGSERVER_PORT")
+
+
+def resolve_pg_endpoint(
+    override: Endpoint | None, config: Path | None, key: str
+) -> Endpoint | None:
+    """Pick the Postgres endpoint to probe: ``--pg``, else the config, else env.
+
+    None when nothing names one: the probe must not guess a port.
+    """
+    if override is not None:
+        return override
+    if config is not None:
+        endpoint = pg_endpoint_from_config(config, key)
+        if endpoint is not None:
+            return endpoint
+    return pg_endpoint_from_env()
 
 
 def probe_tcp(host: str, port: int) -> bool:
@@ -240,19 +284,28 @@ def requirement_reason(key: str) -> str:
     return f"port {key[len(_PORT_PREFIX) :]} in use"
 
 
-def unmet_requirements(specs: list[Spec], pg: tuple[str, int]) -> dict[str, str]:
+def unmet_requirements(
+    specs: list[Spec], pg: Callable[[], Endpoint | None]
+) -> dict[str, str]:
     """Probe each requirement any spec declares; map the unavailable ones to a detail.
 
-    Only requirements actually declared are probed, so a tree with no
-    ``ci-requires`` line pays nothing.
+    Only requirements actually declared are probed, and the pg endpoint is
+    resolved only then, so a tree with no ``ci-requires`` line pays nothing.
     """
     unmet: dict[str, str] = {}
     declared: set[str] = set().union(*(spec.requires for spec in specs))
     for key in sorted(declared):
         if key == _PG_REQUIREMENT:
-            host, port = pg
-            if not probe_tcp(host, port):
-                unmet[key] = f"{_PG_UNAVAILABLE}: {host}:{port} unreachable"
+            endpoint = pg()
+            if endpoint is None:
+                unmet[key] = (
+                    f"{_PG_UNAVAILABLE}: no endpoint "
+                    "(--pg, --pg-config or INFRA_PGSERVER_PORT names none)"
+                )
+            elif not probe_tcp(*endpoint):
+                unmet[key] = (
+                    f"{_PG_UNAVAILABLE}: {endpoint[0]}:{endpoint[1]} unreachable"
+                )
         elif not probe_bind(int(key[len(_PORT_PREFIX) :])):
             unmet[key] = requirement_reason(key)
     return unmet
@@ -514,15 +567,31 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--only", help="run only files whose path contains this substring"
     )
+    _add_pg_args(parser)
+    _add_output_args(parser)
+    return parser
+
+
+def _add_pg_args(parser: argparse.ArgumentParser) -> None:
+    """Add the options that name the Postgres endpoint for `ci-requires: pg`."""
     parser.add_argument(
         "--pg",
         metavar="HOST:PORT",
-        help="Postgres endpoint probed for `ci-requires: pg` files "
-        "(default: INFRA_PGSERVER_HOST/PORT, else "
-        f"{_DEFAULT_PG_HOST}:{_DEFAULT_PG_PORT})",
+        help="Postgres endpoint probed for `ci-requires: pg` files",
     )
-    _add_output_args(parser)
-    return parser
+    parser.add_argument(
+        "--pg-config",
+        type=Path,
+        metavar="FILE",
+        help="config file whose --pg-key section names the endpoint, when --pg "
+        "does not (else INFRA_PGSERVER_HOST/PORT)",
+    )
+    parser.add_argument(
+        "--pg-key",
+        default="pgserver",
+        metavar="KEY",
+        help="section of --pg-config with host and port (default: %(default)s)",
+    )
 
 
 def _add_output_args(parser: argparse.ArgumentParser) -> None:
@@ -549,11 +618,13 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     start = time.monotonic()
     try:
-        # Resolve --pg up front so a malformed value fails even when no
-        # selected file declares pg.
-        pg = resolve_pg_endpoint(ns.pg)
+        # Parse --pg up front so a malformed value fails even when no selected
+        # file declares pg; the config and env are read only when one does.
+        override = parse_pg_override(ns.pg) if ns.pg else None
         specs = [parse_spec(p, ns.timeout) for p in discover(ns.examples_dir, ns.only)]
-        unmet = unmet_requirements(specs, pg)
+        unmet = unmet_requirements(
+            specs, lambda: resolve_pg_endpoint(override, ns.pg_config, ns.pg_key)
+        )
     except ValueError as e:
         print(e, file=sys.stderr)
         return 2

@@ -43,7 +43,7 @@ services:
       - HOME=/home/testuser
       - COVERAGE_FILE=.cover/data
       # Override pgserver.host to reach postgres via docker network (tests only;
-      # examples run with --network host and use the default 127.0.0.1:25432)
+      # examples run with --network host, at the pgserver host and port of etc/)
       - INFRA_PGSERVER_HOST=postgres
       # pytest-xdist workers for lanes that override the command with make test.*
       # targets (test.all, test.coverage). check.ci goes through check.sh,
