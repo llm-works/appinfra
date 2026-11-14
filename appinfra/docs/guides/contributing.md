@@ -164,8 +164,10 @@ development. Two entry points are equivalent — pick by installation shape:
 - Wheel installers: `appinfra pg up` (reads the packaged base or a config
   named via `--config` / `--etc-dir`).
 
-Both project the same `_APPINFRA_PG_*` wire protocol into
-`appinfra/scripts/pg.sh`, so container state is identical either way.
+Both load the config as the application does (includes and `INFRA_*` overrides apply) and
+project it the same way into `appinfra/scripts/pg.sh`, so container state is identical either
+way. The server listens on `127.0.0.1` without a password; `pgserver.bind` and
+`pgserver.pass` change that (see `etc/README.md`).
 
 ### Single Instance Mode (Default)
 
@@ -181,7 +183,8 @@ make pg.info.short      # or: appinfra pg status
 
 ### Replication Mode
 
-Start primary + standby (read-only replica) servers:
+Start primary + standby (read-only replica) servers; needs `pgserver.replica.enabled: true`
+and `pgserver.replica.port`:
 
 ```bash
 make pg.server.up.repl  # or: appinfra pg up --repl

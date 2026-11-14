@@ -88,14 +88,15 @@ _APPINFRA_CQ_EXCLUDE_FLAGS := $(foreach _APPINFRA_PAT,$(APPINFRA_DEV_CQ_EXCLUDE)
 # a dotted name.
 _APPINFRA_CQ_KEEP_DECORATOR_FLAGS := $(foreach _APPINFRA_DEC,$(APPINFRA_DEV_CQ_DEAD_KEEP_DECORATORS),--keep-decorator '$(subst ','\'',$(_APPINFRA_DEC))')
 
-# Endpoint run_examples.py probes for `# ci-requires: pg` files, as HOST:PORT.
-# Recursive (=) on purpose: _APPINFRA_PG_HOST / _APPINFRA_PG_PORT are defined
-# by Makefile.pg, which is included after this file, and they resolve when a
-# recipe runs. Empty when no pg config is loaded; the runner then falls back to
-# INFRA_PGSERVER_HOST / INFRA_PGSERVER_PORT and its default.
-_APPINFRA_DEV_EXAMPLES_PG = $(if $(and $(_APPINFRA_PG_HOST),$(_APPINFRA_PG_PORT)),$(_APPINFRA_PG_HOST):$(_APPINFRA_PG_PORT))
-_APPINFRA_DEV_EXAMPLES_PG_FLAG = $(if $(_APPINFRA_DEV_EXAMPLES_PG),--pg $(_APPINFRA_DEV_EXAMPLES_PG))
-export _APPINFRA_DEV_EXAMPLES_PG
+# Config file and key run_examples.py reads the Postgres endpoint from, for
+# `# ci-requires: pg` files; it loads them only when some file declares pg.
+# Recursive (=) on purpose: Makefile.pg, included after this file, defines the
+# path. Empty without Makefile.pg; the runner then takes INFRA_PGSERVER_HOST /
+# INFRA_PGSERVER_PORT.
+_APPINFRA_DEV_EXAMPLES_PG_CONFIG = $(if $(_APPINFRA_PG_INCLUDED),$(_APPINFRA_PG_CONFIG_PATH))
+_APPINFRA_DEV_EXAMPLES_PG_KEY = $(APPINFRA_PG_CONFIG_KEY)
+_APPINFRA_DEV_EXAMPLES_PG_FLAG = $(if $(_APPINFRA_DEV_EXAMPLES_PG_CONFIG),--pg-config "$(_APPINFRA_DEV_EXAMPLES_PG_CONFIG)" --pg-key $(_APPINFRA_DEV_EXAMPLES_PG_KEY))
+export _APPINFRA_DEV_EXAMPLES_PG_CONFIG _APPINFRA_DEV_EXAMPLES_PG_KEY
 
 ##@ Health Check
 

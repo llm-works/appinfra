@@ -130,16 +130,18 @@ Defines PostgreSQL server connection settings.
 pgserver:
   version: 18                   # PostgreSQL version (required unless image is specified)
   name: llm-works-pg           # Server name/identifier (shared across llm-works packages)
+  host: 127.0.0.1              # Address the dbs URLs and the pg tools connect to (not where the server listens: see bind)
   port: 25432                  # PostgreSQL port
   user: postgres               # Database user
-  pass: ''                     # Database password (use environment variable for security)
+  pass: ''                     # Database password; empty = none (set with INFRA_PGSERVER_PASS)
+  bind: 127.0.0.1              # Optional: host address the port listens on (default 127.0.0.1)
   image: pgvector/pgvector:pg18  # Optional: custom Docker image (defaults to postgres:VERSION)
   postgres_conf:               # Optional: PostgreSQL -c parameters (see Recommended Settings below)
     max_connections: 500
     shared_preload_libraries:
       - pg_stat_statements
   replica:                     # Optional: replication mode configuration
-    enabled: true              # Enable replication targets (pg.server.up.repl, pg.standby)
+    enabled: true              # Needed by the replication targets (pg.server.up.repl, pg.standby)
     port: 25433                # Standby server port (required when enabled: true)
 ```
 
@@ -213,7 +215,32 @@ pgserver:
 ```
 
 **Need a knob not in the table?** File an issue or PR — each addition is small (one entry
-in `pg-config.sh`'s whitelist plus one slot in both compose YAMLs).
+in the whitelist of `appinfra/cli/tools/pg_tool.py` plus one slot in both compose YAMLs).
+
+#### Bind Address and Password
+
+The server `make pg.server.up` starts is for local development. Its defaults keep it on the
+developer's machine at no cost:
+
+- **`bind`** is the host address the published port listens on, `127.0.0.1` by default, so
+  other hosts cannot reach it. `0.0.0.0` (or a LAN address) opens it to them; starting such a
+  server without a password prints a warning.
+- **`pass`**, empty by default, leaves every connection trusted. Set it through the environment,
+  `INFRA_PGSERVER_PASS=...`, never in the file: the server then requires the password
+  (scram-sha-256) on its port, the standby uses it to replicate, and every `dbs.*.url` that
+  references `${pgserver.pass}` carries it. Connections from inside the container stay trusted.
+
+The password takes effect on the next start, on a new volume or an existing one: each
+`pg.server.up` (and `pg.server.wait.up`) sets the role's password to `pass`, or clears it.
+
+```yaml
+pgserver:
+  name: shared-dev-pg
+  version: 18
+  port: 5432
+  pass: ''                     # INFRA_PGSERVER_PASS=... in the environment
+  bind: 0.0.0.0                # reachable from the LAN
+```
 
 #### Recommended PostgreSQL Settings
 
@@ -249,13 +276,13 @@ Some extensions must be loaded at server startup:
 #### Replication Mode
 
 When `replica.enabled` is `true`:
-- Replication targets are available (`make pg.server.up.repl`, `make pg.standby`)
+- The replication targets start and reach the standby (`make pg.server.up.repl`,
+  `make pg.standby`)
 - `replica.port` is required and used for the standby server
 - Database URLs can reference `${pgserver.replica.port}` for read replicas
 
-When `replica` is omitted or `replica.enabled` is `false`:
-- Only single-instance mode is available
-- Replication targets are hidden from `make help`
+When `replica` is omitted or `replica.enabled` is `false`, only single-instance mode runs: the
+replication targets stop with a message naming the setting they need.
 
 ### 3. Database Configurations
 

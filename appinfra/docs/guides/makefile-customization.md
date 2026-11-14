@@ -569,6 +569,10 @@ Each setting has a type, and a value that does not fit it stops make:
 | `APPINFRA_PG_HOST` | `127.0.0.1` | PostgreSQL host |
 | `APPINFRA_PG_USER` | `postgres` | PostgreSQL user |
 
+A `pg.*` target loads the config file when it runs, as the application loads it: `!include`
+resolves, and `INFRA_*` overrides apply, each to a path the file declares, so an override the
+file does not declare stops the target. Make does not read the file while it parses.
+
 **Container Runtime (PG):**
 
 | Variable | Default | Description |

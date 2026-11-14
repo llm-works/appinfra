@@ -10,9 +10,9 @@ wire protocol and execs ``appinfra/scripts/pg.sh <verb>``. Location of
 pg.sh is resolved from ``appinfra.__file__`` so wheel installs work
 without a repo checkout.
 
-The projection matches ``appinfra/scripts/pg-config.sh`` exactly (same
-whitelist, same rendering) so ``make pg.server.up`` and ``appinfra pg up``
-resolve to identical container state.
+The ``make pg.*`` targets run the same projection through ``pg_make``, so
+``make pg.server.up`` and ``appinfra pg up`` resolve to identical container
+state.
 """
 
 import argparse
@@ -88,26 +88,39 @@ def _project_postgres_conf(postgres_conf: Any) -> dict[str, str]:
     return knobs
 
 
-def _project_env(cfg: Any) -> dict[str, str]:
+def _plain(value: Any) -> str:
+    """A config value as plain text, revealed when it is held in an Envelope;
+    empty when unset."""
+    if value is None:
+        return ""
+    if isinstance(value, Envelope):
+        return value.reveal()
+    return str(value)
+
+
+def _project_env(cfg: Any, key: str = "pgserver") -> dict[str, str]:
     """
     Project resolved YAML config → ``_APPINFRA_PG_*`` wire-protocol env vars.
 
-    Mirrors ``appinfra/scripts/pg-config.sh`` + ``Makefile.pg`` so the CLI
-    path and the Make path produce identical container state. Missing
-    optional fields become empty strings (pg.sh treats those as unset).
+    The one projection for both callers: the ``appinfra pg`` tools and the
+    ``make pg.*`` targets (through ``pg_make``). ``key`` names the server's
+    section. Missing optional fields become empty strings (pg.sh treats
+    those as unset, and owns the defaults of bind and pass).
     """
-    version = cfg.get("pgserver.version", "") or ""
-    replica_enabled = bool(cfg.get("pgserver.replica.enabled", False))
-    resolved_image = _resolve_image(cfg.get("pgserver.image", ""), version)
-    knobs = _project_postgres_conf(cfg.get("pgserver.postgres_conf", {}) or {})
+    version = cfg.get(f"{key}.version", "") or ""
+    replica_enabled = bool(cfg.get(f"{key}.replica.enabled", False))
+    resolved_image = _resolve_image(cfg.get(f"{key}.image", ""), version)
+    knobs = _project_postgres_conf(cfg.get(f"{key}.postgres_conf", {}) or {})
 
     return {
-        "_APPINFRA_PG_CONTAINER_NAME": str(cfg.get("pgserver.name", "") or ""),
+        "_APPINFRA_PG_CONTAINER_NAME": str(cfg.get(f"{key}.name", "") or ""),
         "_APPINFRA_PG_VERSION": str(version),
-        "_APPINFRA_PG_HOST": str(cfg.get("pgserver.host", "127.0.0.1") or "127.0.0.1"),
-        "_APPINFRA_PG_PORT": str(cfg.get("pgserver.port", "") or ""),
-        "_APPINFRA_PG_PORT_R": str(cfg.get("pgserver.replica.port", "") or ""),
-        "_APPINFRA_PG_USER": str(cfg.get("pgserver.user", "postgres") or "postgres"),
+        "_APPINFRA_PG_HOST": str(cfg.get(f"{key}.host", "127.0.0.1") or "127.0.0.1"),
+        "_APPINFRA_PG_PORT": str(cfg.get(f"{key}.port", "") or ""),
+        "_APPINFRA_PG_PORT_R": str(cfg.get(f"{key}.replica.port", "") or ""),
+        "_APPINFRA_PG_USER": str(cfg.get(f"{key}.user", "postgres") or "postgres"),
+        "_APPINFRA_PG_BIND": str(cfg.get(f"{key}.bind", "") or ""),
+        "_APPINFRA_PG_PASS": _plain(cfg.get(f"{key}.pass")),
         "_APPINFRA_PG_REPLICA_ENABLED": "true" if replica_enabled else "false",
         "_APPINFRA_PG_IMAGE": resolved_image,
         "_APPINFRA_PG_MAX_CONNECTIONS": knobs.get("MAX_CONNECTIONS", ""),
@@ -155,9 +168,9 @@ def _detect_runtime_env() -> dict[str, str]:
 _NO_CONFIG_NOOP_VERBS = frozenset({"down", "info", "logs"})
 
 
-def _pgserver_configured(cfg: Any) -> bool:
-    """True iff the resolved config declares a non-empty ``pgserver.name``."""
-    return bool(str(cfg.get("pgserver.name", "") or ""))
+def _pgserver_configured(cfg: Any, key: str = "pgserver") -> bool:
+    """True iff the resolved config declares a non-empty ``<key>.name``."""
+    return bool(str(cfg.get(f"{key}.name", "") or ""))
 
 
 def _report_no_pgserver(verb: str) -> int:
@@ -176,11 +189,12 @@ def _exec_pg(
     verb: str,
     extra_args: list[str] | None = None,
     extra_env: dict[str, str] | None = None,
+    key: str = "pgserver",
 ) -> int:
     """Project env + exec pg.sh <verb>. Returns exit code."""
-    if not _pgserver_configured(cfg):
+    if not _pgserver_configured(cfg, key):
         return _report_no_pgserver(verb)
-    env = {**os.environ, **_detect_runtime_env(), **_project_env(cfg)}
+    env = {**os.environ, **_detect_runtime_env(), **_project_env(cfg, key)}
     if extra_env:
         env.update(extra_env)
     cmd = [str(_pg_script_path()), verb, *(extra_args or [])]

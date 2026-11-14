@@ -20,6 +20,8 @@
 #   _APPINFRA_PG_PORT               primary connection port
 #   _APPINFRA_PG_PORT_R             standby port (only when _APPINFRA_PG_REPLICA_ENABLED=true)
 #   _APPINFRA_PG_USER               postgres user
+#   _APPINFRA_PG_BIND               host address the published ports listen on (default 127.0.0.1)
+#   _APPINFRA_PG_PASS               password of _APPINFRA_PG_USER; empty = trust, set = scram
 #   _APPINFRA_PG_REPLICA_ENABLED    "true" enables replica-aware behavior
 #   _APPINFRA_PG_IMAGE              pre-resolved container image (e.g. docker.io/postgres:18)
 #   _APPINFRA_PG_MAX_CONNECTIONS    postgres_conf: max_connections (optional)
@@ -123,6 +125,45 @@ MSG
     return 2
 }
 
+_pg_bind() {
+    echo "${_APPINFRA_PG_BIND:-127.0.0.1}"
+}
+
+_pg_is_loopback() {
+    # $1 = address; true when only this machine can reach it
+    case "$1" in
+        127.* | ::1 | localhost) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+_pg_publish_host() {
+    # The bind address as compose's ports syntax takes it: IPv6 in brackets.
+    local bind
+    bind="$(_pg_bind)"
+    case "${bind}" in
+        *:*) echo "[${bind}]" ;;
+        *) echo "${bind}" ;;
+    esac
+}
+
+_pg_hba_file() {
+    # The pg_hba.conf every server mounts: trust without a password, scram
+    # for connections through the published ports with one. Shipped next to
+    # this script, so it resolves the same from any project directory.
+    local auth="trust"
+    [ -n "${_APPINFRA_PG_PASS:-}" ] && auth="scram"
+    echo "$(_pg_script_dir)/docker/pg/pg_hba.${auth}.conf"
+}
+
+_pg_warn_open_bind() {
+    local bind
+    bind="$(_pg_bind)"
+    if ! _pg_is_loopback "${bind}" && [ -z "${_APPINFRA_PG_PASS:-}" ]; then
+        ui_warn "pgserver.bind is ${bind}: other hosts reach the server without a password; set pgserver.pass (INFRA_PGSERVER_PASS) to require one"
+    fi
+}
+
 _pg_compose_run() {
     # Invoke compose with the mode-appropriate YAML. $1 = single|repl,
     # remaining args pass through to compose. The compose YAMLs read the
@@ -133,10 +174,13 @@ _pg_compose_run() {
     compose_yaml="$(_pg_compose_yaml "${mode}")"
     compose_cmd="${APPINFRA_COMPOSE_CMD:-docker compose}"
 
+    _APPINFRA_PG_PUBLISH_HOST="$(_pg_publish_host)"
+    _APPINFRA_PG_HBA_FILE="$(_pg_hba_file)"
     export _APPINFRA_PG_CONTAINER_NAME _APPINFRA_PG_PORT _APPINFRA_PG_PORT_R
     export _APPINFRA_PG_IMAGE _APPINFRA_PG_MAX_CONNECTIONS
     export _APPINFRA_PG_SHARED_PRELOAD_LIBRARIES _APPINFRA_PG_WORK_MEM
-    export _APPINFRA_PG_AUTOVACUUM
+    export _APPINFRA_PG_AUTOVACUUM _APPINFRA_PG_PASS _APPINFRA_PG_USER
+    export _APPINFRA_PG_PUBLISH_HOST _APPINFRA_PG_HBA_FILE
 
     # ${compose_cmd} is intentionally unquoted: it commonly holds
     # "docker compose" or "podman compose" (two words) that must word-split.
@@ -171,8 +215,12 @@ _pg_up() {
         echo "pg.sh up: _APPINFRA_PG_MODE must be 'single' or 'repl' (got '${_APPINFRA_PG_MODE}')" >&2
         exit 2
     fi
+    if [ "${_APPINFRA_PG_MODE}" = "repl" ] && [ "${_APPINFRA_PG_REPLICA_ENABLED:-false}" != "true" ]; then
+        echo "pg.sh up: replication mode needs pgserver.replica.enabled: true" >&2
+        exit 2
+    fi
     if [ "${_APPINFRA_PG_MODE}" = "repl" ] && [ -z "${_APPINFRA_PG_PORT_R:-}" ]; then
-        echo "pg.sh up: _APPINFRA_PG_PORT_R required for repl mode" >&2
+        echo "pg.sh up: replication mode needs pgserver.replica.port" >&2
         exit 2
     fi
 
@@ -215,6 +263,7 @@ _pg_up() {
             ui_running "Starting pgserver '${_APPINFRA_PG_CONTAINER_NAME}' (single mode, port ${_APPINFRA_PG_PORT})"
         fi
     fi
+    _pg_warn_open_bind
     _pg_compose_run "${_APPINFRA_PG_MODE}" up -d
 
     if [ "${_APPINFRA_PG_WAIT}" != "0" ]; then
@@ -428,6 +477,29 @@ _pg_wait_container_up() {
     exit 1
 }
 
+_pg_sync_password() {
+    # Give the role the configured password, or none: POSTGRES_PASSWORD only
+    # applies when a volume is initialized, so an existing one follows the
+    # config from here. The statement goes in on stdin, off the command line,
+    # over the container's own loopback, which both pg_hba files trust.
+    local target="$1" runtime role sql
+    runtime="$(_pg_container_runtime)"
+    role="${_APPINFRA_PG_USER//\"/\"\"}"
+    if [ -n "${_APPINFRA_PG_PASS:-}" ]; then
+        sql="ALTER ROLE \"${role}\" PASSWORD '${_APPINFRA_PG_PASS//\'/\'\'}';"
+    else
+        sql="ALTER ROLE \"${role}\" PASSWORD NULL;"
+    fi
+    if ! printf '%s\n' "${sql}" | ${runtime} exec -i "${target}" \
+        psql -X -q -v ON_ERROR_STOP=1 -h 127.0.0.1 -U "${_APPINFRA_PG_USER}" -d postgres >/dev/null; then
+        ui_fail "could not set the password of role ${_APPINFRA_PG_USER} on ${target}"
+        exit 1
+    fi
+    if [ -n "${_APPINFRA_PG_PASS:-}" ]; then
+        ui_ok "Password required on port ${_APPINFRA_PG_PORT} (role ${_APPINFRA_PG_USER})"
+    fi
+}
+
 _pg_wait_up() {
     : "${_APPINFRA_PG_CONTAINER_NAME:?_APPINFRA_PG_CONTAINER_NAME required}"
     : "${_APPINFRA_PG_USER:?_APPINFRA_PG_USER required}"
@@ -445,6 +517,9 @@ _pg_wait_up() {
     ui_running "Waiting for ${primary_target} to accept connections..."
     _pg_wait_container_up "${primary_target}" "${_APPINFRA_PG_WAIT_TIMEOUT}"
     ui_ok "Server is UP (${primary_target} on port ${_APPINFRA_PG_PORT})"
+    # Before the standby wait: on an existing volume the standby's base backup
+    # authenticates with the password this sets.
+    _pg_sync_password "${primary_target}"
 
     # In repl mode the standby container's psql only answers once basebackup
     # completes. Fixes the historic wait-up quirk where the target went ready
@@ -592,6 +667,12 @@ _pg_info_config() {
         echo -e "Standby Port:     ${UI_BLUE}${_APPINFRA_PG_PORT_R}${UI_RESET}"
     else
         echo -e "Port:             ${UI_BLUE}${_APPINFRA_PG_PORT}${UI_RESET}"
+    fi
+    echo -e "Bind:             ${UI_BLUE}$(_pg_bind)${UI_RESET}"
+    if [ -n "${_APPINFRA_PG_PASS:-}" ]; then
+        echo -e "Auth:             ${UI_BLUE}password (scram-sha-256)${UI_RESET}"
+    else
+        echo -e "Auth:             ${UI_BLUE}trust (no password)${UI_RESET}"
     fi
 }
 
@@ -860,6 +941,12 @@ case "$cmd" in
     -h | --help | help) : ;;
     *) _pg_ensure_runtime || exit $? ;;
 esac
+
+# The host's psql and pg_top (info, clean, psql, top) authenticate with the
+# configured password; without one the server trusts them.
+if [ -n "${_APPINFRA_PG_PASS:-}" ]; then
+    export PGPASSWORD="${_APPINFRA_PG_PASS}"
+fi
 
 case "$cmd" in
     up)        _pg_up ;;

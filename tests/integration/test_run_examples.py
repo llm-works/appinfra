@@ -5,9 +5,12 @@
 
 from __future__ import annotations
 
+import contextlib
 import os
+import socket
 import subprocess
 import sys
+from collections.abc import Iterator
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -133,3 +136,85 @@ def test_passing_example_reports_its_warnings(tmp_path: Path) -> None:
     assert warned == [
         "warning: use_old.py --twice: DeprecationWarning: old api (examples/oldlib.py:5)"
     ]
+
+
+def _run_pg_example(tmp_path: Path, *flags: str, env: dict[str, str] | None = None):
+    """Run one example that declares `ci-requires: pg`, with no INFRA_* overrides
+    but those given."""
+    examples_dir = tmp_path / "examples"
+    examples_dir.mkdir()
+    (examples_dir / "needs_pg.py").write_text("# ci-requires: pg\nprint('ran')\n")
+    base = {k: v for k, v in os.environ.items() if not k.startswith("INFRA_")}
+    return subprocess.run(
+        [
+            sys.executable,
+            str(RUN_EXAMPLES_PY),
+            str(examples_dir),
+            "--jobs",
+            "1",
+            *flags,
+        ],
+        cwd=tmp_path,
+        env={**base, **(env or {})},
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+
+
+def _pg_config(tmp_path: Path, port: int, key: str = "pgserver") -> Path:
+    path = tmp_path / "etc" / "infra.yaml"
+    path.parent.mkdir()
+    path.write_text(f"{key}:\n  host: 127.0.0.1\n  port: {port}\n")
+    return path
+
+
+@contextlib.contextmanager
+def _listening() -> Iterator[int]:
+    """A TCP port on loopback that accepts connections, for the pg probe."""
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        sock.listen()
+        yield sock.getsockname()[1]
+
+
+def _closed_port() -> int:
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        return int(sock.getsockname()[1])
+
+
+class TestPgEndpoint:
+    """The endpoint `ci-requires: pg` is probed at comes from the project's config."""
+
+    def test_the_config_names_the_endpoint(self, tmp_path: Path) -> None:
+        with _listening() as port:
+            config = _pg_config(tmp_path, port)
+            result = _run_pg_example(tmp_path, "--pg-config", str(config))
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "1 passed, 0 failed" in result.stdout
+
+    def test_an_unreachable_config_endpoint_is_named(self, tmp_path: Path) -> None:
+        port = _closed_port()
+        config = _pg_config(tmp_path, port, key="db_server")
+        result = _run_pg_example(
+            tmp_path, "--pg-config", str(config), "--pg-key", "db_server"
+        )
+        assert f"127.0.0.1:{port} unreachable" in result.stdout
+
+    def test_an_override_of_the_config_applies(self, tmp_path: Path) -> None:
+        with _listening() as port:
+            config = _pg_config(tmp_path, _closed_port())
+            result = _run_pg_example(
+                tmp_path,
+                "--pg-config",
+                str(config),
+                env={"INFRA_PGSERVER_PORT": str(port)},
+            )
+        assert "1 passed, 0 failed" in result.stdout, result.stdout + result.stderr
+
+    def test_without_an_endpoint_the_example_is_skipped(self, tmp_path: Path) -> None:
+        # No config, no INFRA_PGSERVER_PORT: nothing is probed at a guessed port
+        result = _run_pg_example(tmp_path)
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "pg-unavailable: no endpoint" in result.stdout

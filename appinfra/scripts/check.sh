@@ -73,8 +73,10 @@ PKG_NAME="$(appinfra_setting APPINFRA_DEV_PKG_NAME appinfra package)" || exit 2
 CQ_STRICT="$(appinfra_bool APPINFRA_DEV_CQ_STRICT false)" || exit 2
 CHECK_EXAMPLES="$(appinfra_bool APPINFRA_DEV_CHECK_EXAMPLES false)" || exit 2
 CQ_SPDX="$(appinfra_bool APPINFRA_DEV_CQ_SPDX false)" || exit 2
-# HOST:PORT for run_examples.py --pg; Makefile.dev derives it from Makefile.pg.
-EXAMPLES_PG="${_APPINFRA_DEV_EXAMPLES_PG:-}"
+# Config file and key run_examples.py reads the pg endpoint from; Makefile.dev
+# derives them from Makefile.pg.
+EXAMPLES_PG_CONFIG="${_APPINFRA_DEV_EXAMPLES_PG_CONFIG:-}"
+EXAMPLES_PG_KEY="${_APPINFRA_DEV_EXAMPLES_PG_KEY:-pgserver}"
 COVERAGE_MARKERS="${APPINFRA_PYTEST_COVERAGE_MARKERS:-unit}"
 
 # Coverage threshold precedence: CLI arg > env var > default (80)
@@ -580,7 +582,7 @@ fi
 # runner and flags as `make examples.check`; raw mode adds -v.
 if [ "$CHECK_EXAMPLES" = "true" ] && [ -n "$EXAMPLES_DIR" ]; then
     # --full-output: the runner prints a failed example's whole output, so the kept log has it
-    EXAMPLES_CMD="${PYTHON} ${SCRIPT_DIR}/run_examples.py ${EXAMPLES_DIR} --full-output${EXAMPLES_PG:+ --pg ${EXAMPLES_PG}}"
+    EXAMPLES_CMD="${PYTHON} ${SCRIPT_DIR}/run_examples.py ${EXAMPLES_DIR} --full-output${EXAMPLES_PG_CONFIG:+ --pg-config ${EXAMPLES_PG_CONFIG} --pg-key ${EXAMPLES_PG_KEY}}"
     TEST_SUBCHECKS+=("Examples|examples.check|${EXAMPLES_CMD}|")
     TEST_SUBCHECKS_RAW+=("Examples|examples.check|${EXAMPLES_CMD} -v|")
 fi
