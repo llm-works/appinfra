@@ -34,11 +34,14 @@ PORT = "40101"
 PORT_R = "40102"
 ROLE = "app_owner"
 
-# Answers `ps` with no containers and every `exec` (the readiness probe and the
-# password statement) with success; records each exec and its stdin.
+# Answers `ps` with the containers named in PG_STUB_RUNNING (none by default) and
+# every `exec` (the readiness probe and the password statement) with success;
+# records each exec and its stdin.
 _RUNTIME = """#!/usr/bin/env bash
 case "$1" in
-  ps) exit 0 ;;
+  ps)
+    for name in ${PG_STUB_RUNNING:-}; do printf '%s\\n' "$name"; done
+    exit 0 ;;
   exec)
     shift
     if [ "$1" = "-i" ]; then

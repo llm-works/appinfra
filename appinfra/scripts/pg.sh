@@ -164,6 +164,15 @@ _pg_warn_open_bind() {
     fi
 }
 
+_pg_warn_unsynced_password() {
+    # Started without waiting: the role's password can only be set on a ready
+    # server; a new volume has it from initialization, an existing one only
+    # after wait-up.
+    if [ -n "${_APPINFRA_PG_PASS:-}" ]; then
+        ui_warn "pgserver.pass is set: the role's password is applied once the server is ready; run make pg.server.wait.up (or appinfra pg up without --no-wait) before connecting"
+    fi
+}
+
 _pg_compose_run() {
     # Invoke compose with the mode-appropriate YAML. $1 = single|repl,
     # remaining args pass through to compose. The compose YAMLs read the
@@ -268,10 +277,8 @@ _pg_up() {
 
     if [ "${_APPINFRA_PG_WAIT}" != "0" ]; then
         _pg_wait_up
-    elif [ -n "${_APPINFRA_PG_PASS:-}" ]; then
-        # The role's password can only be set on a ready server; a new volume
-        # has it from initialization, an existing one only after wait-up.
-        ui_warn "pgserver.pass is set: the role's password is applied once the server is ready; run make pg.server.wait.up (or appinfra pg up without --no-wait) before connecting"
+    else
+        _pg_warn_unsynced_password
     fi
 }
 
@@ -337,6 +344,10 @@ _pg_reboot() {
     local running_mode
     running_mode="$(_pg_detect_running_mode)"
 
+    # A reboot recreates the containers from the current config, as up does
+    if [ "${running_mode}" != "none" ]; then
+        _pg_warn_open_bind
+    fi
     case "${running_mode}" in
         repl)
             if [ -z "${_APPINFRA_PG_PORT_R:-}" ]; then
@@ -358,6 +369,8 @@ _pg_reboot() {
 
     if [ "${_APPINFRA_PG_WAIT}" != "0" ]; then
         _pg_wait_up
+    else
+        _pg_warn_unsynced_password
     fi
 }
 
@@ -490,9 +503,11 @@ _pg_sync_password() {
     runtime="$(_pg_container_runtime)"
     role="${_APPINFRA_PG_USER//\"/\"\"}"
     if [ -n "${_APPINFRA_PG_PASS:-}" ]; then
-        # Stored as scram whatever the server's default: the scram pg_hba rule
-        # cannot check a password stored as md5
-        sql="SET password_encryption = 'scram-sha-256'; ALTER ROLE \"${role}\" PASSWORD '${_APPINFRA_PG_PASS//\'/\'\'}';"
+        # Pinned for the statement whatever the server's defaults: the scram
+        # pg_hba rule cannot check a password stored as md5, and the escaping
+        # below doubles quotes only, which leaves backslashes literal only with
+        # standard_conforming_strings on
+        sql="SET password_encryption = 'scram-sha-256'; SET standard_conforming_strings = on; ALTER ROLE \"${role}\" PASSWORD '${_APPINFRA_PG_PASS//\'/\'\'}';"
     else
         sql="ALTER ROLE \"${role}\" PASSWORD NULL;"
     fi

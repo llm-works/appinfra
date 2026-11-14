@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.helpers.pg_sh import PORT, ROLE, run_pg_sh
+from tests.helpers.pg_sh import CONTAINER, PORT, ROLE, run_pg_sh
 
 MODES = ["single", "repl"]
 
@@ -211,12 +211,21 @@ class TestPasswordOnUp:
         run = _up(tmp_path, "single", _APPINFRA_PG_PASS="it's")
         assert f"ALTER ROLE \"{ROLE}\" PASSWORD 'it''s';" in run.exec_log
 
-    def test_the_password_is_stored_for_scram(self, tmp_path: Path) -> None:
-        # The scram pg_hba rule cannot check a password stored as md5
+    @pytest.mark.parametrize(
+        "setting",
+        [
+            # The scram pg_hba rule cannot check a password stored as md5
+            "SET password_encryption = 'scram-sha-256';",
+            # The escaping doubles quotes only: a backslash must stay literal
+            "SET standard_conforming_strings = on;",
+        ],
+    )
+    def test_the_password_statement_pins_its_session_settings(
+        self, tmp_path: Path, setting: str
+    ) -> None:
         log = _up(tmp_path, "single", _APPINFRA_PG_PASS="pw").exec_log
-        encryption = "SET password_encryption = 'scram-sha-256';"
-        assert encryption in log
-        assert log.index(encryption) < log.index("ALTER ROLE")
+        assert setting in log
+        assert log.index(setting) < log.index("ALTER ROLE")
 
     def test_up_without_password_clears_it(self, tmp_path: Path) -> None:
         run = _up(tmp_path, "single")
@@ -254,6 +263,36 @@ class TestPasswordOnUp:
         waited = run_pg_sh(tmp_path, "wait-up", env={"_APPINFRA_PG_PASS": "pw"})
         assert waited.result.returncode == 0, waited.result.stderr
         assert f"ALTER ROLE \"{ROLE}\" PASSWORD 'pw';" in waited.exec_log
+
+
+class TestReboot:
+    """A reboot starts the server again with the current config, so it warns as up does."""
+
+    _RUNNING = {"single": CONTAINER, "repl": f"{CONTAINER}-primary {CONTAINER}-standby"}
+
+    def _reboot(self, tmp_path: Path, mode: str, **env: str) -> str:
+        run = run_pg_sh(
+            tmp_path, "reboot", env={"PG_STUB_RUNNING": self._RUNNING[mode], **env}
+        )
+        assert run.result.returncode == 0, run.result.stderr
+        assert run.compose_args, "reboot started nothing"
+        return run.result.stdout + run.result.stderr
+
+    @pytest.mark.parametrize("mode", MODES)
+    def test_lan_bind_without_password_warns(self, tmp_path: Path, mode: str) -> None:
+        output = self._reboot(tmp_path, mode, _APPINFRA_PG_BIND="0.0.0.0")
+        assert "without a password" in output
+
+    def test_no_wait_with_a_password_says_when_it_applies(self, tmp_path: Path) -> None:
+        output = self._reboot(
+            tmp_path, "single", _APPINFRA_PG_PASS="pw", _APPINFRA_PG_WAIT="0"
+        )
+        assert "applied once the server is ready" in output
+
+    def test_loopback_reboot_warns_nothing(self, tmp_path: Path) -> None:
+        output = self._reboot(tmp_path, "single")
+        assert "without a password" not in output
+        assert "applied once the server is ready" not in output
 
 
 @pytest.mark.parametrize(
