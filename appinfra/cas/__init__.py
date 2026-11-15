@@ -2,11 +2,12 @@
 # SPDX-FileCopyrightText: Copyright 2026 The appinfra Authors
 
 """
-Content-addressed store: blobs, trees and commits, with named refs.
+Content-addressed store: blobs, trees, commits and vectors, with named refs.
 
 Objects are immutable and identified by the hash of their content. Refs are named
 pointers to commits that move only with compare-and-set. Each repository of a store has
-its own objects and refs.
+its own objects and refs. A :class:`Vector` is a list of object ids stored in shared
+chunks, so each new version of a long list stores only what changed.
 
 Example:
     from appinfra.cas import Blob, FileStore, Tree, TreeEntry
@@ -34,11 +35,13 @@ from .objects import (
     ObjectType,
     Tree,
     TreeEntry,
+    VectorNode,
     canonical_json,
     content_hash,
     is_object_id,
 )
-from .store import Repo, Store
+from .store import Batch, Repo, Store
+from .vector import Splice, Vector
 
 __all__ = [
     # Objects
@@ -47,13 +50,18 @@ __all__ = [
     "Tree",
     "TreeEntry",
     "Commit",
+    "VectorNode",
     "ObjectType",
     "canonical_json",
     "content_hash",
     "is_object_id",
+    # Vectors
+    "Vector",
+    "Splice",
     # Stores
     "Store",
     "Repo",
+    "Batch",
     "MemoryStore",
     "FileStore",
     # Errors

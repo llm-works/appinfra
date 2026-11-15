@@ -197,13 +197,24 @@ _pg_compose_run() {
     ${compose_cmd} -p "${_APPINFRA_PG_CONTAINER_NAME}" -f "${compose_yaml}" "$@"
 }
 
+# True when a container whose whole name matches the ERE <pattern> is listed by
+# `<runtime> ps [ps-args...]`. The listing is read in full before matching: with
+# pipefail, `ps | grep -q` fails when grep stops at its match while ps is still
+# writing (ps dies of SIGPIPE), so a listed container would count as absent.
+_pg_container_listed() {
+    local runtime="$1" pattern="$2" names
+    shift 2
+    names="$(${runtime} ps "$@" --format '{{.Names}}' 2>/dev/null || true)"
+    grep -qE "^(${pattern})$" <<<"${names}"
+}
+
 _pg_detect_running_mode() {
     # Echoes: "single" | "repl" | "none"
     local runtime
     runtime="$(_pg_container_runtime)"
-    if ${runtime} ps --format '{{.Names}}' 2>/dev/null | grep -q "^${_APPINFRA_PG_CONTAINER_NAME}-primary$"; then
+    if _pg_container_listed "${runtime}" "${_APPINFRA_PG_CONTAINER_NAME}-primary"; then
         echo "repl"
-    elif ${runtime} ps --format '{{.Names}}' 2>/dev/null | grep -q "^${_APPINFRA_PG_CONTAINER_NAME}$"; then
+    elif _pg_container_listed "${runtime}" "${_APPINFRA_PG_CONTAINER_NAME}"; then
         echo "single"
     else
         echo "none"
@@ -531,7 +542,7 @@ _pg_wait_up() {
     runtime="$(_pg_container_runtime)"
 
     local primary_target="${_APPINFRA_PG_CONTAINER_NAME}"
-    if ${runtime} ps --format '{{.Names}}' 2>/dev/null | grep -q "^${_APPINFRA_PG_CONTAINER_NAME}-primary$"; then
+    if _pg_container_listed "${runtime}" "${_APPINFRA_PG_CONTAINER_NAME}-primary"; then
         primary_target="${_APPINFRA_PG_CONTAINER_NAME}-primary"
     fi
 
@@ -547,7 +558,7 @@ _pg_wait_up() {
     # while the standby was still cloning.
     if [ "${primary_target}" = "${_APPINFRA_PG_CONTAINER_NAME}-primary" ]; then
         local standby_target="${_APPINFRA_PG_CONTAINER_NAME}-standby"
-        if ${runtime} ps --format '{{.Names}}' 2>/dev/null | grep -q "^${standby_target}$"; then
+        if _pg_container_listed "${runtime}" "${standby_target}"; then
             ui_running "Waiting for ${standby_target} to accept connections (basebackup)..."
             _pg_wait_container_up "${standby_target}" "${_APPINFRA_PG_WAIT_TIMEOUT}"
             ui_ok "Standby is UP (${standby_target} on port ${_APPINFRA_PG_PORT_R:-?})"
@@ -577,7 +588,7 @@ _pg_wait_down() {
 
     ui_running "Waiting for ${_APPINFRA_PG_CONTAINER_NAME} ${noun} to be removed..."
     for i in $(seq 1 "${_APPINFRA_PG_WAIT_TIMEOUT}"); do
-        if ! ${runtime} ps -a --format '{{.Names}}' 2>/dev/null | grep -qE "^${_APPINFRA_PG_CONTAINER_NAME}(-primary|-standby)?$"; then
+        if ! _pg_container_listed "${runtime}" "${_APPINFRA_PG_CONTAINER_NAME}(-primary|-standby)?" -a; then
             ui_ok "Server is DOWN"
             return 0
         fi

@@ -51,6 +51,7 @@ from .errors import (
 )
 from .objects import Blob, Commit, Tree, TreeEntry
 from .store import Repo, Store
+from .vector import Vector
 
 
 def dangling_links(store: Store, repo: str) -> list[tuple[str, str]]:
@@ -602,6 +603,65 @@ class StoreSerialConformance:
         name = "a" * 100
         store.repo(name).commit(name, _tree(store.repo(name), f=b"x"))
         assert store.repo(name).get_ref(name) is not None
+
+    # -- bulk primitives, batches and vectors -----------------------------------
+
+    def test_object_types_reports_stored_ids(self, store: Store) -> None:
+        """object_types returns the stored ids among those asked, with their types."""
+        repo = store.repo("r")
+        blob_id, tree_id = repo.put(Blob(b"x")), _tree(repo, f=b"y")
+        absent = Blob(b"absent").id
+        assert store.object_types("r", [blob_id, absent, tree_id]) == {
+            blob_id: "blob",
+            tree_id: "tree",
+        }
+        assert store.object_types("r", []) == {}
+        assert store.object_types("other", [blob_id]) == {}
+
+    def test_write_objects_stores_each(self, store: Store) -> None:
+        """write_objects stores every object given; writing one again changes nothing."""
+        blob = Blob(b"x")
+        tree = Tree((TreeEntry("x", "blob", blob.id),))
+        objects = [(o.id, o.type, o.serialize()) for o in (blob, tree)]
+        store.write_objects("r", objects)
+        store.write_objects("r", objects[:1])
+        assert set(store.list_objects("r")) == {blob.id, tree.id}
+        assert store.repo("r").get(tree.id) == tree
+
+    def test_batch_stores_everything_at_block_end(self, store: Store) -> None:
+        """Objects put on a batch are stored when its block ends, not before."""
+        repo = store.repo("r")
+        with repo.batch() as batch:
+            blob_id = batch.put(Blob(b"x"))
+            tree_id = batch.put(Tree((TreeEntry("x", "blob", blob_id),)))
+            assert store.list_objects("r") == {}
+        repo.commit("main", tree_id)
+        assert repo.get(blob_id) == Blob(b"x")
+        assert dangling_links(store, "r") == []
+
+    def test_batch_with_a_bad_link_stores_nothing(self, store: Store) -> None:
+        """A batch whose objects point at a missing object stores none of them."""
+        repo = store.repo("r")
+        with pytest.raises(ObjectNotFoundError), repo.batch() as batch:
+            batch.put(Blob(b"x"))
+            batch.put(Tree((TreeEntry("m", "blob", Blob(b"missing").id),)))
+        assert store.list_objects("r") == {}
+        assert store.list_repos() == []
+
+    def test_vector_versions_round_trip_and_survive_prune(self, store: Store) -> None:
+        """Committed vector versions read back, share chunks, and refs keep them."""
+        repo = store.repo("r")
+        with repo.batch() as batch:
+            ids = [batch.put(Blob(str(i).encode())) for i in range(2000)]
+            first = Vector.build(batch, ids)
+            batch.put(Tree((TreeEntry("items", "vector", first.id),)))
+        repo.commit("main", Tree((TreeEntry("items", "vector", first.id),)).id)
+        second = first.on(repo).splice(1, 1000, ids[5:6])
+        repo.commit("main", repo.put(Tree((TreeEntry("items", "vector", second.id),))))
+        assert repo.prune(expire=0) == 0
+        assert list(Vector(repo, first.id)) == ids
+        assert list(Vector(repo, second.id)) == ids[:1] + ids[5:6] + ids[1000:]
+        assert dangling_links(store, "r") == []
 
 
 class StoreConcurrencyConformance:
