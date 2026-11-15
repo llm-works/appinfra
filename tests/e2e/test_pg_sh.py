@@ -294,6 +294,21 @@ class TestReboot:
         assert "without a password" not in output
         assert "applied once the server is ready" not in output
 
+    @pytest.mark.parametrize("mode", MODES)
+    def test_finds_the_server_among_many_containers(
+        self, tmp_path: Path, mode: str
+    ) -> None:
+        """The server is found however much `ps` lists after it.
+
+        ~100 KB of other names overflow the pipe, so a check that stops reading at
+        the first match leaves `ps` to die of SIGPIPE mid-output.
+        """
+        env = {"PG_STUB_RUNNING": self._RUNNING[mode], "PG_STUB_OTHERS": "5000"}
+        run = run_pg_sh(tmp_path, "reboot", env=env)
+        assert run.result.returncode == 0, run.result.stderr
+        for name in self._RUNNING[mode].split():  # each container waited on
+            assert f"exec {name} " in run.exec_log
+
 
 @pytest.mark.parametrize(
     ("env", "needs"),
