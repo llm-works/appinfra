@@ -15,8 +15,8 @@ from __future__ import annotations
 import time
 from abc import ABC, abstractmethod
 from collections import deque
-from collections.abc import Iterable, Iterator
-from contextlib import AbstractContextManager
+from collections.abc import Iterable, Iterator, Mapping, Sequence
+from contextlib import AbstractContextManager, contextmanager
 from typing import TypeVar, overload
 
 from .. import time as infratime
@@ -30,6 +30,7 @@ from .errors import (
 )
 from .objects import (
     Commit,
+    Link,
     Object,
     ObjectType,
     content_hash,
@@ -133,6 +134,38 @@ class Store(ABC):
         :meth:`Repo.prune` treats it as recent again.
         """
 
+    def object_types(
+        self, repo: str, object_ids: Iterable[str]
+    ) -> dict[str, ObjectType]:
+        """
+        Return the type of each of ``object_ids`` that is stored; absent ids are left out.
+
+        :class:`Repo` checks an object's links with one call. The default calls
+        :meth:`object_type` once per id; a backend with a cheaper bulk lookup (one query
+        for all ids) overrides it.
+        """
+        found: dict[str, ObjectType] = {}
+        for object_id in object_ids:
+            object_type = self.object_type(repo, object_id)
+            if object_type is not None:
+                found[object_id] = object_type
+        return found
+
+    def write_objects(
+        self, repo: str, objects: Sequence[tuple[str, ObjectType, bytes]]
+    ) -> None:
+        """
+        Store ``(object_id, object_type, data)`` objects, each as :meth:`write_object` does.
+
+        :meth:`Repo.batch` passes children before the objects pointing at them. A backend
+        must keep that order on storage, or make the objects visible all at once (one
+        transaction), so a crash never leaves an object without its links. The default
+        calls :meth:`write_object` once per object, in order; a backend that can write
+        several objects for less than one each overrides it.
+        """
+        for object_id, object_type, data in objects:
+            self.write_object(repo, object_id, object_type, data)
+
     @abstractmethod
     def list_objects(self, repo: str) -> dict[str, float]:
         """Return every object id of the repository with its last write time (epoch secs)."""
@@ -213,10 +246,11 @@ class Repo:
         """
         Store ``obj`` and return its id.
 
-        A tree's entries and a commit's tree and parents must already be in the
-        repository with the right type, so a stored object never points at nothing. The
-        check and the write hold the repository's shared lock, so :meth:`prune` cannot
-        delete a link in between.
+        What ``obj`` points at (a tree's entries, a commit's tree and parents, a vector
+        node's children) must already be in the repository with the right type, so a
+        stored object never points at nothing. The check and the write hold the
+        repository's shared lock, so :meth:`prune` cannot delete a link in between. To
+        store several objects at once, use :meth:`batch`.
 
         Raises:
             ObjectNotFoundError: A referenced object is missing.
@@ -224,10 +258,25 @@ class Repo:
         """
         object_id, data = obj.id, obj.serialize()
         with self._store.lock(self._name):
-            for link_id, link_type in _links(obj):
-                self._require(link_id, link_type)
+            self._require_links(obj.links(), {})
             self._store.write_object(self._name, object_id, obj.type, data)
         return object_id
+
+    def batch(self) -> AbstractContextManager[Batch]:
+        """
+        Return a context manager whose :class:`Batch` stores its objects at the block's end.
+
+        Every object put on the batch is written when the ``with`` block ends, under one
+        hold of the shared lock, with one lookup for all their links and one
+        :meth:`Store.write_objects` call. An exception inside the block writes nothing.
+        Refs move afterwards, as usual::
+
+            with repo.batch() as batch:
+                blob_id = batch.put(Blob(b"hello"))
+                tree_id = batch.put(Tree((TreeEntry("greeting", "blob", blob_id),)))
+            repo.commit("main", tree_id)
+        """
+        return _batch(self)
 
     @overload
     def get(self, object_id: str) -> Object | None:
@@ -278,6 +327,25 @@ class Repo:
             raise ObjectNotFoundError(self._name, object_id)
         if actual != object_type:
             raise ObjectTypeError(self._name, object_id, object_type, actual)
+
+    def _require_links(
+        self, links: Sequence[Link], pending: Mapping[str, ObjectType]
+    ) -> None:
+        """
+        Raise unless every link is in ``pending`` or stored, with its required type.
+
+        ``pending`` maps the ids of objects about to be written with them to their types.
+        Stored ids are looked up with one :meth:`Store.object_types` call. The first bad
+        link, in order, raises.
+        """
+        lookup = [link_id for link_id, _ in links if link_id not in pending]
+        stored = self._store.object_types(self._name, dict.fromkeys(lookup))
+        for link_id, link_type in links:
+            actual = pending.get(link_id) or stored.get(link_id)
+            if actual is None:
+                raise ObjectNotFoundError(self._name, link_id)
+            if link_type is not None and actual != link_type:
+                raise ObjectTypeError(self._name, link_id, link_type, actual)
 
     # -- refs -------------------------------------------------------------------
 
@@ -509,6 +577,114 @@ class Repo:
         return reachable
 
 
-def _links(obj: Object | None) -> list[tuple[str, ObjectType]]:
+def _links(obj: Object | None) -> list[Link]:
     """Return the ids and required types of the objects ``obj`` points at."""
     return obj.links() if obj is not None else []
+
+
+class Batch:
+    """
+    Objects queued to be stored together; obtained from :meth:`Repo.batch`.
+
+    :meth:`put` queues an object and returns its id; nothing is written until the batch's
+    ``with`` block ends. A queued object may point at objects queued before or after it
+    and at objects already stored; they are written children first. :meth:`get` sees
+    queued objects, so code that builds on what it just put (a
+    :class:`~appinfra.cas.vector.Vector` edited twice in one batch) reads them back
+    before they are stored. After the block, reads go to the repository and :meth:`put`
+    raises.
+    """
+
+    def __init__(self, repo: Repo) -> None:
+        self._repo = repo
+        self._pending: dict[str, Object] = {}
+        self._closed = False
+
+    @property
+    def repo(self) -> Repo:
+        """The repository the batch writes to."""
+        return self._repo
+
+    def put(self, obj: Object) -> str:
+        """
+        Queue ``obj`` and return its id; queuing the same object again is harmless.
+
+        Raises:
+            RuntimeError: The batch's block has ended.
+        """
+        if self._closed:
+            raise RuntimeError("batch is closed")
+        object_id = obj.id
+        self._pending.setdefault(object_id, obj)
+        return object_id
+
+    @overload
+    def get(self, object_id: str) -> Object | None:
+        """Return the object of any type."""
+
+    @overload
+    def get(self, object_id: str, cls: type[T]) -> T | None:
+        """Return the object as ``cls``."""
+
+    def get(self, object_id: str, cls: type[Object] | None = None) -> Object | None:
+        """Return a queued object, else what :meth:`Repo.get` returns."""
+        obj = self._pending.get(object_id)
+        if obj is None:
+            return (
+                self._repo.get(object_id)
+                if cls is None
+                else self._repo.get(object_id, cls)
+            )
+        if cls is not None and not isinstance(obj, cls):
+            raise ObjectTypeError(self._repo.name, object_id, cls.type, obj.type)
+        return obj
+
+    def __len__(self) -> int:
+        """Number of objects queued."""
+        return len(self._pending)
+
+    def _write(self) -> None:
+        """Check every queued object's links and store them all, children first."""
+        order = _children_first(self._pending)
+        types = {object_id: obj.type for object_id, obj in self._pending.items()}
+        links = [link for obj in order for link in obj.links()]
+        repo, store = self._repo, self._repo._store
+        with store.lock(repo.name):
+            repo._require_links(links, types)
+            store.write_objects(
+                repo.name, [(obj.id, obj.type, obj.serialize()) for obj in order]
+            )
+        repo._lg.trace("wrote batch", extra={"repo": repo.name, "objects": len(order)})
+
+
+def _children_first(objects: Mapping[str, Object]) -> list[Object]:
+    """Order ``objects`` so each comes after the objects among them it points at."""
+    order: list[Object] = []
+    done: set[str] = set()
+    for root_id in objects:
+        stack: list[tuple[str, bool]] = [(root_id, False)]
+        while stack:
+            object_id, expanded = stack.pop()
+            if expanded:
+                order.append(objects[object_id])
+            elif object_id not in done:
+                done.add(object_id)
+                stack.append((object_id, True))
+                stack.extend(
+                    (link_id, False)
+                    for link_id, _ in reversed(objects[object_id].links())
+                    if link_id in objects and link_id not in done
+                )
+    return order
+
+
+@contextmanager
+def _batch(repo: Repo) -> Iterator[Batch]:
+    """Yield a batch; write it if the block ends normally, drop it if it raises."""
+    batch = Batch(repo)
+    try:
+        yield batch
+        batch._write()
+    finally:
+        batch._closed = True
+        batch._pending.clear()

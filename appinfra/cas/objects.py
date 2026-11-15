@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: Copyright 2026 The appinfra Authors
 
 """
-Content-addressed objects: blobs, trees and commits.
+Content-addressed objects: blobs, trees, commits and vector nodes.
 
 An object's id is the sha256 hex digest of ``"<type> <length>\\0"`` followed by its
 serialized bytes. The type is part of the hashed bytes, so a blob and a tree with the
@@ -16,6 +16,10 @@ Serialization:
 - Commit: a ``tree <id>`` line and one ``parent <id>`` line per parent, a blank line,
   then the payload bytes. There is no author or timestamp, so identical content gives the
   identical commit; the payload is opaque bytes the caller owns.
+- Vector node: one byte for the level, then per entry the 32-byte binary digest of the
+  id; an interior node follows each digest with the number of elements under that child,
+  as 8 bytes big-endian. Binary, not JSON: a node is nothing but ids, and appending to a
+  vector rewrites its last leaf, so the encoding's size is most of what an append costs.
 """
 
 from __future__ import annotations
@@ -27,15 +31,30 @@ import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from functools import cached_property
-from typing import Any, ClassVar, Literal, Self
+from typing import Any, ClassVar, Literal, Self, get_args
 
 from .errors import CorruptObjectError
 
-ObjectType = Literal["blob", "tree", "commit"]
+ObjectType = Literal["blob", "tree", "commit", "vector"]
 """The type of an object."""
 
-TreeEntryType = Literal["blob", "tree"]
-"""What a tree entry points at: a blob or a subtree."""
+TreeEntryType = Literal["blob", "tree", "vector"]
+"""What a tree entry points at: a blob, a subtree or the root node of a vector."""
+
+Link = tuple[str, ObjectType | None]
+"""An id an object points at, with the type it must have; ``None`` accepts any type."""
+
+VECTOR_NODE_MAX = 256
+"""Most entries in a vector node; :mod:`appinfra.cas.vector` ends a node that reaches it."""
+
+_VECTOR_LEVEL_MAX = 255
+"""Highest vector node level: it is stored in one byte."""
+
+_DIGEST = 32
+"""Bytes of a binary id."""
+
+_COUNT = 8
+"""Bytes of an interior entry's element count."""
 
 _OBJECT_ID = re.compile(r"[0-9a-f]{64}")
 
@@ -66,7 +85,7 @@ def canonical_json(obj: Any) -> bytes:
 
 
 class Object(ABC):
-    """Base of :class:`Blob`, :class:`Tree` and :class:`Commit`."""
+    """Base of :class:`Blob`, :class:`Tree`, :class:`Commit` and :class:`VectorNode`."""
 
     type: ClassVar[ObjectType]
 
@@ -84,8 +103,8 @@ class Object(ABC):
     def deserialize(cls, data: bytes) -> Self:
         """Rebuild the object from its serialized bytes."""
 
-    def links(self) -> list[tuple[str, ObjectType]]:
-        """Return the (id, type) pairs of objects this object points at."""
+    def links(self) -> list[Link]:
+        """Return the ids this object points at, each with the type it must have."""
         return []
 
 
@@ -109,7 +128,7 @@ class Blob(Object):
 
 @dataclass(frozen=True)
 class TreeEntry:
-    """One named entry of a tree: a blob or a subtree, by id."""
+    """One named entry of a tree: a blob, a subtree or a vector, by id."""
 
     name: str
     type: TreeEntryType
@@ -119,7 +138,7 @@ class TreeEntry:
         """Reject an empty name, a commit entry and a malformed id."""
         if not isinstance(self.name, str) or not self.name:
             raise ValueError(f"entry name must be a non-empty str: {self.name!r}")
-        if self.type not in ("blob", "tree"):
+        if self.type not in get_args(TreeEntryType):
             raise ValueError(f"entry {self.name!r} has type {self.type!r}")
         if not is_object_id(self.id):
             raise ValueError(f"entry {self.name!r} has id {self.id!r}")
@@ -159,8 +178,8 @@ class Tree(Object):
         """Return the bytes the id is computed over."""
         return canonical_json([[e.name, e.type, e.id] for e in self.entries])
 
-    def links(self) -> list[tuple[str, ObjectType]]:
-        """Return the (id, type) pairs of entries this tree points at."""
+    def links(self) -> list[Link]:
+        """Return the ids and types of the entries this tree points at."""
         return [(entry.id, entry.type) for entry in self.entries]
 
     @classmethod
@@ -212,8 +231,8 @@ class Commit(Object):
         lines = [f"tree {self.tree}"] + [f"parent {p}" for p in self.parents]
         return ("\n".join(lines) + "\n\n").encode("ascii") + self.payload
 
-    def links(self) -> list[tuple[str, ObjectType]]:
-        """Return the (id, type) pairs of the tree and parents this commit points at."""
+    def links(self) -> list[Link]:
+        """Return the ids and types of the tree and parents this commit points at."""
         return [(self.tree, "tree"), *((parent, "commit") for parent in self.parents)]
 
     @classmethod
@@ -239,7 +258,102 @@ class Commit(Object):
             raise CorruptObjectError("commit", str(e)) from e
 
 
-_CLASSES: dict[str, type[Object]] = {"blob": Blob, "tree": Tree, "commit": Commit}
+@dataclass(frozen=True)
+class VectorNode(Object):
+    """
+    One node of a vector: a leaf holding element ids, or an interior node above them.
+
+    A leaf (``level`` 0) lists the ids of its elements, which can be objects of any type.
+    An interior node lists the ids of its child nodes, one level down, in ``children`` and
+    the number of elements under each in ``counts``. :class:`~appinfra.cas.vector.Vector`
+    builds and reads these; build them by hand only to inspect or test the format.
+    """
+
+    type: ClassVar[ObjectType] = "vector"
+
+    level: int
+    children: tuple[str, ...] = ()
+    counts: tuple[int, ...] = ()
+
+    def __post_init__(self) -> None:
+        """Store tuples; reject a bad level, malformed ids, too many entries, bad counts."""
+        object.__setattr__(self, "children", tuple(self.children))
+        object.__setattr__(self, "counts", tuple(self.counts))
+        if type(self.level) is not int or not 0 <= self.level <= _VECTOR_LEVEL_MAX:
+            raise ValueError(f"level must be an int in 0..255: {self.level!r}")
+        if len(self.children) > VECTOR_NODE_MAX:
+            raise ValueError(f"{len(self.children)} entries, at most {VECTOR_NODE_MAX}")
+        for child in self.children:
+            if not is_object_id(child):
+                raise ValueError(f"child id {child!r}")
+        self._check_counts()
+
+    def _check_counts(self) -> None:
+        """A leaf has no counts; an interior node has a positive count per child."""
+        if self.level == 0:
+            if self.counts:
+                raise ValueError("a leaf has no counts")
+            return
+        if not self.children:
+            raise ValueError("an interior node has no children")
+        if len(self.counts) != len(self.children):
+            raise ValueError("an interior node needs one count per child")
+        if any(
+            type(n) is not int or not 1 <= n < 2 ** (8 * _COUNT) for n in self.counts
+        ):
+            raise ValueError(f"counts must be ints in 1..2**64-1: {self.counts!r}")
+
+    @property
+    def count(self) -> int:
+        """Number of elements under this node."""
+        return sum(self.counts) if self.level else len(self.children)
+
+    def serialize(self) -> bytes:
+        """Return the bytes the id is computed over."""
+        parts = [bytes((self.level,))]
+        if self.level == 0:
+            parts.extend(bytes.fromhex(child) for child in self.children)
+        else:
+            for child, count in zip(self.children, self.counts):
+                parts.append(bytes.fromhex(child))
+                parts.append(count.to_bytes(_COUNT, "big"))
+        return b"".join(parts)
+
+    def links(self) -> list[Link]:
+        """Return the element ids (any type) of a leaf, the child nodes of an interior node."""
+        child_type: ObjectType | None = None if self.level == 0 else "vector"
+        return [(child, child_type) for child in self.children]
+
+    @classmethod
+    def deserialize(cls, data: bytes) -> VectorNode:
+        """Rebuild a vector node from its serialized bytes."""
+        if not data:
+            raise CorruptObjectError("vector", "no level byte")
+        level, body = data[0], data[1:]
+        width = _DIGEST if level == 0 else _DIGEST + _COUNT
+        if len(body) % width:
+            raise CorruptObjectError(
+                "vector", f"{len(body)} bytes of entries, not a multiple of {width}"
+            )
+        entries = [body[i : i + width] for i in range(0, len(body), width)]
+        children = tuple(entry[:_DIGEST].hex() for entry in entries)
+        counts = (
+            tuple(int.from_bytes(entry[_DIGEST:], "big") for entry in entries)
+            if level
+            else ()
+        )
+        try:
+            return cls(level, children, counts)
+        except ValueError as e:  # invalid content read back is corruption
+            raise CorruptObjectError("vector", str(e)) from e
+
+
+_CLASSES: dict[str, type[Object]] = {
+    "blob": Blob,
+    "tree": Tree,
+    "commit": Commit,
+    "vector": VectorNode,
+}
 
 
 def deserialize(object_type: ObjectType, data: bytes) -> Object:

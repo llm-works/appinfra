@@ -15,6 +15,11 @@ For API stability guarantees and deprecation policy, see
   `appinfra pg up`) listens on. `pgserver.pass`, set through `INFRA_PGSERVER_PASS`, makes the
   server require that password on its port; it takes effect on the next start, existing volumes
   included.
+- `appinfra.cas.Vector`: a list of object ids stored in shared, content-defined chunks, so each
+  new version (append, splice, `assign` of a whole list) stores about what changed; `diff`
+  between versions. Stores must accept the new `vector` object type. See `docs/api/cas.md`.
+- `Repo.batch()` stores several objects with one lock hold and one link lookup, through the new
+  `Store.object_types` and `Store.write_objects`; their defaults loop over the single-object calls.
 
 ### Changed
 - **Breaking:** the local dev server listens on `127.0.0.1` by default instead of every

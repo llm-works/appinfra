@@ -15,11 +15,12 @@ from appinfra.cas import (
     CorruptObjectError,
     Tree,
     TreeEntry,
+    VectorNode,
     canonical_json,
     content_hash,
     is_object_id,
 )
-from appinfra.cas.objects import deserialize
+from appinfra.cas.objects import VECTOR_NODE_MAX, deserialize
 
 ID = "a" * 64
 
@@ -150,6 +151,87 @@ class TestCommit:
         """Bad header shape or invalid ids read back are corruption, not ValueError."""
         with pytest.raises(CorruptObjectError):
             Commit.deserialize(data)
+
+
+class TestVectorNode:
+    """Vector node validation, serialization and links."""
+
+    def test_leaf_serialized_form_and_links(self) -> None:
+        """A leaf is a zero byte and 32-byte digests; its elements may be any type."""
+        leaf = VectorNode(0, (ID, "b" * 64))
+        assert leaf.serialize() == b"\x00" + b"\xaa" * 32 + b"\xbb" * 32
+        assert leaf.links() == [(ID, None), ("b" * 64, None)]
+        assert leaf.count == 2
+
+    def test_interior_serialized_form_and_links(self) -> None:
+        """An interior node is its level byte, then digest + 8-byte count per child."""
+        node = VectorNode(1, (ID, "b" * 64), (3, 16))
+        assert node.serialize() == (
+            b"\x01"
+            + b"\xaa" * 32
+            + (3).to_bytes(8, "big")
+            + b"\xbb" * 32
+            + (16).to_bytes(8, "big")
+        )
+        assert node.links() == [(ID, "vector"), ("b" * 64, "vector")]
+        assert node.count == 19
+
+    @pytest.mark.parametrize(
+        "node",
+        [VectorNode(0), VectorNode(0, (ID,) * 3), VectorNode(2, (ID,), (40,))],
+    )
+    def test_round_trip(self, node: VectorNode) -> None:
+        """Deserializing the serialized form gives the node back."""
+        assert VectorNode.deserialize(node.serialize()) == node
+        assert deserialize("vector", node.serialize()) == node
+
+    def test_children_list_becomes_tuple(self) -> None:
+        """Nodes are hashable whatever sequence type was passed."""
+        assert VectorNode(1, [ID], [2]) == VectorNode(1, (ID,), (2,))  # type: ignore[arg-type]
+
+    @pytest.mark.parametrize(
+        ("level", "children", "counts"),
+        [
+            (-1, (), ()),
+            (256, (ID,), (1,)),
+            (True, (ID,), (1,)),
+            (1, (ID,), (2**64,)),
+            (0, ("short",), ()),
+            (0, (ID,), (1,)),
+            (1, (), ()),
+            (1, (ID,), ()),
+            (1, (ID,), (0,)),
+            (0, (ID,) * (VECTOR_NODE_MAX + 1), ()),
+        ],
+    )
+    def test_invalid_rejected(
+        self, level: int, children: tuple[str, ...], counts: tuple[int, ...]
+    ) -> None:
+        """Bad levels, ids, counts and oversized nodes are refused."""
+        with pytest.raises(ValueError):
+            VectorNode(level, children, counts)
+
+    @pytest.mark.parametrize(
+        "data",
+        [
+            b"",
+            b"\x00" + b"\xaa" * 31,
+            b"\x01" + b"\xaa" * 32,
+            b"\x01" + b"\xaa" * 32 + bytes(8),
+            b"\x01",
+            b"\x00" + b"\xaa" * 32 * (VECTOR_NODE_MAX + 1),
+        ],
+    )
+    def test_corrupt_bytes(self, data: bytes) -> None:
+        """Bytes that are not a valid node are corruption, not ValueError."""
+        with pytest.raises(CorruptObjectError):
+            VectorNode.deserialize(data)
+
+    def test_tree_entry_may_point_at_a_vector(self) -> None:
+        """A tree names a vector by its root node, so commits reach it."""
+        tree = Tree((TreeEntry("messages", "vector", ID),))
+        assert tree.links() == [(ID, "vector")]
+        assert Tree.deserialize(tree.serialize()) == tree
 
 
 class TestCorruptObjectError:
