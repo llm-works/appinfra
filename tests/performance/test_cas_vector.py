@@ -6,14 +6,19 @@ Vector benchmark: a commit at every step, on the file store (fsync on) and in me
 
 Two parts. Each edit shape on its own (append, prefix drop, prefix replace, scattered
 point edits) against a long vector, one commit per edit. Then the conversation profile:
-an agent loop committed at all 1,000 steps until about a million tokens (4 MB of
-messages) passed through it, with tool-result trimming, summaries and window drops along
-the way, against the bytes one blob per step would store. Each part prints its numbers;
-run with ``make test.perf.v`` to see them.
+an agent loop committed at every step, with tool-result trimming, summaries and window
+drops along the way, against the bytes one blob per step would store. Each part prints
+its numbers; run with ``make test.perf.v`` to see them.
+
+By default the benchmark runs small, as a regression check that fits ``make check``.
+``APPINFRA_CAS_BENCH=full`` runs it at full size: a 20,000-element vector, 100 commits
+per edit shape, and 1,000 conversation steps that put about a million tokens (4 MB of
+messages) through the loop.
 """
 
 from __future__ import annotations
 
+import os
 import random
 import statistics
 import time
@@ -49,14 +54,21 @@ from tests.helpers.cas_conversation import (
 
 LG = Logger("perf-cas")
 
-BASE_SIZE = 20_000
-"""Elements of the vector the edit shapes run against (three levels deep)."""
 
-REPEATS = 100
-"""Commits per edit shape."""
+@dataclass(frozen=True)
+class Scale:
+    """How big a benchmark run is, and what it must show at that size."""
 
-STEPS = 1000
-"""Steps of the conversation profile."""
+    base: int  # elements of the vector the edit shapes run against
+    repeats: int  # commits per edit shape
+    steps: int  # steps of the conversation profile
+    min_seen: int  # message bytes the profile must put through the loop
+    min_saving: int  # how many times less than one blob per step it must store
+
+
+SMALL = Scale(base=5_000, repeats=20, steps=200, min_seen=600_000, min_saving=10)
+FULL = Scale(base=20_000, repeats=100, steps=1000, min_seen=3_500_000, min_saving=50)
+SCALE = FULL if os.environ.get("APPINFRA_CAS_BENCH") == "full" else SMALL
 
 
 @dataclass
@@ -144,7 +156,7 @@ def _base(repo: Repo) -> Vector:
     with repo.batch() as batch:
         ids = [
             batch.put(Blob(canonical_json({"i": i, "pad": "x" * 200})))
-            for i in range(BASE_SIZE)
+            for i in range(SCALE.base)
         ]
         return Vector.build(batch, ids).on(repo)
 
@@ -179,34 +191,24 @@ def _shapes(rng: random.Random) -> dict[str, Shape]:
     }
 
 
-def _prepared(
-    tmp_path: Path, backend: str, count: int
-) -> tuple[_Counting, list[Vector]]:
-    """``count`` repositories holding a committed base vector; built without fsync."""
+def _prepared(tmp_path: Path, backend: str) -> tuple[_Counting, Vector]:
+    """A store holding the base vector, built without fsync; the store measured, with it."""
     builder = _store(tmp_path, backend, fsync=False)
-    roots = []
-    for i in range(count):
-        repo = builder.repo(f"shape{i}")  # type: ignore[attr-defined]
-        vector = _base(repo)
-        repo.commit("main", repo.put(Tree((TreeEntry("items", "vector", vector.id),))))
-        roots.append(vector.id)
+    vector = _base(builder.repo("bench"))  # type: ignore[attr-defined]
     store = builder if backend == "memory" else _store(tmp_path, backend)
     store.known = set(builder.known)
-    return store, [
-        Vector(store.repo(f"shape{i}"), root) for i, root in enumerate(roots)
-    ]  # type: ignore[attr-defined]
+    return store, vector.on(store.repo("bench"))  # type: ignore[attr-defined]
 
 
 @pytest.mark.parametrize("backend", ["file", "memory"])
 def test_edit_shapes(tmp_path: Path, backend: str) -> None:
-    """Each edit shape committed REPEATS times: time, bytes and objects per commit."""
+    """Each edit shape committed on its own ref: time, bytes and objects per commit."""
     rng = random.Random(1)
-    shapes = _shapes(rng)
-    store, bases = _prepared(tmp_path, backend, len(shapes))
-    print(f"\n-- edit shapes on {BASE_SIZE} elements, {backend} store --")
-    for (name, shape), vector in zip(shapes.items(), bases):
-        repo, stats, fresh = vector._source, Stats(name), []
-        for i in range(REPEATS):
+    store, base = _prepared(tmp_path, backend)
+    print(f"\n-- edit shapes on {SCALE.base} elements, {backend} store --")
+    for name, shape in _shapes(rng).items():
+        repo, vector, stats, fresh = base._source, base, Stats(name), []
+        for i in range(SCALE.repeats):
             blobs = [
                 Blob(f"{name} {i} {k}".encode() * 50) for k in range(shape.fresh())
             ]
@@ -214,7 +216,7 @@ def test_edit_shapes(tmp_path: Path, backend: str) -> None:
             fresh.append(len(blobs))
             with _measured(stats, store):
                 vector = _commit(
-                    repo, "main", lambda v: shape.edit(v, new), vector, blobs
+                    repo, name, lambda v: shape.edit(v, new), vector, blobs
                 )  # type: ignore[arg-type]
         print(stats.line())
         root = repo.get(vector.id, VectorNode)
@@ -225,43 +227,61 @@ def test_edit_shapes(tmp_path: Path, backend: str) -> None:
         assert statistics.mean(nodes) <= shape.splices * (root.level + 1) * 1.5
 
 
+class _ListBytes:
+    """Size of ``canonical_json(messages)``, from each message's size computed once."""
+
+    def __init__(self) -> None:
+        self._sizes: dict[int, tuple[Message, int]] = {}
+
+    def __call__(self, messages: list[Message]) -> int:
+        sizes = {}
+        for m in messages:
+            known = self._sizes.get(id(m))
+            sizes[id(m)] = (
+                known if known and known[0] is m else (m, len(canonical_json(m)))
+            )
+        self._sizes = sizes
+        return 2 + sum(sizes[id(m)][1] for m in messages) + max(0, len(messages) - 1)
+
+
 def _conversation(
     recorder: Recorder, stats: Stats, store: _Counting
 ) -> tuple[list[Message], int, int]:
-    """Run the agent loop STEPS steps, compacting along the way; commit at every step."""
+    """Run the agent loop, compacting along the way; commit at every step."""
     loop = AgentLoop(seed=7, tool_bytes=4500, text_bytes=1200)
-    messages, seen, rewritten = [SYSTEM], 0, 0
-    for step in range(1, STEPS + 1):
+    messages, seen, rewritten, list_bytes = [SYSTEM], 0, 0, _ListBytes()
+    trim, summary, drop = SCALE.steps // 20, SCALE.steps * 3 // 20, SCALE.steps * 2 // 5
+    for step in range(1, SCALE.steps + 1):
         new = loop.step()
         seen += sum(len(message_blob(m).data) for m in new)
         messages = messages + new
-        if step % 50 == 0:
+        if step % trim == 0:
             messages = trim_tool_results(messages, limit=4000, every=7)
-        if step % 150 == 0:
+        if step % summary == 0:
             messages = summarize(messages, keep=len(messages) * 3 // 4, step=step)
-        if step % 400 == 0:
+        if step % drop == 0:
             messages = window(messages, keep=len(messages) * 9 // 10)
         with _measured(stats, store):
             recorder.commit(messages)
-        rewritten += len(canonical_json(messages))
+        rewritten += list_bytes(messages)  # what one blob per step would store
     return messages, seen, rewritten
 
 
 @pytest.mark.parametrize("backend", ["file", "memory"])
 def test_conversation_profile(tmp_path: Path, backend: str) -> None:
-    """1,000 steps, ~1M tokens through the loop, one commit per step, compaction mixed in."""
+    """One commit per step, compaction mixed in; ~1M tokens through the loop at full size."""
     store = _store(tmp_path, backend)
     recorder = Recorder(store.repo("agent"), "session")  # type: ignore[attr-defined]
     stats = Stats(f"conversation ({backend})")
     messages, seen, rewritten = _conversation(recorder, stats, store)
     stored = store.new_bytes
-    print(f"\n-- conversation profile, {STEPS} steps, {backend} store --")
+    print(f"\n-- conversation profile, {SCALE.steps} steps, {backend} store --")
     print(stats.line())
     print(
         f"message bytes through the loop {seen:,}  live at the end {len(messages)} messages\n"
         f"stored {stored:,} ({stored / seen:.2f}x the messages)  "
         f"one blob per step would store {rewritten:,} ({rewritten / stored:.0f}x more)"
     )
-    assert seen > 3_500_000  # about a million tokens
+    assert seen > SCALE.min_seen
     assert stored <= 3 * seen
-    assert rewritten > 50 * stored
+    assert rewritten > SCALE.min_saving * stored

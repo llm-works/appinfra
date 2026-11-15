@@ -17,7 +17,8 @@ For API stability guarantees and deprecation policy, see
   included.
 - `appinfra.cas.Vector`: a list of object ids stored in shared, content-defined chunks, so each
   new version (append, splice, `assign` of a whole list) stores about what changed; `diff`
-  between versions. Stores must accept the new `vector` object type. See `docs/api/cas.md`.
+  between versions. Stores must accept the new `vector` object type; `Object.links()` may report
+  `None` (any type) for a vector's elements. See `docs/api/cas.md`.
 - `Repo.batch()` stores several objects with one lock hold and one link lookup, through the new
   `Store.object_types` and `Store.write_objects`; their defaults loop over the single-object calls.
 
