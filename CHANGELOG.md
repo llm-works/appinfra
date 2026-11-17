@@ -33,10 +33,16 @@ For API stability guarantees and deprecation policy, see
   skipped instead of probed at `127.0.0.1:25432`.
 - `pg.server.up.repl` and `pg.standby` are always defined; without `pgserver.replica.enabled`
   they stop with a message naming the setting.
+- **Breaking:** `cq spdx` requires the `[project] license` expression of `pyproject.toml`
+  (`Apache-2.0` without one), matched whole, instead of always `Apache-2.0`; `--license`
+  overrides it. `--fix` leaves files declaring another license unchanged and exits 1.
 
 ### Fixed
 - `make pg.server.up.repl` starts from any project, not only from the appinfra repo: the
   primary mounted its `pg_hba.conf` from a path under the project directory.
+- `pg.sh reboot` and the `pg.*` waits find the server however many other containers the runtime
+  lists: `reboot` could report "no server running" in replicated mode, and the down-wait report
+  the server down too early.
 
 ## [0.15.0] - 2026-11-11
 

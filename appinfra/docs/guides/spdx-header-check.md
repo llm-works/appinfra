@@ -14,12 +14,13 @@ The `cq spdx` subcommand asserts that every tracked source file in the current
 repository carries the required SPDX license markers in its first five lines:
 
 ```text
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: <license>
 # SPDX-FileCopyrightText: Copyright <year> The <package> Authors
 ```
 
-Two modes: check (default, no side effects) and `--fix` (prepends the header to
-files that don't already have it).
+`<license>` is the project's license (see [License](#license)), `Apache-2.0` unless
+the project declares another. Two modes: check (default, no side effects) and
+`--fix` (prepends the header to files that don't already have it).
 
 ## Usage
 
@@ -41,7 +42,9 @@ python -m appinfra.cli.cli cq spdx --fix
 Prepends the 2-line header (plus one trailing blank line) to every tracked
 source file that doesn't already carry it. Idempotent — files that already have
 both `SPDX-License-Identifier` and `SPDX-FileCopyrightText` in their first 5
-lines are skipped.
+lines are skipped. A file whose `SPDX-License-Identifier` line declares a
+different license is left unchanged and listed, and `--fix` exits 1: prepending a
+second header would give it two license lines, so it needs a decision by hand.
 
 Shebangs are preserved. Between the shebang and the SPDX header, one blank line
 is inserted so the OS-level directive stays visually separate from license
@@ -63,6 +66,27 @@ python -m appinfra.cli.cli cq spdx --fix --dry-run
 ```
 
 Reports what `--fix` would change without writing anything to disk.
+
+## License
+
+The license is the `[project] license` SPDX expression in `./pyproject.toml`
+(PEP 639), used both for the check and for the headers `--fix` writes:
+
+```toml
+[project]
+license = "MIT"
+```
+
+- Without the file or the field, the license is `Apache-2.0`.
+- Compound expressions are used whole: `license = "MIT OR Apache-2.0"` requires
+  that exact expression in every header.
+- The older table form (`license = {text = ...}` or `{file = ...}`) is not an SPDX
+  expression: `cq spdx` stops with an error naming the field.
+- `--license <expression>` overrides the field for one run.
+
+The check compares the whole expression on the `SPDX-License-Identifier` line:
+`MIT-0` does not satisfy `MIT`, nor `Apache-2.0 WITH LLVM-exception` satisfy
+`Apache-2.0`.
 
 ## Package + year auto-derivation
 
@@ -108,8 +132,8 @@ include path/to/appinfra/Makefile
 `mypy`, and `cq cf`. On failure, `make cq.spdx` runs just the header check,
 and `python -m appinfra.cli.cli cq spdx --fix` applies missing headers.
 
-The default of `false` means projects reusing this framework that are not on
-Apache-2.0 (or that don't want header enforcement) are unaffected.
+The default of `false` means projects reusing this framework that don't want
+header enforcement are unaffected.
 
 ## CI integration
 
@@ -124,20 +148,15 @@ Add a step to a GitHub Actions lint job:
 
 `cq spdx` is repo-agnostic. Any project that has `appinfra` installed as a
 dependency can run it from that project's repo root. The tool walks that
-repo's `git ls-files`, derives the package name from the local
-`pyproject.toml`, and applies headers with that project's attribution.
+repo's `git ls-files`, derives the license and package name from the local
+`pyproject.toml`, and applies headers with that project's license and
+attribution.
 
-To adopt in a downstream Apache-2.0 repository:
+To adopt in a downstream repository:
 
-1. Run `python -m appinfra.cli.cli cq spdx --fix` from repo root.
-2. Commit the changes.
-3. Add the CI step above to the lint workflow.
-4. Optionally: set `APPINFRA_DEV_CQ_SPDX := true` in the top-level Makefile.
-
-## Limitations
-
-The required license marker is hardcoded to `SPDX-License-Identifier:
-Apache-2.0`. Projects on other licenses (MIT, BSD, GPL) would false-fail even
-with correct SPDX headers for their license. If cross-license support is
-needed, the tool would need a `--license <spdx-id>` flag; not planned as of
-this release.
+1. Declare the license in `pyproject.toml` (`license = "MIT"`), unless it is
+   Apache-2.0.
+2. Run `python -m appinfra.cli.cli cq spdx --fix` from repo root.
+3. Commit the changes.
+4. Add the CI step above to the lint workflow.
+5. Optionally: set `APPINFRA_DEV_CQ_SPDX := true` in the top-level Makefile.
