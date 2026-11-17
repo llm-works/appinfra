@@ -217,12 +217,14 @@ def derive_license(cwd: Path | None = None) -> str:
         ValueError: pyproject.toml is not valid TOML, or the field is not a
             one-line SPDX expression (the older ``{text = ...}`` / ``{file = ...}``
             table form included).
+        OSError: pyproject.toml exists but cannot be read.
     """
     path = (cwd or Path.cwd()) / "pyproject.toml"
-    if not path.is_file():
+    try:
+        with path.open("rb") as f:
+            project = tomllib.load(f).get("project")
+    except FileNotFoundError:
         return DEFAULT_LICENSE
-    with path.open("rb") as f:
-        project = tomllib.load(f).get("project")
     value = project.get("license") if isinstance(project, dict) else None
     if value is None:
         return DEFAULT_LICENSE
@@ -388,7 +390,7 @@ class CheckSpdxTool(Tool):
             if self.args.license is not None:
                 return check_license(self.args.license, "--license")
             return derive_license()
-        except ValueError as e:
+        except (OSError, ValueError) as e:
             self.lg.warning("could not determine the license", extra={"exception": e})
             return None
 
@@ -416,7 +418,7 @@ class CheckSpdxTool(Tool):
         """Fix mode: prepend headers to files missing them."""
         try:
             package = self.args.package or derive_package_name()
-        except (FileNotFoundError, KeyError, TypeError) as e:
+        except (OSError, KeyError, TypeError, ValueError) as e:  # ValueError: bad TOML
             self.lg.warning("could not derive package name", extra={"exception": e})
             return 1
         year = self.args.year or _dt.datetime.now().year

@@ -245,6 +245,29 @@ class TestDeriveLicense:
     def test_missing_file_falls_back(self, tmp_path: Path):
         assert derive_license(cwd=tmp_path) == DEFAULT_LICENSE
 
+    def test_file_gone_before_it_is_opened_falls_back(
+        self, tmp_path: Path, monkeypatch
+    ):
+        """Only a missing file means the default; there is no check-then-open window."""
+        root = _pyproject(tmp_path, '[project]\nlicense = "MIT"\n')
+
+        def vanished(*args: object, **kwargs: object) -> None:
+            raise FileNotFoundError("removed")
+
+        monkeypatch.setattr(Path, "open", vanished)
+        assert derive_license(cwd=root) == DEFAULT_LICENSE
+
+    def test_unreadable_file_raises(self, tmp_path: Path, monkeypatch):
+        """An unreadable pyproject.toml is an error, not a reason to assume Apache-2.0."""
+        root = _pyproject(tmp_path, '[project]\nlicense = "MIT"\n')
+
+        def denied(*args: object, **kwargs: object) -> None:
+            raise PermissionError("denied")
+
+        monkeypatch.setattr(Path, "open", denied)
+        with pytest.raises(PermissionError):
+            derive_license(cwd=root)
+
     @pytest.mark.parametrize(
         "body",
         [
@@ -546,6 +569,16 @@ class TestCheckSpdxToolMethods:
         assert tool._run_fix([], LICENSE) == 1
         tool._logger.warning.assert_called()
 
+    def test_run_fix_returns_1_when_pyproject_is_not_toml(
+        self, tmp_path: Path, monkeypatch
+    ):
+        """A malformed pyproject.toml is reported, not raised, when the name is needed."""
+        _pyproject(tmp_path, "[project\n")
+        monkeypatch.chdir(tmp_path)
+        tool = _make_tool(fix=True, license="MIT")
+        assert tool._run_fix([], "MIT") == 1
+        tool._logger.warning.assert_called_once()
+
     def test_run_dispatches_to_fix(self, tmp_path: Path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         result = MagicMock()
@@ -618,6 +651,18 @@ class TestProjectLicense:
 
     def test_table_license_stops_the_check(self, tmp_path: Path, monkeypatch):
         _project(tmp_path, 'license = {text = "MIT"}\n', {}, monkeypatch)
+        tool = _make_tool()
+        assert tool.run() == 1
+        tool._logger.warning.assert_called_once()
+
+    def test_unreadable_pyproject_stops_the_check(self, tmp_path: Path, monkeypatch):
+        """Reported and exit 1, not a traceback."""
+        _project(tmp_path, 'license = "MIT"\n', {}, monkeypatch)
+
+        def denied(*args: object, **kwargs: object) -> None:
+            raise PermissionError("denied")
+
+        monkeypatch.setattr(Path, "open", denied)
         tool = _make_tool()
         assert tool.run() == 1
         tool._logger.warning.assert_called_once()
