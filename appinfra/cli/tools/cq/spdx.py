@@ -14,7 +14,8 @@ Two modes:
     appinfra cq spdx --fix     # apply — prepend SPDX header to missing files
 
 The license is the [project] license SPDX expression of ./pyproject.toml
-(Apache-2.0 when it has none) unless --license is passed. For --fix, package
+(Apache-2.0 when it has none) unless --license is passed. It must be a valid SPDX
+expression; validating it needs packaging>=24.2, part of the ``check`` extra. For --fix, package
 attribution is auto-derived from ./pyproject.toml [project] name unless
 --package is passed. Year defaults to the current year unless --year is passed.
 
@@ -124,7 +125,7 @@ def apply_headers(
             return result
         head = text.splitlines()[:HEADER_SCAN_LINES]
         declared = _declared_licenses(head)
-        if declared and license_expr not in declared:
+        if any(d != license_expr for d in declared):  # one matching line hides no other
             result.conflicts.append(path)
         elif not _missing(head, license_expr):
             result.skipped += 1
@@ -155,9 +156,16 @@ def _declared_licenses(head: list[str]) -> list[str]:
 
 
 def _missing(head: list[str], license_expr: str) -> list[str]:
-    """Return the markers ``head`` lacks; the license must match ``license_expr`` exactly."""
-    missing = []
-    if license_expr not in _declared_licenses(head):
+    """
+    Return what ``head`` lacks or gets wrong; every license line must be ``license_expr``.
+
+    A license line declaring another expression is reported with the expected one; it
+    fails the check even when another line declares ``license_expr``.
+    """
+    declared = _declared_licenses(head)
+    others = [d for d in declared if d != license_expr]
+    missing = [f"{LICENSE_MARKER} {d} (expected {license_expr})" for d in others]
+    if not declared:
         missing.append(f"{LICENSE_MARKER} {license_expr}")
     if not any(COPYRIGHT_MARKER in line for line in head):
         missing.append(COPYRIGHT_MARKER)
@@ -196,7 +204,8 @@ def build_header(package: str, year: int, license_expr: str) -> str:
 def check_license(value: object, source: str) -> str:
     """Return ``value`` stripped if it can be a header's license; raise ValueError if not.
 
-    It must be a non-empty, one-line string: it is written into every header.
+    It must be a one-line, valid SPDX license expression (PEP 639): it is written into
+    every header. The expression is validated, not rewritten: it comes back as given.
     """
     if (
         not isinstance(value, str)
@@ -205,6 +214,21 @@ def check_license(value: object, source: str) -> str:
         or "\r" in value
     ):
         raise ValueError(f"{source} must be a one-line SPDX expression, got {value!r}")
+    # Imported here: packaging is a dependency of the check extra, which cq belongs to
+    try:
+        from packaging.licenses import (
+            InvalidLicenseExpression,
+            canonicalize_license_expression,
+        )
+    except ImportError as e:
+        raise ValueError(
+            "validating the license needs packaging>=24.2 (the appinfra[check] extra)"
+        ) from e
+
+    try:
+        canonicalize_license_expression(value.strip())
+    except InvalidLicenseExpression as e:
+        raise ValueError(f"{source} is not a valid SPDX expression: {e}") from e
     return value.strip()
 
 

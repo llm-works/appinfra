@@ -4,6 +4,7 @@
 """Tests for appinfra/cli/tools/cq/spdx.py."""
 
 import argparse
+import sys
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -74,7 +75,9 @@ class TestMissingMarkers:
 
     def test_header_of_another_license_misses_the_license_marker(self, tmp_path: Path):
         p = self._write(tmp_path, VALID_HEADER + "x = 1\n")
-        assert missing_markers(p, "MIT") == [f"{LICENSE_MARKER} MIT"]
+        assert missing_markers(p, "MIT") == [
+            f"{LICENSE_MARKER} Apache-2.0 (expected MIT)"
+        ]
 
 
 @pytest.mark.integration
@@ -145,8 +148,17 @@ class TestLicenseMatching:
     )
     def test_other_expressions_do_not_match(self, declared: str, expected: str):
         assert _missing(self._head(declared), expected) == [
-            f"{LICENSE_MARKER} {expected}"
+            f"{LICENSE_MARKER} {declared} (expected {expected})"
         ]
+
+    def test_a_second_license_line_fails_and_is_named(self):
+        """Declaring the expected license next to another one does not pass."""
+        head = [f"# {LICENSE_MARKER} MIT", *self._head("Apache-2.0")]
+        assert _missing(head, "MIT") == [f"{LICENSE_MARKER} Apache-2.0 (expected MIT)"]
+
+    def test_the_expected_license_repeated_passes(self):
+        head = [f"# {LICENSE_MARKER} MIT", *self._head("MIT")]
+        assert _missing(head, "MIT") == []
 
 
 @pytest.mark.unit
@@ -160,6 +172,27 @@ class TestCheckLicense:
     def test_rejects_what_cannot_go_in_a_header(self, value: object):
         with pytest.raises(ValueError, match="--license"):
             check_license(value, "--license")
+
+    @pytest.mark.parametrize(
+        "value", ["MIT OR", "Not-A-License", "MIT AND (", "Apach-2.0"]
+    )
+    def test_rejects_invalid_spdx_expressions(self, value: str):
+        """A dangling operator or an unknown license id never reaches a header."""
+        with pytest.raises(ValueError, match="--license"):
+            check_license(value, "--license")
+
+    @pytest.mark.parametrize(
+        "value", ["MIT OR Apache-2.0", "LicenseRef-Proprietary", "mit"]
+    )
+    def test_valid_expression_is_kept_as_written(self, value: str):
+        """Validated, not rewritten: the header carries the expression as given."""
+        assert check_license(value, "--license") == value
+
+    def test_missing_validator_is_reported(self, monkeypatch):
+        """Without packaging >= 24.2 the license cannot be validated: a clear error."""
+        monkeypatch.setitem(sys.modules, "packaging.licenses", None)
+        with pytest.raises(ValueError, match="packaging>=24.2"):
+            check_license("MIT", "--license")
 
 
 @pytest.mark.unit
@@ -276,8 +309,9 @@ class TestDeriveLicense:
             '[project]\nlicense = ""\n',
             "[project]\nlicense = 3\n",
             "[project\n",
+            '[project]\nlicense = "MIT OR"\n',
         ],
-        ids=["text-table", "file-table", "empty", "number", "bad-toml"],
+        ids=["text-table", "file-table", "empty", "number", "bad-toml", "bad-spdx"],
     )
     def test_unusable_value_raises(self, tmp_path: Path, body: str):
         with pytest.raises(ValueError):
@@ -400,6 +434,18 @@ class TestApplyHeaders:
         assert result.modified == 1
         assert apache.read_text() == VALID_HEADER + "x = 1\n"
         assert bare.read_text().startswith(mit_header)
+
+    def test_header_with_the_expected_and_another_license_is_a_conflict(
+        self, tmp_path: Path
+    ):
+        """A matching line does not hide a second, different license line."""
+        both = tmp_path / "both.py"
+        text = f"# {LICENSE_MARKER} MIT\n" + VALID_HEADER + "x = 1\n"
+        both.write_text(text, encoding="utf-8")
+        header = build_header("docs", 2026, "MIT")
+        result = apply_headers([both], header, "MIT", dry_run=False)
+        assert (result.conflicts, result.skipped) == ([both], 0)
+        assert both.read_text() == text
 
 
 @pytest.mark.unit

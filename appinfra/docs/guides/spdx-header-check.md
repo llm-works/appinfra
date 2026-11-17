@@ -83,6 +83,9 @@ license = "MIT"
 - The older table form (`license = {text = ...}` or `{file = ...}`) is not an SPDX
   expression: `cq spdx` stops with an error naming the field.
 - `--license <expression>` overrides the field for one run.
+- Either source must be a valid SPDX expression (`MIT OR` or an unknown license id stops the
+  run); it is validated with `packaging` 24.2 or later, part of the `check` extra, and written
+  into headers as given.
 
 The check compares the whole expression on the `SPDX-License-Identifier` line:
 `MIT-0` does not satisfy `MIT`, nor `Apache-2.0 WITH LLVM-exception` satisfy

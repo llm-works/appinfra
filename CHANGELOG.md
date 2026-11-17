@@ -36,6 +36,8 @@ For API stability guarantees and deprecation policy, see
 - **Breaking:** `cq spdx` requires the `[project] license` expression of `pyproject.toml`
   (`Apache-2.0` without one), matched whole, instead of always `Apache-2.0`; `--license`
   overrides it. `--fix` leaves files declaring another license unchanged and exits 1.
+- The `check` extra requires `packaging>=24.2` (was `>=22.0`): `cq spdx` validates license
+  expressions with it.
 
 ### Fixed
 - `make pg.server.up.repl` starts from any project, not only from the appinfra repo: the
