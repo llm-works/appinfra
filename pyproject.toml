@@ -109,9 +109,6 @@ all = [
 [project.scripts]
 appinfra = "appinfra.cli.cli:main"
 
-[project.entry-points."setuptools.finalize_distribution_options"]
-appinfra_build_info = "appinfra.version.setuptools_hook:finalize_hook"
-
 [tool.ruff]
 line-length = 88
 target-version = "py311"

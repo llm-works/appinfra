@@ -30,6 +30,7 @@ from __future__ import annotations
 import argparse
 import datetime as _dt
 import fnmatch
+import shlex
 import subprocess
 import sys
 import tomllib
@@ -303,18 +304,30 @@ def derive_package_name(cwd: Path | None = None) -> str:
 
 
 def _print_offenders(
-    offenders: list[tuple[Path, list[str]]], license_expr: str
+    offenders: list[tuple[Path, list[str]]],
+    license_expr: str,
+    *,
+    override: str | None,
 ) -> None:
-    """Print offender list + fix guidance to stderr."""
+    """
+    Print offender list + fix guidance to stderr.
+
+    ``override`` is the --license expression of this run, None when the license came
+    from pyproject.toml: the printed --fix command repeats it, so running that command
+    writes the license this check asked for.
+    """
     print(
         f"FAIL: {len(offenders)} source file(s) missing SPDX header:",
         file=sys.stderr,
     )
     for path, missing in offenders:
         print(f"  {path}: missing {missing}", file=sys.stderr)
+    fix = "appinfra cq spdx --fix"
+    if override is not None:
+        fix += f" --license {shlex.quote(override)}"
     print(
         "\nApply headers with:\n"
-        "    appinfra cq spdx --fix\n"
+        f"    {fix}\n"
         "\nOr add manually to top of each file (after shebang if present):\n"
         f"    # {LICENSE_MARKER} {license_expr}\n"
         f"    # {COPYRIGHT_MARKER} Copyright <year> The <package> Authors\n"
@@ -435,7 +448,8 @@ class CheckSpdxTool(Tool):
                 "license": license_expr,
             },
         )
-        _print_offenders(offenders, license_expr)
+        override = license_expr if self.args.license is not None else None
+        _print_offenders(offenders, license_expr, override=override)
         return 1
 
     def _run_fix(self, files: list[Path], license_expr: str) -> int:

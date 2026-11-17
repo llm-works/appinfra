@@ -45,6 +45,9 @@ For API stability guarantees and deprecation policy, see
 - `pg.sh reboot` and the `pg.*` waits find the server however many other containers the runtime
   lists: `reboot` could report "no server running" in replicated mode, and the down-wait report
   the server down too early.
+- Installing appinfra no longer adds a setuptools plugin to the environment, so a build of the
+  appinfra repo without isolation no longer rewrites the tracked `appinfra/_build_info.py`.
+  The `_build_info.py` in the wheel carries the SPDX header.
 
 ## [0.15.0] - 2026-11-11
 

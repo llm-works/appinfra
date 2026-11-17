@@ -3,7 +3,7 @@
 
 """Build information - auto-generated during install, do not edit."""
 
-# Populated by setuptools hook during pip install or CI/CD build
+# Populated by setup.py's build_py when the package is built
 COMMIT_HASH = ""
 COMMIT_SHORT = ""
 COMMIT_MESSAGE = ""
