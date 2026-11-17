@@ -83,6 +83,9 @@ Age = Callable[[str, str, float], None]
 _HOLD = 0.3
 """Seconds a test waits to see that a blocked call stays blocked."""
 
+_DEADLINE = 10.0
+"""Seconds a call that must not wait for a lock gets to finish; only a waiting call reaches it."""
+
 
 @contextlib.contextmanager
 def _pruning(repo: Repo) -> Iterator[None]:
@@ -132,6 +135,35 @@ def _blocked_while(store: Store, exclusive: bool, call: Callable[[], object]) ->
     if errors:
         raise errors[0]
     return blocked
+
+
+def _finishes_while_shared_held(store: Store, call: Callable[[], object]) -> bool:
+    """
+    Run ``call`` in a thread while holding the shared lock; True if it finished before release.
+
+    Waits for the call to finish rather than timing it: slow storage (a loaded disk's
+    fsync) makes it finish later, never fail. Only a call waiting for the lock reaches
+    :data:`_DEADLINE`.
+    """
+    errors: list[BaseException] = []
+    done = threading.Event()
+
+    def run() -> None:
+        try:
+            call()
+        except BaseException as e:
+            errors.append(e)
+        finally:
+            done.set()
+
+    thread = threading.Thread(target=run)
+    with store.lock("r"):
+        thread.start()
+        finished = done.wait(_DEADLINE)
+    thread.join(_DEADLINE)
+    if errors:
+        raise errors[0]
+    return finished
 
 
 class StoreSerialConformance:
@@ -698,7 +730,7 @@ class StoreConcurrencyConformance:
     def test_shared_holders_do_not_wait(self, store: Store) -> None:
         """Writers do not exclude each other."""
         repo = store.repo("r")
-        assert not _blocked_while(store, False, lambda: repo.put(Blob(b"y")))
+        assert _finishes_while_shared_held(store, lambda: repo.put(Blob(b"y")))
 
     def test_prune_and_delete_wait_for_writers(self, store: Store) -> None:
         """prune and delete_repo block while a writer holds the shared lock."""

@@ -13,13 +13,16 @@ Two modes:
     appinfra cq spdx           # check (default) — exits 1 if any file missing markers
     appinfra cq spdx --fix     # apply — prepend SPDX header to missing files
 
-For --fix, package attribution is auto-derived from ./pyproject.toml
-[project] name unless --package is passed. Year defaults to the current
-year unless --year is passed.
+The license is the [project] license SPDX expression of ./pyproject.toml
+(Apache-2.0 when it has none) unless --license is passed. It must be a valid SPDX
+expression; validating it needs packaging>=24.2, part of the ``check`` extra. For --fix, package
+attribution is auto-derived from ./pyproject.toml [project] name unless
+--package is passed. Year defaults to the current year unless --year is passed.
 
 Exit Codes:
     0: All files carry required markers (check) or apply succeeded (fix)
-    1: One or more files missing markers (check) OR apply failed
+    1: One or more files missing markers (check), a file declaring another
+       license (fix), or apply failed
 """
 
 from __future__ import annotations
@@ -30,15 +33,16 @@ import fnmatch
 import subprocess
 import sys
 import tomllib
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from ....app.tools import Tool, ToolConfig
 
-REQUIRED_MARKERS: tuple[str, ...] = (
-    "SPDX-License-Identifier: Apache-2.0",
-    "SPDX-FileCopyrightText:",
-)
+LICENSE_MARKER = "SPDX-License-Identifier:"
+COPYRIGHT_MARKER = "SPDX-FileCopyrightText:"
+DEFAULT_LICENSE = "Apache-2.0"
+"""License used when pyproject.toml declares none."""
 HEADER_SCAN_LINES = 5
 
 # Source file basenames the check covers. All target types share `#`
@@ -92,54 +96,168 @@ def tracked_source_files() -> list[Path]:
     return _filter_source_files(result.stdout.splitlines())
 
 
-def apply_headers(
-    files: list[Path], header: str, dry_run: bool
-) -> tuple[int, int, Path | None]:
-    """Apply header to files missing it.
+@dataclass
+class ApplyResult:
+    """What `apply_headers` did: files changed, already fine, left alone, or failed."""
 
-    Returns (modified, skipped, first_error_path). first_error_path is
-    None on success, or the path where the read failed.
+    modified: int = 0
+    skipped: int = 0
+    conflicts: list[Path] = field(default_factory=list)
+    """Files whose header declares another license; left unchanged."""
+    error: Path | None = None
+    """The file a read or write failed on; nothing after it was processed."""
+
+
+def apply_headers(
+    files: list[Path], header: str, license_expr: str, dry_run: bool
+) -> ApplyResult:
+    """Prepend ``header`` to files missing the markers for ``license_expr``.
+
+    A file whose header already declares a different license is left as is and
+    listed in ``conflicts``: prepending would give it two license lines.
     """
-    modified = 0
-    skipped = 0
+    result = ApplyResult()
     for path in files:
-        if not missing_markers(path):
-            skipped += 1
-            continue
         try:
             text = path.read_text(encoding="utf-8")
-            new_text = apply_header_to_text(text, header)
-            if not dry_run:
-                path.write_text(new_text, encoding="utf-8")
         except (OSError, UnicodeDecodeError):
-            return modified, skipped, path
-        modified += 1
-    return modified, skipped, None
+            result.error = path
+            return result
+        head = text.splitlines()[:HEADER_SCAN_LINES]
+        declared = _declared_licenses(head)
+        if any(d != license_expr for d in declared):  # one matching line hides no other
+            result.conflicts.append(path)
+        elif not _missing(head, license_expr):
+            result.skipped += 1
+        else:
+            if not dry_run and not _write(path, apply_header_to_text(text, header)):
+                result.error = path
+                return result
+            result.modified += 1
+    return result
 
 
-def missing_markers(path: Path) -> list[str]:
-    """Return required SPDX markers not present in path's first N lines."""
+def _write(path: Path, text: str) -> bool:
+    """Write ``text`` to ``path``; False if the write failed."""
     try:
-        head = "\n".join(
-            path.read_text(encoding="utf-8").splitlines()[:HEADER_SCAN_LINES]
-        )
+        path.write_text(text, encoding="utf-8")
+    except OSError:
+        return False
+    return True
+
+
+def _declared_licenses(head: list[str]) -> list[str]:
+    """Return the license expressions that ``SPDX-License-Identifier`` lines declare."""
+    return [
+        line.split(LICENSE_MARKER, 1)[1].strip()
+        for line in head
+        if LICENSE_MARKER in line
+    ]
+
+
+def _missing(head: list[str], license_expr: str) -> list[str]:
+    """
+    Return what ``head`` lacks or gets wrong; every license line must be ``license_expr``.
+
+    A license line declaring another expression is reported with the expected one; it
+    fails the check even when another line declares ``license_expr``.
+    """
+    declared = _declared_licenses(head)
+    others = [d for d in declared if d != license_expr]
+    missing = [f"{LICENSE_MARKER} {d} (expected {license_expr})" for d in others]
+    if not declared:
+        missing.append(f"{LICENSE_MARKER} {license_expr}")
+    if not any(COPYRIGHT_MARKER in line for line in head):
+        missing.append(COPYRIGHT_MARKER)
+    return missing
+
+
+def missing_markers(path: Path, license_expr: str) -> list[str]:
+    """Return the SPDX markers for ``license_expr`` not present in path's first N lines.
+
+    The license line must declare exactly ``license_expr``: ``MIT-0`` does not
+    satisfy ``MIT``, nor ``Apache-2.0 WITH LLVM-exception`` satisfy ``Apache-2.0``.
+    """
+    try:
+        head = path.read_text(encoding="utf-8").splitlines()[:HEADER_SCAN_LINES]
     except (OSError, UnicodeDecodeError) as e:
         return [f"read error: {e}"]
-    return [m for m in REQUIRED_MARKERS if m not in head]
+    return _missing(head, license_expr)
 
 
-def collect_offenders(files: list[Path]) -> list[tuple[Path, list[str]]]:
+def collect_offenders(
+    files: list[Path], license_expr: str
+) -> list[tuple[Path, list[str]]]:
     """Return (path, missing_markers) pairs for files missing any marker."""
-    return [(p, m) for p in files if (m := missing_markers(p))]
+    return [(p, m) for p in files if (m := missing_markers(p, license_expr))]
 
 
-def build_header(package: str, year: int) -> str:
+def build_header(package: str, year: int, license_expr: str) -> str:
     """Return the 2-line SPDX header plus one trailing blank line."""
     return (
-        "# SPDX-License-Identifier: Apache-2.0\n"
-        f"# SPDX-FileCopyrightText: Copyright {year} The {package} Authors\n"
+        f"# {LICENSE_MARKER} {license_expr}\n"
+        f"# {COPYRIGHT_MARKER} Copyright {year} The {package} Authors\n"
         "\n"
     )
+
+
+def check_license(value: object, source: str) -> str:
+    """Return ``value`` stripped if it can be a header's license; raise ValueError if not.
+
+    It must be a one-line, valid SPDX license expression (PEP 639): it is written into
+    every header. The expression is validated, not rewritten: it comes back as given.
+    """
+    if (
+        not isinstance(value, str)
+        or not value.strip()
+        or "\n" in value
+        or "\r" in value
+    ):
+        raise ValueError(f"{source} must be a one-line SPDX expression, got {value!r}")
+    # Imported here: packaging is a dependency of the check extra, which cq belongs to
+    try:
+        from packaging.licenses import (
+            InvalidLicenseExpression,
+            canonicalize_license_expression,
+        )
+    except ImportError as e:
+        raise ValueError(
+            "validating the license needs packaging>=24.2 (the appinfra[check] extra)"
+        ) from e
+
+    try:
+        canonicalize_license_expression(value.strip())
+    except InvalidLicenseExpression as e:
+        raise ValueError(f"{source} is not a valid SPDX expression: {e}") from e
+    return value.strip()
+
+
+def derive_license(cwd: Path | None = None) -> str:
+    """Return the [project] license SPDX expression of ./pyproject.toml.
+
+    Without pyproject.toml or the field, the license is :data:`DEFAULT_LICENSE`.
+
+    Raises:
+        ValueError: pyproject.toml is not valid TOML, or the field is not a
+            one-line SPDX expression (the older ``{text = ...}`` / ``{file = ...}``
+            table form included).
+        OSError: pyproject.toml exists but cannot be read.
+    """
+    path = (cwd or Path.cwd()) / "pyproject.toml"
+    try:
+        with path.open("rb") as f:
+            project = tomllib.load(f).get("project")
+    except FileNotFoundError:
+        return DEFAULT_LICENSE
+    value = project.get("license") if isinstance(project, dict) else None
+    if value is None:
+        return DEFAULT_LICENSE
+    if isinstance(value, dict):
+        raise ValueError(
+            "pyproject.toml [project] license is a table, not an SPDX expression; "
+            'set it to one (license = "MIT") or pass --license'
+        )
+    return check_license(value, "pyproject.toml [project] license")
 
 
 def apply_header_to_text(text: str, header: str) -> str:
@@ -184,7 +302,9 @@ def derive_package_name(cwd: Path | None = None) -> str:
     return name
 
 
-def _print_offenders(offenders: list[tuple[Path, list[str]]]) -> None:
+def _print_offenders(
+    offenders: list[tuple[Path, list[str]]], license_expr: str
+) -> None:
     """Print offender list + fix guidance to stderr."""
     print(
         f"FAIL: {len(offenders)} source file(s) missing SPDX header:",
@@ -196,9 +316,25 @@ def _print_offenders(offenders: list[tuple[Path, list[str]]]) -> None:
         "\nApply headers with:\n"
         "    appinfra cq spdx --fix\n"
         "\nOr add manually to top of each file (after shebang if present):\n"
-        "    # SPDX-License-Identifier: Apache-2.0\n"
-        "    # SPDX-FileCopyrightText: Copyright <year> The <package> Authors\n"
+        f"    # {LICENSE_MARKER} {license_expr}\n"
+        f"    # {COPYRIGHT_MARKER} Copyright <year> The <package> Authors\n"
         "    <blank line>",
+        file=sys.stderr,
+    )
+
+
+def _print_conflicts(conflicts: list[Path], license_expr: str) -> None:
+    """Print the files --fix left alone because they declare another license."""
+    print(
+        f"FAIL: {len(conflicts)} source file(s) declare a license other than "
+        f"{license_expr}; left unchanged:",
+        file=sys.stderr,
+    )
+    for path in conflicts:
+        print(f"  {path}", file=sys.stderr)
+    print(
+        f"\nCorrect their {LICENSE_MARKER.rstrip(':')} line by hand if they belong "
+        f"under {license_expr}.",
         file=sys.stderr,
     )
 
@@ -219,7 +355,8 @@ class CheckSpdxTool(Tool):
                 f"in its first {HEADER_SCAN_LINES} lines. "
                 "Default: check-only, exits 1 on missing headers. "
                 "With --fix: prepend the header to missing files. "
-                "Package name auto-derived from ./pyproject.toml; year defaults to current."
+                "License and package name auto-derived from ./pyproject.toml "
+                "(license: Apache-2.0 when it declares none); year defaults to current."
             ),
         )
         super().__init__(parent, config)
@@ -247,9 +384,20 @@ class CheckSpdxTool(Tool):
             default=None,
             help="Copyright year (default: current year)",
         )
+        parser.add_argument(
+            "--license",
+            default=None,
+            help=(
+                "SPDX license expression for the headers (default: [project] "
+                f"license of pyproject.toml, {DEFAULT_LICENSE} when it has none)"
+            ),
+        )
 
     def run(self, **kwargs: Any) -> int:
         """Execute the SPDX header check or fix."""
+        license_expr = self._license()
+        if license_expr is None:
+            return 1
         try:
             files = tracked_source_files()
         except subprocess.CalledProcessError as e:
@@ -257,53 +405,76 @@ class CheckSpdxTool(Tool):
             return 1
 
         if self.args.fix:
-            return self._run_fix(files)
-        return self._run_check(files)
+            return self._run_fix(files, license_expr)
+        return self._run_check(files, license_expr)
 
-    def _run_check(self, files: list[Path]) -> int:
+    def _license(self) -> str | None:
+        """Return --license, else the pyproject.toml license; None (logged) if invalid."""
+        try:
+            if self.args.license is not None:
+                return check_license(self.args.license, "--license")
+            return derive_license()
+        except (OSError, ValueError) as e:
+            self.lg.warning("could not determine the license", extra={"exception": e})
+            return None
+
+    def _run_check(self, files: list[Path], license_expr: str) -> int:
         """Check mode: report offenders, exit 1 if any."""
-        offenders = collect_offenders(files)
+        offenders = collect_offenders(files, license_expr)
         if not offenders:
-            self.lg.info("SPDX headers OK", extra={"files_checked": len(files)})
+            self.lg.info(
+                "SPDX headers OK",
+                extra={"files_checked": len(files), "license": license_expr},
+            )
             return 0
         self.lg.warning(
             "SPDX headers missing",
-            extra={"missing_count": len(offenders), "total": len(files)},
+            extra={
+                "missing_count": len(offenders),
+                "total": len(files),
+                "license": license_expr,
+            },
         )
-        _print_offenders(offenders)
+        _print_offenders(offenders, license_expr)
         return 1
 
-    def _run_fix(self, files: list[Path]) -> int:
+    def _run_fix(self, files: list[Path], license_expr: str) -> int:
         """Fix mode: prepend headers to files missing them."""
         try:
             package = self.args.package or derive_package_name()
-        except (FileNotFoundError, KeyError, TypeError) as e:
+        except (OSError, KeyError, TypeError, ValueError) as e:  # ValueError: bad TOML
             self.lg.warning("could not derive package name", extra={"exception": e})
             return 1
         year = self.args.year or _dt.datetime.now().year
-        header = build_header(package, year)
-        counts = self._apply_headers_to_files(files, header)
-        if counts is None:
+        header = build_header(package, year, license_expr)
+        result = self._apply_headers_to_files(files, header, license_expr)
+        if result is None:
             return 1
-        modified, skipped = counts
         self.lg.info(
             "SPDX headers " + ("(dry-run)" if self.args.dry_run else "applied"),
             extra={
                 "package": package,
                 "year": year,
-                "modified": modified,
-                "skipped": skipped,
+                "license": license_expr,
+                "modified": result.modified,
+                "skipped": result.skipped,
+                "conflicts": len(result.conflicts),
                 "dry_run": self.args.dry_run,
             },
         )
+        if result.conflicts:
+            _print_conflicts(result.conflicts, license_expr)
+            return 1
         return 0
 
     def _apply_headers_to_files(
-        self, files: list[Path], header: str
-    ) -> tuple[int, int] | None:
-        """Thin wrapper around `apply_headers` that logs the first read error."""
-        modified, skipped, err = apply_headers(files, header, self.args.dry_run)
-        if err is not None:
-            self.lg.warning("read error", extra={"path": str(err)})
+        self, files: list[Path], header: str, license_expr: str
+    ) -> ApplyResult | None:
+        """Thin wrapper around `apply_headers` that logs the first read or write error."""
+        result = apply_headers(files, header, license_expr, self.args.dry_run)
+        if result.error is not None:
+            self.lg.warning(
+                "could not read or write file", extra={"path": str(result.error)}
+            )
             return None
-        return modified, skipped
+        return result
