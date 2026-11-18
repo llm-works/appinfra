@@ -3,9 +3,11 @@
 
 """Relative links in appinfra's Markdown resolve, anchors included.
 
-A link resolves the way GitHub renders it: the path is relative to the file that holds the
-link, and a #fragment must match a heading of the target page under GitHub's anchor rules.
-Links to other sites are not followed.
+The docs are standard Markdown (CommonMark), parsed here by a CommonMark parser: links in code
+are not links, and a relative link resolves from the file that holds it. Links to other sites
+are not followed. CommonMark defines no heading anchors; a #fragment must match a heading under
+GitHub's anchor convention, so that links also work where GitHub renders the docs. GitHub's
+extensions to Markdown (explicit `<a id>` anchors, for one) are not modeled.
 
 The docs and examples are read mostly from the installed package (`appinfra docs`), where
 the repo root and its symlinks don't exist: a link from a file inside the package must
@@ -15,21 +17,15 @@ resolve inside the package. Files outside it, such as the changelog, take a URL.
 import re
 from collections import Counter
 from pathlib import Path
+from urllib.parse import unquote
+
+from markdown_it import MarkdownIt
+from markdown_it.token import Token
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _PACKAGE = _REPO_ROOT / "appinfra"
 
-_LINK = re.compile(r"\]\(([^)\s]+)")
-_HEADING = re.compile(r"#{1,6}\s+(.*?)\s*#*\s*$")
-_FENCE = re.compile(r"\s*(`{3,}|~{3,})")
-# A link written inside inline code is an example. A span may continue on the next line, and
-# its delimiters are whole backtick runs of the same length; a run with no partner is text.
-_CODE_SPAN = re.compile(r"(?<!`)(`+)(?!`).+?(?<!`)\1(?!`)", re.DOTALL)
-_PARAGRAPH_BREAK = re.compile(r"\n[ \t]*\n")
-_INLINE_LINK = re.compile(r"\[([^\]]*)\]\([^)]*\)")
-_EMPHASIS = re.compile(
-    r"(?<!\w)[*_]+|[*_]+(?!\w)"
-)  # markers, not underscores inside a word
+_MD = MarkdownIt("commonmark")
 
 
 def _markdown_files() -> list[Path]:
@@ -37,67 +33,51 @@ def _markdown_files() -> list[Path]:
     return sorted(files) + [_REPO_ROOT / "README.md", _REPO_ROOT / "CHANGELOG.md"]
 
 
-def _prose_lines(path: Path) -> list[str]:
-    """The lines of ``path`` outside fenced code blocks; each block leaves one blank line, as
-    it ends the paragraph before it.
-
-    A fence closes only on the character that opened it, at least as many times, with nothing
-    after it (CommonMark), so a block can show another fence inside it.
-    """
-    lines: list[str] = []
-    fence = ""
-    for line in path.read_text(encoding="utf-8").splitlines():
-        match = _FENCE.match(line)
-        if match and not fence:
-            fence = match.group(1)
-            lines.append("")
-        elif (
-            match
-            and match.group(1)[0] == fence[0]
-            and len(match.group(1)) >= len(fence)
-            and not line[match.end() :].strip()
-        ):
-            fence = ""
-        elif not fence:
-            lines.append(line)
-    return lines
+def _tokens(path: Path) -> list[Token]:
+    return _MD.parse(path.read_text(encoding="utf-8"))
 
 
-def _rendered_prose(text: str) -> str:
-    """Text outside code spans as it renders: link text only, no emphasis markers."""
-    return _EMPHASIS.sub("", _INLINE_LINK.sub(r"\1", text))
+def _plain_text(inline: Token) -> str:
+    """The text an inline token renders: link text, code as written, no markup."""
+    children = inline.children or []
+    return "".join(c.content for c in children if c.type in ("text", "code_inline"))
 
 
-def _visible_text(heading: str) -> str:
-    """The text a heading renders; code spans show their content as written."""
-    parts, pos = [], 0
-    for span in _CODE_SPAN.finditer(heading):
-        parts.append(_rendered_prose(heading[pos : span.start()]))
-        parts.append(span.group(0).strip("`"))
-        pos = span.end()
-    parts.append(_rendered_prose(heading[pos:]))
-    return "".join(parts)
+def _anchor(text: str) -> str:
+    """The anchor of heading text, GitHub's convention: lowercase, punctuation dropped, spaces
+    to hyphens."""
+    return re.sub(r"[^\w\- ]", "", text.strip().lower()).replace(" ", "-")
 
 
 def _slug(heading: str) -> str:
-    """GitHub's anchor for a heading: its visible text, lowercase, punctuation dropped, spaces
-    to hyphens."""
-    text = _visible_text(heading).strip().lower()
-    return re.sub(r"[^\w\- ]", "", text).replace(" ", "-")
+    """The anchor of a heading written as Markdown."""
+    return _anchor(_plain_text(_MD.parseInline(heading)[0]))
 
 
 def _anchors(path: Path) -> set[str]:
-    """Every anchor GitHub generates for the headings of ``path``."""
+    """The anchors of the headings of ``path``; a repeated one gets a -1, -2 ... suffix."""
     anchors: set[str] = set()
     seen: Counter[str] = Counter()
-    for line in _prose_lines(path):
-        match = _HEADING.match(line)
-        if match is None:
+    tokens = _tokens(path)
+    for i, token in enumerate(tokens):
+        if token.type != "heading_open":
             continue
-        slug = _slug(match.group(1))
+        slug = _anchor(_plain_text(tokens[i + 1]))
         anchors.add(f"{slug}-{seen[slug]}" if seen[slug] else slug)
         seen[slug] += 1
     return anchors
+
+
+def _link_targets(path: Path) -> list[str]:
+    """The targets of the links and images in the prose of ``path``."""
+    targets = []
+    for token in _tokens(path):
+        for child in token.children or []:
+            if child.type == "link_open":
+                targets.append(unquote(str(child.attrGet("href"))))
+            elif child.type == "image":
+                targets.append(unquote(str(child.attrGet("src"))))
+    return targets
 
 
 def _broken(path: Path, target: str) -> str | None:
@@ -111,17 +91,6 @@ def _broken(path: Path, target: str) -> str | None:
     if fragment and dest.suffix == ".md" and fragment not in _anchors(dest):
         return "no such heading"
     return None
-
-
-def _link_targets(path: Path) -> list[str]:
-    """The targets of the links in the prose of ``path``, code spans left out.
-
-    Code spans are matched per paragraph, as a span may continue on the next line.
-    """
-    targets = []
-    for paragraph in _PARAGRAPH_BREAK.split("\n".join(_prose_lines(path))):
-        targets += _LINK.findall(_CODE_SPAN.sub("", paragraph))
-    return targets
 
 
 def test_relative_links_resolve():
@@ -158,7 +127,7 @@ def test_link_targets_skip_code_spans_across_lines(tmp_path: Path):
 
 
 def test_slug_follows_the_rendered_heading():
-    """GitHub derives the anchor from the text a heading renders, not its markup."""
+    """An anchor comes from the text a heading renders, not from its markup."""
     cases = {
         "_Setup_": "setup",
         "**Bold** text": "bold-text",
@@ -166,6 +135,7 @@ def test_slug_follows_the_rendered_heading():
         "load_file": "load_file",
         "See [the guide](guide.md) first": "see-the-guide-first",
         "`[label](file.md)`": "labelfilemd",
+        "[`App`](app.md)": "app",
         "Reading `app.etc_dir`": "reading-appetc_dir",
         "6. `--config` and `--etc-dir` are user-authoritative": (
             "6---config-and---etc-dir-are-user-authoritative"
@@ -174,30 +144,32 @@ def test_slug_follows_the_rendered_heading():
     assert {heading: _slug(heading) for heading in cases} == cases
 
 
-def test_prose_lines_skips_fenced_blocks(tmp_path: Path):
+def test_link_targets_skip_fenced_blocks(tmp_path: Path):
     """A block ends only at a bare fence of its own character, at least as long."""
     doc = tmp_path / "doc.md"
     doc.write_text(
         "\n".join(
             [
-                "prose 1",
+                "[one](1.md)",
                 "````markdown",
                 "```python",
+                "[code](c1.md)",
                 "```",
                 "~~~",
                 "````",
-                "prose 2",
+                "[two](2.md)",
                 "```",
                 "```text",
-                "still code",
+                "[code](c2.md)",
                 "```",
-                "prose 3",
+                "[three](3.md)",
                 "~~~",
                 "```",
+                "[code](c3.md)",
                 "~~~",
-                "prose 4",
+                "[four](4.md)",
             ]
         ),
         encoding="utf-8",
     )
-    assert _prose_lines(doc) == ["prose 1", "", "prose 2", "", "prose 3", "", "prose 4"]
+    assert _link_targets(doc) == ["1.md", "2.md", "3.md", "4.md"]
