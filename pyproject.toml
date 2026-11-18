@@ -65,12 +65,6 @@ dev = [
 validation = [
     "pydantic>=2.0.0,<3.0.0",
 ]
-docs = [
-    "mkdocs>=1.5.3,<2.0.0",
-    "mkdocs-material>=9.5.0,<10.0.0",
-    "mkdocstrings[python]>=1.0.0,<2.0.0",
-    "mkdocs-autorefs>=1.4.0,<2.0.0",
-]
 fastapi = [
     # Both are 0.x and break APIs in minor releases: capped one minor past the newest
     # tested version, raised after testing a newer one
@@ -97,7 +91,6 @@ service = [
 ]
 all = [
     "appinfra[dev]",
-    "appinfra[docs]",
     "appinfra[sql]",
     "appinfra[ui]",
     "appinfra[fastapi]",
@@ -112,7 +105,7 @@ appinfra = "appinfra.cli.cli:main"
 [tool.ruff]
 line-length = 88
 target-version = "py311"
-exclude = [".build", ".dist", ".cover", ".htmlcov", ".site"]
+exclude = [".build", ".dist", ".cover", ".htmlcov"]
 
 [tool.ruff.lint]
 select = [
@@ -182,7 +175,7 @@ strict = true
 # add_multi_constructor from yaml.SafeLoader; sqlalchemy.dialects.postgresql.dialect (the
 # psycopg dialect) has an unannotated __init__.
 untyped_calls_exclude = ["appinfra.yaml.loader.Loader", "sqlalchemy.dialects.postgresql"]
-exclude = ["tests/", "scripts/", ".build/", ".dist/", ".cover/", ".htmlcov/", ".site/"]
+exclude = ["tests/", "scripts/", ".build/", ".dist/", ".cover/", ".htmlcov/"]
 
 # No usable type information. sqlalchemy_utils has no py.typed, and its only stub package
 # (types-sqlalchemy-utils) is built on the SQLAlchemy 1.4 stubs, not SQLAlchemy 2.0's own types.

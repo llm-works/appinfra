@@ -21,7 +21,7 @@
 #   include $(APPINFRA_SCRIPTS)/make/Makefile.dev
 #   include $(APPINFRA_SCRIPTS)/make/Makefile.install  # Optional: only if building a package
 #   include $(APPINFRA_SCRIPTS)/make/Makefile.pytest
-#   # Skip: Makefile.docs, Makefile.pg if not needed
+#   # Skip: Makefile.pg if not needed
 #   include $(APPINFRA_SCRIPTS)/make/Makefile.clean
 
 # Determine the directory containing this Makefile
@@ -37,6 +37,5 @@ include $(_APPINFRA_MAKE_DIR)Makefile.utils
 include $(_APPINFRA_MAKE_DIR)Makefile.dev
 include $(_APPINFRA_MAKE_DIR)Makefile.install
 include $(_APPINFRA_MAKE_DIR)Makefile.pytest
-include $(_APPINFRA_MAKE_DIR)Makefile.docs
 include $(_APPINFRA_MAKE_DIR)Makefile.pg
 include $(_APPINFRA_MAKE_DIR)Makefile.clean

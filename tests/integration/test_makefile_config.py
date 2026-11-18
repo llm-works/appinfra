@@ -232,7 +232,7 @@ class TestScriptsLocation:
         assert result.returncode == 0, result.stderr
 
 
-MODULES = ["dev", "docs", "install", "help", "clean", "pg", "pytest", "utils", "env"]
+MODULES = ["dev", "install", "help", "clean", "pg", "pytest", "utils", "env"]
 
 
 class TestModuleIncludedAlone:

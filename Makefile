@@ -49,9 +49,6 @@ APPINFRA_DEV_TEST_HEALTH ?= warn
 # Install with all optional extras
 APPINFRA_DEV_INSTALL_EXTRAS ?= all
 
-# Documentation configuration (filename only - resolved from APPINFRA_ETC_DIR)
-APPINFRA_DOCS_CONFIG_FILE ?= mkdocs.yaml
-
 # ============================================================================
 # Load Infra Framework
 # ============================================================================
@@ -67,6 +64,5 @@ include $(local)/scripts/make/Makefile.utils
 include $(local)/scripts/make/Makefile.dev
 include $(local)/scripts/make/Makefile.install
 include $(local)/scripts/make/Makefile.pytest
-include $(local)/scripts/make/Makefile.docs
 include $(local)/scripts/make/Makefile.pg
 include $(local)/scripts/make/Makefile.clean

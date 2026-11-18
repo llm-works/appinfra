@@ -39,6 +39,11 @@ For API stability guarantees and deprecation policy, see
 - The `check` extra requires `packaging>=24.2` (was `>=22.0`): `cq spdx` validates license
   expressions with it.
 
+### Removed
+- **Breaking:** the MkDocs build: the `docs.serve`, `docs.build`, `docs.check` and `docs.deploy`
+  Make targets, their `APPINFRA_DOCS_CONFIG_FILE` and `APPINFRA_DOCS_OUTPUT_DIR` settings (set in
+  a makefile, either now stops make as unknown) and the `docs` extra.
+
 ### Fixed
 - `make pg.server.up.repl` starts from any project, not only from the appinfra repo: the
   primary mounted its `pg_hba.conf` from a path under the project directory.

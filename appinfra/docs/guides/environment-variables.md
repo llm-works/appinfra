@@ -392,7 +392,7 @@ These environment variables control framework behavior (not config value overrid
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `APPINFRA_DEFAULT_CONFIG_FILE` | `infra.yaml` | Config filename the `pg.*` and `docs.*` Make targets fall back to when `APPINFRA_PG_CONFIG_FILE` / `APPINFRA_DOCS_CONFIG_FILE` are empty |
+| `APPINFRA_DEFAULT_CONFIG_FILE` | `infra.yaml` | Config filename the `pg.*` Make targets fall back to when `APPINFRA_PG_CONFIG_FILE` is empty |
 | `APPINFRA_CONTAINER_CMD` | `docker` | Container runtime used by `pg.*` Make targets (`ps`, `exec`, `volume`, ...). Set to `podman` to run the local-dev container layer under Podman. Exported to the `pg.sh` helper script. |
 | `APPINFRA_COMPOSE_CMD` | `docker compose` | Compose orchestrator paired with `APPINFRA_CONTAINER_CMD`. Set to `podman compose` alongside the container-cmd override. |
 | `APPINFRA_YES` | `false` | `true`, `1`, `y` or `yes` (any case) answers yes to every confirmation: the `areyousure` prompt of destructive Make targets (e.g., `pg.server.down`, `pg.server.clean`, `uninstall`) and the prompts of `appinfra.ui.prompts`. Intended for CI and other non-interactive contexts. |

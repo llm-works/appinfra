@@ -16,7 +16,7 @@
 #   https://github.com/kubernetes-sigs/kubebuilder/blob/master/Makefile
 # - Section grouping (##@): Common pattern from Kubernetes ecosystem
 # - Multiple file handling: Custom implementation for this project
-# - Target pattern extended to support dots (test.unit, docs.build, etc.)
+# - Target pattern extended to support dots (test.unit, pg.server.up, etc.)
 
 # Defaults are declared in Makefile.config; load it when the project has not
 ifndef _APPINFRA_CONFIG_LOADED

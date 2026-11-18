@@ -22,8 +22,6 @@ clean:: areyousure ## restores project to original post-clone state (preserves .
 	@rm -rf .coverage .cover .htmlcov .cicd-coverage .coverage.json
 	@echo "  - Removing build artifacts (*.egg-info, .dist/, .build/, dist/, build/)..."
 	@rm -rf *.egg-info .dist .build dist build
-	@echo "  - Removing documentation build (.site/)..."
-	@rm -rf .site
 	@echo "  - Removing tool caches (.mypy_cache/, .pytest_cache/, .ruff_cache/, .hypothesis/)..."
 	@rm -rf .mypy_cache .pytest_cache .ruff_cache .hypothesis
 	@echo "  - Removing hidden markdown files (.*.md except .GRADING.md)..."

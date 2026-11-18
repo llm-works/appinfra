@@ -13,7 +13,6 @@ __pycache__
 .build/
 dist/
 build/
-.site/
 .*.md
 
 # Docker Compose local configuration
