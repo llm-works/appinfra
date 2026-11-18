@@ -25,6 +25,7 @@ services:
       - ../../../appinfra:/workspace/appinfra:ro
       - ../../../tests:/workspace/tests:ro
       - ../../../pyproject.toml:/workspace/pyproject.toml:ro
+      - ../../../setup.py:/workspace/setup.py:ro
       - ../../../Makefile:/workspace/Makefile:ro
       - ../../../appinfra/scripts:/workspace/scripts:ro
       - ../../../appinfra/etc:/workspace/etc:ro
