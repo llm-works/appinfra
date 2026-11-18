@@ -6,9 +6,10 @@
 Works alongside pyproject.toml - pyproject.toml provides the configuration,
 this script just adds the build-time code generation hook.
 
-The setuptools entry point (finalize_distribution_options) doesn't work for
-a package's own build because entry points are loaded from already-installed
-packages. This setup.py uses cmdclass to run the hook during our own build.
+build_py below is the only build hook: it writes _build_info.py into the build
+directory, so the tracked stub in the source tree stays unchanged. appinfra
+registers no setuptools plugin, which would run in every setuptools build of the
+environment it is installed in.
 """
 
 import subprocess
@@ -20,9 +21,12 @@ from setuptools import setup
 from setuptools.command.build_py import build_py
 
 _BUILD_INFO_TEMPLATE = '''\
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The appinfra Authors
+
 """Build information - auto-generated during install, do not edit."""
 
-# Populated by setuptools hook during pip install or CI/CD build
+# Populated by setup.py's build_py when the package is built
 COMMIT_HASH = "{commit_full}"
 COMMIT_SHORT = "{commit_short}"
 COMMIT_MESSAGE = "{commit_message}"

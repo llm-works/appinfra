@@ -455,7 +455,9 @@ class TestPrintOffenders:
     @pytest.mark.integration
     def test_prints_offender_list_to_stderr(self, capsys, tmp_path: Path):
         p = tmp_path / "bad.py"
-        _print_offenders([(p, ["SPDX-License-Identifier: Apache-2.0"])], LICENSE)
+        _print_offenders(
+            [(p, ["SPDX-License-Identifier: Apache-2.0"])], LICENSE, override=None
+        )
         captured = capsys.readouterr()
         assert "FAIL: 1 source file(s)" in captured.err
         assert str(p) in captured.err
@@ -463,13 +465,24 @@ class TestPrintOffenders:
         assert "appinfra cq spdx --fix" in captured.err
 
     def test_empty_offenders_still_prints_header(self, capsys):
-        _print_offenders([], LICENSE)
+        _print_offenders([], LICENSE, override=None)
         captured = capsys.readouterr()
         assert "FAIL: 0 source file(s)" in captured.err
 
     def test_example_header_carries_the_license(self, capsys):
-        _print_offenders([], "MIT")
+        _print_offenders([], "MIT", override=None)
         assert "    # SPDX-License-Identifier: MIT\n" in capsys.readouterr().err
+
+    def test_fix_command_keeps_the_license_override(self, capsys):
+        """Running the printed command writes the license the check asked for."""
+        _print_offenders([], "MIT OR Apache-2.0", override="MIT OR Apache-2.0")
+        err = capsys.readouterr().err
+        assert "    appinfra cq spdx --fix --license 'MIT OR Apache-2.0'\n" in err
+
+    def test_fix_command_without_override_names_no_license(self, capsys):
+        """A license from pyproject.toml stays implicit in the printed command."""
+        _print_offenders([], "MIT", override=None)
+        assert "    appinfra cq spdx --fix\n" in capsys.readouterr().err
 
     def test_conflicts_listed_with_the_expected_license(self, capsys):
         _print_conflicts([Path("copied.py")], "MIT")
@@ -592,6 +605,15 @@ class TestCheckSpdxToolMethods:
         p.write_text("no header\n", encoding="utf-8")
         tool = _make_tool()
         assert tool._run_check([p], LICENSE) == 1
+
+    def test_run_check_guidance_repeats_the_license_override(
+        self, tmp_path: Path, capsys
+    ):
+        p = tmp_path / "bad.py"
+        p.write_text("no header\n", encoding="utf-8")
+        tool = _make_tool(license="MIT")
+        assert tool._run_check([p], "MIT") == 1
+        assert "appinfra cq spdx --fix --license MIT\n" in capsys.readouterr().err
 
     def test_run_fix_returns_0(self, tmp_path: Path):
         p = tmp_path / "a.py"
