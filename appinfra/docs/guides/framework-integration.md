@@ -88,7 +88,6 @@ include $(APPINFRA_SCRIPTS)/make/Makefile.utils    # Utilities (areyousure, etc.
 include $(APPINFRA_SCRIPTS)/make/Makefile.dev      # Requires: env, utils
 include $(APPINFRA_SCRIPTS)/make/Makefile.install  # Optional: only if building a package
 include $(APPINFRA_SCRIPTS)/make/Makefile.pytest   # Requires: env
-include $(APPINFRA_SCRIPTS)/make/Makefile.docs     # Requires: env
 include $(APPINFRA_SCRIPTS)/make/Makefile.pg       # Requires: env, utils
 include $(APPINFRA_SCRIPTS)/make/Makefile.clean    # Requires: utils
 ```
@@ -147,7 +146,6 @@ endif
 APPINFRA_DEV_PKG_NAME ?= myproject
 APPINFRA_DEV_CQ_STRICT ?= true
 APPINFRA_PYTEST_TESTS_DIR ?= tests
-APPINFRA_DOCS_CONFIG_FILE ?= mkdocs.yaml
 
 # Hide unused features
 APPINFRA_DISABLE_GROUPS ?= pg.

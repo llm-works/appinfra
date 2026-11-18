@@ -177,7 +177,7 @@ models:
 - Expands tilde (`~`) to the user's home directory
 - Leaves absolute paths and URLs unchanged
 
-See [YAML Tags](utilities.md#yaml-tags) for more details on `!path` and other custom tags.
+See [YAML Tags](utilities.md#custom-tags) for more details on `!path` and other custom tags.
 
 ## Config Spec
 
@@ -548,7 +548,7 @@ arguments. With `--etc-dir` opted in, the flag still populates `app.etc_dir` (va
 setup), but no config is loaded from it. With `--config` opted in, the value is accessible
 via `app.args.config` for manual loading.
 
-See [Config Protocol §6](../guides/config-protocol.md#6-etc-dir-is-user-authoritative) for the
+See [Config Protocol §6](../guides/config-protocol.md#6---config-and---etc-dir-are-user-authoritative) for the
 full `--etc-dir` semantics, and [`ConfigSpec`](#config-spec) for the resolution chain.
 
 ## See Also

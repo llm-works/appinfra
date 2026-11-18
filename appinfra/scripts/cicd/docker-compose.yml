@@ -26,6 +26,9 @@ services:
       - ../../../tests:/workspace/tests:ro
       - ../../../pyproject.toml:/workspace/pyproject.toml:ro
       - ../../../setup.py:/workspace/setup.py:ro
+      - ../../../README.md:/workspace/README.md:ro
+      - ../../../CHANGELOG.md:/workspace/CHANGELOG.md:ro
+      - ../../../LICENSE:/workspace/LICENSE:ro
       - ../../../Makefile:/workspace/Makefile:ro
       - ../../../appinfra/scripts:/workspace/scripts:ro
       - ../../../appinfra/etc:/workspace/etc:ro

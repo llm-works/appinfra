@@ -333,4 +333,4 @@ which appinfra uses for tool hierarchies.
 
 - [AppBuilder](app-builder.md) - Fluent builder API
 - [Logging System](logging.md) - Logger configuration
-- [Examples](../examples/) - Working code examples
+- [Examples](../../examples/) - Working code examples

@@ -105,19 +105,19 @@ and configuration loading.
 
 ### Target Filtering
 
-Hide specific targets from `make help` and block their execution:
+Hide targets from `make help`. A hidden target still runs when named on the command line:
 
 ```makefile
 # Hide specific targets
 APPINFRA_DISABLE_TARGETS ?= pg.clean pg.clean.internal pg.server.clean pg.server.clean.internal
 
 # Hide all targets with a prefix
-APPINFRA_DISABLE_GROUPS ?= pg. docs.
+APPINFRA_DISABLE_GROUPS ?= pg. examples.
 ```
 
 `APPINFRA_DISABLE_TARGETS` matches names exactly. Confirm-prompt wrappers like `pg.clean` and their
-no-prompt `.internal` siblings are independent targets — list both to block a destructive op
-entirely. Alternatively, use `APPINFRA_DISABLE_GROUPS` to cover an entire prefix.
+no-prompt `.internal` siblings are independent targets — list both to hide both.
+`APPINFRA_DISABLE_GROUPS` hides every target with a prefix.
 
 Usage:
 
@@ -443,12 +443,6 @@ These targets can be extended by defining them again in your Makefile:
 - `init::` - Add initialization steps
 - `deps::`, `deps.deep::` - Add steps to the dependency report
 
-**Documentation:**
-- `docs.serve::` - Extend doc server
-- `docs.build::` - Add doc build steps
-- `docs.check::` - Add doc validation
-- `docs.deploy::` - Add deployment steps
-
 **Database:**
 - `pg.clean::` - Add steps to "drop databases (with confirmation)". Runs `areyousure`
   upfront; chaining destructive ops in here re-prompts.
@@ -552,13 +546,6 @@ Each setting has a type, and a value that does not fit it stops make:
 | `APPINFRA_PYTEST_ARGS` | (empty) | Additional pytest arguments for the `make test*` targets and `make check`'s test runs, after their own. An xdist worker option (`-n`, `--numprocesses`, `--maxprocesses`, `--dist`) is an error: `make test*` take workers from `APPINFRA_PYTEST_WORKERS`, `make check` from `APPINFRA_PYTEST_CHECK_WORKERS` and `APPINFRA_PYTEST_COVERAGE_WORKERS` |
 | `APPINFRA_PYTEST_HANG_DUMP_SECONDS` | `120` | In `make check`, a test still running after this many seconds gets a row below the checklist and its process's stacks in the check's log; the test is neither stopped nor failed. `0` disables it |
 
-**Documentation (DOCS):**
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `APPINFRA_DOCS_CONFIG_FILE` | (empty) | MkDocs config filename (empty = use `APPINFRA_DEFAULT_CONFIG_FILE`) |
-| `APPINFRA_DOCS_OUTPUT_DIR` | `.site` | Documentation build output |
-
 **PostgreSQL (PG):**
 
 | Variable | Default | Description |
@@ -627,7 +614,6 @@ include $(APPINFRA_SCRIPTS)/make/Makefile.utils
 include $(APPINFRA_SCRIPTS)/make/Makefile.dev
 include $(APPINFRA_SCRIPTS)/make/Makefile.install
 include $(APPINFRA_SCRIPTS)/make/Makefile.pytest
-include $(APPINFRA_SCRIPTS)/make/Makefile.docs
 include $(APPINFRA_SCRIPTS)/make/Makefile.pg
 include $(APPINFRA_SCRIPTS)/make/Makefile.clean
 
