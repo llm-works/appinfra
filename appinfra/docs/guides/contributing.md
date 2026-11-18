@@ -311,7 +311,7 @@ make test.security.v     # Verbose security test output
 - Centralized attack payload library
 - Platform-aware (Unix/Windows differences handled)
 
-See [SECURITY.md](../../SECURITY.md) for the full security policy and threat model.
+See [SECURITY.md](../SECURITY.md) for the full security policy and threat model.
 
 ## Sign-off (DCO)
 

@@ -68,26 +68,26 @@ appinfra/
 ### Most Commonly Used Classes
 
 **Application Framework:**
-- [`App`](app.md#appinfra.app.core.App) - Main application orchestrator
-- [`AppBuilder`](app-builder.md#appinfra.app.builder.AppBuilder) - Fluent builder for apps
-- [`Tool`](app.md#appinfra.app.tools.Tool) - Base class for commands
+- [`App`](app.md) - Main application orchestrator
+- [`AppBuilder`](app-builder.md#appbuilder) - Fluent builder for apps
+- [`Tool`](app.md#tool) - Base class for commands
 
 **Logging:**
-- [`LoggingBuilder`](logging.md#appinfra.log.builder.LoggingBuilder) - Main logging builder
-- [`Logger`](logging.md#appinfra.log.Logger) - Logger class with custom formatting
-- [`LoggerFactory`](logging.md#appinfra.log.LoggerFactory) - Factory for creating loggers
+- [`LoggingBuilder`](logging.md#loggingbuilder) - Main logging builder
+- [`Logger`](logging.md) - Logger class with custom formatting
+- [`LoggerFactory`](logging.md#loggerfactory) - Factory for creating loggers
 
 **UI:**
 - [`ProgressLogger`](ui.md#progresslogger) - Spinner/progress bar with logging coordination
 - [`console`](ui.md#console) - Rich console for styled output
 
 **Database:**
-- [`PG`](database.md#appinfra.db.pg.PG) - PostgreSQL database interface
-- [`Manager`](database.md#appinfra.db.Manager) - Multi-database manager
+- [`PG`](database.md#pg-postgresql) - PostgreSQL database interface
+- [`Manager`](database.md#manager) - Multi-database manager
 
 **Time:**
-- [`Ticker`](time.md#appinfra.time.Ticker) - Periodic task executor
-- [`Sched`](time.md#appinfra.time.Sched) - Time-based scheduler
+- [`Ticker`](time.md#ticker) - Periodic task executor
+- [`Sched`](time.md#sched-scheduler) - Time-based scheduler
 
 **Configuration:**
 - [`Config`](config.md#config) - Configuration management

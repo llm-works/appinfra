@@ -163,7 +163,7 @@ When a Python version reaches end-of-life, support may be dropped in the next mi
 
 If you encounter unexpected behavior or breaking changes:
 
-1. Check the [CHANGELOG](../CHANGELOG.md) for documented changes
+1. Check the [CHANGELOG](../../../CHANGELOG.md) for documented changes
 2. Search existing [GitHub Issues](https://github.com/your-org/appinfra/issues)
 3. Open a new issue with:
    - appinfra version

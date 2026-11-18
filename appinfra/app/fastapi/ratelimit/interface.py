@@ -38,9 +38,9 @@ class RateLimiter(ABC):
             Tuple of (allowed, headers).
             - allowed: True if the request should proceed, False if rate limited.
             - headers: Dict of HTTP headers to include in the response.
-              Must include "Retry-After" (seconds) when allowed is False.
-              May include X-RateLimit-Limit, X-RateLimit-Remaining,
-              X-RateLimit-Reset on allowed responses.
+                Must include "Retry-After" (seconds) when allowed is False.
+                May include X-RateLimit-Limit, X-RateLimit-Remaining,
+                X-RateLimit-Reset on allowed responses.
         """
         ...  # pragma: no cover
 
