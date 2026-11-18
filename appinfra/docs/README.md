@@ -3,7 +3,8 @@
 Production-grade Python infrastructure framework providing reusable building blocks for robust
 applications.
 
-For feature highlights and code examples, see the [main README](../../README.md).
+For feature highlights and code examples, see the
+[main README](https://github.com/llm-works/appinfra/blob/main/README.md).
 
 ## Overview
 

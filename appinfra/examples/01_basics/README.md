@@ -54,4 +54,4 @@ After mastering the basics, move on to:
 ## Related Documentation
 
 - [Main README](../README.md) - Full examples index
-- [Project README](../../README.md) - Project overview
+- [User Guide](../../docs/README.md) - Project overview

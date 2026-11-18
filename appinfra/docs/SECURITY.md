@@ -654,9 +654,9 @@ Security updates are announced via:
 
 ### Internal Documentation
 
-- [Configuration Guide](docs/guides/environment-variables.md) - Secure config practices
-- [Logging Guide](docs/guides/logging-builder.md) - Structured logging
-- [Testing Guide](docs/guides/test-naming-standards.md) - Security testing
+- [Configuration Guide](guides/environment-variables.md) - Secure config practices
+- [Logging Guide](guides/logging-builder.md) - Structured logging
+- [Testing Guide](guides/test-naming-standards.md) - Security testing
 
 ### External Resources
 

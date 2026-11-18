@@ -310,6 +310,6 @@ def tool(self):
 
 ## Further Reading
 
-- [Decorator API Documentation](../../docs/decorators.md)
-- [Tool Development Guide](../../docs/tools.md)
-- [Configuration Guide](../../docs/configuration.md)
+- [Decorator API with Config Files](../../docs/guides/decorator-config-pattern.md)
+- [Tool Framework](../../docs/api/app.md#tool-framework)
+- [Configuration](../../docs/api/config.md)

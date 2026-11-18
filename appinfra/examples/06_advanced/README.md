@@ -215,6 +215,6 @@ After mastering advanced topics:
 
 ## Related Documentation
 
-- [Time Utilities](../../infra/time/) - Ticker, Scheduler, Delta source code
-- [Network](../../infra/net/) - TCP/HTTP server source code
+- [Time Utilities](../../time/) - Ticker, Scheduler, Delta source code
+- [Network](../../net/) - TCP/HTTP server source code
 - [Main README](../README.md) - Full examples index

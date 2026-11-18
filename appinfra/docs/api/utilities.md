@@ -811,4 +811,4 @@ old_function()  # Warning: old_function is deprecated since 0.2.0
 ## See Also
 
 - [Environment Variables Guide](../guides/environment-variables.md)
-- [Configuration examples](../examples/)
+- [Configuration examples](../../examples/)
