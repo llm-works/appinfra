@@ -69,20 +69,22 @@ def _anchors(path: Path) -> set[str]:
 
 
 def _link_targets(path: Path) -> list[str]:
-    """The targets of the links and images in the prose of ``path``."""
+    """The targets of the links and images in the prose of ``path``, percent-encoded."""
     targets = []
     for token in _tokens(path):
         for child in token.children or []:
             if child.type == "link_open":
-                targets.append(unquote(str(child.attrGet("href"))))
+                targets.append(str(child.attrGet("href")))
             elif child.type == "image":
-                targets.append(unquote(str(child.attrGet("src"))))
+                targets.append(str(child.attrGet("src")))
     return targets
 
 
 def _broken(path: Path, target: str) -> str | None:
     """Why ``target``, linked from ``path``, does not resolve, or None if it does."""
+    # Split before decoding: an encoded '#' (%23) is part of the file name, not a fragment
     file_part, _, fragment = target.partition("#")
+    file_part, fragment = unquote(file_part), unquote(fragment)
     dest = (path.parent / file_part).resolve() if file_part else path
     if path.is_relative_to(_PACKAGE) and not dest.is_relative_to(_PACKAGE):
         return "outside the installed package"
@@ -124,6 +126,19 @@ def test_link_targets_skip_code_spans_across_lines(tmp_path: Path):
         encoding="utf-8",
     )
     assert _link_targets(doc) == ["real.md", "after.md", "linked.md"]
+
+
+def test_encoded_delimiters_stay_in_the_file_name(tmp_path: Path):
+    """A %23 in a target is a '#' in the file name, not the start of a fragment."""
+    (tmp_path / "draft#1.md").write_text("# Title\n", encoding="utf-8")
+    doc = tmp_path / "doc.md"
+    doc.write_text(
+        "[guide](draft%231.md) ![pic](draft%231.md) [title](draft%231.md#title)\n",
+        encoding="utf-8",
+    )
+    targets = _link_targets(doc)
+    assert len(targets) == 3
+    assert [_broken(doc, target) for target in targets] == [None, None, None]
 
 
 def test_slug_follows_the_rendered_heading():
