@@ -112,7 +112,7 @@ Hide specific targets from `make help` and block their execution:
 APPINFRA_DISABLE_TARGETS ?= pg.clean pg.clean.internal pg.server.clean pg.server.clean.internal
 
 # Hide all targets with a prefix
-APPINFRA_DISABLE_GROUPS ?= pg. docs.
+APPINFRA_DISABLE_GROUPS ?= pg. examples.
 ```
 
 `APPINFRA_DISABLE_TARGETS` matches names exactly. Confirm-prompt wrappers like `pg.clean` and their

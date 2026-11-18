@@ -21,7 +21,8 @@ _PACKAGE = _REPO_ROOT / "appinfra"
 
 _LINK = re.compile(r"\]\(([^)\s]+)")
 _HEADING = re.compile(r"#{1,6}\s+(.*?)\s*#*\s*$")
-_FENCE = ("```", "~~~")
+_FENCE = re.compile(r"\s*(`{3,}|~{3,})")
+_CODE_SPAN = re.compile(r"(`+).+?\1")  # a link written inside inline code is an example
 
 
 def _markdown_files() -> list[Path]:
@@ -30,12 +31,24 @@ def _markdown_files() -> list[Path]:
 
 
 def _prose_lines(path: Path) -> list[str]:
-    """The lines of ``path`` outside fenced code blocks."""
-    lines, fenced = [], False
+    """The lines of ``path`` outside fenced code blocks.
+
+    A fence closes only on the character that opened it, at least as many times (CommonMark),
+    so a block can show another fence inside it.
+    """
+    lines: list[str] = []
+    fence = ""
     for line in path.read_text(encoding="utf-8").splitlines():
-        if line.lstrip().startswith(_FENCE):
-            fenced = not fenced
-        elif not fenced:
+        match = _FENCE.match(line)
+        if match and not fence:
+            fence = match.group(1)
+        elif (
+            match
+            and match.group(1)[0] == fence[0]
+            and len(match.group(1)) >= len(fence)
+        ):
+            fence = ""
+        elif not fence:
             lines.append(line)
     return lines
 
@@ -76,7 +89,7 @@ def test_relative_links_resolve():
     problems = []
     for path in _markdown_files():
         for line in _prose_lines(path):
-            for target in _LINK.findall(line):
+            for target in _LINK.findall(_CODE_SPAN.sub("", line)):
                 if re.match(r"[a-z][a-z0-9+.-]*:", target):
                     continue  # http:, mailto: and other schemes
                 reason = _broken(path, target)
