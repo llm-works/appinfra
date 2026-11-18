@@ -22,8 +22,9 @@ _PACKAGE = _REPO_ROOT / "appinfra"
 _LINK = re.compile(r"\]\(([^)\s]+)")
 _HEADING = re.compile(r"#{1,6}\s+(.*?)\s*#*\s*$")
 _FENCE = re.compile(r"\s*(`{3,}|~{3,})")
-# A link written inside inline code is an example. A span may continue on the next line.
-_CODE_SPAN = re.compile(r"(`+).+?\1", re.DOTALL)
+# A link written inside inline code is an example. A span may continue on the next line, and
+# its delimiters are whole backtick runs of the same length; a run with no partner is text.
+_CODE_SPAN = re.compile(r"(?<!`)(`+)(?!`).+?(?<!`)\1(?!`)", re.DOTALL)
 _PARAGRAPH_BREAK = re.compile(r"\n[ \t]*\n")
 _INLINE_LINK = re.compile(r"\[([^\]]*)\]\([^)]*\)")
 _EMPHASIS = re.compile(
@@ -62,15 +63,19 @@ def _prose_lines(path: Path) -> list[str]:
     return lines
 
 
+def _rendered_prose(text: str) -> str:
+    """Text outside code spans as it renders: link text only, no emphasis markers."""
+    return _EMPHASIS.sub("", _INLINE_LINK.sub(r"\1", text))
+
+
 def _visible_text(heading: str) -> str:
-    """The text a heading renders: link text only, code as written, no emphasis markers."""
-    heading = _INLINE_LINK.sub(r"\1", heading)
+    """The text a heading renders; code spans show their content as written."""
     parts, pos = [], 0
     for span in _CODE_SPAN.finditer(heading):
-        parts.append(_EMPHASIS.sub("", heading[pos : span.start()]))
+        parts.append(_rendered_prose(heading[pos : span.start()]))
         parts.append(span.group(0).strip("`"))
         pos = span.end()
-    parts.append(_EMPHASIS.sub("", heading[pos:]))
+    parts.append(_rendered_prose(heading[pos:]))
     return "".join(parts)
 
 
@@ -143,11 +148,13 @@ def test_link_targets_skip_code_spans_across_lines(tmp_path: Path):
                 "",
                 "A span may also `open here, then",
                 "close` before [after](after.md) and `code`.",
+                "",
+                "Runs pair only with runs as long: `unclosed [linked](linked.md)``",
             ]
         ),
         encoding="utf-8",
     )
-    assert _link_targets(doc) == ["real.md", "after.md"]
+    assert _link_targets(doc) == ["real.md", "after.md", "linked.md"]
 
 
 def test_slug_follows_the_rendered_heading():
@@ -158,6 +165,7 @@ def test_slug_follows_the_rendered_heading():
         "`_private`": "_private",
         "load_file": "load_file",
         "See [the guide](guide.md) first": "see-the-guide-first",
+        "`[label](file.md)`": "labelfilemd",
         "Reading `app.etc_dir`": "reading-appetc_dir",
         "6. `--config` and `--etc-dir` are user-authoritative": (
             "6---config-and---etc-dir-are-user-authoritative"
