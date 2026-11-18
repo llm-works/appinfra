@@ -43,6 +43,9 @@ For API stability guarantees and deprecation policy, see
 - **Breaking:** the MkDocs build: the `docs.serve`, `docs.build`, `docs.check` and `docs.deploy`
   Make targets, their `APPINFRA_DOCS_CONFIG_FILE` and `APPINFRA_DOCS_OUTPUT_DIR` settings (set in
   a makefile, either now stops make as unknown) and the `docs` extra.
+- **Breaking:** without pydantic, `appinfra.config` no longer exports placeholder
+  `InfraConfig`, `LoggingConfig`, `DatabaseConfig` and a no-op `validate_config`; check
+  `PYDANTIC_AVAILABLE`. `appinfra.config.schemas` needs pydantic to import.
 
 ### Fixed
 - `make pg.server.up.repl` starts from any project, not only from the appinfra repo: the
@@ -53,6 +56,8 @@ For API stability guarantees and deprecation policy, see
 - Installing appinfra no longer adds a setuptools plugin to the environment, so a build of the
   appinfra repo without isolation no longer rewrites the tracked `appinfra/_build_info.py`.
   The `_build_info.py` in the wheel carries the SPDX header.
+- The API reference and type checkers describe the real pydantic config models: each is defined
+  once, no longer next to a placeholder of the same name.
 
 ## [0.15.0] - 2026-11-11
 
