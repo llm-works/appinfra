@@ -105,7 +105,7 @@ and configuration loading.
 
 ### Target Filtering
 
-Hide specific targets from `make help` and block their execution:
+Hide targets from `make help`. A hidden target still runs when named on the command line:
 
 ```makefile
 # Hide specific targets
@@ -116,8 +116,8 @@ APPINFRA_DISABLE_GROUPS ?= pg. examples.
 ```
 
 `APPINFRA_DISABLE_TARGETS` matches names exactly. Confirm-prompt wrappers like `pg.clean` and their
-no-prompt `.internal` siblings are independent targets — list both to block a destructive op
-entirely. Alternatively, use `APPINFRA_DISABLE_GROUPS` to cover an entire prefix.
+no-prompt `.internal` siblings are independent targets — list both to hide both.
+`APPINFRA_DISABLE_GROUPS` hides every target with a prefix.
 
 Usage:
 
