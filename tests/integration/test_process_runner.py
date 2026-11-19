@@ -25,7 +25,7 @@ class SimpleProcessService(Service):
     def name(self) -> str:
         return self._name
 
-    def execute(self) -> None:
+    def run(self) -> None:
         self._lg.info("service started")
         assert self._shutdown_event is not None
         self._shutdown_event.wait()

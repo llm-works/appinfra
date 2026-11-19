@@ -8,16 +8,18 @@ from __future__ import annotations
 import threading
 
 from ..base import Service
+from ..channel.sync import Channel
 from ..errors import SetupError
 from ..state import RestartPolicy, State
 from .base import Runner
+from .drive import LOOPED_SERVICES, drive
 
 
 class ThreadRunner(Runner):
     """Runs a service in a daemon thread.
 
-    Executes service.execute() in a background thread. Handles setup,
-    teardown, and state management.
+    Runs the service's work in a background thread, by its form (see
+    drive()). Handles setup, teardown, and state management.
 
     Example:
         runner = ThreadRunner(my_service)
@@ -31,17 +33,21 @@ class ThreadRunner(Runner):
         self,
         service: Service,
         policy: RestartPolicy | None = None,
+        inbox: Channel | None = None,
     ) -> None:
         """Initialize thread runner.
 
         Args:
             service: The service to run.
             policy: Restart policy.
+            inbox: A StepService's inbox channel (see Runner).
         """
-        super().__init__(service, policy)
+        super().__init__(service, policy, inbox)
         self._thread: threading.Thread | None = None
         self._exception: BaseException | None = None
-        # Set by _run() once execute() has returned. Thread.is_alive() on
+        # Ends a scheduled or step service's loop; set by stop()
+        self._stop = threading.Event()
+        # Set by _run() once the service's work has returned. Thread.is_alive() on
         # Python 3.13+ stays True until the OS thread handle is marked done,
         # which happens after the GIL is released; polling it alone lets
         # wait_healthy() observe a finished thread as alive and report
@@ -72,6 +78,7 @@ class ThreadRunner(Runner):
         # Execute phase
         self._exception = None
         self._exited = False
+        self._stop.clear()
         self._thread = threading.Thread(
             target=self._run,
             name=f"svc-{self.name}",
@@ -79,49 +86,71 @@ class ThreadRunner(Runner):
         )
         self._thread.start()
 
+    @property
+    def _loops_here(self) -> bool:
+        """True if the runner loops the service (step, scheduled) and so tears it
+        down on this thread once the loop ends; a service with its own run() is
+        torn down by stop(), which is how run() learns to return."""
+        return isinstance(self.service, LOOPED_SERVICES)
+
     def _run(self) -> None:
         """Thread target.
 
-        Updates state on exit (clean or exception). Transitions are guarded
-        to handle races with stop() or wait_healthy().
+        Records how the service's work ended, tears down a service the runner
+        loops, then settles the state. Transitions are guarded to handle races
+        with stop() or wait_healthy().
         """
+        try:
+            try:
+                drive(self.service, self._stop, self.inbox)
+            except BaseException as e:
+                self._exception = e
+            if self._loops_here:
+                self._teardown()
+            self._settle_exit_state()
+        finally:
+            # Last, so _exception, teardown and the state are settled before
+            # is_alive() reports the exit.
+            self._exited = True
+
+    def _settle_exit_state(self) -> None:
+        """DONE after a clean exit, FAILED after an exception, unless stop() or
+        wait_healthy() has already moved the state on."""
         from ..errors import InvalidTransitionError
 
         try:
-            self.service.execute()
-            # Clean exit - transition to DONE if in RUNNING state
-            try:
+            if self._exception is None:
                 if self._state == State.RUNNING:
                     self._transition(State.DONE)
-            except InvalidTransitionError:
-                pass  # Already transitioned by stop()
-        except BaseException as e:
-            self._exception = e
-            # Transition to FAILED if possible
-            try:
-                if self._state in (State.STARTING, State.RUNNING):
-                    self._transition(State.FAILED)
-            except InvalidTransitionError:
-                pass  # Already transitioned by stop()
-        finally:
-            # Last, so _exception and the state are settled before is_alive()
-            # reports the exit.
-            self._exited = True
+            elif self._state in (State.STARTING, State.RUNNING):
+                self._transition(State.FAILED)
+        except InvalidTransitionError:
+            pass  # Already transitioned by stop()
 
-    def stop(self, timeout: float = 5.0) -> None:
-        """Stop the service."""
-        if self._state in (State.CREATED, State.STOPPED, State.STOPPING, State.DONE):
-            return
-
-        self._transition(State.STOPPING)
-
-        # Teardown with exception handling - continue to join even if teardown fails
+    def _teardown(self) -> None:
+        """Run the service's teardown(); a failure is logged, not raised."""
         try:
             self.service.teardown()
         except Exception as e:
             self.service.lg.warning(
                 "teardown failed", extra={"exception": e, "service": self.name}
             )
+
+    def stop(self, timeout: float = 5.0) -> None:
+        """Stop the service.
+
+        A step or scheduled service's loop ends and the service thread tears it
+        down; a service with its own run() is torn down here, which tells run()
+        to return. Either way the thread is then joined for up to *timeout*
+        seconds.
+        """
+        if self._state in (State.CREATED, State.STOPPED, State.STOPPING, State.DONE):
+            return
+
+        self._transition(State.STOPPING)
+        self._stop.set()
+        if not self._loops_here:
+            self._teardown()
 
         if self._thread is not None:
             self._thread.join(timeout=timeout)
@@ -147,5 +176,5 @@ class ThreadRunner(Runner):
 
     @property
     def exception(self) -> BaseException | None:
-        """Exception from execute(), if any."""
+        """Exception from the service's work, if any."""
         return self._exception

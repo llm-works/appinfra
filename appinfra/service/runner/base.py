@@ -9,43 +9,49 @@ import threading
 import time
 from abc import ABC, abstractmethod
 
+from ..base import Service
+from ..channel.sync import Channel
 from ..errors import HealthTimeoutError, InvalidTransitionError, RunError
 from ..state import TRANSITIONS, RestartPolicy, State, StateHook
+from .drive import check_form
 
 
 class Runner(ABC):
     """Abstract base for service execution and state management.
 
     A Runner handles:
-    - HOW a service is executed (thread, process, async, scheduled)
+    - HOW a service is executed (thread, process)
     - State tracking (STOPPED -> STARTING -> RUNNING -> STOPPING)
     - Restart policy with backoff
     - State change hooks
 
-    Different runners for different execution models:
-    - ThreadRunner: Runs service.execute() in a daemon thread
-    - ProcessRunner: Runs ProcessService as subprocess
-    - AsyncRunner: Runs service as asyncio task (future)
-    - ScheduledRunner: Runs multiple services cooperatively (future)
+    It hosts any Service: it runs a StepService's or ScheduledService's loop,
+    calls any other service's run(), and owns a step service's inbox channel:
+    - ThreadRunner: Runs the service in a daemon thread
+    - ProcessRunner: Runs the service in a subprocess
     """
 
     def __init__(
         self,
         service: object,
         policy: RestartPolicy | None = None,
+        inbox: Channel | None = None,
     ) -> None:
         """Initialize runner.
 
         Args:
             service: The service to run.
             policy: Restart policy. Defaults to RestartPolicy().
+            inbox: The channel a StepService receives its messages on; required
+                for a step service, refused for any other.
+
+        Raises:
+            TypeError: If *service* is not a Service it can host (see
+                check_form()).
+            ValueError: If *inbox* does not match the service.
         """
-        from ..base import Service
-
-        if not isinstance(service, Service):
-            raise TypeError(f"service must be a Service, got {type(service)}")
-
-        self.service: Service = service
+        self.service: Service = check_form(service, inbox)
+        self.inbox = inbox
         self.policy = policy or RestartPolicy()
         self._state = State.CREATED
         self._hooks: list[StateHook] = []

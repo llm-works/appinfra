@@ -32,7 +32,7 @@ class UvicornService(Service):
     - Proper logging forwarding to parent process
 
     The service setup() validates configuration in the parent process.
-    The execute() method runs in the subprocess and starts uvicorn.
+    The run() method runs in the subprocess and starts uvicorn.
 
     Example:
         service = UvicornService(lg, "myapi", adapter, config, request_q, response_q)
@@ -72,7 +72,7 @@ class UvicornService(Service):
         self._response_q = response_q
         # Injected by ProcessRunner in subprocess
         self._shutdown_event: MPEvent | None = None
-        # Set by execute() in the subprocess
+        # Set by run() in the subprocess
         self._server: WatchedServer | None = None
 
     @property
@@ -157,7 +157,7 @@ class UvicornService(Service):
             **uvicorn_kwargs,
         )
 
-    def execute(self) -> None:
+    def run(self) -> None:
         """Run uvicorn (runs in subprocess).
 
         Exits on SIGTERM/SIGINT, when the shutdown event is set, or when the
@@ -169,7 +169,7 @@ class UvicornService(Service):
         if self._shutdown_event is None:
             raise RuntimeError("_shutdown_event must be injected by ProcessRunner")
         if self._bound_port is None:
-            raise RuntimeError("setup() must run before execute()")
+            raise RuntimeError("setup() must run before run()")
         bound_port = self._bound_port
         self._setup_subprocess_logging()
 
@@ -190,7 +190,7 @@ class UvicornService(Service):
                 raise SystemExit(_UVICORN_STARTUP_FAILURE)
 
     def teardown(self) -> None:
-        """Cleanup - uvicorn shuts itself down (see ``execute``)."""
+        """Cleanup - uvicorn shuts itself down (see ``run``)."""
 
     def is_healthy(self) -> bool:
         """Whether this service's uvicorn server is ready: ran the app's startup, bound

@@ -25,7 +25,7 @@ class SimpleService(Service):
         self._health_delay = health_delay
 
         self._setup_called = False
-        self._execute_called = False
+        self._run_called = False
         self._teardown_called = False
         self._healthy = False
         self._stop_event = threading.Event()
@@ -43,8 +43,8 @@ class SimpleService(Service):
         if self._setup_error:
             raise SetupError(self._name, self._setup_error)
 
-    def execute(self) -> None:
-        self._execute_called = True
+    def run(self) -> None:
+        self._run_called = True
 
         if self._health_delay:
             time.sleep(self._health_delay)

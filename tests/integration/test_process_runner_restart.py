@@ -32,7 +32,7 @@ class FailOnceService(Service):
     def name(self) -> str:
         return "fail-once"
 
-    def execute(self) -> None:
+    def run(self) -> None:
         runs = _count_run(self._counter)
         if runs == 1:
             # Fail only once the parent has seen this run healthy, so the failure
@@ -60,7 +60,7 @@ class FailAlwaysService(Service):
     def name(self) -> str:
         return "fail-always"
 
-    def execute(self) -> None:
+    def run(self) -> None:
         runs = _count_run(self._counter)
         if runs == 1:
             self._healthy = True

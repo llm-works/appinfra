@@ -22,7 +22,7 @@ from tests.helpers.service.runner import SimpleService
 
 
 class FailingService(Service):
-    """Service that raises during execute()."""
+    """Service that raises during run()."""
 
     def __init__(self) -> None:
         self._lg = MagicMock()
@@ -31,12 +31,12 @@ class FailingService(Service):
     def name(self) -> str:
         return "failing"
 
-    def execute(self) -> None:
+    def run(self) -> None:
         raise RuntimeError("intentional failure")
 
 
-class FailOnFirstExecute(Service):
-    """Service that fails on first execute but succeeds on retry."""
+class FailOnFirstRun(Service):
+    """Service that fails on first run but succeeds on retry."""
 
     def __init__(self) -> None:
         self._lg = MagicMock()
@@ -48,7 +48,7 @@ class FailOnFirstExecute(Service):
     def name(self) -> str:
         return "flaky"
 
-    def execute(self) -> None:
+    def run(self) -> None:
         self._runs += 1
         if self._runs == 1:
             raise RuntimeError("first run fails")
@@ -107,7 +107,7 @@ class TestThreadRunner:
         assert not runner.is_alive()
 
     def test_exception_captured(self):
-        """Exception from execute() is captured."""
+        """Exception from run() is captured."""
         svc = FailingService()
         runner = ThreadRunner(svc)
 
@@ -158,7 +158,7 @@ class TestThreadRunner:
 
     def test_restart_policy(self):
         """Restart policy triggers restart on failure."""
-        svc = FailOnFirstExecute()
+        svc = FailOnFirstRun()
         policy = RestartPolicy(max_retries=3, backoff=0.01)
         runner = ThreadRunner(svc, policy)
 
@@ -186,7 +186,7 @@ class TestThreadRunner:
             def __init__(self) -> None:
                 self._stop = threading.Event()
 
-            def execute(self) -> None:
+            def run(self) -> None:
                 self._stop.wait()
 
             def teardown(self) -> None:
@@ -213,7 +213,7 @@ class TestThreadRunner:
             def name(self) -> str:
                 return "quiet-exit"
 
-            def execute(self) -> None:
+            def run(self) -> None:
                 pass  # Exits immediately
 
         svc = QuietExit()
@@ -240,7 +240,7 @@ class TestRunnerRestart:
             def name(self) -> str:
                 return "always-fails"
 
-            def execute(self) -> None:
+            def run(self) -> None:
                 raise RuntimeError("always fails")
 
         policy = RestartPolicy(max_retries=2, backoff=0.01)
@@ -279,7 +279,7 @@ class TestRunnerRestart:
             def name(self) -> str:
                 return "fails-once"
 
-            def execute(self) -> None:
+            def run(self) -> None:
                 raise RuntimeError("fails")
 
         policy = RestartPolicy(restart_on_failure=False)
@@ -326,3 +326,34 @@ class TestScheduledService:
         runner.stop()
 
         assert tick_count >= 2
+        # The runner ends the loop: the service has no teardown() of its own
+        assert runner.state == State.STOPPED
+
+    def test_teardown_runs_on_the_service_thread_after_the_last_tick(self):
+        """stop() ends the loop, then teardown() runs on the thread that ticked."""
+        ticked = threading.Event()
+        threads: dict[str, str] = {}
+
+        class Ticker(ScheduledService):
+            interval = 5.0
+
+            @property
+            def name(self) -> str:
+                return "ticker"
+
+            def tick(self) -> None:
+                threads["tick"] = threading.current_thread().name
+                ticked.set()
+
+            def teardown(self) -> None:
+                threads["teardown"] = threading.current_thread().name
+
+        runner = ThreadRunner(Ticker())
+        runner.start()
+        runner.wait_healthy(timeout=5.0)
+        assert ticked.wait(timeout=5.0)
+
+        runner.stop()
+
+        assert threads == {"tick": "svc-ticker", "teardown": "svc-ticker"}
+        assert runner.state == State.STOPPED

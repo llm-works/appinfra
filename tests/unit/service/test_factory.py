@@ -46,7 +46,7 @@ class ConfigurableService(Service):
     def name(self) -> str:
         return "configurable"
 
-    def execute(self) -> None:
+    def run(self) -> None:
         self._stop.wait()
 
     def teardown(self) -> None:

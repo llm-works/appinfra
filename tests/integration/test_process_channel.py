@@ -36,7 +36,7 @@ class EchoService(Service):
     def name(self) -> str:
         return "echo"
 
-    def execute(self) -> None:
+    def run(self) -> None:
         assert self._shutdown_event is not None and self.channel is not None
         while not self._shutdown_event.is_set():
             try:
@@ -60,7 +60,7 @@ class QuitService(Service):
     def name(self) -> str:
         return "quit"
 
-    def execute(self) -> None:
+    def run(self) -> None:
         pass
 
 

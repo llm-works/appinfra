@@ -17,7 +17,7 @@ Three-layer architecture separates concerns:
 
 | Layer | Responsibility | Examples |
 |-------|---------------|----------|
-| **Service** | WHAT to run (definition, config, behavior) | `Service`, `ScheduledService` |
+| **Service** | WHAT to run (definition, config, behavior) | `Service`, `StepService`, `ScheduledService` |
 | **Runner** | HOW to run it (execution + state management) | `ThreadRunner`, `ProcessRunner` |
 | **Manager** | Orchestration (dependency ordering, parallel start/stop) | `Manager` |
 
@@ -25,41 +25,35 @@ Three-layer architecture separates concerns:
 
 ```python
 from appinfra.log import Logger
-from appinfra.service import Service, ThreadRunner, Manager
+from appinfra.service import Message, RunnerFactory, StepService
 
 
-class MyService(Service):
+class Doubler(StepService):
     def __init__(self, lg: Logger):
         self._lg = lg
-        self._stop = threading.Event()
 
     @property
     def name(self) -> str:
-        return "myservice"
+        return "doubler"
 
-    def execute(self) -> None:
-        self._lg.info("service started")
-        self._stop.wait()  # Block until teardown
-
-    def teardown(self) -> None:
-        self._stop.set()
-
-    def is_healthy(self) -> bool:
-        return True
+    def step(self, msg: Message) -> Message:
+        return Message(id=msg.id, payload=msg.payload * 2)
 
 
-# Run with ThreadRunner
+# Run on a thread; the runner owns the service's inbox, the caller holds the other end
 lg = Logger(name="app")
-runner = ThreadRunner(MyService(lg))
-runner.start()
-runner.wait_healthy(timeout=30.0)
-# ... service is running ...
-runner.stop()
+result = RunnerFactory(lg).create_thread_runner_with_channel(Doubler(lg))
+result.runner.start()
+result.runner.wait_healthy(timeout=30.0)
+reply = result.channel.submit(Message(payload=21))  # reply.payload == 42
+result.runner.stop()
 ```
 
-## Service Base Class
+## Services
 
-Services define WHAT to run. Implement these methods:
+Services define WHAT to run. A `Service` implements `run()`, which holds its thread until the
+service is stopped. `StepService` and `ScheduledService` hand their loop to the runner instead,
+which lets a runner host many of them without a thread each.
 
 ```python
 class Service(ABC):
@@ -73,15 +67,15 @@ class Service(ABC):
         """Names of services this depends on."""
         return []
 
+    @abstractmethod
+    def run(self) -> None:
+        """Do the work, blocking until stopped. The services the runner loops implement it."""
+
     def setup(self) -> None:
         """Initialize resources. Raise SetupError to abort."""
 
-    @abstractmethod
-    def execute(self) -> None:
-        """Main work. Block until teardown for long-running services."""
-
     def teardown(self) -> None:
-        """Cleanup. Should cause execute() to return."""
+        """Cleanup. Step/scheduled: runs after the loop ends. Otherwise: must make run() return."""
 
     def is_healthy(self) -> bool:
         """Check if ready. Runner waits for this before RUNNING state."""
@@ -92,6 +86,56 @@ class Service(ABC):
         """Logger instance."""
         return self._lg
 ```
+
+| Class | Implement | Triggered by |
+|-------|-----------|--------------|
+| `Service` | `run()` | once at start; it holds its thread until stopped |
+| `StepService` | `step(msg)` | each message on the inbox channel its runner owns |
+| `ScheduledService` | `tick()`, `interval` | a timer, `interval` seconds after the last `tick()` returned |
+
+For a step or scheduled service, the runner owns the loop and calls `teardown()` once the loop has
+ended, however it ended (stop, failure, inbox closed), on the thread or in the process that ran it:
+`teardown()` never overlaps `step()` or `tick()`, so cleanup that must happen on the service's own
+thread belongs there.
+
+### StepService
+
+The runner receives each message on the service's inbox and calls `step()` with it. A reply that
+`step()` returns, unless `None`, goes back on the inbox, so the caller's `submit()` receives it; a
+reply to a `submit()` carries the request's `id`. While the inbox has no room for a reply, the
+runner waits for room before the next `step()`; a reply still waiting when the service stops is
+dropped. Messages are handled one at a time, in order. The service ends when it is stopped or its
+inbox closes.
+
+`step()` must not block: it may `send(..., timeout=0)` on other channels, never `recv()` or
+`submit()`.
+
+`RunnerFactory.create_thread_runner_with_channel()` and `create_process_runner_with_channel()`
+give a step service's runner the service side of the channel pair; the caller uses
+`result.channel`. A runner created directly takes it as `inbox=`.
+
+### Service with run()
+
+```python
+class Database(Service):
+    def __init__(self, lg: Logger):
+        self._lg = lg
+        self._stop = threading.Event()
+
+    @property
+    def name(self) -> str:
+        return "database"
+
+    def run(self) -> None:
+        self._lg.info("service started")
+        self._stop.wait()  # Block until teardown
+
+    def teardown(self) -> None:
+        self._stop.set()
+```
+
+Under `ProcessRunner`, `run()` watches the injected `_shutdown_event` instead: `teardown()` runs in
+the subprocess after `run()` returns.
 
 ## State Machine
 
@@ -131,7 +175,7 @@ runner.on_state_change(on_change)
 
 ### ThreadRunner
 
-Runs `service.execute()` in a daemon thread:
+Runs the service in a daemon thread:
 
 ```python
 runner = ThreadRunner(service)
@@ -143,7 +187,7 @@ runner.stop()
 
 ### ProcessRunner
 
-Runs `service.execute()` in a subprocess for isolation:
+Runs the service in a subprocess for isolation:
 
 ```python
 runner = ProcessRunner(service)
@@ -157,7 +201,7 @@ ProcessRunner features:
 - Uses `multiprocessing.Process` for subprocess isolation
 - Queue-based logging forwarded to parent process
 - IPC for shutdown signaling and health status
-- Service must be picklable
+- Service, and a step service's inbox, must be picklable
 
 #### Start method and restarts
 
@@ -182,11 +226,12 @@ service must come from the same start method: multiprocessing refuses them in th
 
 ## Scheduled Services
 
-For periodic execution, extend `ScheduledService`:
+For periodic execution, extend `ScheduledService`. The runner calls `tick()`, then waits `interval`
+seconds, until the service is stopped; ticks start `interval` plus the time `tick()` took apart:
 
 ```python
 class MetricsCollector(ScheduledService):
-    interval = 60.0  # Seconds between tick() calls
+    interval = 60.0  # Seconds from one tick() returning to the next
 
     def __init__(self, lg: Logger):
         self._lg = lg
@@ -462,7 +507,8 @@ worker = svc_factory.create("worker")
 
 ### Classes
 
-- `Service` - Base class for service definitions
+- `Service` - Base class for service definitions; its run() holds its thread until stopped
+- `StepService` - Service that handles one message per step()
 - `ScheduledService` - Service with periodic tick() execution
 - `Runner` - Abstract base for execution
 - `ThreadRunner` - Thread-based execution

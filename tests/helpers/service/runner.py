@@ -25,7 +25,7 @@ class SimpleService(Service):
     def name(self) -> str:
         return self._name
 
-    def execute(self) -> None:
+    def run(self) -> None:
         self._running = True
         if self._health_delay:
             time.sleep(self._health_delay)
