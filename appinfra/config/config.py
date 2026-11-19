@@ -779,27 +779,19 @@ class Config(DotDict):
             except ValidationError as e:
                 lg.error(f"Invalid configuration: {e}")
         """
+        from . import PYDANTIC_AVAILABLE
+
+        if not PYDANTIC_AVAILABLE:
+            return True  # pydantic not installed: no validation
+        from .schemas import validate_config
+
+        config_dict = dict(self)
+        if raise_on_error:
+            return validate_config(config_dict)
         try:
-            from . import PYDANTIC_AVAILABLE, validate_config
-
-            if not PYDANTIC_AVAILABLE:
-                # Pydantic not installed - skip validation
-                return True
-
-            # Convert config to dict for validation
-            config_dict = dict(self)
-
-            # Validate using pydantic schema
-            if raise_on_error:
-                return validate_config(config_dict)
-            try:
-                return validate_config(config_dict)
-            except Exception:
-                return False
-
-        except ImportError:
-            # Config schemas module not available
-            return True
+            return validate_config(config_dict)
+        except Exception:
+            return False
 
     def get_source_files(self) -> set[Path]:
         """

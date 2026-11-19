@@ -12,22 +12,19 @@ Tests Pydantic-based validation for configuration schemas including:
 
 import pytest
 
+from appinfra.config import PYDANTIC_AVAILABLE
 from appinfra.envelope import Envelope
 
-try:
+if PYDANTIC_AVAILABLE:
     from pydantic import ValidationError
 
     from appinfra.config.schemas import (
-        PYDANTIC_AVAILABLE,
         DatabaseConfig,
         LoggingConfig,
         PostgreSQLServerConfig,
     )
 
-    SKIP_REASON = None
-except ImportError:
-    SKIP_REASON = "pydantic not installed"
-    PYDANTIC_AVAILABLE = False
+SKIP_REASON = None if PYDANTIC_AVAILABLE else "pydantic not installed"
 
 
 @pytest.mark.skipif(

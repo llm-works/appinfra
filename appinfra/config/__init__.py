@@ -10,31 +10,18 @@ This module provides:
 - Optional schema validation using Pydantic (if installed)
 """
 
-from typing import Any
-
 from .config import Config
 from .constants import MAX_CONFIG_SIZE_BYTES
 from .spec import AUTO, Auto, ConfigFile, ConfigSpec
 from .watcher import ConfigWatcher
 
+# The schema models need pydantic (the validation extra); without it they are not exported
 try:
-    from .schemas import (
-        PYDANTIC_AVAILABLE,
-        DatabaseConfig,
-        InfraConfig,
-        LoggingConfig,
-        validate_config,
-    )
+    from .schemas import DatabaseConfig, InfraConfig, LoggingConfig, validate_config
 except ImportError:
-    # Pydantic not installed - validation not available
     PYDANTIC_AVAILABLE = False
-    InfraConfig: type[Any] | None = None  # type: ignore[no-redef]
-    LoggingConfig: type[Any] | None = None  # type: ignore[no-redef]
-    DatabaseConfig: type[Any] | None = None  # type: ignore[no-redef]
-
-    def validate_config(config_dict: dict[str, Any]) -> dict[str, Any]:  # type: ignore[misc]
-        """No-op validation when pydantic is not installed."""
-        return config_dict
+else:
+    PYDANTIC_AVAILABLE = True
 
 
 __all__ = [
@@ -50,9 +37,7 @@ __all__ = [
     # Constants
     "MAX_CONFIG_SIZE_BYTES",
     # Validation (optional)
-    "InfraConfig",
-    "LoggingConfig",
-    "DatabaseConfig",
-    "validate_config",
     "PYDANTIC_AVAILABLE",
 ]
+if PYDANTIC_AVAILABLE:
+    __all__ += ["InfraConfig", "LoggingConfig", "DatabaseConfig", "validate_config"]
