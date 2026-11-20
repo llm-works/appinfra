@@ -44,7 +44,7 @@ class MPSimpleService(Service):
     def name(self) -> str:
         return self._name
 
-    def execute(self) -> None:
+    def run(self) -> None:
         # Wait for shutdown signal (injected by ProcessRunner)
         if hasattr(self, "_shutdown_event") and self._shutdown_event:
             self._shutdown_event.wait()
@@ -68,7 +68,7 @@ class MPSetupFailService(Service):
     def setup(self) -> None:
         raise SetupError(self.name, "setup failed")
 
-    def execute(self) -> None:
+    def run(self) -> None:
         pass
 
 
@@ -85,7 +85,7 @@ class SetupFailService(Service):
     def setup(self) -> None:
         raise SetupError(self.name, "config invalid")
 
-    def execute(self) -> None:
+    def run(self) -> None:
         pass
 
 

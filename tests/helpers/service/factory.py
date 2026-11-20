@@ -20,7 +20,7 @@ class SimpleService(Service):
     def name(self) -> str:
         return "simple"
 
-    def execute(self) -> None:
+    def run(self) -> None:
         self._stop.wait()
 
     def teardown(self) -> None:

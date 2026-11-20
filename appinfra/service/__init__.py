@@ -15,14 +15,19 @@ Three-layer architecture:
 - Runner: HOW to run it (execution + state management)
 - Manager: Orchestration (dependency ordering, parallel start/stop)
 
+A Service implements run(), which holds its thread until stopped. Two
+subclasses hand their loop to the runner instead:
+- StepService: step(msg) for each message on the inbox its runner owns
+- ScheduledService: tick() every interval seconds
+
 Basic usage with ThreadRunner:
-    from appinfra.service import Manager, ThreadRunner
+    from appinfra.service import Manager, Service, ThreadRunner
 
     class MyService(Service):
         name = "myservice"
         depends_on = ["database"]
 
-        def execute(self) -> None:
+        def run(self) -> None:
             # Main work - blocks until teardown
             self._stop.wait()
 
@@ -69,9 +74,11 @@ Scheduled services:
             collect_and_send_metrics()
 
     mgr.add_service(MetricsCollector())
+
+Step services: see docs/api/service.md.
 """
 
-from .base import ScheduledService, Service
+from .base import ScheduledService, Service, StepService
 from .channel import (
     AsyncBufferedChannel,
     AsyncChannel,
@@ -121,6 +128,7 @@ from .state import RestartPolicy, State, StateHook
 __all__ = [
     # Core classes
     "Service",
+    "StepService",
     "ScheduledService",
     "Runner",
     "ThreadRunner",

@@ -1,11 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright 2026 The appinfra Authors
 
-"""Base service class."""
+"""Service base class, and the services whose loop the runner runs."""
 
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from typing import Any
 
 from ..log import Logger
 
@@ -16,9 +17,14 @@ class Service(ABC):
     A Service defines WHAT to run - configuration and behavior.
     The Runner handles HOW to run it and manages state.
 
-    Lifecycle methods:
+    A plain Service implements run(), which holds its thread, or process, until
+    the service is stopped. Two subclasses hand their loop to the runner
+    instead, which lets a runner host many of them without a thread each:
+    - StepService: step(msg) for each message on its inbox channel
+    - ScheduledService: tick() every interval seconds
+
+    Lifecycle methods, common to all services:
     - setup(): Initialize resources, validate config
-    - execute(): The main work (blocking for threads, one-shot for scheduled)
     - teardown(): Cleanup resources
     - is_healthy(): Check if ready to serve
 
@@ -38,7 +44,7 @@ class Service(ABC):
                 if not self._config.host:
                     raise SetupError(self.name, "host required")
 
-            def execute(self) -> None:
+            def run(self) -> None:
                 self._pool = create_pool(self._config)
                 self._lg.info("database pool created")
                 self._stop.wait()  # Block until teardown
@@ -75,10 +81,22 @@ class Service(ABC):
         """
         return []
 
+    @abstractmethod
+    def run(self) -> None:
+        """Do the service's work, blocking until it is stopped.
+
+        The runner calls it once. Under ThreadRunner, teardown() must make it
+        return; under ProcessRunner, the injected ``_shutdown_event`` is set
+        (teardown() runs in the subprocess after run() returns). ProcessRunner
+        injects it only into an attribute the service declares, e.g.
+        ``self._shutdown_event = None`` in ``__init__``.
+        """
+        ...
+
     def setup(self) -> None:
         """Initialize the service.
 
-        Called before execute(). Use for:
+        Called before the runner starts the service's work. Use for:
         - Validating configuration
         - Allocating resources
         - Checking prerequisites
@@ -86,28 +104,22 @@ class Service(ABC):
         Raise SetupError to abort startup.
         """
 
-    @abstractmethod
-    def execute(self) -> None:
-        """Execute the service work.
-
-        For long-running services (ThreadRunner): block until teardown.
-        For scheduled services: do one iteration of work.
-        For process services: not used (ProcessRunner runs external command).
-        """
-        ...
-
     def teardown(self) -> None:
         """Cleanup the service.
 
-        Called to stop the service. Should cause execute() to return
-        for blocking services. Default does nothing.
+        For a step or scheduled service, the runner calls it once the loop has
+        ended (stopped, failed, or inbox closed), on the thread or in the
+        process that ran the loop, so it never overlaps step() or tick().
+        For a service with its own run(), it must make run() return: under
+        ThreadRunner, stop() calls it while run() is still running. Default
+        does nothing.
         """
 
     def is_healthy(self) -> bool:
         """Check if service is ready.
 
-        Called after execute() begins to determine when the service
-        is ready. Runner waits for this before reporting RUNNING state.
+        Called after the service's work begins to determine when it is
+        ready. Runner waits for this before reporting RUNNING state.
 
         Returns:
             True if service is ready, False otherwise.
@@ -115,29 +127,56 @@ class Service(ABC):
         return True
 
 
+class StepService(Service):
+    """Service that handles one message per step.
+
+    The runner that hosts it owns its inbox channel: it receives each message
+    and calls step() with it, one at a time and in order, until the service is
+    stopped or the inbox closes. What step() returns, unless None, the runner
+    sends back on the inbox, so a caller holding the other end (see
+    RunnerFactory's create_*_runner_with_channel) can submit() a request and
+    get the reply. While the inbox has no room for a reply, the runner waits for
+    room before the next step(); a reply still waiting when the service stops
+    is dropped.
+
+    step() must not block. It may send(..., timeout=0) on other channels it
+    holds, but never recv() or submit(), which wait.
+    """
+
+    @abstractmethod
+    def step(self, msg: Any) -> Any:
+        """Handle one message from the inbox. Must not block.
+
+        Returns:
+            A reply for the runner to send back on the inbox, or None. A reply
+            to a submit() carries the request's id.
+        """
+        ...
+
+    def run(self) -> None:
+        """Not used: the runner drives a step service through step()."""
+        raise TypeError(
+            f"step service '{self.name}' is driven through step(), not run()"
+        )
+
+
 class ScheduledService(Service):
     """Service that runs on a schedule.
 
-    Instead of blocking execute(), scheduled services implement tick()
-    which is called repeatedly. The interval property controls frequency.
-
-    If used with ThreadRunner, the default execute() loops calling tick().
-
-    Important:
-        Subclasses must call super().__init__() in their __init__ to
-        initialize the stop event used by execute() and teardown().
+    The runner calls tick(), then waits ``interval`` seconds, until the service
+    is stopped: ticks start interval plus tick() time apart. An exception from
+    tick() fails the service.
 
     Example:
         class MetricsCollector(ScheduledService):
+            interval = 60.0  # Collect every minute
+
             def __init__(self, lg: Logger) -> None:
-                super().__init__()
                 self._lg = lg
 
             @property
             def name(self) -> str:
                 return "metrics"
-
-            interval = 60.0  # Collect every minute
 
             def tick(self) -> None:
                 metrics = collect_metrics()
@@ -145,12 +184,7 @@ class ScheduledService(Service):
     """
 
     interval: float = 1.0
-    """Seconds between tick() calls."""
-
-    def __init__(self) -> None:
-        import threading
-
-        self._stop_event = threading.Event()
+    """Seconds from the end of one tick() to the start of the next."""
 
     @abstractmethod
     def tick(self) -> None:
@@ -160,12 +194,8 @@ class ScheduledService(Service):
         """
         ...
 
-    def execute(self) -> None:
-        """Default execute() that loops calling tick()."""
-        while not self._stop_event.is_set():
-            self.tick()
-            self._stop_event.wait(self.interval)
-
-    def teardown(self) -> None:
-        """Signal the service to stop."""
-        self._stop_event.set()
+    def run(self) -> None:
+        """Not used: the runner drives a scheduled service through tick()."""
+        raise TypeError(
+            f"scheduled service '{self.name}' is driven through tick(), not run()"
+        )

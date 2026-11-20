@@ -124,7 +124,7 @@ class TestManagerLifecycle:
             mgr.start()
 
         assert svc._setup_called
-        assert not svc._execute_called
+        assert not svc._run_called
 
     def test_dependency_failed_error(self, lg):
         """If dependency fails, dependent is not started."""

@@ -24,7 +24,7 @@ class MockService(Service):
     def depends_on(self) -> list[str]:
         return self._depends_on
 
-    def execute(self) -> None:
+    def run(self) -> None:
         pass
 
 

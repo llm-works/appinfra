@@ -31,7 +31,7 @@ class UnhealthyService(Service):
     def name(self) -> str:
         return self._name
 
-    def execute(self) -> None:
+    def run(self) -> None:
         self._stop.wait()
 
     def teardown(self) -> None:
@@ -64,7 +64,7 @@ class TestManagerLifecycle:
 
         mgr.start()
         assert svc._setup_called
-        assert svc._execute_called
+        assert svc._run_called
         assert svc.is_healthy()
         assert mgr.is_running("a")
 
@@ -88,9 +88,9 @@ class TestManagerLifecycle:
         order: list[str] = []
 
         class OrderTrackingService(SimpleService):
-            def execute(self) -> None:
+            def run(self) -> None:
                 order.append(self._name)
-                super().execute()
+                super().run()
 
         mgr = Manager(lg)
         svc_a = OrderTrackingService("a")
