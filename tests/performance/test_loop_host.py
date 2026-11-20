@@ -35,8 +35,8 @@ from appinfra.service import (
 )
 
 SERVICES = 100_000 if os.environ.get("APPINFRA_SERVICE_BENCH") == "full" else 1_000
-# Seconds of wall time over which idle CPU is measured: two of the channel's
-# 0.1 s polls, enough to show their cost
+# Seconds of wall time over which idle CPU is measured: long enough to catch two
+# wakeups of a recv() that polled every 0.1 s
 IDLE_WINDOW = 0.2
 LG = MagicMock()
 
@@ -173,10 +173,6 @@ class TestLoopHostCost:
         print(f"\n{SERVICES:,} idle services: {cpu:.1%} of a core")
         assert cpu < 0.02, f"{cpu:.1%} of a core while idle"
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="AsyncBufferedChannel.recv() wakes every 0.1 s to check for close",
-    )
     def test_idle_channel_receivers_use_no_cpu(self, host):
         """Services parked in recv() on an async channel leave the loop asleep."""
         runners, _ = _start_all(host, OnChannel, SERVICES)

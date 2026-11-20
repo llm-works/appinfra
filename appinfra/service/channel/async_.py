@@ -83,6 +83,12 @@ class AsyncTransport(Protocol):
     ``AsyncBufferedChannel`` class wraps an AsyncTransport and adds
     request/response correlation, streaming, redelivery buffering, and close
     management.
+
+    A transport whose ``close()`` wakes a pending ``recv()``, which then raises
+    ``ChannelClosedError``, declares ``wakes_on_close = True``: the channel then
+    hands ``recv()`` its whole timeout in one call. Without it, the channel
+    calls ``recv()`` in 0.1 s slices to notice a close, waking that often while
+    idle.
     """
 
     async def send(self, message: Any, timeout: float | None = None) -> None:
@@ -261,7 +267,10 @@ class AsyncBufferedChannel(Generic[TRequest, TResponse]):
     # -- internal helpers --------------------------------------------------
 
     async def _recv_poll(self, timeout: float | None) -> TResponse:
-        """Poll transport with periodic close checks."""
+        """Wait for the next message. A transport that wakes on close gets the
+        whole wait in one call; any other is polled with periodic close checks."""
+        if getattr(self._transport, "wakes_on_close", False):
+            return cast(TResponse, await self._transport.recv(timeout))
         poll_interval = 0.1
         deadline = None if timeout is None else time.monotonic() + timeout
 
@@ -379,9 +388,18 @@ class AsyncBufferedChannel(Generic[TRequest, TResponse]):
 # Built-in async transports
 # ---------------------------------------------------------------------------
 
+_CLOSED: Any = object()
+"""Put on an AsyncQueueTransport's inbound queue by close(), to wake recv()."""
+
 
 class AsyncQueueTransport(Generic[TRequest, TResponse]):
-    """Async transport using ``asyncio.Queue`` for coroutine communication."""
+    """Async transport using ``asyncio.Queue`` for coroutine communication.
+
+    close() puts a marker on the inbound queue that wakes a pending recv(), so
+    a recv() waits on the queue alone, without a timer while idle.
+    """
+
+    wakes_on_close = True
 
     def __init__(
         self,
@@ -408,15 +426,33 @@ class AsyncQueueTransport(Generic[TRequest, TResponse]):
             raise ChannelFullError(f"Queue full ({timeout}s)") from None
 
     async def recv(self, timeout: float | None = None) -> TResponse:
-        """Get next message from the inbound asyncio queue."""
+        """Get next message from the inbound asyncio queue.
+
+        Messages queued before close() are still returned; after them, recv()
+        raises ChannelClosedError.
+        """
+        if self._closed and self._inbound.empty():
+            raise ChannelClosedError("Channel is closed")
         try:
-            return await asyncio.wait_for(self._inbound.get(), timeout=timeout)
+            if timeout is None:
+                message = await self._inbound.get()
+            else:
+                message = await asyncio.wait_for(self._inbound.get(), timeout=timeout)
         except TimeoutError:
             raise ChannelTimeoutError(f"Timeout waiting for message ({timeout}s)")
+        if message is _CLOSED:
+            # Put it back for the next recv() waiting on this queue
+            with contextlib.suppress(asyncio.QueueFull):
+                self._inbound.put_nowait(message)
+            raise ChannelClosedError("Channel is closed")
+        return message
 
     async def close(self) -> None:
-        """Mark as closed."""
+        """Mark as closed and wake a recv() waiting on the inbound queue. With
+        the queue full nothing waits on it, and recv() raises once it is drained."""
         self._closed = True
+        with contextlib.suppress(asyncio.QueueFull):
+            self._inbound.put_nowait(_CLOSED)
 
     @property
     def is_closed(self) -> bool:

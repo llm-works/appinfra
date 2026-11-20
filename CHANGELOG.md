@@ -25,6 +25,8 @@ For API stability guarantees and deprecation policy, see
   one shared event loop thread, so a service waiting on an `await` holds no thread of its own.
 
 ### Changed
+- An async channel over `AsyncQueueTransport` waits in `recv()` without waking every 0.1 s:
+  `close()` wakes it instead. A custom `AsyncTransport` opts in with `wakes_on_close = True`.
 - **Breaking:** `Service.execute()` is renamed `run()`. A `ScheduledService` override of it is
   never called: the runner runs the tick loop and calls `teardown()` on that thread after it ends.
 - **Breaking:** the local dev server listens on `127.0.0.1` by default instead of every
