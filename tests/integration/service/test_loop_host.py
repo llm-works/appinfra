@@ -125,6 +125,21 @@ def _wait_until(condition: Callable[[], bool], timeout: float = 5.0) -> bool:
     return True
 
 
+def _hold_loop(host: LoopHost) -> threading.Event:
+    """Block the host's loop inside a callback until the returned event is set.
+    Returns once the loop is blocked, so what is scheduled next runs in a later
+    iteration, in the order scheduled."""
+    held, release = threading.Event(), threading.Event()
+
+    def hold() -> None:
+        held.set()
+        release.wait(5.0)
+
+    host.loop.call_soon_threadsafe(hold)
+    assert held.wait(5.0)
+    return release
+
+
 class TestTaskRunner:
     """An AsyncService under a TaskRunner on a LoopHost."""
 
@@ -246,6 +261,55 @@ class TestTaskRunner:
 
 
 class TestLoopHostStop:
+    def test_stop_tears_down_a_service_whose_task_has_not_begun(self):
+        """The host stopping between a task's creation and its first step still
+        tears the service down and ends its runner."""
+        host = LoopHost(name=LOOP_THREAD)
+        host.start()
+        release = _hold_loop(host)
+        svc = Parked()
+        runner = host.runner(svc)
+        runner.start()  # its task's creation is queued behind the hold
+        stopper = threading.Thread(target=host.stop)
+        stopper.start()
+        # Private: once stop() leaves its locked block, the loop's stop is queued
+        # right after the task's creation, so the loop stops in the iteration
+        # that creates the task, before the task's first step
+        assert _wait_until(lambda: host._closing)
+        with host._lock:
+            pass
+
+        release.set()
+        stopper.join(timeout=5.0)
+
+        assert svc.torn_down.is_set()
+        assert not svc.entered.is_set()
+        assert not runner.is_alive()
+
+    def test_start_while_the_host_stops_is_refused(self):
+        """A start() once stop() has begun raises, and tears down what setup()
+        opened."""
+        host = LoopHost(name=LOOP_THREAD)
+        host.start()
+        release = _hold_loop(host)
+        stopper = threading.Thread(target=host.stop)
+        stopper.start()
+        # Private: the window in which stop() has begun but the loop still runs
+        assert _wait_until(lambda: host._closing)
+        svc = Parked()
+        runner = host.runner(svc)
+
+        try:
+            with pytest.raises(RuntimeError, match="is stopping"):
+                runner.start()
+        finally:
+            release.set()
+            stopper.join(timeout=5.0)
+
+        assert runner.state == State.FAILED
+        assert svc.torn_down.is_set()
+        assert not runner.is_alive()
+
     def test_stop_ends_the_services_still_running(self):
         host = LoopHost(name=LOOP_THREAD)
         host.start()

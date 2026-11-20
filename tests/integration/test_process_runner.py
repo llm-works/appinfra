@@ -9,7 +9,7 @@ from multiprocessing.synchronize import Event as MPEvent
 import pytest
 
 from appinfra.log import Logger
-from appinfra.service import ProcessRunner, Service, State
+from appinfra.service import InvalidTransitionError, ProcessRunner, Service, State
 from tests.helpers.fork import forks_in_xdist_worker
 
 
@@ -60,6 +60,26 @@ class TestProcessRunnerIntegration:
 
         assert runner.state == State.STOPPED
         assert not runner.is_alive()
+
+    def test_start_while_running_is_refused_before_setup(self, lg):
+        """A second start() fails on the state check, without running setup()."""
+        setups: list[int] = []
+
+        class CountsSetup(SimpleProcessService):
+            def setup(self) -> None:
+                setups.append(1)
+
+        runner = ProcessRunner(CountsSetup(lg))
+        runner.start()
+        try:
+            runner.wait_healthy(timeout=5.0)
+
+            with pytest.raises(InvalidTransitionError):
+                runner.start()
+        finally:
+            runner.stop()
+
+        assert len(setups) == 1
 
     def test_subprocess_logging(self, lg):
         """Test that subprocess logs are captured via queue."""
