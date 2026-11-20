@@ -54,12 +54,13 @@ class ThreadRunner(Runner):
     def _launch(self) -> None:
         """Start the service's thread."""
         self._exception = None
-        self._exited = False
+        # The thread first, so an older one ending now sees it isn't current
         self._thread = threading.Thread(
             target=self._run,
             name=f"svc-{self.name}",
             daemon=True,
         )
+        self._exited = False
         self._thread.start()
 
     def _reset_stop(self) -> None:
@@ -89,8 +90,10 @@ class ThreadRunner(Runner):
             self._settle_exit_state(self._exception)
         finally:
             # Last, so _exception, teardown and the state are settled before
-            # is_alive() reports the exit.
-            self._exited = True
+            # is_alive() reports the exit; not once a start() on another
+            # thread has launched a newer run
+            if self._thread is threading.current_thread():
+                self._exited = True
 
     def stop(self, timeout: float = 5.0) -> None:
         """Stop the service.

@@ -148,6 +148,16 @@ class TestThreadRunner:
 
         assert runner.state != State.STOPPING
 
+    def test_an_ended_thread_leaves_a_newer_run_alive(self):
+        """A thread that ends after start() has launched a newer one does not
+        mark the newer run as exited."""
+        runner = ThreadRunner(SetupFailService())  # its run() returns at once
+        runner._thread = MagicMock()  # Private: the newer run's thread
+
+        runner._run()  # the old thread's last steps, on this thread
+
+        assert runner._exited is False
+
     def test_stop_joins_for_what_is_left_after_waiting_for_start(self):
         """The time stop() spends waiting for a start() in progress comes off
         the time it then joins the service thread for."""
