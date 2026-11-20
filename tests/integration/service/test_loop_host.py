@@ -98,16 +98,25 @@ class HoldsCancel(Parked):
 
 
 class FailsOnce(Parked):
-    """Fails its first run(); parks in the second."""
+    """Fails its first run(); parks in the second. With *gated*, the first run
+    fails only once release() is called."""
 
-    def __init__(self) -> None:
+    def __init__(self, gated: bool = False) -> None:
         super().__init__("fails-once")
         self.runs = 0
         self.second_run = threading.Event()
+        self._gate = asyncio.Event()
+        if not gated:
+            self._gate.set()
+
+    def release(self, loop: asyncio.AbstractEventLoop) -> None:
+        """Let the first run fail; called from outside *loop*."""
+        loop.call_soon_threadsafe(self._gate.set)
 
     async def run(self) -> None:
         self.runs += 1
         if self.runs == 1:
+            await self._gate.wait()
             raise RuntimeError("first run failed")
         self.second_run.set()
         await asyncio.Event().wait()
@@ -360,8 +369,10 @@ class TestTaskRunner:
 
     def test_start_from_an_end_state_hook_runs_and_stops(self, host):
         """A FAILED hook that starts the runner again, on the loop as the run
-        ends, gets a run that is alive and that stop() ends."""
-        svc = FailsOnce()
+        ends, gets a run that is alive and that stop() ends. The first run fails
+        only once start() has returned: a start() still in progress refuses
+        another."""
+        svc = FailsOnce(gated=True)
         runner = host.runner(svc)
         restarted: list[bool] = []
 
@@ -372,6 +383,7 @@ class TestTaskRunner:
 
         runner.on_state_change(restart)
         runner.start()
+        svc.release(host.loop)
 
         assert svc.second_run.wait(5.0)
         assert runner.is_alive()

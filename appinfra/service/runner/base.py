@@ -101,7 +101,8 @@ class Runner(ABC):
         Non-blocking. After start() returns, execution has begun but
         service may not be healthy yet. Call wait_healthy() to block
         until ready. A stop() from another thread waits for start() to
-        return.
+        return. A run that ends before start() returns cannot be started
+        again until it has: its end-state hooks see this start() in progress.
 
         Raises:
             InvalidTransitionError: If not in CREATED, STOPPED or FAILED state,
