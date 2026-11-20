@@ -103,10 +103,7 @@ class ProcessRunner(Runner):
         self._stop_monitor_event: threading.Event = threading.Event()
 
     def _launch(self) -> None:
-        """Spawn the service's subprocess, unless a stop() from a STARTING hook
-        has already ended the run."""
-        if self._state != State.STARTING:
-            return
+        """Spawn the service's subprocess."""
         try:
             # One context for the process and every queue and event it uses:
             # multiprocessing refuses a lock from another context in the child
@@ -185,7 +182,12 @@ class ProcessRunner(Runner):
     def stop(self, timeout: float | None = None) -> None:
         """Stop the subprocess. A start() in progress on another thread is
         waited for first; that wait and the wait for the child to exit
-        gracefully take at most *timeout* (stop_timeout if None) together."""
+        gracefully take at most *timeout* (stop_timeout if None) together.
+
+        Raises:
+            RuntimeError: If called from one of this runner's state hooks.
+        """
+        self._refuse_from_hook("stop")
         left = self._start_ended(self.stop_timeout if timeout is None else timeout)
         if left is None:
             return
@@ -264,13 +266,7 @@ class ProcessRunner(Runner):
         """
         self._stop_monitor_event.set()
         thread = self._monitor_thread
-        # Called from the monitor thread itself (e.g. a state hook), there is
-        # nothing to join: the set event ends its loop
-        if (
-            thread is not None
-            and thread.is_alive()
-            and thread is not threading.current_thread()
-        ):
+        if thread is not None and thread.is_alive():
             thread.join(timeout=timeout)
         self._monitor_thread = None
 

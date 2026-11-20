@@ -98,25 +98,16 @@ class HoldsCancel(Parked):
 
 
 class FailsOnce(Parked):
-    """Fails its first run(); parks in the second. With *gated*, the first run
-    fails only once release() is called."""
+    """Fails its first run(); parks in the second."""
 
-    def __init__(self, gated: bool = False) -> None:
+    def __init__(self) -> None:
         super().__init__("fails-once")
         self.runs = 0
         self.second_run = threading.Event()
-        self._gate = asyncio.Event()
-        if not gated:
-            self._gate.set()
-
-    def release(self, loop: asyncio.AbstractEventLoop) -> None:
-        """Let the first run fail; called from outside *loop*."""
-        loop.call_soon_threadsafe(self._gate.set)
 
     async def run(self) -> None:
         self.runs += 1
         if self.runs == 1:
-            await self._gate.wait()
             raise RuntimeError("first run failed")
         self.second_run.set()
         await asyncio.Event().wait()
@@ -254,20 +245,40 @@ class TestTaskRunner:
         assert other_runner.is_alive()
         other_runner.stop()
 
-    def test_stop_that_lands_while_starting_skips_run(self, host):
-        """A stop() between the STARTING transition and the task's start is
-        not lost: the task tears the service down without running it."""
+    def test_start_and_stop_from_a_state_hook_are_refused(self, host):
+        """A state hook, on the caller's thread or on the loop, cannot start or
+        stop its own runner; the runner's transitions go on as without it."""
         svc = Parked()
         runner = host.runner(svc)
-        # Hooks run synchronously in start(), so stop() lands inside the window
-        runner.on_state_change(
-            lambda _name, _old, new: runner.stop() if new == State.STARTING else None
-        )
+        refused: list[tuple[State, str]] = []
 
+        def drives(_name: str, _old: State, new: State) -> None:
+            for call in (runner.start, runner.stop):
+                try:
+                    call()
+                except RuntimeError:
+                    refused.append((new, call.__name__))
+
+        runner.on_state_change(drives)
+        stopped = _on_state(runner, State.STOPPED)
         runner.start()
+        assert svc.entered.wait(5.0)
+        runner.wait_healthy(timeout=5.0)
+        runner.stop()
 
-        assert svc.torn_down.wait(timeout=5.0)
-        assert not svc.entered.is_set()
+        assert stopped.wait(5.0)
+        steps = [
+            State.INITD,
+            State.STARTING,
+            State.RUNNING,
+            State.STOPPING,
+            State.STOPPED,  # on the loop, as the task ends
+        ]
+        assert refused == [
+            (state, call) for state in steps for call in ("start", "stop")
+        ]
+        assert runner.state == State.STOPPED
+        assert not runner.is_alive()
 
     def test_stop_right_after_start_tears_down(self, host):
         """Whether or not the task has begun when stop() lands, the service is
@@ -366,30 +377,6 @@ class TestTaskRunner:
         runner.start()
         runner.stop()
         assert runner.state == State.STOPPED
-
-    def test_start_from_an_end_state_hook_runs_and_stops(self, host):
-        """A FAILED hook that starts the runner again, on the loop as the run
-        ends, gets a run that is alive and that stop() ends. The first run fails
-        only once start() has returned: a start() still in progress refuses
-        another."""
-        svc = FailsOnce(gated=True)
-        runner = host.runner(svc)
-        restarted: list[bool] = []
-
-        def restart(_name: str, _old: State, new: State) -> None:
-            if new == State.FAILED and not restarted:
-                restarted.append(True)
-                runner.start()
-
-        runner.on_state_change(restart)
-        runner.start()
-        svc.release(host.loop)
-
-        assert svc.second_run.wait(5.0)
-        assert runner.is_alive()
-        runner.stop()
-        assert runner.state == State.STOPPED
-        assert not runner.is_alive()
 
     def test_check_restarts_a_failed_service(self, host):
         svc = FailsOnce()

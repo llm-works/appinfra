@@ -177,6 +177,37 @@ class TestThreadRunner:
         runner.stop()
         assert runner.state == State.STOPPED
 
+    def test_start_and_stop_from_a_state_hook_are_refused(self):
+        """A state hook, on the caller's thread or the service thread, cannot
+        start or stop its own runner; the transitions go on as without it."""
+        runner = ThreadRunner(SimpleService())
+        refused: list[tuple[State, str]] = []
+
+        def drives(_name: str, _old: State, new: State) -> None:
+            for call in (runner.start, runner.stop):
+                try:
+                    call()
+                except RuntimeError:
+                    refused.append((new, call.__name__))
+
+        runner.on_state_change(drives)
+        runner.start()
+        runner.wait_healthy(timeout=5.0)
+        runner.stop()
+
+        steps = [
+            State.INITD,
+            State.STARTING,
+            State.RUNNING,
+            State.STOPPING,
+            State.STOPPED,  # on the service thread or in stop(), whichever is first
+        ]
+        assert refused == [
+            (state, call) for state in steps for call in ("start", "stop")
+        ]
+        assert runner.state == State.STOPPED
+        assert not runner.is_alive()
+
     def test_start_while_another_start_runs_setup_is_refused(self):
         """A start() that lands while another start() is in setup() fails
         before calling setup() again."""
@@ -506,33 +537,3 @@ class TestScheduledService:
 
         assert torn_down.wait(timeout=5.0)
         assert "tick failed" in str(runner.exception)
-
-    def test_stop_that_lands_while_starting_ends_the_loop(self):
-        """A stop() between the STARTING transition and the thread's start ends
-        the loop before its first tick; start() must not discard it."""
-        torn_down = threading.Event()
-        ticks: list[int] = []
-
-        class Ticker(ScheduledService):
-            interval = 5.0
-
-            @property
-            def name(self) -> str:
-                return "ticker"
-
-            def tick(self) -> None:
-                ticks.append(1)
-
-            def teardown(self) -> None:
-                torn_down.set()
-
-        runner = ThreadRunner(Ticker())
-        # Hooks run synchronously in start(), so stop() lands inside the window
-        runner.on_state_change(
-            lambda _name, _old, new: runner.stop() if new == State.STARTING else None
-        )
-
-        runner.start()
-
-        assert torn_down.wait(timeout=5.0)
-        assert ticks == []

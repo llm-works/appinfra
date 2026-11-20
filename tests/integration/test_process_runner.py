@@ -117,23 +117,28 @@ class TestProcessRunnerIntegration:
         assert runner.state == State.STOPPED
         assert not runner.is_alive()
 
-    def test_stop_from_a_starting_hook_spawns_no_child(self, lg):
-        """A stop() from a STARTING hook, on the thread running start(), ends the
-        run before the spawn: start() then spawns no child."""
+    def test_stop_from_a_starting_hook_is_refused(self, lg):
+        """A stop() from a STARTING hook, on the thread running start(), raises
+        in the hook; the start goes on and spawns the child."""
         runner = ProcessRunner(SimpleProcessService(lg, name="hook-stop"))
-        runner.on_state_change(
-            lambda _name, _old, new: runner.stop() if new == State.STARTING else None
-        )
+        refused: list[RuntimeError] = []
 
+        def stops(_name: str, _old: State, new: State) -> None:
+            if new == State.STARTING:
+                try:
+                    runner.stop()
+                except RuntimeError as e:
+                    refused.append(e)
+
+        runner.on_state_change(stops)
         runner.start()
-
         try:
-            assert runner.state == State.STOPPED
-            assert runner.pid is None
-            assert not runner.is_alive()
+            assert len(refused) == 1
+            assert runner.state == State.STARTING
+            assert runner.is_alive()
         finally:
-            if runner._process is not None and runner._process.is_alive():
-                runner._process.kill()  # Private: a child spawned before the fix
+            runner.stop()
+        assert runner.state == State.STOPPED
 
     def test_subprocess_logging(self, lg):
         """Test that subprocess logs are captured via queue."""

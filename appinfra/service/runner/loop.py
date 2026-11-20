@@ -191,7 +191,7 @@ class TaskRunner(Runner):
         self._running = False
         # The task; held here because the loop keeps only a weak reference.
         # None from start() until the task is created, so a run ending tells
-        # whether a state hook has started a newer one meanwhile
+        # whether a start() on another thread has begun a newer one meanwhile
         self._task: asyncio.Task[None] | None = None
         # Events of stop() calls waiting for the task to end; loop thread only
         self._waiters: list[threading.Event] | None = None
@@ -203,8 +203,9 @@ class TaskRunner(Runner):
         """Run setup(), then start the service's task on the host's loop.
 
         Raises:
-            RuntimeError: If the host is not running or is stopping; a service
-                already set up is torn down and the runner FAILED.
+            RuntimeError: If the host is not running or is stopping (a service
+                already set up is torn down and the runner FAILED), or if
+                called from one of this runner's state hooks.
             InvalidTransitionError: If the runner is not CREATED, STOPPED or FAILED.
             SetupError: If setup fails.
         """
@@ -240,8 +241,9 @@ class TaskRunner(Runner):
         the state, and wake the stop() calls waiting for it.
 
         The state settles before the run is marked ended, so is_alive() never
-        reports a RUNNING service as gone. The state hooks it runs may start a
-        new run, which resets _task; its fields are then left alone."""
+        reports a RUNNING service as gone. Once it has settled, a start() on
+        another thread may begin a new run, which resets _task; that run's
+        fields are then left alone."""
         self._teardown()
         waiters, self._waiters = self._waiters, None
         self._settle_exit_state(self._exception)
@@ -269,9 +271,11 @@ class TaskRunner(Runner):
         thread is waited for first; both waits together take at most *timeout*.
 
         Raises:
-            RuntimeError: If called from the host's loop thread on a runner that
-                is starting or running, which the wait would block.
+            RuntimeError: If called from one of this runner's state hooks, or
+                from the host's loop thread on a runner that is starting or
+                running, which the wait would block.
         """
+        self._refuse_from_hook("stop")
         on_loop = self._host.on_loop_thread()
         # On the loop thread, not even a start() in progress is waited for
         if not on_loop:

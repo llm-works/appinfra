@@ -16,6 +16,9 @@ from ..errors import HealthTimeoutError, InvalidTransitionError, RunError, Setup
 from ..state import TRANSITIONS, RestartPolicy, State, StateHook
 from .drive import check_service
 
+# The runners whose state hooks the current thread is running (_notify())
+_in_hooks = threading.local()
+
 
 class Runner(ABC):
     """Abstract base for service execution and state management.
@@ -90,6 +93,11 @@ class Runner(ABC):
     def on_state_change(self, hook: StateHook) -> None:
         """Register a callback for state changes.
 
+        Hooks observe transitions; they run on the thread making the
+        transition, which may be the service's own thread or loop. A hook that
+        calls start() or stop() on this runner gets a RuntimeError, which is
+        logged like any other hook failure.
+
         Args:
             hook: Callable(service_name, from_state, to_state).
         """
@@ -101,15 +109,16 @@ class Runner(ABC):
         Non-blocking. After start() returns, execution has begun but
         service may not be healthy yet. Call wait_healthy() to block
         until ready. A stop() from another thread waits for start() to
-        return. A run that ends before start() returns cannot be started
-        again until it has: its end-state hooks see this start() in progress.
+        return.
 
         Raises:
             InvalidTransitionError: If not in CREATED, STOPPED or FAILED state,
                 or another start() is in progress.
             SetupError: If setup fails.
             RunError: If execution fails to start.
+            RuntimeError: If called from one of this runner's state hooks.
         """
+        self._refuse_from_hook("start")
         with self._start_claim():
             self._begin_start()
             self._launch()
@@ -273,9 +282,8 @@ class Runner(ABC):
     def _claim_start(self) -> None:
         """Check under the lock that the runner can start and no other start()
         is in progress, claim the start, and reset the stop request there
-        (_reset_stop()): a stop() from another thread waits for the start, and
-        one from a state hook during start() survives until the service's
-        work sees it.
+        (_reset_stop()), before a stop() from another thread can reach this
+        start: such a stop() waits for the claim.
 
         Raises:
             InvalidTransitionError: If the runner is not CREATED, STOPPED or
@@ -290,14 +298,13 @@ class Runner(ABC):
 
     def _await_start(self, timeout: float) -> bool:
         """Wait up to *timeout* seconds for a start() in progress on another
-        thread to return; every runner's stop() calls it first. A stop() on the
-        thread running start() (a state hook) does not wait for itself.
+        thread to return; every runner's stop() calls it first.
 
         Returns:
             False if a start() is still in progress after *timeout*.
         """
         with self._lock:
-            if self._start_thread in (None, threading.get_ident()):
+            if self._start_thread is None:
                 return True
             if self._start_done is None:
                 self._start_done = threading.Condition(self._lock)
@@ -403,12 +410,34 @@ class Runner(ABC):
 
         self._notify(from_state, to)
 
+    def _refuse_from_hook(self, call: str) -> None:
+        """Refuse a start() or stop() from one of this runner's state hooks:
+        the transition that runs them is still under way.
+
+        Raises:
+            RuntimeError: If the current thread is running this runner's hooks.
+        """
+        if any(runner is self for runner in getattr(_in_hooks, "runners", ())):
+            raise RuntimeError(
+                f"{call}() from a state hook of '{self.name}': hooks observe "
+                "their runner's transitions and cannot start or stop it"
+            )
+
     def _notify(self, from_state: State, to: State) -> None:
         """Run the state hooks for a transition; a failing hook is logged."""
-        for hook in self._hooks:
-            try:
-                hook(self.name, from_state, to)
-            except Exception as e:
-                self.service.lg.warning(
-                    "state hook failed", extra={"exception": e, "hook": hook}
-                )
+        if not self._hooks:
+            return
+        runners = getattr(_in_hooks, "runners", None)
+        if runners is None:
+            runners = _in_hooks.runners = []
+        runners.append(self)
+        try:
+            for hook in self._hooks:
+                try:
+                    hook(self.name, from_state, to)
+                except Exception as e:
+                    self.service.lg.warning(
+                        "state hook failed", extra={"exception": e, "hook": hook}
+                    )
+        finally:
+            runners.pop()
