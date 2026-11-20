@@ -54,8 +54,23 @@ class Parked(AsyncService):
 
 
 class Returns(Parked):
+    """Returns from run() once release() is called, so a test can see it
+    RUNNING first: a run() that ends before wait_healthy() looks counts as
+    exiting during startup."""
+
+    def __init__(self) -> None:
+        super().__init__("returns")
+        self._release: asyncio.Event | None = None
+
     async def run(self) -> None:
+        self._release = asyncio.Event()
         self.entered.set()
+        await self._release.wait()
+
+    def release(self, host: LoopHost) -> None:
+        """Let run() return; call once entered is set."""
+        assert self._release is not None
+        host.loop.call_soon_threadsafe(self._release.set)
 
 
 class Boom(Parked):
@@ -190,6 +205,9 @@ class TestTaskRunner:
         done = _on_state(runner, State.DONE)
         runner.start()
         runner.wait_healthy(timeout=5.0)
+        assert svc.entered.wait(timeout=5.0)
+
+        svc.release(host)
 
         assert done.wait(timeout=5.0)
         assert svc.torn_down.is_set()

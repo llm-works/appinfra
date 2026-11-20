@@ -35,6 +35,18 @@ class SimpleProcessService(Service):
         return True
 
 
+class CountsSetup(SimpleProcessService):
+    """Counts setup() calls; setup() runs in the parent, in start(). Module
+    level so the spawn start method can pickle it."""
+
+    def __init__(self, lg: Logger) -> None:
+        super().__init__(lg, name="counts-setup")
+        self.setups = 0
+
+    def setup(self) -> None:
+        self.setups += 1
+
+
 @forks_in_xdist_worker
 class TestProcessRunnerIntegration:
     """Integration tests for ProcessRunner with real subprocesses."""
@@ -63,13 +75,8 @@ class TestProcessRunnerIntegration:
 
     def test_start_while_running_is_refused_before_setup(self, lg):
         """A second start() fails on the state check, without running setup()."""
-        setups: list[int] = []
-
-        class CountsSetup(SimpleProcessService):
-            def setup(self) -> None:
-                setups.append(1)
-
-        runner = ProcessRunner(CountsSetup(lg))
+        svc = CountsSetup(lg)
+        runner = ProcessRunner(svc)
         runner.start()
         try:
             runner.wait_healthy(timeout=5.0)
@@ -79,7 +86,7 @@ class TestProcessRunnerIntegration:
         finally:
             runner.stop()
 
-        assert len(setups) == 1
+        assert svc.setups == 1
 
     def test_subprocess_logging(self, lg):
         """Test that subprocess logs are captured via queue."""
