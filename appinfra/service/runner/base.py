@@ -8,6 +8,8 @@ from __future__ import annotations
 import threading
 import time
 from abc import ABC, abstractmethod
+from collections.abc import Iterator
+from contextlib import contextmanager
 
 from ..base import Service
 from ..errors import HealthTimeoutError, InvalidTransitionError, RunError, SetupError
@@ -47,8 +49,10 @@ class Runner(ABC):
         self._retries = 0
         self._restarting = False
         self._lock = threading.Lock()
-        # Held by a start() from its state check until STARTING (_begin_start())
-        self._start_claimed = False
+        # The thread running start(), from its state check until it returns
+        # (_start_claim()); stop() from another thread waits on _start_done
+        self._start_thread: int | None = None
+        self._start_done = threading.Condition(self._lock)
 
     @property
     def name(self) -> str:
@@ -89,19 +93,28 @@ class Runner(ABC):
         """
         self._hooks.append(hook)
 
-    @abstractmethod
     def start(self) -> None:
         """Start the service (STOPPED -> STARTING -> begins execution).
 
         Non-blocking. After start() returns, execution has begun but
         service may not be healthy yet. Call wait_healthy() to block
-        until ready.
+        until ready. A stop() from another thread waits for start() to
+        return.
 
         Raises:
-            InvalidTransitionError: If not in STOPPED or FAILED state.
+            InvalidTransitionError: If not in CREATED, STOPPED or FAILED state,
+                or another start() is in progress.
             SetupError: If setup fails.
             RunError: If execution fails to start.
         """
+        with self._start_claim():
+            self._begin_start()
+            self._launch()
+
+    @abstractmethod
+    def _launch(self) -> None:
+        """Begin the service's work once it is set up and STARTING: start its
+        thread, process or task."""
 
     @abstractmethod
     def stop(self, timeout: float = 5.0) -> None:
@@ -233,31 +246,31 @@ class Runner(ABC):
             self.policy.max_backoff,
         )
 
-    def _begin_start(self) -> None:
-        """Claim the start, run setup() and move to STARTING; the first steps of
-        every runner's start(). The claim holds until STARTING, from which the
-        state check alone refuses another start, so a second start() fails
-        before it calls setup().
+    @contextmanager
+    def _start_claim(self) -> Iterator[None]:
+        """Hold the start for one start() call, from its state check until it
+        returns or raises; every runner's start() runs inside it. A second
+        start() fails before it calls setup(), and a stop() from another thread
+        waits for the claim to be released (_await_start()).
 
         Raises:
             InvalidTransitionError: If the runner is not CREATED, STOPPED or
                 FAILED, or another start() is in progress.
-            SetupError: If setup fails.
         """
         self._claim_start()
         try:
-            self._run_setup()
-            self._transition(State.INITD)
-            self._transition(State.STARTING)
+            yield
         finally:
-            with self._lock:
-                self._start_claimed = False
+            with self._start_done:
+                self._start_thread = None
+                self._start_done.notify_all()
 
     def _claim_start(self) -> None:
         """Check under the lock that the runner can start and no other start()
         is in progress, claim the start, and reset the stop request there
-        (_reset_stop()): no stop() is accepted yet, so one that lands later
-        survives until the service's work sees it.
+        (_reset_stop()): a stop() from another thread waits for the start, and
+        one from a state hook during start() survives until the service's
+        work sees it.
 
         Raises:
             InvalidTransitionError: If the runner is not CREATED, STOPPED or
@@ -265,10 +278,50 @@ class Runner(ABC):
         """
         with self._lock:
             startable = self._state in (State.CREATED, State.STOPPED, State.FAILED)
-            if self._start_claimed or not startable:
+            if self._start_thread is not None or not startable:
                 raise InvalidTransitionError(self.name, self._state, State.INITD)
-            self._start_claimed = True
+            self._start_thread = threading.get_ident()
             self._reset_stop()
+
+    def _await_start(self, timeout: float) -> bool:
+        """Wait up to *timeout* seconds for a start() in progress on another
+        thread to return; every runner's stop() calls it first. A stop() on the
+        thread running start() (a state hook) does not wait for itself.
+
+        Returns:
+            False if a start() is still in progress after *timeout*.
+        """
+        with self._start_done:
+            if self._start_thread == threading.get_ident():
+                return True
+            return self._start_done.wait_for(
+                lambda: self._start_thread is None, timeout
+            )
+
+    def _begin_start(self) -> None:
+        """Run setup() and move to STARTING, inside start()'s claim.
+
+        Raises:
+            SetupError: If setup fails.
+        """
+        self._run_setup()
+        self._transition(State.INITD)
+        self._transition(State.STARTING)
+
+    def _start_ended(self, timeout: float) -> bool:
+        """For stop(): wait up to *timeout* seconds for a start() in progress
+        on another thread; if it is still running then, log it.
+
+        Returns:
+            False if stop() should return without acting.
+        """
+        if self._await_start(timeout):
+            return True
+        self.service.lg.warning(
+            "stop() waited for a start() in progress",
+            extra={"service": self.name, "timeout": timeout},
+        )
+        return False
 
     def _reset_stop(self) -> None:
         """Clear the runner's stop request before a start; called under the lock.

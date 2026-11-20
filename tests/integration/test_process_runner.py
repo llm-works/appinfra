@@ -3,6 +3,7 @@
 
 """Integration tests for ProcessRunner with real subprocesses."""
 
+import threading
 import time
 from multiprocessing.synchronize import Event as MPEvent
 
@@ -87,6 +88,34 @@ class TestProcessRunnerIntegration:
             runner.stop()
 
         assert svc.setups == 1
+
+    def test_stop_during_start_leaves_no_child_behind(self, lg):
+        """A stop() that lands between STARTING and the spawn does not report
+        STOPPED for a child start() is about to spawn; with no time to wait
+        it returns, and a later stop() ends the child."""
+        runner = ProcessRunner(SimpleProcessService(lg, name="held-start"))
+        starting, release = threading.Event(), threading.Event()
+
+        def hold(_name: str, _old: State, new: State) -> None:
+            if new == State.STARTING and not starting.is_set():
+                starting.set()
+                release.wait(5.0)  # holds start() before it spawns
+
+        runner.on_state_change(hold)
+        first = threading.Thread(target=runner.start)
+        first.start()
+        try:
+            assert starting.wait(5.0)
+            runner.stop(timeout=0)  # the start is in progress: no time to wait
+            assert runner.state == State.STARTING
+        finally:
+            release.set()
+            first.join(5.0)
+
+        runner.wait_healthy(timeout=5.0)
+        runner.stop()
+        assert runner.state == State.STOPPED
+        assert not runner.is_alive()
 
     def test_subprocess_logging(self, lg):
         """Test that subprocess logs are captured via queue."""

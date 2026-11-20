@@ -205,7 +205,11 @@ class TaskRunner(Runner):
             SetupError: If setup fails.
         """
         self._host.loop  # fails before any state change if the host is not running
-        self._begin_start()
+        super().start()
+
+    def _launch(self) -> None:
+        """Schedule the service's task on the host's loop; if the host is
+        stopping, tear the service down and fail."""
         self._exception = None
         self._running = True
         try:
@@ -251,12 +255,15 @@ class TaskRunner(Runner):
 
     def stop(self, timeout: float = 5.0) -> None:
         """Cancel the service's task and wait up to *timeout* seconds for it to
-        end and the service to be torn down.
+        end and the service to be torn down. A start() in progress on another
+        thread is waited for first, within the same *timeout*.
 
         Raises:
             RuntimeError: If called from the host's loop thread, which the wait
                 would block.
         """
+        if not self._start_ended(timeout):
+            return
         if self._state in (State.CREATED, State.STOPPED, State.STOPPING, State.DONE):
             return
         if self._host.on_loop_thread():

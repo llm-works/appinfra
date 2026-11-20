@@ -274,6 +274,35 @@ class TestTaskRunner:
             assert runner.state == State.STOPPED
             assert not runner.is_alive()
 
+    def test_stop_from_another_thread_during_start_leaves_the_start_alone(self, host):
+        """A stop() from another thread that lands while start() is between
+        STARTING and scheduling the task does not report STOPPED before
+        teardown; with no time to wait it returns, and the start completes."""
+        svc = Parked()
+        runner = host.runner(svc)
+        starting, release = threading.Event(), threading.Event()
+
+        def hold(_name: str, _old: State, new: State) -> None:
+            if new == State.STARTING and not starting.is_set():
+                starting.set()
+                release.wait(5.0)  # holds start() before its task is scheduled
+
+        runner.on_state_change(hold)
+        first = threading.Thread(target=runner.start)
+        first.start()
+        try:
+            assert starting.wait(5.0)
+            runner.stop(timeout=0)  # the start is in progress: no time to wait
+            assert runner.state == State.STARTING
+        finally:
+            release.set()
+            first.join(5.0)
+
+        assert svc.entered.wait(5.0)
+        runner.stop()
+        assert svc.torn_down.is_set()
+        assert runner.state == State.STOPPED
+
     def test_task_ending_after_stop_gave_up_stops_the_runner(self, host):
         """A task that outlives stop()'s wait still moves the runner to
         STOPPED when it ends, so the runner can start again."""

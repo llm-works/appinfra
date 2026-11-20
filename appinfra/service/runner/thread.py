@@ -51,11 +51,8 @@ class ThreadRunner(Runner):
         # RUNNING for a service that exited during startup.
         self._exited = False
 
-    def start(self) -> None:
-        """Start the service in a background thread."""
-        self._begin_start()
-
-        # Execute phase
+    def _launch(self) -> None:
+        """Start the service's thread."""
         self._exception = None
         self._exited = False
         self._thread = threading.Thread(
@@ -101,8 +98,11 @@ class ThreadRunner(Runner):
         A scheduled service's loop ends and the service thread tears it down; a
         service with its own run() is torn down here, which tells run() to
         return. Either way the thread is then joined for up to *timeout*
-        seconds.
+        seconds. A start() in progress on another thread is waited for first,
+        within the same *timeout*.
         """
+        if not self._start_ended(timeout):
+            return
         if self._state in (State.CREATED, State.STOPPED, State.STOPPING, State.DONE):
             return
 

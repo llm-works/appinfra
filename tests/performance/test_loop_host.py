@@ -187,7 +187,7 @@ class TestLoopHostCost:
     @pytest.mark.skipif(
         sys.platform == "darwin",
         reason="macOS CI runners run this an order of magnitude slower than Linux; "
-        "the same code is held to the floor there",
+        "the floor is enforced on Linux only",
     )
     def test_submit_reply_rate(self, host):
         """Round trips from a caller on the loop to a service and back."""

@@ -81,6 +81,26 @@ class SlowSetup(SimpleService):
         self.release.wait(5.0)
 
 
+class FailsFirstRun(SlowSetup):
+    """Its first run() fails; later runs park like SimpleService. Counts
+    teardown() calls."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.runs = 0
+        self.teardowns = 0
+
+    def run(self) -> None:
+        self.runs += 1
+        if self.runs == 1:
+            raise RuntimeError("first run fails")
+        super().run()
+
+    def teardown(self) -> None:
+        self.teardowns += 1
+        super().teardown()
+
+
 class OutlivesStop(Service):
     """run() ignores teardown() and returns only once released."""
 
@@ -98,6 +118,44 @@ class OutlivesStop(Service):
 
 class TestThreadRunner:
     """Test ThreadRunner class."""
+
+    def test_stop_during_a_start_from_failed_leaves_the_start_alone(self):
+        """A stop() that lands while a start() from FAILED is in setup() does
+        not tear the service down under it; with no time to wait it returns,
+        and the start completes."""
+        svc = FailsFirstRun()
+        runner = ThreadRunner(svc)
+        failed = threading.Event()
+        runner.on_state_change(
+            lambda _name, _old, new: failed.set() if new == State.FAILED else None
+        )
+        svc.release.set()
+        runner.start()
+        assert failed.wait(5.0)
+        svc.in_setup.clear()
+        svc.release.clear()
+        errors: list[BaseException] = []
+
+        def start() -> None:
+            try:
+                runner.start()
+            except BaseException as e:
+                errors.append(e)
+
+        first = threading.Thread(target=start)
+        first.start()
+        assert svc.in_setup.wait(5.0)
+
+        runner.stop(timeout=0)  # the start is in progress: no time to wait for it
+
+        assert svc.teardowns == 0
+        assert runner.state == State.FAILED
+        svc.release.set()
+        first.join(5.0)
+        assert errors == []
+        runner.wait_healthy(timeout=5.0)
+        runner.stop()
+        assert runner.state == State.STOPPED
 
     def test_thread_ending_after_stop_gave_up_stops_the_runner(self):
         """A thread that outlives stop()'s join still moves the runner to

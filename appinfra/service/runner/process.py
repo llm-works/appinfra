@@ -102,10 +102,8 @@ class ProcessRunner(Runner):
         self._monitor_thread: threading.Thread | None = None
         self._stop_monitor_event: threading.Event = threading.Event()
 
-    def start(self) -> None:
-        """Start the service in a subprocess."""
-        self._begin_start()
-
+    def _launch(self) -> None:
+        """Spawn the service's subprocess."""
         try:
             # One context for the process and every queue and event it uses:
             # multiprocessing refuses a lock from another context in the child
@@ -182,7 +180,10 @@ class ProcessRunner(Runner):
                 setattr(self.service, "_lg", saved_lg)
 
     def stop(self, timeout: float | None = None) -> None:
-        """Stop the subprocess."""
+        """Stop the subprocess. A start() in progress on another thread is
+        waited for first, within the same timeout (stop_timeout if None)."""
+        if not self._start_ended(self.stop_timeout if timeout is None else timeout):
+            return
         if self._state in (State.CREATED, State.STOPPED, State.STOPPING, State.DONE):
             return
 

@@ -33,6 +33,26 @@ class RecordingTransport(AsyncQueueTransport[Any, Any]):
         return await super().recv(timeout)
 
 
+class YieldsAfterTake(AsyncQueueTransport[Any, Any]):
+    """A recv() with a finite timeout pauses between taking an item off the
+    queue and handling it, as wait_for() does on Python 3.11, where get() runs
+    in a task of its own; held until proceed is set."""
+
+    def __init__(
+        self, outbound: asyncio.Queue[Any], inbound: asyncio.Queue[Any]
+    ) -> None:
+        super().__init__(outbound, inbound)
+        self.taken = asyncio.Event()
+        self.proceed = asyncio.Event()
+
+    async def _wait_for_message(self, timeout: float | None) -> Any:
+        message = await super()._wait_for_message(timeout)
+        if timeout is not None:
+            self.taken.set()
+            await self.proceed.wait()
+        return message
+
+
 async def _parked(task: asyncio.Task[Any]) -> None:
     """Let *task* run until it waits on something."""
     for _ in range(3):
@@ -114,6 +134,32 @@ class TestAsyncQueueChannelWait:
         )
         assert [r.payload for r in results if isinstance(r, Message)] == [1]
         assert sum(isinstance(r, ChannelClosedError) for r in results) == 1
+
+    @pytest.mark.asyncio
+    async def test_close_marker_lost_to_a_peer_send_is_queued_again(self) -> None:
+        """The peer fills the slot the close marker left while a recv() holds
+        it, so the marker cannot be put back; the next message taken off the
+        queue makes room for it, and the last parked recv() still ends."""
+        inbound: asyncio.Queue[Any] = asyncio.Queue(maxsize=1)
+        transport = YieldsAfterTake(asyncio.Queue(), inbound)
+        finite = asyncio.create_task(transport.recv(timeout=5.0))
+        await _parked(finite)
+        others = [asyncio.create_task(transport.recv()) for _ in range(2)]
+        for task in others:
+            await _parked(task)
+
+        await transport.close()  # the marker goes to the finite recv()
+        await asyncio.wait_for(transport.taken.wait(), timeout=5.0)
+        # Without yielding in between: the finite recv() resumes, before the
+        # recv() this message wakes, and finds the slot full
+        transport.proceed.set()
+        inbound.put_nowait(Message(payload=1))  # the open peer fills the slot
+
+        results = await asyncio.wait_for(
+            asyncio.gather(finite, *others, return_exceptions=True), timeout=5.0
+        )
+        assert [r.payload for r in results if isinstance(r, Message)] == [1]
+        assert sum(isinstance(r, ChannelClosedError) for r in results) == 2
 
     @pytest.mark.asyncio
     async def test_recv_without_waiting_returns_a_queued_message(self) -> None:

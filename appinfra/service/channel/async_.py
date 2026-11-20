@@ -409,9 +409,8 @@ class AsyncQueueTransport(Generic[TRequest, TResponse]):
         self._outbound = outbound
         self._inbound = inbound
         self._closed = False
-        # The close marker is on the inbound queue, or a recv() woken by it is
-        # putting it back. At most one: extra markers would take queue slots
-        # the peer, still open, sends into.
+        # The close marker is on the inbound queue. At most one: extra markers
+        # would take queue slots the peer, still open, sends into.
         self._marker_queued = False
 
     async def send(self, message: TRequest, timeout: float | None = None) -> None:
@@ -460,9 +459,11 @@ class AsyncQueueTransport(Generic[TRequest, TResponse]):
         """*message* taken off the inbound queue, or ChannelClosedError if it is
         the close marker."""
         if message is _CLOSED:
-            # Put it back for the next recv() waiting on this queue
-            with contextlib.suppress(asyncio.QueueFull):
-                self._inbound.put_nowait(message)
+            # Put it back for the next recv() waiting on this queue. If the
+            # peer has filled the slot meanwhile, the flag stays clear and the
+            # next message taken off the queue makes room for it.
+            self._marker_queued = False
+            self._queue_marker()
             raise ChannelClosedError("Channel is closed")
         if self._closed:
             # close() found the queue full; the message just taken made room
