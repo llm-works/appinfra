@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import gc
 import os
+import sys
 import threading
 import time
 import tracemalloc
@@ -183,6 +184,11 @@ class TestLoopHostCost:
         print(f"\n{SERVICES:,} idle channel receivers: {cpu:.1%} of a core")
         assert cpu < 0.02, f"{cpu:.1%} of a core while idle"
 
+    @pytest.mark.skipif(
+        sys.platform == "darwin",
+        reason="macOS CI runners run this an order of magnitude slower than Linux; "
+        "the same code is held to the floor there",
+    )
     def test_submit_reply_rate(self, host):
         """Round trips from a caller on the loop to a service and back."""
         pair = AsyncQueueChannelFactory().create_pair()
