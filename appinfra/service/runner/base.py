@@ -10,48 +10,37 @@ import time
 from abc import ABC, abstractmethod
 
 from ..base import Service
-from ..channel.sync import Channel
-from ..errors import HealthTimeoutError, InvalidTransitionError, RunError
+from ..errors import HealthTimeoutError, InvalidTransitionError, RunError, SetupError
 from ..state import TRANSITIONS, RestartPolicy, State, StateHook
-from .drive import check_form
+from .drive import check_service
 
 
 class Runner(ABC):
     """Abstract base for service execution and state management.
 
     A Runner handles:
-    - HOW a service is executed (thread, process)
+    - HOW a service is executed (thread, process, task on an event loop)
     - State tracking (STOPPED -> STARTING -> RUNNING -> STOPPING)
     - Restart policy with backoff
     - State change hooks
 
-    It hosts any Service: it runs a StepService's or ScheduledService's loop,
-    calls any other service's run(), and owns a step service's inbox channel:
+    Implementations:
     - ThreadRunner: Runs the service in a daemon thread
     - ProcessRunner: Runs the service in a subprocess
+    - TaskRunner: Runs an AsyncService as a task on a LoopHost's event loop
     """
 
-    def __init__(
-        self,
-        service: object,
-        policy: RestartPolicy | None = None,
-        inbox: Channel | None = None,
-    ) -> None:
+    def __init__(self, service: object, policy: RestartPolicy | None = None) -> None:
         """Initialize runner.
 
         Args:
             service: The service to run.
             policy: Restart policy. Defaults to RestartPolicy().
-            inbox: The channel a StepService receives its messages on; required
-                for a step service, refused for any other.
 
         Raises:
-            TypeError: If *service* is not a Service it can host (see
-                check_form()).
-            ValueError: If *inbox* does not match the service.
+            TypeError: If *service* is not a Service (see check_service()).
         """
-        self.service: Service = check_form(service, inbox)
-        self.inbox = inbox
+        self.service: Service = check_service(service)
         self.policy = policy or RestartPolicy()
         self._state = State.CREATED
         self._hooks: list[StateHook] = []
@@ -241,6 +230,50 @@ class Runner(ABC):
             self.policy.backoff * (self.policy.backoff_multiplier**self._retries),
             self.policy.max_backoff,
         )
+
+    def _claim_start(self, stop: threading.Event) -> None:
+        """Check under the lock that the runner can start, which prevents
+        concurrent starts, and clear *stop* there: no stop() is accepted yet, so
+        one that lands later survives until the service's work sees it.
+
+        Raises:
+            InvalidTransitionError: If the runner is not CREATED, STOPPED or FAILED.
+        """
+        with self._lock:
+            if self._state not in (State.CREATED, State.STOPPED, State.FAILED):
+                raise InvalidTransitionError(self.name, self._state, State.INITD)
+            stop.clear()
+
+    def _run_setup(self) -> None:
+        """Run service setup, transition to FAILED on error."""
+        try:
+            self.service.setup()
+        except Exception as e:
+            self._transition(State.FAILED)
+            if isinstance(e, SetupError):
+                raise
+            raise SetupError(self.name, str(e)) from e
+
+    def _teardown(self) -> None:
+        """Run the service's teardown(); a failure is logged, not raised."""
+        try:
+            self.service.teardown()
+        except Exception as e:
+            self.service.lg.warning(
+                "teardown failed", extra={"exception": e, "service": self.name}
+            )
+
+    def _settle_exit_state(self, exception: BaseException | None) -> None:
+        """DONE after the work ended cleanly, FAILED after *exception*, unless
+        stop() or wait_healthy() has already moved the state on."""
+        try:
+            if exception is None:
+                if self._state == State.RUNNING:
+                    self._transition(State.DONE)
+            elif self._state in (State.STARTING, State.RUNNING):
+                self._transition(State.FAILED)
+        except InvalidTransitionError:
+            pass  # Already transitioned by stop()
 
     def _transition(self, to: State) -> None:
         """Transition to a new state."""

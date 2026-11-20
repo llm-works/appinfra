@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright 2026 The appinfra Authors
 
-"""ProcessRunner drives step and scheduled services in the subprocess."""
+"""ProcessRunner runs a scheduled service's tick loop in the subprocess."""
 
 import multiprocessing as mp
 from multiprocessing.synchronize import Event as MPEvent
@@ -9,29 +9,8 @@ from multiprocessing.synchronize import Event as MPEvent
 import pytest
 
 from appinfra.log import Logger
-from appinfra.service import (
-    Message,
-    ProcessRunner,
-    RunnerFactory,
-    ScheduledService,
-    State,
-    StepService,
-)
+from appinfra.service import ProcessRunner, ScheduledService, State
 from tests.helpers.fork import forks_in_xdist_worker
-
-
-class ProcessDoubler(StepService):
-    """Replies with the payload doubled. Module-level: pickled to the subprocess."""
-
-    def __init__(self, lg: Logger) -> None:
-        self._lg = lg
-
-    @property
-    def name(self) -> str:
-        return "doubler"
-
-    def step(self, msg: Message) -> Message:
-        return Message(id=msg.id, payload=msg.payload * 2)
 
 
 class ProcessTicker(ScheduledService):
@@ -57,27 +36,12 @@ class ProcessTicker(ScheduledService):
 
 
 @forks_in_xdist_worker
-class TestProcessServiceForms:
+class TestProcessScheduledService:
     @pytest.fixture
     def lg(self) -> Logger:
         return Logger(name="test")
 
-    @pytest.mark.parametrize("start_method", mp.get_all_start_methods())
-    def test_step_service_replies_from_the_subprocess(self, lg, start_method):
-        """Under spawn and forkserver the inbox is pickled into the subprocess."""
-        factory = RunnerFactory(lg, start_method=start_method)
-        result = factory.create_process_runner_with_channel(ProcessDoubler(lg))
-        result.runner.start()
-        try:
-            result.runner.wait_healthy(timeout=10.0)
-            reply = result.channel.submit(Message(payload=21), timeout=10.0)
-        finally:
-            result.runner.stop()
-
-        assert reply.payload == 42
-        assert result.runner.state == State.STOPPED
-
-    def test_scheduled_service_ticks_and_stops_in_the_subprocess(self, lg):
+    def test_ticks_and_stops_in_the_subprocess(self, lg):
         """The runner ticks the service and ends its loop on stop().
 
         teardown() runs in the subprocess only after the loop returns: a process

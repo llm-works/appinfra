@@ -18,25 +18,23 @@ from typing import Any
 from ...log import Logger
 from ...log.mp import LogQueueListener
 from ..base import Service
-from ..channel.sync import Channel
-from ..errors import SetupError
 from ..state import RestartPolicy, State
 from .base import Runner
-from .drive import drive
+from .drive import check_drivable, drive
 
 
 class ProcessRunner(Runner):
     """Runs a service in a separate process using multiprocessing.
 
     Similar to ThreadRunner but uses a subprocess for isolation.
-    The service, and a step service's inbox, must be picklable for this to work.
+    The service must be picklable for this to work. An AsyncService runs on a
+    LoopHost instead.
 
     Note:
         A service with its own run() should use ``_shutdown_event`` (injected
         by ProcessRunner) to detect shutdown signals from the parent process. Do
         NOT create your own multiprocessing.Event - it won't be shared across
-        processes. Step and scheduled services need nothing: the runner ends
-        their loop.
+        processes. Scheduled services need nothing: the runner ends their loop.
 
     Example:
         from appinfra.service import ProcessRunner, Service
@@ -72,7 +70,6 @@ class ProcessRunner(Runner):
         policy: RestartPolicy | None = None,
         stop_timeout: float = 5.0,
         start_method: str | None = None,
-        inbox: Channel | None = None,
     ) -> None:
         """Initialize process runner.
 
@@ -85,10 +82,12 @@ class ProcessRunner(Runner):
                 None uses multiprocessing's default. Under fork, a restart forks
                 from the monitor thread, which Python 3.12+ warns may deadlock the
                 child; spawn or forkserver avoids it.
-            inbox: A StepService's inbox channel (see Runner), on a process-safe
-                transport such as ProcessQueueTransport.
+
+        Raises:
+            TypeError: If *service* is an AsyncService.
         """
-        super().__init__(service, policy, inbox)
+        super().__init__(service, policy)
+        check_drivable(self.service)
         self.stop_timeout = stop_timeout
         self._start_method = start_method
         self._process: BaseProcess | None = None
@@ -139,16 +138,6 @@ class ProcessRunner(Runner):
             proc.kill()
             proc.join(timeout=1.0)
 
-    def _run_setup(self) -> None:
-        """Run service setup, transition to FAILED on error."""
-        try:
-            self.service.setup()
-        except Exception as e:
-            self._transition(State.FAILED)
-            if isinstance(e, SetupError):
-                raise
-            raise SetupError(self.name, str(e)) from e
-
     def _create_log_infrastructure(
         self, ctx: BaseContext
     ) -> tuple[dict[str, Any], LogQueueListener]:
@@ -180,7 +169,6 @@ class ProcessRunner(Runner):
                 target=_process_entry,
                 args=(
                     self.service,
-                    self.inbox,
                     self._shutdown_event,
                     self._healthy_event,
                     self._error_queue,
@@ -408,7 +396,6 @@ def _start_health_poller(
 
 def _process_entry(
     service: Any,
-    inbox: Channel | None,
     shutdown_event: MPEvent,
     healthy_event: MPEvent,
     error_queue: mp.Queue[BaseException],
@@ -433,7 +420,7 @@ def _process_entry(
             service._shutdown_event = shutdown_event
 
         _start_health_poller(service, shutdown_event, healthy_event)
-        drive(service, shutdown_event, inbox)
+        drive(service, shutdown_event)
     except BaseException as e:
         exit_code = _exit_code(e)
         with contextlib.suppress(Exception):

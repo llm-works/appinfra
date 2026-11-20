@@ -17,43 +17,49 @@ Three-layer architecture separates concerns:
 
 | Layer | Responsibility | Examples |
 |-------|---------------|----------|
-| **Service** | WHAT to run (definition, config, behavior) | `Service`, `StepService`, `ScheduledService` |
-| **Runner** | HOW to run it (execution + state management) | `ThreadRunner`, `ProcessRunner` |
+| **Service** | WHAT to run (definition, config, behavior) | `Service`, `ScheduledService`, `AsyncService` |
+| **Runner** | HOW to run it (execution + state management) | `ThreadRunner`, `ProcessRunner`, `TaskRunner` |
 | **Manager** | Orchestration (dependency ordering, parallel start/stop) | `Manager` |
 
 ## Quick Start
 
 ```python
 from appinfra.log import Logger
-from appinfra.service import Message, RunnerFactory, StepService
+from appinfra.service import Service, ThreadRunner
 
 
-class Doubler(StepService):
+class MyService(Service):
     def __init__(self, lg: Logger):
         self._lg = lg
+        self._stop = threading.Event()
 
     @property
     def name(self) -> str:
-        return "doubler"
+        return "myservice"
 
-    def step(self, msg: Message) -> Message:
-        return Message(id=msg.id, payload=msg.payload * 2)
+    def run(self) -> None:
+        self._lg.info("service started")
+        self._stop.wait()  # Block until teardown
+
+    def teardown(self) -> None:
+        self._stop.set()
 
 
-# Run on a thread; the runner owns the service's inbox, the caller holds the other end
+# Run with ThreadRunner
 lg = Logger(name="app")
-result = RunnerFactory(lg).create_thread_runner_with_channel(Doubler(lg))
-result.runner.start()
-result.runner.wait_healthy(timeout=30.0)
-reply = result.channel.submit(Message(payload=21))  # reply.payload == 42
-result.runner.stop()
+runner = ThreadRunner(MyService(lg))
+runner.start()
+runner.wait_healthy(timeout=30.0)
+# ... service is running ...
+runner.stop()
 ```
 
 ## Services
 
 Services define WHAT to run. A `Service` implements `run()`, which holds its thread until the
-service is stopped. `StepService` and `ScheduledService` hand their loop to the runner instead,
-which lets a runner host many of them without a thread each.
+service is stopped. A `ScheduledService` hands its loop to the runner, which calls `tick()`. An
+`AsyncService`'s `run()` is a coroutine: a `LoopHost` runs many of them as tasks on one event loop
+thread.
 
 ```python
 class Service(ABC):
@@ -69,13 +75,13 @@ class Service(ABC):
 
     @abstractmethod
     def run(self) -> None:
-        """Do the work, blocking until stopped. The services the runner loops implement it."""
+        """Do the work, blocking until stopped. ScheduledService implements it."""
 
     def setup(self) -> None:
         """Initialize resources. Raise SetupError to abort."""
 
     def teardown(self) -> None:
-        """Cleanup. Step/scheduled: runs after the loop ends. Otherwise: must make run() return."""
+        """Cleanup. Scheduled/async: runs after the work ends. Otherwise: must make run() return."""
 
     def is_healthy(self) -> bool:
         """Check if ready. Runner waits for this before RUNNING state."""
@@ -87,32 +93,60 @@ class Service(ABC):
         return self._lg
 ```
 
-| Class | Implement | Triggered by |
-|-------|-----------|--------------|
-| `Service` | `run()` | once at start; it holds its thread until stopped |
-| `StepService` | `step(msg)` | each message on the inbox channel its runner owns |
-| `ScheduledService` | `tick()`, `interval` | a timer, `interval` seconds after the last `tick()` returned |
+| Class | Implement | Runs on |
+|-------|-----------|---------|
+| `Service` | `run()` | a thread or process of its own, held until stopped |
+| `ScheduledService` | `tick()`, `interval` | a thread or process; `tick()` runs `interval` seconds after the last one returned |
+| `AsyncService` | `async def run()` | a task on a `LoopHost`'s event loop, shared with other async services |
 
-For a step or scheduled service, the runner owns the loop and calls `teardown()` once the loop has
-ended, however it ended (stop, failure, inbox closed), on the thread or in the process that ran it:
-`teardown()` never overlaps `step()` or `tick()`, so cleanup that must happen on the service's own
-thread belongs there.
+For a scheduled service, the runner owns the loop and calls `teardown()` once it has ended (stop or
+failure), on the thread or in the process that ran it: `teardown()` never overlaps `tick()`, so
+cleanup that must happen on the service's own thread belongs there.
 
-### StepService
+### AsyncService
 
-The runner receives each message on the service's inbox and calls `step()` with it. A reply that
-`step()` returns, unless `None`, goes back on the inbox, so the caller's `submit()` receives it; a
-reply to a `submit()` carries the request's `id`. While the inbox has no room for a reply, the
-runner waits for room before the next `step()`; a reply still waiting when the service stops is
-dropped. Messages are handled one at a time, in order. The service ends when it is stopped or its
-inbox closes.
+```python
+class Doubler(AsyncService):
+    def __init__(self, lg: Logger, inbox: AsyncChannel):
+        self._lg = lg
+        self._inbox = inbox
 
-`step()` must not block: it may `send(..., timeout=0)` on other channels, never `recv()` or
-`submit()`.
+    @property
+    def name(self) -> str:
+        return "doubler"
 
-`RunnerFactory.create_thread_runner_with_channel()` and `create_process_runner_with_channel()`
-give a step service's runner the service side of the channel pair; the caller uses
-`result.channel`. A runner created directly takes it as `inbox=`.
+    async def run(self) -> None:
+        while True:
+            msg = await self._inbox.recv()  # parked: holds no thread
+            await self._inbox.send(Message(id=msg.id, payload=msg.payload * 2))
+
+
+pair = AsyncQueueChannelFactory().create_pair()
+with LoopHost() as host:
+    runner = host.runner(Doubler(lg, pair.child))
+    runner.start()
+    runner.wait_healthy()
+    # Callers on the loop await pair.parent directly; from another thread:
+    reply = asyncio.run_coroutine_threadsafe(
+        pair.parent.submit(Message(payload=21)), host.loop
+    ).result()  # reply.payload == 42
+    runner.stop()
+```
+
+`host.runner(service)` returns a `TaskRunner`. It has the usual runner interface (`start()`,
+`stop()`, `wait_healthy()`, restart policy), so `Manager.add()` takes it like any other runner.
+Every service on a host shares one thread: a service waiting on an `await` costs its task, not a
+thread.
+
+- `setup()` runs on the thread that calls `start()`; `run()` and then `teardown()` run on the
+  loop. Open clients bound to the loop inside `run()` and close them in its `finally`.
+- `stop()` cancels the task: `CancelledError` is raised at the `await` `run()` is parked on.
+- An exception from `run()` fails that service only; the loop and its other services run on.
+- A service stays on the loop it started on. `LoopHost.stop()` cancels the tasks still running
+  and lets them finish.
+- `run()` must not call anything that blocks without awaiting: that stalls every service on the
+  loop. Run blocking code through `asyncio.to_thread()`.
+- One loop uses one core. `ThreadRunner` and `ProcessRunner` refuse an `AsyncService`.
 
 ### Service with run()
 
@@ -202,7 +236,7 @@ ProcessRunner features:
 - Uses `multiprocessing.Process` for subprocess isolation
 - Queue-based logging forwarded to parent process
 - IPC for shutdown signaling and health status
-- Service, and a step service's inbox, must be picklable
+- Service must be picklable
 
 #### Start method and restarts
 
@@ -509,11 +543,13 @@ worker = svc_factory.create("worker")
 ### Classes
 
 - `Service` - Base class for service definitions; its run() holds its thread until stopped
-- `StepService` - Service that handles one message per step()
 - `ScheduledService` - Service with periodic tick() execution
+- `AsyncService` - Service whose run() is a coroutine, run as a task on a LoopHost
 - `Runner` - Abstract base for execution
 - `ThreadRunner` - Thread-based execution
 - `ProcessRunner` - Subprocess-based execution
+- `LoopHost` - An event loop on its own thread, running many AsyncServices as tasks
+- `TaskRunner` - Runner for one AsyncService on a LoopHost (from `LoopHost.runner()`)
 - `Manager` - Service orchestration
 - `RestartPolicy` - Restart configuration
 - `State` - State enum

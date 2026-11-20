@@ -8,7 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from ...log import Logger
-from ..base import Service, StepService
+from ..base import Service
 from ..channel.sync import Channel, ProcessQueueTransport
 from ..runner import ProcessRunner, Runner, ThreadRunner
 from ..state import RestartPolicy
@@ -28,8 +28,7 @@ class RunnerWithChannel:
     Attributes:
         runner: The runner instance
         channel: Parent-side channel for communicating with the service
-        service_channel: Service-side channel. For a StepService the runner owns
-            it as the service's inbox; for the other forms, pass it to the service.
+        service_channel: Service-side channel (pass to service)
     """
 
     runner: Runner
@@ -96,7 +95,6 @@ class RunnerFactory:
         self,
         service: Service,
         policy: RestartPolicy | None = None,
-        inbox: Channel | None = None,
     ) -> ThreadRunner:
         """
         Create a ThreadRunner for the service.
@@ -104,13 +102,12 @@ class RunnerFactory:
         Args:
             service: Service to run
             policy: Restart policy (uses default if not provided)
-            inbox: A StepService's inbox channel
 
         Returns:
             Configured ThreadRunner
         """
         effective_policy = policy if policy is not None else self._default_policy
-        return ThreadRunner(service, policy=effective_policy, inbox=inbox)
+        return ThreadRunner(service, policy=effective_policy)
 
     def create_thread_runner_with_channel(
         self,
@@ -121,8 +118,6 @@ class RunnerFactory:
         """
         Create a ThreadRunner with a channel pair for communication.
 
-        For a StepService, the pair's service side becomes the runner's inbox.
-
         Args:
             service: Service to run
             policy: Restart policy (uses default if not provided)
@@ -131,8 +126,8 @@ class RunnerFactory:
         Returns:
             RunnerWithChannel containing runner and both channels
         """
+        runner = self.create_thread_runner(service, policy)
         pair = channel_pair or self._create_thread_pair()
-        runner = self.create_thread_runner(service, policy, _inbox(service, pair))
 
         return RunnerWithChannel(
             runner=runner,
@@ -145,7 +140,6 @@ class RunnerFactory:
         service: Service,
         policy: RestartPolicy | None = None,
         stop_timeout: float | None = None,
-        inbox: Channel | None = None,
     ) -> ProcessRunner:
         """
         Create a ProcessRunner for the service.
@@ -154,7 +148,6 @@ class RunnerFactory:
             service: Service to run (must be picklable)
             policy: Restart policy (uses default if not provided)
             stop_timeout: Stop timeout (uses factory default if not provided)
-            inbox: A StepService's inbox channel, on a process-safe transport
 
         Returns:
             Configured ProcessRunner
@@ -168,7 +161,6 @@ class RunnerFactory:
             policy=effective_policy,
             stop_timeout=effective_timeout,
             start_method=self._start_method,
-            inbox=inbox,
         )
 
     def create_process_runner_with_channel(
@@ -187,8 +179,6 @@ class RunnerFactory:
         this process exits: requests the service has not read by then are dropped
         instead of blocking exit.
 
-        For a StepService, the pair's service side becomes the runner's inbox.
-
         Args:
             service: Service to run (must be picklable)
             policy: Restart policy (uses default if not provided)
@@ -198,10 +188,8 @@ class RunnerFactory:
         Returns:
             RunnerWithChannel containing runner and both channels
         """
+        runner = self.create_process_runner(service, policy, stop_timeout)
         pair = channel_pair or self._create_process_pair()
-        runner = self.create_process_runner(
-            service, policy, stop_timeout, _inbox(service, pair)
-        )
         transport = getattr(pair.parent, "transport", None)
         if isinstance(transport, ProcessQueueTransport):
             transport.allow_exit_without_flush()
@@ -233,8 +221,3 @@ class RunnerFactory:
         return ProcessQueueChannelFactory(
             self._channel_config, start_method=self._start_method
         ).create_pair()
-
-
-def _inbox(service: Service, pair: ChannelPair) -> Channel | None:
-    """The runner's inbox for *service*: the pair's service side for a step service."""
-    return pair.child if isinstance(service, StepService) else None

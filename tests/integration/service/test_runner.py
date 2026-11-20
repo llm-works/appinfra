@@ -357,3 +357,54 @@ class TestScheduledService:
 
         assert threads == {"tick": "svc-ticker", "teardown": "svc-ticker"}
         assert runner.state == State.STOPPED
+
+    def test_teardown_runs_after_tick_fails(self):
+        """A failing tick() ends the loop; teardown() still runs on its thread."""
+        torn_down = threading.Event()
+
+        class Boom(ScheduledService):
+            @property
+            def name(self) -> str:
+                return "boom"
+
+            def tick(self) -> None:
+                raise RuntimeError("tick failed")
+
+            def teardown(self) -> None:
+                torn_down.set()
+
+        runner = ThreadRunner(Boom())
+        runner.start()
+
+        assert torn_down.wait(timeout=5.0)
+        assert "tick failed" in str(runner.exception)
+
+    def test_stop_that_lands_while_starting_ends_the_loop(self):
+        """A stop() between the STARTING transition and the thread's start ends
+        the loop before its first tick; start() must not discard it."""
+        torn_down = threading.Event()
+        ticks: list[int] = []
+
+        class Ticker(ScheduledService):
+            interval = 5.0
+
+            @property
+            def name(self) -> str:
+                return "ticker"
+
+            def tick(self) -> None:
+                ticks.append(1)
+
+            def teardown(self) -> None:
+                torn_down.set()
+
+        runner = ThreadRunner(Ticker())
+        # Hooks run synchronously in start(), so stop() lands inside the window
+        runner.on_state_change(
+            lambda _name, _old, new: runner.stop() if new == State.STARTING else None
+        )
+
+        runner.start()
+
+        assert torn_down.wait(timeout=5.0)
+        assert ticks == []
