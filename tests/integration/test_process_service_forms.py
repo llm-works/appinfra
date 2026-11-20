@@ -62,10 +62,11 @@ class TestProcessServiceForms:
     def lg(self) -> Logger:
         return Logger(name="test")
 
-    def test_step_service_replies_from_the_subprocess(self, lg):
-        result = RunnerFactory(lg).create_process_runner_with_channel(
-            ProcessDoubler(lg)
-        )
+    @pytest.mark.parametrize("start_method", mp.get_all_start_methods())
+    def test_step_service_replies_from_the_subprocess(self, lg, start_method):
+        """Under spawn and forkserver the inbox is pickled into the subprocess."""
+        factory = RunnerFactory(lg, start_method=start_method)
+        result = factory.create_process_runner_with_channel(ProcessDoubler(lg))
         result.runner.start()
         try:
             result.runner.wait_healthy(timeout=10.0)
