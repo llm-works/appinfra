@@ -119,6 +119,54 @@ class TestThreadRunner:
         result = runner.check()
         assert result is False
 
+    def test_settling_the_exit_state_leaves_no_window_for_a_stop(self):
+        """The end state is chosen and set in one step: a stop() that moves
+        the runner to STOPPING after the first lock release cannot strand it
+        there once the work has ended."""
+        runner = ThreadRunner(SimpleService())
+        runner._state = State.RUNNING  # Private: a running runner
+        real = runner._lock
+
+        class StopsAfterFirstRelease:
+            """The runner's lock; its first release, if the runner is still
+            RUNNING, lets a stop(timeout=0) on another thread move it on."""
+
+            released = 0
+
+            def __enter__(self) -> None:
+                real.acquire()
+
+            def __exit__(self, *exc: object) -> None:
+                real.release()
+                self.released += 1
+                if self.released == 1 and runner._state == State.RUNNING:
+                    runner._state = State.STOPPING
+
+        runner._lock = StopsAfterFirstRelease()  # type: ignore[assignment]
+
+        runner._settle_exit_state(None)
+
+        assert runner.state != State.STOPPING
+
+    def test_stop_joins_for_what_is_left_after_waiting_for_start(self):
+        """The time stop() spends waiting for a start() in progress comes off
+        the time it then joins the service thread for."""
+        runner = ThreadRunner(SimpleService())
+        runner._state = State.RUNNING  # Private: a started runner, no thread
+        thread = MagicMock()
+        thread.is_alive.return_value = False
+        runner._thread = thread
+        clock = "appinfra.service.runner.base.time.monotonic"
+
+        # The wait for start() takes 4 of the 5 seconds
+        with (
+            patch.object(runner, "_await_start", return_value=True),
+            patch(clock, side_effect=[100.0, 104.0]),
+        ):
+            runner.stop(timeout=5.0)
+
+        thread.join.assert_called_once_with(timeout=1.0)
+
 
 class TestProcessRunner:
     """Unit tests for ProcessRunner with mocks."""

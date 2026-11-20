@@ -103,7 +103,10 @@ class ProcessRunner(Runner):
         self._stop_monitor_event: threading.Event = threading.Event()
 
     def _launch(self) -> None:
-        """Spawn the service's subprocess."""
+        """Spawn the service's subprocess, unless a stop() from a STARTING hook
+        has already ended the run."""
+        if self._state != State.STARTING:
+            return
         try:
             # One context for the process and every queue and event it uses:
             # multiprocessing refuses a lock from another context in the child
@@ -181,15 +184,17 @@ class ProcessRunner(Runner):
 
     def stop(self, timeout: float | None = None) -> None:
         """Stop the subprocess. A start() in progress on another thread is
-        waited for first, within the same timeout (stop_timeout if None)."""
-        if not self._start_ended(self.stop_timeout if timeout is None else timeout):
+        waited for first; that wait and the wait for the child to exit
+        gracefully take at most *timeout* (stop_timeout if None) together."""
+        left = self._start_ended(self.stop_timeout if timeout is None else timeout)
+        if left is None:
             return
         if self._state in (State.CREATED, State.STOPPED, State.STOPPING, State.DONE):
             return
 
         # Stop monitor thread first
         self.stop_monitor()
-        self._stop_process(timeout)
+        self._stop_process(left)
 
     def _stop_for_restart(self) -> None:
         """Stop the failed process only: a restart runs on the monitor thread,
@@ -199,7 +204,8 @@ class ProcessRunner(Runner):
     def _stop_process(self, timeout: float | None) -> None:
         """Signal the subprocess to stop, escalating to terminate and kill."""
         self._transition(State.STOPPING)
-        timeout = timeout or self.stop_timeout
+        if timeout is None:
+            timeout = self.stop_timeout
 
         # Signal shutdown
         if self._shutdown_event is not None:

@@ -50,9 +50,11 @@ class Runner(ABC):
         self._restarting = False
         self._lock = threading.Lock()
         # The thread running start(), from its state check until it returns
-        # (_start_claim()); stop() from another thread waits on _start_done
+        # (_start_claim()); a stop() from another thread waits on _start_done.
+        # Created only while such a stop() waits, so an idle runner holds no
+        # condition; it shares _lock, which guards both fields.
         self._start_thread: int | None = None
-        self._start_done = threading.Condition(self._lock)
+        self._start_done: threading.Condition | None = None
 
     @property
     def name(self) -> str:
@@ -261,9 +263,11 @@ class Runner(ABC):
         try:
             yield
         finally:
-            with self._start_done:
+            with self._lock:
                 self._start_thread = None
-                self._start_done.notify_all()
+                if self._start_done is not None:
+                    self._start_done.notify_all()
+                    self._start_done = None
 
     def _claim_start(self) -> None:
         """Check under the lock that the runner can start and no other start()
@@ -291,9 +295,11 @@ class Runner(ABC):
         Returns:
             False if a start() is still in progress after *timeout*.
         """
-        with self._start_done:
-            if self._start_thread == threading.get_ident():
+        with self._lock:
+            if self._start_thread in (None, threading.get_ident()):
                 return True
+            if self._start_done is None:
+                self._start_done = threading.Condition(self._lock)
             return self._start_done.wait_for(
                 lambda: self._start_thread is None, timeout
             )
@@ -308,20 +314,22 @@ class Runner(ABC):
         self._transition(State.INITD)
         self._transition(State.STARTING)
 
-    def _start_ended(self, timeout: float) -> bool:
+    def _start_ended(self, timeout: float) -> float | None:
         """For stop(): wait up to *timeout* seconds for a start() in progress
         on another thread; if it is still running then, log it.
 
         Returns:
-            False if stop() should return without acting.
+            The seconds of *timeout* left for stop() to wait for the service's
+            work, or None if stop() should return without acting.
         """
-        if self._await_start(timeout):
-            return True
-        self.service.lg.warning(
-            "stop() waited for a start() in progress",
-            extra={"service": self.name, "timeout": timeout},
-        )
-        return False
+        began = time.monotonic()
+        if not self._await_start(timeout):
+            self.service.lg.warning(
+                "stop() waited for a start() in progress",
+                extra={"service": self.name, "timeout": timeout},
+            )
+            return None
+        return max(0.0, timeout - (time.monotonic() - began))
 
     def _reset_stop(self) -> None:
         """Clear the runner's stop request before a start; called under the lock.
@@ -350,13 +358,23 @@ class Runner(ABC):
         """Once the service's work has ended: STOPPED if a stop() is waiting for
         it or gave up waiting, else DONE after a clean end of a RUNNING service
         and FAILED after *exception*, unless wait_healthy() has already moved
-        the state on."""
-        if self._transition_from(State.STOPPING, State.STOPPED):
-            return
-        if exception is None:
-            self._transition_from(State.RUNNING, State.DONE)
-        elif not self._transition_from(State.STARTING, State.FAILED):
-            self._transition_from(State.RUNNING, State.FAILED)
+        the state on. The end state is chosen and set under one hold of the
+        lock, so a stop() cannot move the state in between."""
+        with self._lock:
+            from_state = self._state
+            if from_state == State.STOPPING:
+                to = State.STOPPED
+            elif exception is None and from_state == State.RUNNING:
+                to = State.DONE
+            elif exception is not None and from_state in (
+                State.STARTING,
+                State.RUNNING,
+            ):
+                to = State.FAILED
+            else:
+                return
+            self._state = to
+        self._notify(from_state, to)
 
     def _transition_from(self, from_state: State, to: State) -> bool:
         """Transition to *to* if the state is *from_state*, checked under the

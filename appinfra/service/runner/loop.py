@@ -152,7 +152,9 @@ class TaskRunner(Runner):
     run(), then teardown(), run on the loop. stop() cancels the task, raising
     CancelledError at the await run() is parked on, and waits for teardown().
     A failure in run() fails this service only; the loop and its other services
-    run on.
+    run on. If the host is already stopping when start() schedules the task,
+    teardown() runs on the thread that called start(), like setup(): the loop
+    may run no more work.
     """
 
     def __init__(
@@ -187,7 +189,9 @@ class TaskRunner(Runner):
         self._stop_requested = False
         # True from start() until the task has ended and torn the service down
         self._running = False
-        # The task; held here because the loop keeps only a weak reference
+        # The task; held here because the loop keeps only a weak reference.
+        # None from start() until the task is created, so a run ending tells
+        # whether a state hook has started a newer one meanwhile
         self._task: asyncio.Task[None] | None = None
         # Events of stop() calls waiting for the task to end; loop thread only
         self._waiters: list[threading.Event] | None = None
@@ -212,6 +216,7 @@ class TaskRunner(Runner):
         stopping, tear the service down and fail."""
         self._exception = None
         self._running = True
+        self._task = None
         try:
             self._host._schedule(self._spawn)
         except RuntimeError:
@@ -231,13 +236,18 @@ class TaskRunner(Runner):
         self._task = task
 
     def _finish(self, task: asyncio.Task[None]) -> None:
-        """On the loop, once the task has ended: tear the service down, settle
-        the state, and wake the stop() calls waiting for it."""
+        """On the loop, once *task* has ended: tear the service down, settle
+        the state, and wake the stop() calls waiting for it.
+
+        The state settles before the run is marked ended, so is_alive() never
+        reports a RUNNING service as gone. The state hooks it runs may start a
+        new run, which resets _task; its fields are then left alone."""
         self._teardown()
-        self._settle_exit_state(self._exception)
-        self._task = None
-        self._running = False
         waiters, self._waiters = self._waiters, None
+        self._settle_exit_state(self._exception)
+        if self._task is task:
+            self._task = None
+            self._running = False
         for waiter in waiters or ():
             waiter.set()
 
@@ -256,17 +266,22 @@ class TaskRunner(Runner):
     def stop(self, timeout: float = 5.0) -> None:
         """Cancel the service's task and wait up to *timeout* seconds for it to
         end and the service to be torn down. A start() in progress on another
-        thread is waited for first, within the same *timeout*.
+        thread is waited for first; both waits together take at most *timeout*.
 
         Raises:
-            RuntimeError: If called from the host's loop thread, which the wait
-                would block.
+            RuntimeError: If called from the host's loop thread on a runner that
+                is starting or running, which the wait would block.
         """
-        if not self._start_ended(timeout):
-            return
+        on_loop = self._host.on_loop_thread()
+        # On the loop thread, not even a start() in progress is waited for
+        if not on_loop:
+            left = self._start_ended(timeout)
+            if left is None:
+                return
+            timeout = left
         if self._state in (State.CREATED, State.STOPPED, State.STOPPING, State.DONE):
             return
-        if self._host.on_loop_thread():
+        if on_loop:
             raise RuntimeError("TaskRunner.stop() on the loop thread would block it")
 
         self._transition(State.STOPPING)

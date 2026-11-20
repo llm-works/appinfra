@@ -303,6 +303,42 @@ class TestTaskRunner:
         assert svc.torn_down.is_set()
         assert runner.state == State.STOPPED
 
+    def test_stop_on_the_loop_during_a_start_raises_without_waiting(self, host):
+        """A stop() on the loop thread while another thread is in start() raises
+        at once: waiting for the start would block every service on the loop."""
+        runner = host.runner(Parked())
+        starting, release = threading.Event(), threading.Event()
+
+        def hold(_name: str, _old: State, new: State) -> None:
+            if new == State.STARTING and not starting.is_set():
+                starting.set()
+                release.wait(5.0)  # holds start() on its thread
+
+        runner.on_state_change(hold)
+        first = threading.Thread(target=runner.start)
+        first.start()
+        outcome: list[BaseException | None] = []
+        done = threading.Event()
+
+        def stop_on_loop() -> None:
+            try:
+                runner.stop(timeout=2.0)
+                outcome.append(None)
+            except BaseException as e:
+                outcome.append(e)
+            done.set()
+
+        try:
+            assert starting.wait(5.0)
+            host.loop.call_soon_threadsafe(stop_on_loop)
+            assert done.wait(10.0)
+        finally:
+            release.set()
+            first.join(5.0)
+
+        assert isinstance(outcome[0], RuntimeError)
+        runner.stop()
+
     def test_task_ending_after_stop_gave_up_stops_the_runner(self, host):
         """A task that outlives stop()'s wait still moves the runner to
         STOPPED when it ends, so the runner can start again."""
@@ -321,6 +357,27 @@ class TestTaskRunner:
         runner.start()
         runner.stop()
         assert runner.state == State.STOPPED
+
+    def test_start_from_an_end_state_hook_runs_and_stops(self, host):
+        """A FAILED hook that starts the runner again, on the loop as the run
+        ends, gets a run that is alive and that stop() ends."""
+        svc = FailsOnce()
+        runner = host.runner(svc)
+        restarted: list[bool] = []
+
+        def restart(_name: str, _old: State, new: State) -> None:
+            if new == State.FAILED and not restarted:
+                restarted.append(True)
+                runner.start()
+
+        runner.on_state_change(restart)
+        runner.start()
+
+        assert svc.second_run.wait(5.0)
+        assert runner.is_alive()
+        runner.stop()
+        assert runner.state == State.STOPPED
+        assert not runner.is_alive()
 
     def test_check_restarts_a_failed_service(self, host):
         svc = FailsOnce()

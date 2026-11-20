@@ -98,11 +98,13 @@ class ThreadRunner(Runner):
         A scheduled service's loop ends and the service thread tears it down; a
         service with its own run() is torn down here, which tells run() to
         return. Either way the thread is then joined for up to *timeout*
-        seconds. A start() in progress on another thread is waited for first,
-        within the same *timeout*.
+        seconds. A start() in progress on another thread is waited for first;
+        both waits together take at most *timeout*.
         """
-        if not self._start_ended(timeout):
+        left = self._start_ended(timeout)
+        if left is None:
             return
+        timeout = left
         if self._state in (State.CREATED, State.STOPPED, State.STOPPING, State.DONE):
             return
 
