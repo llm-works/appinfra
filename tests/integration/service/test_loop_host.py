@@ -209,6 +209,20 @@ class TestTaskRunner:
         assert svc.torn_down.wait(timeout=5.0)
         assert not svc.entered.is_set()
 
+    def test_stop_right_after_start_tears_down(self, host):
+        """Whether or not the task has begun when stop() lands, the service is
+        torn down and the runner ends STOPPED."""
+        for i in range(20):
+            svc = Parked(name=f"quick-{i}")
+            runner = host.runner(svc)
+            runner.start()
+
+            runner.stop()
+
+            assert svc.torn_down.is_set()
+            assert runner.state == State.STOPPED
+            assert not runner.is_alive()
+
     def test_check_restarts_a_failed_service(self, host):
         svc = FailsOnce()
         runner = host.runner(svc, RestartPolicy(max_retries=1, backoff=0.0))

@@ -6,7 +6,6 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import threading
 from types import TracebackType
 
@@ -156,12 +155,23 @@ class TaskRunner(Runner):
         self._host = host
         self._service = service
         self._exception: BaseException | None = None
-        # Set by stop(); a task that has not started yet sees it and skips run()
-        self._stop = threading.Event()
-        # Set once the task has ended and the service is torn down
-        self._done: threading.Event | None = None
-        # The running task; set and cleared on the loop
-        self._task: asyncio.Task[object] | None = None
+        # Plain flags, not threading.Events, so that an idle service costs no
+        # lock or condition: an Event exists only while a stop() waits.
+        # Set by stop(); read on the loop, where a task that has not begun yet
+        # sees it and skips run()
+        self._stop_requested = False
+        # True from start() until the task has ended and torn the service down
+        self._running = False
+        # True once the task has begun, so a cancel never lands before its
+        # finally can run
+        self._begun = False
+        # The task; held here because the loop keeps only a weak reference
+        self._task: asyncio.Task[None] | None = None
+        # Events of stop() calls waiting for the task to end; loop thread only
+        self._waiters: list[threading.Event] | None = None
+
+    def _reset_stop(self) -> None:
+        self._stop_requested = False
 
     def start(self) -> None:
         """Run setup(), then start the service's task on the host's loop.
@@ -172,29 +182,38 @@ class TaskRunner(Runner):
             SetupError: If setup fails.
         """
         loop = self._host.loop
-        self._claim_start(self._stop)
+        self._claim_start()
         self._run_setup()
         self._transition(State.INITD)
         self._transition(State.STARTING)
         self._exception = None
-        self._done = threading.Event()
-        asyncio.run_coroutine_threadsafe(self._main(self._done), loop)
+        self._running = True
+        loop.call_soon_threadsafe(self._spawn, loop)
 
-    async def _main(self, done: threading.Event) -> None:
-        """The task: run the service, tear it down, settle the state."""
-        self._task = asyncio.current_task()
+    def _spawn(self, loop: asyncio.AbstractEventLoop) -> None:
+        """Create the service's task; called on the loop."""
+        self._task = loop.create_task(self._main(), name=f"svc-{self.name}")
+
+    async def _main(self) -> None:
+        """The task: run the service, tear it down, settle the state, then wake
+        the stop() calls waiting for it."""
+        self._begun = True
         try:
             await self._run_service()
             self._teardown()
             self._settle_exit_state(self._exception)
         finally:
             self._task = None
-            done.set()
+            self._begun = False
+            self._running = False
+            waiters, self._waiters = self._waiters, None
+            for waiter in waiters or ():
+                waiter.set()
 
     async def _run_service(self) -> None:
         """run(), unless a stop() came first. A cancel, from stop() or the host
         shutting down, ends it cleanly; any other exception is recorded."""
-        if self._stop.is_set():
+        if self._stop_requested:
             return
         try:
             await self._service.run()
@@ -217,26 +236,44 @@ class TaskRunner(Runner):
             raise RuntimeError("TaskRunner.stop() on the loop thread would block it")
 
         self._transition(State.STOPPING)
-        self._stop.set()
-        if self._done is not None:
-            with contextlib.suppress(RuntimeError):  # host stopped: no task left
-                self._host.loop.call_soon_threadsafe(self._cancel)
-            if not self._done.wait(timeout):
-                self.service.lg.warning(
-                    "service task did not end in time",
-                    extra={"service": self.name, "timeout": timeout},
-                )
-                return  # Stay STOPPING while the task still runs
+        self._stop_requested = True
+        if self._running and not self._wait_ended(timeout):
+            self.service.lg.warning(
+                "service task did not end in time",
+                extra={"service": self.name, "timeout": timeout},
+            )
+            return  # Stay STOPPING while the task still runs
         self._transition(State.STOPPED)
 
-    def _cancel(self) -> None:
-        """Cancel the running task, if any; called on the loop."""
-        if self._task is not None:
+    def _wait_ended(self, timeout: float) -> bool:
+        """Cancel the task and wait up to *timeout* seconds for it to end.
+
+        Returns:
+            False if it is still running after *timeout*.
+        """
+        ended = threading.Event()
+        try:
+            self._host.loop.call_soon_threadsafe(self._cancel, ended)
+        except RuntimeError:
+            return True  # Host stopped: its shutdown ended the task
+        return ended.wait(timeout)
+
+    def _cancel(self, ended: threading.Event) -> None:
+        """On the loop: set *ended* once the task has ended, and cancel it if
+        it has begun. A task not yet begun sees the stop request and skips
+        run(); cancelling it first would skip its teardown too."""
+        if not self._running:
+            ended.set()
+            return
+        if self._waiters is None:
+            self._waiters = []
+        self._waiters.append(ended)
+        if self._task is not None and self._begun:
             self._task.cancel()
 
     def is_alive(self) -> bool:
         """True while the service's task has not ended."""
-        return self._done is not None and not self._done.is_set()
+        return self._running
 
     def is_healthy(self) -> bool:
         """Check if service is healthy."""

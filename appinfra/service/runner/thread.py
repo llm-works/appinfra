@@ -53,7 +53,7 @@ class ThreadRunner(Runner):
 
     def start(self) -> None:
         """Start the service in a background thread."""
-        self._claim_start(self._stop)
+        self._claim_start()
         self._run_setup()
         self._transition(State.INITD)
         self._transition(State.STARTING)
@@ -67,6 +67,9 @@ class ThreadRunner(Runner):
             daemon=True,
         )
         self._thread.start()
+
+    def _reset_stop(self) -> None:
+        self._stop.clear()
 
     @property
     def _loops_here(self) -> bool:

@@ -231,10 +231,11 @@ class Runner(ABC):
             self.policy.max_backoff,
         )
 
-    def _claim_start(self, stop: threading.Event) -> None:
+    def _claim_start(self) -> None:
         """Check under the lock that the runner can start, which prevents
-        concurrent starts, and clear *stop* there: no stop() is accepted yet, so
-        one that lands later survives until the service's work sees it.
+        concurrent starts, and reset the stop request there (_reset_stop()): no
+        stop() is accepted yet, so one that lands later survives until the
+        service's work sees it.
 
         Raises:
             InvalidTransitionError: If the runner is not CREATED, STOPPED or FAILED.
@@ -242,7 +243,11 @@ class Runner(ABC):
         with self._lock:
             if self._state not in (State.CREATED, State.STOPPED, State.FAILED):
                 raise InvalidTransitionError(self.name, self._state, State.INITD)
-            stop.clear()
+            self._reset_stop()
+
+    def _reset_stop(self) -> None:
+        """Clear the runner's stop request before a start; called under the lock.
+        A runner whose stop goes through its own signal overrides it."""
 
     def _run_setup(self) -> None:
         """Run service setup, transition to FAILED on error."""

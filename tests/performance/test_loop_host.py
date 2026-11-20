@@ -35,7 +35,9 @@ from appinfra.service import (
 )
 
 SERVICES = 100_000 if os.environ.get("APPINFRA_SERVICE_BENCH") == "full" else 1_000
-IDLE_WINDOW = 0.5  # seconds of wall time over which idle CPU is measured
+# Seconds of wall time over which idle CPU is measured: two of the channel's
+# 0.1 s polls, enough to show their cost
+IDLE_WINDOW = 0.2
 LG = MagicMock()
 
 
@@ -148,7 +150,7 @@ class TestLoopHostCost:
             runner.stop()
 
         print(f"\nidle service on a LoopHost: {per_service:,.0f} B each ({SERVICES:,})")
-        assert per_service < 16_000, f"{per_service:,.0f} B per idle service"
+        assert per_service < 6_000, f"{per_service:,.0f} B per idle service"
 
     def test_start_and_stop_rate(self, host):
         runners, start_rate = _start_all(host, OnEvent, SERVICES)
