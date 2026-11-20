@@ -11,6 +11,7 @@ import pytest
 
 from appinfra.service import (
     HealthTimeoutError,
+    InvalidTransitionError,
     RestartPolicy,
     RunError,
     ScheduledService,
@@ -65,8 +66,77 @@ class FailOnFirstRun(Service):
         return self._healthy
 
 
+class SlowSetup(SimpleService):
+    """Counts setup() calls; each blocks until released."""
+
+    def __init__(self) -> None:
+        super().__init__("slow-setup")
+        self.setups = 0
+        self.in_setup = threading.Event()
+        self.release = threading.Event()
+
+    def setup(self) -> None:
+        self.setups += 1
+        self.in_setup.set()
+        self.release.wait(5.0)
+
+
+class OutlivesStop(Service):
+    """run() ignores teardown() and returns only once released."""
+
+    def __init__(self) -> None:
+        self._lg = MagicMock()
+        self.release = threading.Event()
+
+    @property
+    def name(self) -> str:
+        return "outlives-stop"
+
+    def run(self) -> None:
+        self.release.wait(5.0)
+
+
 class TestThreadRunner:
     """Test ThreadRunner class."""
+
+    def test_thread_ending_after_stop_gave_up_stops_the_runner(self):
+        """A thread that outlives stop()'s join still moves the runner to
+        STOPPED when it ends, so the runner can start again."""
+        svc = OutlivesStop()
+        runner = ThreadRunner(svc)
+        stopped = threading.Event()
+        runner.on_state_change(
+            lambda _name, _old, new: stopped.set() if new == State.STOPPED else None
+        )
+        runner.start()
+        runner.stop(timeout=0)
+        assert runner.state == State.STOPPING
+
+        svc.release.set()
+
+        assert stopped.wait(5.0)
+        runner.start()
+        runner.stop()
+        assert runner.state == State.STOPPED
+
+    def test_start_while_another_start_runs_setup_is_refused(self):
+        """A start() that lands while another start() is in setup() fails
+        before calling setup() again."""
+        svc = SlowSetup()
+        runner = ThreadRunner(svc)
+        first = threading.Thread(target=runner.start)
+        first.start()
+        try:
+            assert svc.in_setup.wait(5.0)
+
+            with pytest.raises(InvalidTransitionError):
+                runner.start()
+        finally:
+            svc.release.set()
+            first.join(5.0)
+            runner.stop()
+
+        assert svc.setups == 1
 
     def test_start_spawns_thread(self):
         """start() spawns a daemon thread."""

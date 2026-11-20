@@ -104,10 +104,7 @@ class ProcessRunner(Runner):
 
     def start(self) -> None:
         """Start the service in a subprocess."""
-        self._claim_start()
-        self._run_setup()
-        self._transition(State.INITD)
-        self._transition(State.STARTING)
+        self._begin_start()
 
         try:
             # One context for the process and every queue and event it uses:

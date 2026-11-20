@@ -24,6 +24,8 @@ Three-layer architecture separates concerns:
 ## Quick Start
 
 ```python
+import threading
+
 from appinfra.log import Logger
 from appinfra.service import Service, ThreadRunner
 

@@ -14,6 +14,7 @@ from appinfra.service import (
     AsyncQueueTransport,
     ChannelClosedError,
     ChannelConfig,
+    ChannelTimeoutError,
     Message,
 )
 
@@ -93,6 +94,37 @@ class TestAsyncQueueChannelWait:
         assert (await pair.child.recv()).payload == 1
         with pytest.raises(ChannelClosedError):
             await asyncio.wait_for(pair.child.recv(), timeout=5.0)
+
+    @pytest.mark.asyncio
+    async def test_close_with_a_full_inbox_ends_every_parked_recv(self) -> None:
+        """A message handed to one parked recv() still fills the inbox when
+        close() runs, so close() has no room for its marker. Taking that message
+        must still wake the other parked recv()."""
+        pair = AsyncQueueChannelFactory(ChannelConfig(max_queue_size=1)).create_pair()
+        first = asyncio.create_task(pair.child.recv())
+        second = asyncio.create_task(pair.child.recv())
+        await _parked(first)
+        await _parked(second)
+
+        await pair.parent.send(Message(payload=1))  # wakes first; still queued
+        await pair.child.close()
+
+        results = await asyncio.wait_for(
+            asyncio.gather(first, second, return_exceptions=True), timeout=5.0
+        )
+        assert [r.payload for r in results if isinstance(r, Message)] == [1]
+        assert sum(isinstance(r, ChannelClosedError) for r in results) == 1
+
+    @pytest.mark.asyncio
+    async def test_recv_without_waiting_returns_a_queued_message(self) -> None:
+        """recv(timeout=0) returns a message already queued; only an empty
+        queue times out."""
+        pair = AsyncQueueChannelFactory().create_pair()
+        await pair.parent.send(Message(payload=1))
+
+        assert (await pair.child.recv(timeout=0)).payload == 1
+        with pytest.raises(ChannelTimeoutError):
+            await pair.child.recv(timeout=0)
 
     @pytest.mark.asyncio
     async def test_closing_one_side_leaves_the_other_open(self) -> None:

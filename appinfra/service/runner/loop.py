@@ -95,7 +95,9 @@ class LoopHost:
 
     def stop(self, timeout: float = 5.0) -> None:
         """Stop the loop: cancel the tasks still running, let them finish, and
-        wait up to *timeout* seconds for the thread to end.
+        wait up to *timeout* seconds for the thread to end. If it is still
+        ending then, the host stays running, closed to new tasks, and a later
+        stop() waits for it again.
 
         Raises:
             RuntimeError: If called from the loop's own thread.
@@ -105,9 +107,12 @@ class LoopHost:
         if self.on_loop_thread():
             raise RuntimeError("LoopHost.stop() on the loop thread would block it")
         with self._lock:
-            self._closing = True
-            self._loop.call_soon_threadsafe(self._loop.stop)
+            if not self._closing:
+                self._closing = True
+                self._loop.call_soon_threadsafe(self._loop.stop)
         self._thread.join(timeout)
+        if self._thread.is_alive():
+            return
         self._thread = None
         self._loop = None
 
@@ -200,10 +205,7 @@ class TaskRunner(Runner):
             SetupError: If setup fails.
         """
         self._host.loop  # fails before any state change if the host is not running
-        self._claim_start()
-        self._run_setup()
-        self._transition(State.INITD)
-        self._transition(State.STARTING)
+        self._begin_start()
         self._exception = None
         self._running = True
         try:
@@ -267,8 +269,9 @@ class TaskRunner(Runner):
                 "service task did not end in time",
                 extra={"service": self.name, "timeout": timeout},
             )
-            return  # Stay STOPPING while the task still runs
-        self._transition(State.STOPPED)
+            return  # Stay STOPPING; the task moves the runner to STOPPED once it ends
+        # The task, ending, has usually moved the runner to STOPPED already
+        self._transition_from(State.STOPPING, State.STOPPED)
 
     def _wait_ended(self, timeout: float) -> bool:
         """Cancel the task and wait up to *timeout* seconds for it to end.

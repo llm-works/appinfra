@@ -53,10 +53,7 @@ class ThreadRunner(Runner):
 
     def start(self) -> None:
         """Start the service in a background thread."""
-        self._claim_start()
-        self._run_setup()
-        self._transition(State.INITD)
-        self._transition(State.STARTING)
+        self._begin_start()
 
         # Execute phase
         self._exception = None
@@ -123,10 +120,12 @@ class ThreadRunner(Runner):
                     f"service thread did not exit within {timeout}s, "
                     "will be terminated on process exit"
                 )
-                # Stay in STOPPING state since thread is still alive
+                # Stay STOPPING; the thread moves the runner to STOPPED once
+                # it ends
                 return
 
-        self._transition(State.STOPPED)
+        # The thread, ending, may have moved the runner to STOPPED already
+        self._transition_from(State.STOPPING, State.STOPPED)
 
     def is_alive(self) -> bool:
         """Check if thread is running."""

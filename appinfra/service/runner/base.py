@@ -47,6 +47,8 @@ class Runner(ABC):
         self._retries = 0
         self._restarting = False
         self._lock = threading.Lock()
+        # Held by a start() from its state check until STARTING (_begin_start())
+        self._start_claimed = False
 
     @property
     def name(self) -> str:
@@ -231,18 +233,41 @@ class Runner(ABC):
             self.policy.max_backoff,
         )
 
-    def _claim_start(self) -> None:
-        """Check under the lock that the runner can start, which prevents
-        concurrent starts, and reset the stop request there (_reset_stop()): no
-        stop() is accepted yet, so one that lands later survives until the
-        service's work sees it.
+    def _begin_start(self) -> None:
+        """Claim the start, run setup() and move to STARTING; the first steps of
+        every runner's start(). The claim holds until STARTING, from which the
+        state check alone refuses another start, so a second start() fails
+        before it calls setup().
 
         Raises:
-            InvalidTransitionError: If the runner is not CREATED, STOPPED or FAILED.
+            InvalidTransitionError: If the runner is not CREATED, STOPPED or
+                FAILED, or another start() is in progress.
+            SetupError: If setup fails.
+        """
+        self._claim_start()
+        try:
+            self._run_setup()
+            self._transition(State.INITD)
+            self._transition(State.STARTING)
+        finally:
+            with self._lock:
+                self._start_claimed = False
+
+    def _claim_start(self) -> None:
+        """Check under the lock that the runner can start and no other start()
+        is in progress, claim the start, and reset the stop request there
+        (_reset_stop()): no stop() is accepted yet, so one that lands later
+        survives until the service's work sees it.
+
+        Raises:
+            InvalidTransitionError: If the runner is not CREATED, STOPPED or
+                FAILED, or another start() is in progress.
         """
         with self._lock:
-            if self._state not in (State.CREATED, State.STOPPED, State.FAILED):
+            startable = self._state in (State.CREATED, State.STOPPED, State.FAILED)
+            if self._start_claimed or not startable:
                 raise InvalidTransitionError(self.name, self._state, State.INITD)
+            self._start_claimed = True
             self._reset_stop()
 
     def _reset_stop(self) -> None:
@@ -269,16 +294,30 @@ class Runner(ABC):
             )
 
     def _settle_exit_state(self, exception: BaseException | None) -> None:
-        """DONE after the work ended cleanly, FAILED after *exception*, unless
-        stop() or wait_healthy() has already moved the state on."""
-        try:
-            if exception is None:
-                if self._state == State.RUNNING:
-                    self._transition(State.DONE)
-            elif self._state in (State.STARTING, State.RUNNING):
-                self._transition(State.FAILED)
-        except InvalidTransitionError:
-            pass  # Already transitioned by stop()
+        """Once the service's work has ended: STOPPED if a stop() is waiting for
+        it or gave up waiting, else DONE after a clean end of a RUNNING service
+        and FAILED after *exception*, unless wait_healthy() has already moved
+        the state on."""
+        if self._transition_from(State.STOPPING, State.STOPPED):
+            return
+        if exception is None:
+            self._transition_from(State.RUNNING, State.DONE)
+        elif not self._transition_from(State.STARTING, State.FAILED):
+            self._transition_from(State.RUNNING, State.FAILED)
+
+    def _transition_from(self, from_state: State, to: State) -> bool:
+        """Transition to *to* if the state is *from_state*, checked under the
+        lock, so that two threads ending the same state cannot both do it.
+
+        Returns:
+            True if this call made the transition.
+        """
+        with self._lock:
+            if self._state != from_state:
+                return False
+            self._state = to
+        self._notify(from_state, to)
+        return True
 
     def _transition(self, to: State) -> None:
         """Transition to a new state."""
@@ -290,6 +329,10 @@ class Runner(ABC):
 
             self._state = to
 
+        self._notify(from_state, to)
+
+    def _notify(self, from_state: State, to: State) -> None:
+        """Run the state hooks for a transition; a failing hook is logged."""
         for hook in self._hooks:
             try:
                 hook(self.name, from_state, to)

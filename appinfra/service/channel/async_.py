@@ -409,6 +409,10 @@ class AsyncQueueTransport(Generic[TRequest, TResponse]):
         self._outbound = outbound
         self._inbound = inbound
         self._closed = False
+        # The close marker is on the inbound queue, or a recv() woken by it is
+        # putting it back. At most one: extra markers would take queue slots
+        # the peer, still open, sends into.
+        self._marker_queued = False
 
     async def send(self, message: TRequest, timeout: float | None = None) -> None:
         """Put message on the outbound asyncio queue, waiting up to *timeout*."""
@@ -434,25 +438,51 @@ class AsyncQueueTransport(Generic[TRequest, TResponse]):
         if self._closed and self._inbound.empty():
             raise ChannelClosedError("Channel is closed")
         try:
+            # A queued message without waiting: wait_for(timeout=0) cancels the
+            # get() before it runs on some Python versions
+            message = self._inbound.get_nowait()
+        except asyncio.QueueEmpty:
+            message = await self._wait_for_message(timeout)
+        return self._received(message)
+
+    async def _wait_for_message(self, timeout: float | None) -> Any:
+        """Wait up to *timeout* seconds for the inbound queue's next item."""
+        if timeout is not None and timeout <= 0:
+            raise ChannelTimeoutError("Timeout waiting for message (0s)")
+        try:
             if timeout is None:
-                message = await self._inbound.get()
-            else:
-                message = await asyncio.wait_for(self._inbound.get(), timeout=timeout)
+                return await self._inbound.get()
+            return await asyncio.wait_for(self._inbound.get(), timeout=timeout)
         except TimeoutError:
             raise ChannelTimeoutError(f"Timeout waiting for message ({timeout}s)")
+
+    def _received(self, message: Any) -> TResponse:
+        """*message* taken off the inbound queue, or ChannelClosedError if it is
+        the close marker."""
         if message is _CLOSED:
             # Put it back for the next recv() waiting on this queue
             with contextlib.suppress(asyncio.QueueFull):
                 self._inbound.put_nowait(message)
             raise ChannelClosedError("Channel is closed")
-        return message
+        if self._closed:
+            # close() found the queue full; the message just taken made room
+            self._queue_marker()
+        return cast(TResponse, message)
 
     async def close(self) -> None:
-        """Mark as closed and wake a recv() waiting on the inbound queue. With
-        the queue full nothing waits on it, and recv() raises once it is drained."""
+        """Mark as closed and wake the recv() calls waiting on the inbound
+        queue. If the queue is full, the next message received makes room for
+        the wake-up."""
         self._closed = True
+        self._queue_marker()
+
+    def _queue_marker(self) -> None:
+        """Put the close marker on the inbound queue, once, if there is room."""
+        if self._marker_queued:
+            return
         with contextlib.suppress(asyncio.QueueFull):
             self._inbound.put_nowait(_CLOSED)
+            self._marker_queued = True
 
     @property
     def is_closed(self) -> bool:

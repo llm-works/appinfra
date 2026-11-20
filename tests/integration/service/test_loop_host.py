@@ -79,6 +79,24 @@ class Boom(Parked):
         raise RuntimeError("run failed")
 
 
+class HoldsCancel(Parked):
+    """When cancelled, run() returns only once release() is called."""
+
+    def __init__(self) -> None:
+        super().__init__("holds-cancel")
+        self._hold = asyncio.Event()
+
+    async def run(self) -> None:
+        self.entered.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            await self._hold.wait()
+
+    def release(self, host: LoopHost) -> None:
+        host.loop.call_soon_threadsafe(self._hold.set)
+
+
 class FailsOnce(Parked):
     """Fails its first run(); parks in the second."""
 
@@ -256,6 +274,25 @@ class TestTaskRunner:
             assert runner.state == State.STOPPED
             assert not runner.is_alive()
 
+    def test_task_ending_after_stop_gave_up_stops_the_runner(self, host):
+        """A task that outlives stop()'s wait still moves the runner to
+        STOPPED when it ends, so the runner can start again."""
+        svc = HoldsCancel()
+        runner = host.runner(svc)
+        stopped = _on_state(runner, State.STOPPED)
+        runner.start()
+        assert svc.entered.wait(5.0)
+        runner.stop(timeout=0)
+        assert runner.state == State.STOPPING
+
+        svc.release(host)
+
+        assert stopped.wait(5.0)
+        assert svc.torn_down.is_set()
+        runner.start()
+        runner.stop()
+        assert runner.state == State.STOPPED
+
     def test_check_restarts_a_failed_service(self, host):
         svc = FailsOnce()
         runner = host.runner(svc, RestartPolicy(max_retries=1, backoff=0.0))
@@ -278,7 +315,42 @@ class TestTaskRunner:
         assert runner.state == State.CREATED
 
 
+class BlocksTeardown(Parked):
+    """Its teardown(), run on the loop, blocks until released."""
+
+    def __init__(self) -> None:
+        super().__init__("blocks-teardown")
+        self.release = threading.Event()
+
+    def teardown(self) -> None:
+        self.release.wait(5.0)
+        super().teardown()
+
+
 class TestLoopHostStop:
+    def test_stop_that_times_out_keeps_the_host_until_shutdown_ends(self):
+        """A stop() whose wait ends before the shutdown does leaves the host
+        running, not started anew; a later stop() waits for the shutdown."""
+        host = LoopHost(name=LOOP_THREAD)
+        host.start()
+        svc = BlocksTeardown()
+        runner = host.runner(svc)
+        runner.start()
+        assert svc.entered.wait(5.0)
+
+        host.stop(timeout=0)  # the shutdown blocks in teardown()
+        try:
+            with pytest.raises(RuntimeError, match="already started"):
+                host.start()
+        finally:
+            svc.release.set()
+        host.stop()
+
+        assert svc.torn_down.is_set()
+        assert not runner.is_alive()
+        with pytest.raises(RuntimeError, match="is not running"):
+            host.loop
+
     def test_stop_tears_down_a_service_whose_task_has_not_begun(self):
         """The host stopping between a task's creation and its first step still
         tears the service down and ends its runner."""
