@@ -87,7 +87,9 @@ class Service(ABC):
 
         The runner calls it once. Under ThreadRunner, teardown() must make it
         return; under ProcessRunner, the injected ``_shutdown_event`` is set
-        (teardown() runs in the subprocess after run() returns).
+        (teardown() runs in the subprocess after run() returns). ProcessRunner
+        injects it only into an attribute the service declares, e.g.
+        ``self._shutdown_event = None`` in ``__init__``.
         """
         ...
 

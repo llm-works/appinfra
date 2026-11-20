@@ -135,7 +135,8 @@ class Database(Service):
 ```
 
 Under `ProcessRunner`, `run()` watches the injected `_shutdown_event` instead: `teardown()` runs in
-the subprocess after `run()` returns.
+the subprocess after `run()` returns. `ProcessRunner` injects it only into an attribute the service
+declares, e.g. `self._shutdown_event = None` in `__init__`.
 
 ## State Machine
 

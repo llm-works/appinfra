@@ -56,12 +56,7 @@ class ThreadRunner(Runner):
 
     def start(self) -> None:
         """Start the service in a background thread."""
-        # Validate state under lock before setup to prevent concurrent starts
-        with self._lock:
-            if self._state not in (State.CREATED, State.STOPPED, State.FAILED):
-                from ..errors import InvalidTransitionError
-
-                raise InvalidTransitionError(self.name, self._state, State.INITD)
+        self._claim_start()
 
         # Setup phase
         try:
@@ -78,13 +73,27 @@ class ThreadRunner(Runner):
         # Execute phase
         self._exception = None
         self._exited = False
-        self._stop.clear()
         self._thread = threading.Thread(
             target=self._run,
             name=f"svc-{self.name}",
             daemon=True,
         )
         self._thread.start()
+
+    def _claim_start(self) -> None:
+        """Check under the lock that the runner can start, which prevents
+        concurrent starts, and reset the stop signal there: no stop() is
+        accepted yet, so one that lands later survives until the loop sees it.
+
+        Raises:
+            InvalidTransitionError: If the runner is not CREATED, STOPPED or FAILED.
+        """
+        with self._lock:
+            if self._state not in (State.CREATED, State.STOPPED, State.FAILED):
+                from ..errors import InvalidTransitionError
+
+                raise InvalidTransitionError(self.name, self._state, State.INITD)
+            self._stop.clear()
 
     @property
     def _loops_here(self) -> bool:

@@ -168,3 +168,20 @@ class TestStepServiceTeardown:
 
         assert svc.torn_down.wait(timeout=5.0)
         assert svc.teardown_thread == "svc-recorder"
+
+    def test_after_a_stop_that_lands_while_starting(self):
+        """A stop() between the STARTING transition and the thread's start ends
+        the loop as soon as it runs; start() must not discard it."""
+        svc = TornDown()
+        result = RunnerFactory(MagicMock()).create_thread_runner_with_channel(svc)
+        runner = result.runner
+        # Hooks run synchronously in start(), so stop() lands inside the window
+        runner.on_state_change(
+            lambda _name, _old, new: runner.stop() if new == State.STARTING else None
+        )
+        try:
+            runner.start()
+
+            assert svc.torn_down.wait(timeout=5.0)
+        finally:
+            result.service_channel.close()  # ends a loop the stop() failed to end
