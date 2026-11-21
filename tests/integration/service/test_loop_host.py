@@ -177,14 +177,15 @@ class TestTaskRunner:
     """An AsyncService under a TaskRunner on a LoopHost."""
 
     def test_many_services_share_the_loop_thread(self, host):
-        threads_before = threading.active_count()
+        # A set, not a count: a thread an earlier test left may end meanwhile
+        threads_before = set(threading.enumerate())
         services = [Parked(name=f"parked-{i}") for i in range(50)]
         runners = [host.runner(svc) for svc in services]
         for runner in runners:
             runner.start()
 
         assert all(svc.entered.wait(timeout=5.0) for svc in services)
-        assert threading.active_count() == threads_before
+        assert set(threading.enumerate()) <= threads_before
         for runner in runners:
             runner.stop()
         assert {svc.teardown_thread for svc in services} == {LOOP_THREAD}
