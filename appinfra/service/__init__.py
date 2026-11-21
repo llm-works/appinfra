@@ -8,7 +8,7 @@ This module provides a framework for managing service execution with:
 - Parallel execution: independent services start/stop in parallel
 - State machine: explicit states with hooks
 - Restart policies: automatic restart with configurable backoff
-- Multiple execution modes: threads, processes, scheduled
+- Multiple execution modes: threads, processes, scheduled, tasks on an event loop
 
 Three-layer architecture:
 - Service: WHAT to run (definition, config, behavior)
@@ -16,9 +16,9 @@ Three-layer architecture:
 - Manager: Orchestration (dependency ordering, parallel start/stop)
 
 A Service implements run(), which holds its thread until stopped. Two
-subclasses hand their loop to the runner instead:
-- StepService: step(msg) for each message on the inbox its runner owns
-- ScheduledService: tick() every interval seconds
+subclasses work differently:
+- ScheduledService: the runner calls tick() every interval seconds
+- AsyncService: run() is a coroutine; a LoopHost runs many as tasks on one loop
 
 Basic usage with ThreadRunner:
     from appinfra.service import Manager, Service, ThreadRunner
@@ -75,10 +75,15 @@ Scheduled services:
 
     mgr.add_service(MetricsCollector())
 
-Step services: see docs/api/service.md.
+Async services, many on one event loop thread:
+    with LoopHost() as host:
+        for agent in agents:
+            mgr.add(host.runner(agent))
+        with mgr:
+            run_application()
 """
 
-from .base import ScheduledService, Service, StepService
+from .base import AsyncService, ScheduledService, Service
 from .channel import (
     AsyncBufferedChannel,
     AsyncChannel,
@@ -122,17 +127,19 @@ from .factory import (
     ServiceRegistration,
 )
 from .manager import Manager
-from .runner import ProcessRunner, Runner, ThreadRunner
+from .runner import LoopHost, ProcessRunner, Runner, TaskRunner, ThreadRunner
 from .state import RestartPolicy, State, StateHook
 
 __all__ = [
     # Core classes
     "Service",
-    "StepService",
     "ScheduledService",
+    "AsyncService",
     "Runner",
     "ThreadRunner",
     "ProcessRunner",
+    "LoopHost",
+    "TaskRunner",
     "Manager",
     # Transport (wire level)
     "Transport",

@@ -21,12 +21,14 @@ For API stability guarantees and deprecation policy, see
   `None` (any type) for a vector's elements. See `docs/api/cas.md`.
 - `Repo.batch()` stores several objects with one lock hold and one link lookup, through the new
   `Store.object_types` and `Store.write_objects`; their defaults loop over the single-object calls.
+- `AsyncService`: a service whose `run()` is a coroutine. `LoopHost.runner()` runs it as a task on
+  one shared event loop thread, so a service waiting on an `await` holds no thread of its own.
 
 ### Changed
+- An async channel over `AsyncQueueTransport` waits in `recv()` without waking every 0.1 s:
+  `close()` wakes it instead. A custom `AsyncTransport` opts in with `wakes_on_close = True`.
 - **Breaking:** `Service.execute()` is renamed `run()`. A `ScheduledService` override of it is
   never called: the runner runs the tick loop and calls `teardown()` on that thread after it ends.
-  New `StepService`: `step(msg)` per message on an inbox its runner owns, which a caller's
-  `submit()` gets the reply from.
 - **Breaking:** the local dev server listens on `127.0.0.1` by default instead of every
   interface; `pgserver.bind: 0.0.0.0` lets other hosts reach it.
 - **Breaking:** the `pg.*` targets load their config file when they run, as the application

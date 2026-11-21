@@ -8,56 +8,56 @@ from __future__ import annotations
 import threading
 import time
 from abc import ABC, abstractmethod
+from collections.abc import Iterator
+from contextlib import contextmanager
 
 from ..base import Service
-from ..channel.sync import Channel
-from ..errors import HealthTimeoutError, InvalidTransitionError, RunError
+from ..errors import HealthTimeoutError, InvalidTransitionError, RunError, SetupError
 from ..state import TRANSITIONS, RestartPolicy, State, StateHook
-from .drive import check_form
+from .drive import check_service
+
+# The runners whose state hooks the current thread is running (_notify())
+_in_hooks = threading.local()
 
 
 class Runner(ABC):
     """Abstract base for service execution and state management.
 
     A Runner handles:
-    - HOW a service is executed (thread, process)
+    - HOW a service is executed (thread, process, task on an event loop)
     - State tracking (STOPPED -> STARTING -> RUNNING -> STOPPING)
     - Restart policy with backoff
     - State change hooks
 
-    It hosts any Service: it runs a StepService's or ScheduledService's loop,
-    calls any other service's run(), and owns a step service's inbox channel:
+    Implementations:
     - ThreadRunner: Runs the service in a daemon thread
     - ProcessRunner: Runs the service in a subprocess
+    - TaskRunner: Runs an AsyncService as a task on a LoopHost's event loop
     """
 
-    def __init__(
-        self,
-        service: object,
-        policy: RestartPolicy | None = None,
-        inbox: Channel | None = None,
-    ) -> None:
+    def __init__(self, service: object, policy: RestartPolicy | None = None) -> None:
         """Initialize runner.
 
         Args:
             service: The service to run.
             policy: Restart policy. Defaults to RestartPolicy().
-            inbox: The channel a StepService receives its messages on; required
-                for a step service, refused for any other.
 
         Raises:
-            TypeError: If *service* is not a Service it can host (see
-                check_form()).
-            ValueError: If *inbox* does not match the service.
+            TypeError: If *service* is not a Service (see check_service()).
         """
-        self.service: Service = check_form(service, inbox)
-        self.inbox = inbox
+        self.service: Service = check_service(service)
         self.policy = policy or RestartPolicy()
         self._state = State.CREATED
         self._hooks: list[StateHook] = []
         self._retries = 0
         self._restarting = False
         self._lock = threading.Lock()
+        # The thread running start(), from its state check until it returns
+        # (_start_claim()); a stop() from another thread waits on _start_done.
+        # Created only while such a stop() waits, so an idle runner holds no
+        # condition; it shares _lock, which guards both fields.
+        self._start_thread: int | None = None
+        self._start_done: threading.Condition | None = None
 
     @property
     def name(self) -> str:
@@ -93,24 +93,40 @@ class Runner(ABC):
     def on_state_change(self, hook: StateHook) -> None:
         """Register a callback for state changes.
 
+        Hooks observe transitions; they run on the thread making the
+        transition, which may be the service's own thread or loop. A hook that
+        calls start() or stop() on this runner gets a RuntimeError, which is
+        logged like any other hook failure.
+
         Args:
             hook: Callable(service_name, from_state, to_state).
         """
         self._hooks.append(hook)
 
-    @abstractmethod
     def start(self) -> None:
         """Start the service (STOPPED -> STARTING -> begins execution).
 
         Non-blocking. After start() returns, execution has begun but
         service may not be healthy yet. Call wait_healthy() to block
-        until ready.
+        until ready. A stop() from another thread waits for start() to
+        return.
 
         Raises:
-            InvalidTransitionError: If not in STOPPED or FAILED state.
+            InvalidTransitionError: If not in CREATED, STOPPED or FAILED state,
+                or another start() is in progress.
             SetupError: If setup fails.
             RunError: If execution fails to start.
+            RuntimeError: If called from one of this runner's state hooks.
         """
+        self._refuse_from_hook("start")
+        with self._start_claim():
+            self._begin_start()
+            self._launch()
+
+    @abstractmethod
+    def _launch(self) -> None:
+        """Begin the service's work once it is set up and STARTING: start its
+        thread, process or task."""
 
     @abstractmethod
     def stop(self, timeout: float = 5.0) -> None:
@@ -242,6 +258,146 @@ class Runner(ABC):
             self.policy.max_backoff,
         )
 
+    @contextmanager
+    def _start_claim(self) -> Iterator[None]:
+        """Hold the start for one start() call, from its state check until it
+        returns or raises; every runner's start() runs inside it. A second
+        start() fails before it calls setup(), and a stop() from another thread
+        waits for the claim to be released (_await_start()).
+
+        Raises:
+            InvalidTransitionError: If the runner is not CREATED, STOPPED or
+                FAILED, or another start() is in progress.
+        """
+        self._claim_start()
+        try:
+            yield
+        finally:
+            with self._lock:
+                self._start_thread = None
+                if self._start_done is not None:
+                    self._start_done.notify_all()
+                    self._start_done = None
+
+    def _claim_start(self) -> None:
+        """Check under the lock that the runner can start and no other start()
+        is in progress, claim the start, and reset the stop request there
+        (_reset_stop()), before a stop() from another thread can reach this
+        start: such a stop() waits for the claim.
+
+        Raises:
+            InvalidTransitionError: If the runner is not CREATED, STOPPED or
+                FAILED, or another start() is in progress.
+        """
+        with self._lock:
+            startable = self._state in (State.CREATED, State.STOPPED, State.FAILED)
+            if self._start_thread is not None or not startable:
+                raise InvalidTransitionError(self.name, self._state, State.INITD)
+            self._start_thread = threading.get_ident()
+            self._reset_stop()
+
+    def _await_start(self, timeout: float) -> bool:
+        """Wait up to *timeout* seconds for a start() in progress on another
+        thread to return; every runner's stop() calls it first.
+
+        Returns:
+            False if a start() is still in progress after *timeout*.
+        """
+        with self._lock:
+            if self._start_thread is None:
+                return True
+            if self._start_done is None:
+                self._start_done = threading.Condition(self._lock)
+            return self._start_done.wait_for(
+                lambda: self._start_thread is None, timeout
+            )
+
+    def _begin_start(self) -> None:
+        """Run setup() and move to STARTING, inside start()'s claim.
+
+        Raises:
+            SetupError: If setup fails.
+        """
+        self._run_setup()
+        self._transition(State.INITD)
+        self._transition(State.STARTING)
+
+    def _start_ended(self, timeout: float) -> float | None:
+        """For stop(): wait up to *timeout* seconds for a start() in progress
+        on another thread; if it is still running then, log it.
+
+        Returns:
+            The seconds of *timeout* left for stop() to wait for the service's
+            work, or None if stop() should return without acting.
+        """
+        began = time.monotonic()
+        if not self._await_start(timeout):
+            self.service.lg.warning(
+                "stop() waited for a start() in progress",
+                extra={"service": self.name, "timeout": timeout},
+            )
+            return None
+        return max(0.0, timeout - (time.monotonic() - began))
+
+    def _reset_stop(self) -> None:
+        """Clear the runner's stop request before a start; called under the lock.
+        A runner whose stop goes through its own signal overrides it."""
+
+    def _run_setup(self) -> None:
+        """Run service setup, transition to FAILED on error."""
+        try:
+            self.service.setup()
+        except Exception as e:
+            self._transition(State.FAILED)
+            if isinstance(e, SetupError):
+                raise
+            raise SetupError(self.name, str(e)) from e
+
+    def _teardown(self) -> None:
+        """Run the service's teardown(); a failure is logged, not raised."""
+        try:
+            self.service.teardown()
+        except Exception as e:
+            self.service.lg.warning(
+                "teardown failed", extra={"exception": e, "service": self.name}
+            )
+
+    def _settle_exit_state(self, exception: BaseException | None) -> None:
+        """Once the service's work has ended: STOPPED if a stop() is waiting for
+        it or gave up waiting, else DONE after a clean end of a RUNNING service
+        and FAILED after *exception*, unless wait_healthy() has already moved
+        the state on. The end state is chosen and set under one hold of the
+        lock, so a stop() cannot move the state in between."""
+        with self._lock:
+            from_state = self._state
+            if from_state == State.STOPPING:
+                to = State.STOPPED
+            elif exception is None and from_state == State.RUNNING:
+                to = State.DONE
+            elif exception is not None and from_state in (
+                State.STARTING,
+                State.RUNNING,
+            ):
+                to = State.FAILED
+            else:
+                return
+            self._state = to
+        self._notify(from_state, to)
+
+    def _transition_from(self, from_state: State, to: State) -> bool:
+        """Transition to *to* if the state is *from_state*, checked under the
+        lock, so that two threads ending the same state cannot both do it.
+
+        Returns:
+            True if this call made the transition.
+        """
+        with self._lock:
+            if self._state != from_state:
+                return False
+            self._state = to
+        self._notify(from_state, to)
+        return True
+
     def _transition(self, to: State) -> None:
         """Transition to a new state."""
         with self._lock:
@@ -252,10 +408,36 @@ class Runner(ABC):
 
             self._state = to
 
-        for hook in self._hooks:
-            try:
-                hook(self.name, from_state, to)
-            except Exception as e:
-                self.service.lg.warning(
-                    "state hook failed", extra={"exception": e, "hook": hook}
-                )
+        self._notify(from_state, to)
+
+    def _refuse_from_hook(self, call: str) -> None:
+        """Refuse a start() or stop() from one of this runner's state hooks:
+        the transition that runs them is still under way.
+
+        Raises:
+            RuntimeError: If the current thread is running this runner's hooks.
+        """
+        if any(runner is self for runner in getattr(_in_hooks, "runners", ())):
+            raise RuntimeError(
+                f"{call}() from a state hook of '{self.name}': hooks observe "
+                "their runner's transitions and cannot start or stop it"
+            )
+
+    def _notify(self, from_state: State, to: State) -> None:
+        """Run the state hooks for a transition; a failing hook is logged."""
+        if not self._hooks:
+            return
+        runners = getattr(_in_hooks, "runners", None)
+        if runners is None:
+            runners = _in_hooks.runners = []
+        runners.append(self)
+        try:
+            for hook in self._hooks:
+                try:
+                    hook(self.name, from_state, to)
+                except Exception as e:
+                    self.service.lg.warning(
+                        "state hook failed", extra={"exception": e, "hook": hook}
+                    )
+        finally:
+            runners.pop()

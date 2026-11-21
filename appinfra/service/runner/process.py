@@ -18,25 +18,23 @@ from typing import Any
 from ...log import Logger
 from ...log.mp import LogQueueListener
 from ..base import Service
-from ..channel.sync import Channel
-from ..errors import SetupError
 from ..state import RestartPolicy, State
 from .base import Runner
-from .drive import drive
+from .drive import check_drivable, drive
 
 
 class ProcessRunner(Runner):
     """Runs a service in a separate process using multiprocessing.
 
     Similar to ThreadRunner but uses a subprocess for isolation.
-    The service, and a step service's inbox, must be picklable for this to work.
+    The service must be picklable for this to work. An AsyncService runs on a
+    LoopHost instead.
 
     Note:
         A service with its own run() should use ``_shutdown_event`` (injected
         by ProcessRunner) to detect shutdown signals from the parent process. Do
         NOT create your own multiprocessing.Event - it won't be shared across
-        processes. Step and scheduled services need nothing: the runner ends
-        their loop.
+        processes. Scheduled services need nothing: the runner ends their loop.
 
     Example:
         from appinfra.service import ProcessRunner, Service
@@ -72,7 +70,6 @@ class ProcessRunner(Runner):
         policy: RestartPolicy | None = None,
         stop_timeout: float = 5.0,
         start_method: str | None = None,
-        inbox: Channel | None = None,
     ) -> None:
         """Initialize process runner.
 
@@ -85,10 +82,12 @@ class ProcessRunner(Runner):
                 None uses multiprocessing's default. Under fork, a restart forks
                 from the monitor thread, which Python 3.12+ warns may deadlock the
                 child; spawn or forkserver avoids it.
-            inbox: A StepService's inbox channel (see Runner), on a process-safe
-                transport such as ProcessQueueTransport.
+
+        Raises:
+            TypeError: If *service* is an AsyncService.
         """
-        super().__init__(service, policy, inbox)
+        super().__init__(service, policy)
+        check_drivable(self.service)
         self.stop_timeout = stop_timeout
         self._start_method = start_method
         self._process: BaseProcess | None = None
@@ -103,12 +102,8 @@ class ProcessRunner(Runner):
         self._monitor_thread: threading.Thread | None = None
         self._stop_monitor_event: threading.Event = threading.Event()
 
-    def start(self) -> None:
-        """Start the service in a subprocess."""
-        self._run_setup()
-        self._transition(State.INITD)
-        self._transition(State.STARTING)
-
+    def _launch(self) -> None:
+        """Spawn the service's subprocess."""
         try:
             # One context for the process and every queue and event it uses:
             # multiprocessing refuses a lock from another context in the child
@@ -138,16 +133,6 @@ class ProcessRunner(Runner):
         if proc.is_alive():
             proc.kill()
             proc.join(timeout=1.0)
-
-    def _run_setup(self) -> None:
-        """Run service setup, transition to FAILED on error."""
-        try:
-            self.service.setup()
-        except Exception as e:
-            self._transition(State.FAILED)
-            if isinstance(e, SetupError):
-                raise
-            raise SetupError(self.name, str(e)) from e
 
     def _create_log_infrastructure(
         self, ctx: BaseContext
@@ -180,7 +165,6 @@ class ProcessRunner(Runner):
                 target=_process_entry,
                 args=(
                     self.service,
-                    self.inbox,
                     self._shutdown_event,
                     self._healthy_event,
                     self._error_queue,
@@ -196,13 +180,23 @@ class ProcessRunner(Runner):
                 setattr(self.service, "_lg", saved_lg)
 
     def stop(self, timeout: float | None = None) -> None:
-        """Stop the subprocess."""
+        """Stop the subprocess. A start() in progress on another thread is
+        waited for first; that wait and the wait for the child to exit
+        gracefully take at most *timeout* (stop_timeout if None) together.
+
+        Raises:
+            RuntimeError: If called from one of this runner's state hooks.
+        """
+        self._refuse_from_hook("stop")
+        left = self._start_ended(self.stop_timeout if timeout is None else timeout)
+        if left is None:
+            return
         if self._state in (State.CREATED, State.STOPPED, State.STOPPING, State.DONE):
             return
 
         # Stop monitor thread first
         self.stop_monitor()
-        self._stop_process(timeout)
+        self._stop_process(left)
 
     def _stop_for_restart(self) -> None:
         """Stop the failed process only: a restart runs on the monitor thread,
@@ -212,7 +206,8 @@ class ProcessRunner(Runner):
     def _stop_process(self, timeout: float | None) -> None:
         """Signal the subprocess to stop, escalating to terminate and kill."""
         self._transition(State.STOPPING)
-        timeout = timeout or self.stop_timeout
+        if timeout is None:
+            timeout = self.stop_timeout
 
         # Signal shutdown
         if self._shutdown_event is not None:
@@ -271,13 +266,7 @@ class ProcessRunner(Runner):
         """
         self._stop_monitor_event.set()
         thread = self._monitor_thread
-        # Called from the monitor thread itself (e.g. a state hook), there is
-        # nothing to join: the set event ends its loop
-        if (
-            thread is not None
-            and thread.is_alive()
-            and thread is not threading.current_thread()
-        ):
+        if thread is not None and thread.is_alive():
             thread.join(timeout=timeout)
         self._monitor_thread = None
 
@@ -291,8 +280,8 @@ class ProcessRunner(Runner):
             if not self.is_alive() and self._process is not None:
                 exit_code = self._process.exitcode
                 if exit_code == 0:
-                    # Clean shutdown (e.g., SIGINT/SIGTERM) - transition to DONE
-                    self._transition(State.DONE)
+                    # Clean shutdown (e.g., SIGINT/SIGTERM)
+                    self._end_clean()
                     break
 
             # check() handles failure detection and restart
@@ -309,6 +298,15 @@ class ProcessRunner(Runner):
 
             # Wait for interval or stop signal
             self._stop_monitor_event.wait(timeout=interval)
+
+    def _end_clean(self) -> None:
+        """Move a process that exited cleanly to DONE. DONE is final, so no
+        stop() follows to release the log listener and queues: release them
+        here, keeping the process handle for exit_code."""
+        process = self._process
+        self._cleanup_ipc()
+        self._process = process
+        self._transition(State.DONE)
 
     def _cleanup_ipc(self) -> None:
         """Clean up IPC resources."""
@@ -408,7 +406,6 @@ def _start_health_poller(
 
 def _process_entry(
     service: Any,
-    inbox: Channel | None,
     shutdown_event: MPEvent,
     healthy_event: MPEvent,
     error_queue: mp.Queue[BaseException],
@@ -433,7 +430,7 @@ def _process_entry(
             service._shutdown_event = shutdown_event
 
         _start_health_poller(service, shutdown_event, healthy_event)
-        drive(service, shutdown_event, inbox)
+        drive(service, shutdown_event)
     except BaseException as e:
         exit_code = _exit_code(e)
         with contextlib.suppress(Exception):

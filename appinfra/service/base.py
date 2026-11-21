@@ -1,12 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright 2026 The appinfra Authors
 
-"""Service base class, and the services whose loop the runner runs."""
+"""Service base class, and the scheduled and async services."""
 
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any
 
 from ..log import Logger
 
@@ -18,10 +17,10 @@ class Service(ABC):
     The Runner handles HOW to run it and manages state.
 
     A plain Service implements run(), which holds its thread, or process, until
-    the service is stopped. Two subclasses hand their loop to the runner
-    instead, which lets a runner host many of them without a thread each:
-    - StepService: step(msg) for each message on its inbox channel
-    - ScheduledService: tick() every interval seconds
+    the service is stopped. Two subclasses work differently:
+    - ScheduledService: the runner calls tick() every interval seconds
+    - AsyncService: run() is a coroutine; a LoopHost runs many of them as tasks
+      on one event loop, and one waiting on an await holds no thread
 
     Lifecycle methods, common to all services:
     - setup(): Initialize resources, validate config
@@ -107,10 +106,11 @@ class Service(ABC):
     def teardown(self) -> None:
         """Cleanup the service.
 
-        For a step or scheduled service, the runner calls it once the loop has
-        ended (stopped, failed, or inbox closed), on the thread or in the
-        process that ran the loop, so it never overlaps step() or tick().
-        For a service with its own run(), it must make run() return: under
+        For a scheduled service, the runner calls it once the loop has ended
+        (stopped or failed), on the thread or in the process that ran the loop,
+        so it never overlaps tick(). For an async service, it runs on the
+        LoopHost's thread after run() has ended, so it must not block. For a
+        service with its own run(), it must make run() return: under
         ThreadRunner, stop() calls it while run() is still running. Default
         does nothing.
         """
@@ -127,37 +127,42 @@ class Service(ABC):
         return True
 
 
-class StepService(Service):
-    """Service that handles one message per step.
+class AsyncService(Service):
+    """Service whose run() is a coroutine.
 
-    The runner that hosts it owns its inbox channel: it receives each message
-    and calls step() with it, one at a time and in order, until the service is
-    stopped or the inbox closes. What step() returns, unless None, the runner
-    sends back on the inbox, so a caller holding the other end (see
-    RunnerFactory's create_*_runner_with_channel) can submit() a request and
-    get the reply. While the inbox has no room for a reply, the runner waits for
-    room before the next step(); a reply still waiting when the service stops
-    is dropped.
+    A LoopHost runs it as a task on its event loop, alongside many others
+    (``host.runner(service)``): while run() waits on an await, the service
+    holds no thread. It stays on that loop for its lifetime. Stopping it
+    cancels the task, raising CancelledError at the await it is parked on.
+    ThreadRunner and ProcessRunner refuse an AsyncService.
 
-    step() must not block. It may send(..., timeout=0) on other channels it
-    holds, but never recv() or submit(), which wait.
+    run() must not call anything that blocks without awaiting: that stalls
+    every service on the loop. Run blocking code through asyncio.to_thread().
+    Open clients bound to the loop in run() and close them in its finally:
+    setup() runs on the caller's thread, before the task starts.
+
+    Example:
+        class Doubler(AsyncService):
+            def __init__(self, lg: Logger, inbox: AsyncChannel) -> None:
+                self._lg = lg
+                self._inbox = inbox
+
+            @property
+            def name(self) -> str:
+                return "doubler"
+
+            async def run(self) -> None:
+                while True:
+                    msg = await self._inbox.recv()
+                    await self._inbox.send(Message(id=msg.id, payload=msg.payload * 2))
     """
 
+    # A coroutine, unlike Service.run(): only a LoopHost runs it, and ThreadRunner
+    # and ProcessRunner refuse an AsyncService
     @abstractmethod
-    def step(self, msg: Any) -> Any:
-        """Handle one message from the inbox. Must not block.
-
-        Returns:
-            A reply for the runner to send back on the inbox, or None. A reply
-            to a submit() carries the request's id.
-        """
+    async def run(self) -> None:  # type: ignore[override]
+        """Do the service's work until it returns or is cancelled."""
         ...
-
-    def run(self) -> None:
-        """Not used: the runner drives a step service through step()."""
-        raise TypeError(
-            f"step service '{self.name}' is driven through step(), not run()"
-        )
 
 
 class ScheduledService(Service):

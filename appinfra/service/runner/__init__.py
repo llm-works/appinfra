@@ -4,6 +4,7 @@
 """Service runners - execution and state management."""
 
 from .base import Runner
+from .loop import LoopHost, TaskRunner
 from .process import ProcessRunner
 from .thread import ThreadRunner
 
@@ -11,4 +12,6 @@ __all__ = [
     "Runner",
     "ThreadRunner",
     "ProcessRunner",
+    "LoopHost",
+    "TaskRunner",
 ]

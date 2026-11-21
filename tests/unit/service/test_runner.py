@@ -4,6 +4,7 @@
 """Tests for Runner classes."""
 
 import itertools
+import threading
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -13,15 +14,32 @@ import pytest
 
 from appinfra.log import Logger
 from appinfra.service import (
+    AsyncService,
     InvalidTransitionError,
+    LoopHost,
     ProcessRunner,
     RestartPolicy,
     Service,
     SetupError,
     State,
+    TaskRunner,
     ThreadRunner,
 )
 from tests.helpers.service.runner import SimpleService
+
+
+class IdleAsync(AsyncService):
+    """An async service these tests never run."""
+
+    def __init__(self) -> None:
+        self._lg = MagicMock()
+
+    @property
+    def name(self) -> str:
+        return "idle-async"
+
+    async def run(self) -> None:
+        raise AssertionError("never run by these tests")
 
 
 @contextmanager
@@ -118,6 +136,84 @@ class TestThreadRunner:
         # Not started yet
         result = runner.check()
         assert result is False
+
+    def test_settling_the_exit_state_leaves_no_window_for_a_stop(self):
+        """The end state is chosen and set in one step: a stop() that moves
+        the runner to STOPPING after the first lock release cannot strand it
+        there once the work has ended."""
+        runner = ThreadRunner(SimpleService())
+        runner._state = State.RUNNING  # Private: a running runner
+        real = runner._lock
+
+        class StopsAfterFirstRelease:
+            """The runner's lock; its first release, if the runner is still
+            RUNNING, lets a stop(timeout=0) on another thread move it on."""
+
+            released = 0
+
+            def __enter__(self) -> None:
+                real.acquire()
+
+            def __exit__(self, *exc: object) -> None:
+                real.release()
+                self.released += 1
+                if self.released == 1 and runner._state == State.RUNNING:
+                    runner._state = State.STOPPING
+
+        runner._lock = StopsAfterFirstRelease()  # type: ignore[assignment]
+
+        runner._settle_exit_state(None)
+
+        assert runner.state != State.STOPPING
+
+    def test_an_ended_thread_leaves_a_newer_run_alive(self):
+        """A thread that ends after start() has launched a newer one does not
+        mark the newer run as exited."""
+        runner = ThreadRunner(SetupFailService())  # its run() returns at once
+        runner._thread = MagicMock()  # Private: the newer run's thread
+
+        runner._run()  # the old thread's last steps, on this thread
+
+        assert runner.is_alive()
+
+    def test_a_run_launched_as_the_old_thread_ends_stays_alive(self):
+        """A start() on another thread that launches a newer run while the old
+        thread takes its last step leaves the newer run alive."""
+        runner = ThreadRunner(SetupFailService())  # its run() returns at once
+        old = threading.current_thread()
+        runner._thread = old  # Private: this thread plays the old run
+        newer = MagicMock()
+        newer.is_alive.return_value = True
+
+        def launch_newer() -> threading.Thread:
+            runner._launch()
+            return old
+
+        with patch("appinfra.service.runner.thread.threading") as mod:
+            mod.Thread.return_value = newer
+            mod.current_thread.side_effect = launch_newer
+            runner._run()  # the old thread's last steps, on this thread
+
+        assert runner.is_alive()
+
+    def test_stop_joins_for_what_is_left_after_waiting_for_start(self):
+        """The time stop() spends waiting for a start() in progress comes off
+        the time it then joins the service thread for."""
+        runner = ThreadRunner(SimpleService())
+        runner._state = State.RUNNING  # Private: a started runner, no thread
+        thread = MagicMock()
+        thread.is_alive.return_value = False
+        runner._thread = thread
+        clock = "appinfra.service.runner.base.time.monotonic"
+
+        # The wait for start() takes 4 of the 5 seconds
+        with (
+            patch.object(runner, "_await_start", return_value=True),
+            patch(clock, side_effect=[100.0, 104.0]),
+        ):
+            runner.stop(timeout=5.0)
+
+        thread.join.assert_called_once_with(timeout=1.0)
 
 
 class TestProcessRunner:
@@ -412,6 +508,54 @@ class TestProcessRunner:
             runner._monitor_loop(interval=0)
 
         assert runner.state == state
+
+    def test_a_clean_exit_releases_the_log_listener_and_queues(self, lg):
+        """A process that exits cleanly under the monitor leaves no log listener
+        thread or queues behind: DONE is final, so no stop() will release them.
+        The exit code stays readable."""
+        runner = ProcessRunner(MPSimpleService(lg))
+        runner._state = State.RUNNING
+        runner._process = MagicMock(exitcode=0)
+        listener = runner._log_listener = MagicMock()
+        with patch.object(runner, "is_alive", return_value=False):
+            runner._monitor_loop(interval=0)
+
+        assert runner.state == State.DONE
+        listener.stop.assert_called_once()
+        assert runner.exit_code == 0
+
+
+class TestTaskRunner:
+    """TaskRunner steps that need no running loop."""
+
+    def test_a_run_started_as_the_old_task_ends_stays_alive(self):
+        """A start() on another thread that launches a newer run while the old
+        task takes its last step leaves the newer run alive."""
+        host = LoopHost()
+        old = MagicMock()
+
+        class StartsOnRead(TaskRunner):
+            """Reading the old task, as it ends, is when the newer run's
+            start() lands."""
+
+            @property  # type: ignore[override]
+            def _task(self) -> object:
+                task = self.__dict__["task"]
+                if task is old:
+                    self._launch()
+                return task
+
+            @_task.setter
+            def _task(self, task: object) -> None:
+                self.__dict__["task"] = task
+
+        runner = StartsOnRead(host, IdleAsync())
+        with patch.object(host, "_schedule"):
+            runner._launch()  # the old run
+            runner._task = old
+            runner._finish(old)  # its last step, on the loop
+
+        assert runner.is_alive()
 
 
 class TestRunnerRestart:
