@@ -4,6 +4,7 @@
 """Tests for Runner classes."""
 
 import itertools
+import threading
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -156,7 +157,27 @@ class TestThreadRunner:
 
         runner._run()  # the old thread's last steps, on this thread
 
-        assert runner._exited is False
+        assert runner.is_alive()
+
+    def test_a_run_launched_as_the_old_thread_ends_stays_alive(self):
+        """A start() on another thread that launches a newer run while the old
+        thread takes its last step leaves the newer run alive."""
+        runner = ThreadRunner(SetupFailService())  # its run() returns at once
+        old = threading.current_thread()
+        runner._thread = old  # Private: this thread plays the old run
+        newer = MagicMock()
+        newer.is_alive.return_value = True
+
+        def launch_newer() -> threading.Thread:
+            runner._launch()
+            return old
+
+        with patch("appinfra.service.runner.thread.threading") as mod:
+            mod.Thread.return_value = newer
+            mod.current_thread.side_effect = launch_newer
+            runner._run()  # the old thread's last steps, on this thread
+
+        assert runner.is_alive()
 
     def test_stop_joins_for_what_is_left_after_waiting_for_start(self):
         """The time stop() spends waiting for a start() in progress comes off

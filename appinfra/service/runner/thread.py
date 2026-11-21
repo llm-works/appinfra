@@ -44,23 +44,23 @@ class ThreadRunner(Runner):
         self._exception: BaseException | None = None
         # Ends a scheduled service's loop; set by stop()
         self._stop = threading.Event()
-        # Set by _run() once the service's work has returned. Thread.is_alive() on
-        # Python 3.13+ stays True until the OS thread handle is marked done,
-        # which happens after the GIL is released; polling it alone lets
-        # wait_healthy() observe a finished thread as alive and report
-        # RUNNING for a service that exited during startup.
-        self._exited = False
+        # The thread whose run has ended, set by _run() as its last step.
+        # Thread.is_alive() on Python 3.13+ stays True until the OS thread
+        # handle is marked done, which happens after the GIL is released;
+        # polling it alone lets wait_healthy() observe a finished thread as
+        # alive and report RUNNING for a service that exited during startup.
+        # A thread, not a flag: an older thread ending after a newer run was
+        # launched names itself, not the newer run.
+        self._ended: threading.Thread | None = None
 
     def _launch(self) -> None:
         """Start the service's thread."""
         self._exception = None
-        # The thread first, so an older one ending now sees it isn't current
         self._thread = threading.Thread(
             target=self._run,
             name=f"svc-{self.name}",
             daemon=True,
         )
-        self._exited = False
         self._thread.start()
 
     def _reset_stop(self) -> None:
@@ -90,10 +90,8 @@ class ThreadRunner(Runner):
             self._settle_exit_state(self._exception)
         finally:
             # Last, so _exception, teardown and the state are settled before
-            # is_alive() reports the exit; not once a start() on another
-            # thread has launched a newer run
-            if self._thread is threading.current_thread():
-                self._exited = True
+            # is_alive() reports the exit
+            self._ended = threading.current_thread()
 
     def stop(self, timeout: float = 5.0) -> None:
         """Stop the service.
@@ -138,7 +136,8 @@ class ThreadRunner(Runner):
 
     def is_alive(self) -> bool:
         """Check if thread is running."""
-        return self._thread is not None and not self._exited and self._thread.is_alive()
+        thread = self._thread
+        return thread is not None and self._ended is not thread and thread.is_alive()
 
     def is_healthy(self) -> bool:
         """Check if service is healthy."""
