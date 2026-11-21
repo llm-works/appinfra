@@ -187,8 +187,12 @@ class TaskRunner(Runner):
         # Set by stop(); read on the loop, where a task that has not begun yet
         # sees it and skips run()
         self._stop_requested = False
-        # True from start() until the task has ended and torn the service down
-        self._running = False
+        # Runs launched by start() and runs whose task has ended and torn the
+        # service down; alive while they differ. Counts, each with one writer,
+        # not a flag: a run ending after a start() on another thread launched
+        # a newer one counts itself, not the newer run.
+        self._launched = 0
+        self._ended = 0
         # The task; held here because the loop keeps only a weak reference.
         # None from start() until the task is created, so a run ending tells
         # whether a start() on another thread has begun a newer one meanwhile
@@ -216,12 +220,12 @@ class TaskRunner(Runner):
         """Schedule the service's task on the host's loop; if the host is
         stopping, tear the service down and fail."""
         self._exception = None
-        self._running = True
         self._task = None
+        self._launched += 1
         try:
             self._host._schedule(self._spawn)
         except RuntimeError:
-            self._running = False
+            self._launched -= 1
             self._teardown()
             self._transition(State.FAILED)
             raise
@@ -240,16 +244,16 @@ class TaskRunner(Runner):
         """On the loop, once *task* has ended: tear the service down, settle
         the state, and wake the stop() calls waiting for it.
 
-        The state settles before the run is marked ended, so is_alive() never
+        The state settles before the run is counted ended, so is_alive() never
         reports a RUNNING service as gone. Once it has settled, a start() on
-        another thread may begin a new run, which resets _task; that run's
-        fields are then left alone."""
+        another thread may begin a new run, which resets _task; the new run's
+        task is then left alone."""
         self._teardown()
         waiters, self._waiters = self._waiters, None
         self._settle_exit_state(self._exception)
         if self._task is task:
             self._task = None
-            self._running = False
+        self._ended += 1
         for waiter in waiters or ():
             waiter.set()
 
@@ -290,7 +294,7 @@ class TaskRunner(Runner):
 
         self._transition(State.STOPPING)
         self._stop_requested = True
-        if self._running and not self._wait_ended(timeout):
+        if self.is_alive() and not self._wait_ended(timeout):
             self.service.lg.warning(
                 "service task did not end in time",
                 extra={"service": self.name, "timeout": timeout},
@@ -315,7 +319,7 @@ class TaskRunner(Runner):
     def _cancel(self, ended: threading.Event) -> None:
         """On the loop: set *ended* once the task has ended, and cancel it. A
         task not created yet sees the stop request and skips run()."""
-        if not self._running:
+        if not self.is_alive():
             ended.set()
             return
         if self._waiters is None:
@@ -326,7 +330,7 @@ class TaskRunner(Runner):
 
     def is_alive(self) -> bool:
         """True while the service's task has not ended."""
-        return self._running
+        return self._ended != self._launched
 
     def is_healthy(self) -> bool:
         """Check if service is healthy."""

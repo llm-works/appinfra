@@ -14,15 +14,32 @@ import pytest
 
 from appinfra.log import Logger
 from appinfra.service import (
+    AsyncService,
     InvalidTransitionError,
+    LoopHost,
     ProcessRunner,
     RestartPolicy,
     Service,
     SetupError,
     State,
+    TaskRunner,
     ThreadRunner,
 )
 from tests.helpers.service.runner import SimpleService
+
+
+class IdleAsync(AsyncService):
+    """An async service these tests never run."""
+
+    def __init__(self) -> None:
+        self._lg = MagicMock()
+
+    @property
+    def name(self) -> str:
+        return "idle-async"
+
+    async def run(self) -> None:
+        raise AssertionError("never run by these tests")
 
 
 @contextmanager
@@ -491,6 +508,54 @@ class TestProcessRunner:
             runner._monitor_loop(interval=0)
 
         assert runner.state == state
+
+    def test_a_clean_exit_releases_the_log_listener_and_queues(self, lg):
+        """A process that exits cleanly under the monitor leaves no log listener
+        thread or queues behind: DONE is final, so no stop() will release them.
+        The exit code stays readable."""
+        runner = ProcessRunner(MPSimpleService(lg))
+        runner._state = State.RUNNING
+        runner._process = MagicMock(exitcode=0)
+        listener = runner._log_listener = MagicMock()
+        with patch.object(runner, "is_alive", return_value=False):
+            runner._monitor_loop(interval=0)
+
+        assert runner.state == State.DONE
+        listener.stop.assert_called_once()
+        assert runner.exit_code == 0
+
+
+class TestTaskRunner:
+    """TaskRunner steps that need no running loop."""
+
+    def test_a_run_started_as_the_old_task_ends_stays_alive(self):
+        """A start() on another thread that launches a newer run while the old
+        task takes its last step leaves the newer run alive."""
+        host = LoopHost()
+        old = MagicMock()
+
+        class StartsOnRead(TaskRunner):
+            """Reading the old task, as it ends, is when the newer run's
+            start() lands."""
+
+            @property  # type: ignore[override]
+            def _task(self) -> object:
+                task = self.__dict__["task"]
+                if task is old:
+                    self._launch()
+                return task
+
+            @_task.setter
+            def _task(self, task: object) -> None:
+                self.__dict__["task"] = task
+
+        runner = StartsOnRead(host, IdleAsync())
+        with patch.object(host, "_schedule"):
+            runner._launch()  # the old run
+            runner._task = old
+            runner._finish(old)  # its last step, on the loop
+
+        assert runner.is_alive()
 
 
 class TestRunnerRestart:

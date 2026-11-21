@@ -280,8 +280,8 @@ class ProcessRunner(Runner):
             if not self.is_alive() and self._process is not None:
                 exit_code = self._process.exitcode
                 if exit_code == 0:
-                    # Clean shutdown (e.g., SIGINT/SIGTERM) - transition to DONE
-                    self._transition(State.DONE)
+                    # Clean shutdown (e.g., SIGINT/SIGTERM)
+                    self._end_clean()
                     break
 
             # check() handles failure detection and restart
@@ -298,6 +298,15 @@ class ProcessRunner(Runner):
 
             # Wait for interval or stop signal
             self._stop_monitor_event.wait(timeout=interval)
+
+    def _end_clean(self) -> None:
+        """Move a process that exited cleanly to DONE. DONE is final, so no
+        stop() follows to release the log listener and queues: release them
+        here, keeping the process handle for exit_code."""
+        process = self._process
+        self._cleanup_ipc()
+        self._process = process
+        self._transition(State.DONE)
 
     def _cleanup_ipc(self) -> None:
         """Clean up IPC resources."""
