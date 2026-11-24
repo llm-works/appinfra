@@ -38,6 +38,11 @@ _APPINFRA_COVERAGE_DIR := $(APPINFRA_DEV_PROJECT_ROOT)/.cover
 # Build marker argument for coverage tests (empty if no markers specified)
 _APPINFRA_COVERAGE_MARKER_ARG := $(if $(APPINFRA_PYTEST_COVERAGE_MARKERS),-m "$(APPINFRA_PYTEST_COVERAGE_MARKERS)",)
 
+# Coverage tracer, chosen as check.sh chooses it: sys.monitoring (COVERAGE_CORE=sysmon) on
+# Python 3.12+, much faster than the C tracer; 3.11 keeps the C tracer, as coverage.py
+# refuses sysmon there. Recursive, so only the coverage targets run the probe.
+_APPINFRA_COVERAGE_CORE_ENV = $(if $(shell $(PYTHON) -c "import sys; sys.exit(sys.version_info < (3, 12))" 2>/dev/null && echo y),COVERAGE_CORE=sysmon)
+
 # Helper to check pytest availability with helpful error
 define _APPINFRA_PYTEST_CHECK
 @$(PYTHON) -c "import pytest" 2>/dev/null || { \
@@ -214,25 +219,25 @@ test.coverage:: ## runs tests with coverage analysis (configurable via APPINFRA_
 	@echo "* running tests with coverage analysis..."
 	@rm -rf $(_APPINFRA_COVERAGE_DIR) 2>/dev/null || true
 	@mkdir -p $(_APPINFRA_COVERAGE_DIR)
-	@COVERAGE_FILE=$(_APPINFRA_COVERAGE_DIR)/data $(call APPINFRA_RUN_PYTEST,tests/ $(_APPINFRA_COVERAGE_MARKER_ARG) -qq --no-header --cov=$(APPINFRA_PYTEST_COVERAGE_PKG) --cov-report=term --cov-report=xml:$(_APPINFRA_COVERAGE_DIR)/coverage.xml)
+	@$(_APPINFRA_COVERAGE_CORE_ENV) COVERAGE_FILE=$(_APPINFRA_COVERAGE_DIR)/data $(call APPINFRA_RUN_PYTEST,tests/ $(_APPINFRA_COVERAGE_MARKER_ARG) -qq --no-header --cov=$(APPINFRA_PYTEST_COVERAGE_PKG) --cov-report=term --cov-report=xml:$(_APPINFRA_COVERAGE_DIR)/coverage.xml)
 	@echo "* coverage analysis completed (XML report: $(_APPINFRA_COVERAGE_DIR)/coverage.xml)"
 .PHONY: test.coverage
 
 test.coverage.v:: ## runs tests with coverage analysis (verbose, shows missing lines)
 	@echo "* running tests with coverage analysis... (verbose)"
-	@$(call APPINFRA_RUN_PYTEST,tests/ $(_APPINFRA_COVERAGE_MARKER_ARG) -v --cov=$(APPINFRA_PYTEST_COVERAGE_PKG) --cov-report=term-missing)
+	@$(_APPINFRA_COVERAGE_CORE_ENV) $(call APPINFRA_RUN_PYTEST,tests/ $(_APPINFRA_COVERAGE_MARKER_ARG) -v --cov=$(APPINFRA_PYTEST_COVERAGE_PKG) --cov-report=term-missing)
 	@echo "* coverage analysis completed"
 .PHONY: test.coverage.v
 
 test.coverage.html:: ## generates HTML coverage report
 	@echo "* running tests with coverage analysis..."
-	@$(call APPINFRA_RUN_PYTEST,tests/ $(_APPINFRA_COVERAGE_MARKER_ARG) --cov=$(APPINFRA_PYTEST_COVERAGE_PKG) --cov-report=html)
+	@$(_APPINFRA_COVERAGE_CORE_ENV) $(call APPINFRA_RUN_PYTEST,tests/ $(_APPINFRA_COVERAGE_MARKER_ARG) --cov=$(APPINFRA_PYTEST_COVERAGE_PKG) --cov-report=html)
 	@echo "* HTML coverage report generated in .htmlcov/ directory"
 .PHONY: test.coverage.html
 
 test.coverage.json:: ## generates JSON coverage report
 	@echo "* running tests with coverage analysis..."
-	@$(call APPINFRA_RUN_PYTEST,tests/ $(_APPINFRA_COVERAGE_MARKER_ARG) --cov=$(APPINFRA_PYTEST_COVERAGE_PKG) --cov-report=json)
+	@$(_APPINFRA_COVERAGE_CORE_ENV) $(call APPINFRA_RUN_PYTEST,tests/ $(_APPINFRA_COVERAGE_MARKER_ARG) --cov=$(APPINFRA_PYTEST_COVERAGE_PKG) --cov-report=json)
 	@echo "* JSON coverage report generated as .coverage.json"
 .PHONY: test.coverage.json
 
