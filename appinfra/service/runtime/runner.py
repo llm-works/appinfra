@@ -170,7 +170,8 @@ class Runner(ABC):
         """Exception from execution, if any."""
 
     def wait_healthy(self, timeout: float = 30.0, interval: float = 0.1) -> None:
-        """Block until healthy or timeout.
+        """Block until healthy or timeout. Several threads may wait at once:
+        the first to see the service healthy moves it to RUNNING.
 
         Args:
             timeout: Max seconds to wait.
@@ -187,8 +188,9 @@ class Runner(ABC):
                 self._handle_execution_exit()
 
             if self.is_healthy():
-                self._transition(State.RUNNING)
-                self._retries = 0
+                # Only from STARTING: another waiter may have moved it already
+                if self._transition_from(State.STARTING, State.RUNNING):
+                    self._retries = 0
                 return
 
             time.sleep(interval)

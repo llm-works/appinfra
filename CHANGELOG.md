@@ -25,10 +25,10 @@ For API stability guarantees and deprecation policy, see
   one shared event loop thread, so a service waiting on an `await` holds no thread of its own.
 - `BufferedChannel.stream()`: the sync counterpart of `AsyncBufferedChannel.stream()`, yielding
   the response chunks of a request until the one with `is_final=True`.
-- `Runtime`: `spawn()` starts a service at once on the runner its kind needs (a task on the
-  runtime's shared event loop, a thread, or a process with `isolate=True`); `depends_on` must be
-  running, `stop()` goes in reverse spawn order, and a service that fails while running is
-  restarted per its policy.
+- `Runtime`: `spawn()` takes services in any order, from any thread, and starts each on the runner
+  its kind needs (a task on a shared event loop, a thread, or a process with `isolate=True`) once
+  its `depends_on` run. `stop()` goes in reverse start order; a service that fails while running
+  is restarted per its policy.
 - `Service.stopping`: a `StopToken` every runner sets before `setup()` and stops when the service
   is to stop; `run()` returns on it under any runner. `stopping.child()` derives a token stopped
   with it.

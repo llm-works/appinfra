@@ -55,8 +55,8 @@ class DependencyFailedError(Error):
         super().__init__(f"{name}: dependency '{dependency}' failed to start")
 
 
-class DependencyNotRunningError(Error):
-    """A service was spawned before a service it depends on runs."""
+class DependencyNotRunningError(Error, TimeoutError):
+    """A service still waited for a dependency to run when the wait for it ended."""
 
     def __init__(self, name: str, dependency: str) -> None:
         self.name = name

@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import asyncio
+import random
 import threading
 import time
 from collections.abc import Callable, Iterator
@@ -16,6 +17,8 @@ import pytest
 from appinfra.log import Logger
 from appinfra.service import (
     AsyncService,
+    CycleError,
+    DependencyFailedError,
     DependencyNotRunningError,
     ProcessRunner,
     RestartPolicy,
@@ -180,14 +183,6 @@ class TestSpawn:
         with pytest.raises(ValueError, match="already"):
             rt.spawn(Parked("same"))
 
-    def test_a_dependency_must_be_running(self, rt):
-        db = rt.spawn(Parked("db"))
-        with pytest.raises(DependencyNotRunningError, match="'db'"):
-            rt.spawn(Parked("api", depends=("db",)))  # db spawned, not ready yet
-        rt.ready(db)
-        rt.spawn(Parked("api", depends=("db",)))
-        assert list(rt.services) == ["db", "api"]
-
     def test_spawn_needs_a_running_runtime(self):
         runtime = Runtime(MagicMock())
         with pytest.raises(RuntimeError, match="not running"):
@@ -198,13 +193,96 @@ class TestSpawn:
             runtime.spawn(Parked("late"))
 
 
+class TestDependencies:
+    def test_a_service_spawned_before_its_dependency_waits_for_it(self, rt):
+        api = rt.spawn(Parked("api", depends=("db",)))
+        assert api.state == State.CREATED
+
+        rt.spawn(Parked("db"))  # nobody waits on db's health: the runtime does
+
+        rt.ready(api)
+        assert api.state == State.RUNNING
+
+    def test_a_dependency_that_never_comes_is_named(self, rt):
+        api = rt.spawn(Parked("api", depends=("db",)))
+        with pytest.raises(DependencyNotRunningError, match="'db'"):
+            rt.ready(api, timeout=0.2)
+
+    def test_a_cycle_is_refused(self, rt):
+        rt.spawn(Parked("a", depends=("b",)))
+        with pytest.raises(CycleError, match="b → a → b"):
+            rt.spawn(Parked("b", depends=("a",)))
+        assert list(rt.services) == ["a"]
+
+    def test_waiters_fail_when_their_dependency_cannot_start(self, rt):
+        class FailsSetup(Parked):
+            def setup(self) -> None:
+                raise RuntimeError("no setup")
+
+        api = rt.spawn(Parked("api", depends=("db",)))
+        web = rt.spawn(Parked("web", depends=("api",)))
+        with pytest.raises(Exception, match="no setup"):
+            rt.spawn(FailsSetup("db"))
+
+        with pytest.raises(DependencyFailedError, match="'db'"):
+            rt.ready(api)
+        with pytest.raises(DependencyFailedError, match="'api'"):
+            rt.ready(web)
+        assert rt.services == {}
+
+    @pytest.mark.parametrize("seed", range(20))
+    def test_concurrent_spawns_in_any_order_start_each_once_after_its_dependencies(
+        self, seed
+    ):
+        """Ten services, a dependency DAG between them, spawned from ten threads
+        at once in a shuffled order."""
+        graph = {
+            "pg": (), "redis": (), "auth": ("pg",), "users": ("pg", "auth"),
+            "cache": ("redis",), "api": ("users", "cache"), "jobs": ("pg", "redis"),
+            "mail": ("jobs",), "web": ("api",), "admin": ("api", "jobs"),
+        }  # fmt: skip
+        started: list[str] = []
+        services = [StartOrder(n, deps, started) for n, deps in graph.items()]
+        random.Random(seed).shuffle(services)
+        go = threading.Barrier(len(services))
+
+        def spawn(svc: StartOrder) -> None:
+            go.wait()
+            rt.spawn(svc)
+
+        with Runtime(MagicMock()) as rt:
+            threads = [threading.Thread(target=spawn, args=(s,)) for s in services]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join(5.0)
+            rt.ready(*rt.services.values(), timeout=10.0)
+
+        assert sorted(started) == sorted(graph)  # each once
+        for name, deps in graph.items():
+            assert all(started.index(d) < started.index(name) for d in deps), started
+
+
+class StartOrder(Parked):
+    """Notes in *started* when it is started: setup() runs as the runtime starts
+    it. Not run(): its task may not have begun when ready() returns."""
+
+    def __init__(self, name: str, depends: tuple[str, ...], started: list[str]) -> None:
+        super().__init__(name, depends=depends)
+        self._started = started
+
+    def setup(self) -> None:
+        self._started.append(self.name)
+
+
 class TestStop:
     def test_dependents_stop_before_what_they_depend_on(self):
         torn_down: list[str] = []
         with Runtime(MagicMock()) as rt:
-            rt.ready(rt.spawn(Parked("db", torn_down)))
-            rt.ready(rt.spawn(Blocking("cache", torn_down, depends=("db",))))
-            rt.spawn(Parked("api", torn_down, depends=("db", "cache")))
+            api = rt.spawn(Parked("api", torn_down, depends=("db", "cache")))
+            rt.spawn(Blocking("cache", torn_down, depends=("db",)))
+            rt.spawn(Parked("db", torn_down))
+            rt.ready(api)
         assert torn_down == ["api", "cache", "db"]
 
     def test_stopping_the_runtime_stops_what_services_derived(self):
