@@ -3,7 +3,8 @@
 
 """check.sh (make check) worker counts: APPINFRA_PYTEST_CHECK_WORKERS for each standalone suite
 and APPINFRA_PYTEST_COVERAGE_WORKERS for the coverage run. A fraction below 1 is a share of
-the CPUs, at least 2 workers; a whole number is that many workers."""
+the CPUs, at least 2 workers; a whole number is that many workers. make check.ci, whose
+stages run one after another, gives each run APPINFRA_PYTEST_WORKERS instead."""
 
 import os
 import subprocess
@@ -14,6 +15,7 @@ import pytest
 
 REPO = Path(__file__).resolve().parents[2]
 CHECK_SH = REPO / "appinfra" / "scripts" / "check.sh"
+MAKE_DIR = REPO / "appinfra" / "scripts" / "make"
 
 # Each pytest controller writes its suite and worker count; xdist workers have workerinput
 _CONFTEST = '''"""Suites, and the worker count of each pytest run."""
@@ -38,8 +40,16 @@ def _cpus() -> int:
     return len(affinity(0)) if affinity else os.cpu_count() or 8
 
 
-def _workers(project: Path, coverage: str, settings: dict[str, str]) -> dict[str, int]:
-    """Run check.sh over a package and one unit test; return each run's worker count by suite.
+def _workers(
+    project: Path,
+    coverage: str,
+    settings: dict[str, str],
+    check_ci: bool = False,
+    makefile: str = "",
+) -> dict[str, int]:
+    """Run check.sh, or make check.ci when *check_ci*, over a package and one unit test;
+    return each run's worker count by suite. *makefile* goes in the project's Makefile ahead
+    of the framework's includes.
 
     The environment drops the settings a surrounding make check exports.
     """
@@ -67,8 +77,15 @@ def _workers(project: Path, coverage: str, settings: dict[str, str]) -> dict[str
         "APPINFRA_PYTEST_COVERAGE_THRESHOLD": coverage,
         **settings,
     }
+    command = ["bash", str(CHECK_SH)]
+    if check_ci:
+        (project / "Makefile").write_text(
+            f"{makefile}include {MAKE_DIR / 'Makefile.config'}\n"
+            f"include {MAKE_DIR / 'Makefile.dev'}\n"
+        )
+        command = ["make", "--no-print-directory", "check.ci"]
     result = subprocess.run(
-        ["bash", str(CHECK_SH)],
+        command,
         cwd=project,
         env=env,
         capture_output=True,
@@ -108,6 +125,29 @@ def test_the_coverage_run_takes_coverage_workers(
 ) -> None:
     settings = {} if value is None else {"APPINFRA_PYTEST_COVERAGE_WORKERS": value}
     assert _workers(tmp_path, "1", settings)["cov"] == expected
+
+
+@pytest.mark.parametrize(("coverage", "run"), [("0", "unit"), ("1", "cov")])
+def test_check_ci_gives_each_run_the_pytest_workers(
+    tmp_path: Path, coverage: str, run: str
+) -> None:
+    """check.ci runs its stages one after another, so a standalone suite and the coverage
+    run each take APPINFRA_PYTEST_WORKERS instead of make check's shares."""
+    settings = {"APPINFRA_PYTEST_WORKERS": "3"}
+    assert _workers(tmp_path, coverage, settings, check_ci=True) == {run: 3}
+
+
+def test_check_ci_takes_every_cpu_by_default(tmp_path: Path) -> None:
+    """APPINFRA_PYTEST_WORKERS defaults to auto: one worker per CPU."""
+    assert _workers(tmp_path, "1", {}, check_ci=True) == {"cov": _cpus()}
+
+
+def test_check_ci_without_pytest_workers_keeps_the_shares(tmp_path: Path) -> None:
+    """A project that sets APPINFRA_PYTEST_WORKERS empty keeps check.sh's shares."""
+    runs = _workers(
+        tmp_path, "1", {}, check_ci=True, makefile="APPINFRA_PYTEST_WORKERS :=\n"
+    )
+    assert runs == {"cov": max(2, _cpus() // 2)}
 
 
 def test_an_invalid_share_stops_check_sh(tmp_path: Path) -> None:
