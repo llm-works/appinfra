@@ -4,9 +4,10 @@
 """
 LoopHost benchmark: what many async services on one event loop thread cost.
 
-Memory per idle service, start and stop rate, idle CPU, and the submit/reply rate
-through an async channel. Each test prints its numbers; run with
-``make test.perf.v`` to see them.
+The net memory cost of an idle service and the part of it the framework adds over
+plain asyncio tasks, start and stop rate, idle CPU, and the submit/reply rate through
+an async channel, measured with appinfra.service.bench. Each test prints its numbers;
+run with ``make test.perf.v`` to see them.
 
 By default the benchmark runs 1,000 services, as a regression check that fits
 ``make check``. ``APPINFRA_SERVICE_BENCH=full`` runs 100,000.
@@ -15,24 +16,21 @@ By default the benchmark runs 1,000 services, as a regression check that fits
 from __future__ import annotations
 
 import asyncio
-import gc
 import os
 import sys
-import threading
 import time
-import tracemalloc
 from collections.abc import Iterator
 from unittest.mock import MagicMock
 
 import pytest
 
-from appinfra.service import (
-    AsyncChannel,
-    AsyncQueueChannelFactory,
-    AsyncService,
-    LoopHost,
-    Message,
-    TaskRunner,
+from appinfra.service import AsyncQueueChannelFactory, AsyncService, LoopHost
+from appinfra.service.bench import (
+    Arrivals,
+    round_trip_rate,
+    service_cost,
+    start_runners,
+    stop_runners,
 )
 
 SERVICES = 100_000 if os.environ.get("APPINFRA_SERVICE_BENCH") == "full" else 1_000
@@ -45,22 +43,8 @@ RATE_SHARE = 0.5 if sys.platform == "darwin" else 1.0
 LG = MagicMock()
 
 
-class Arrivals:
-    """Counts services whose run() has started; set once all *expected* have.
-    Updated on the loop thread only."""
-
-    def __init__(self, expected: int) -> None:
-        self._left = expected
-        self.all = threading.Event()
-
-    def arrive(self) -> None:
-        self._left -= 1
-        if self._left == 0:
-            self.all.set()
-
-
 class OnEvent(AsyncService):
-    """Parks on an asyncio.Event nothing sets."""
+    """Parks on an asyncio.Event of its own that nothing sets."""
 
     def __init__(self, i: int, arrivals: Arrivals) -> None:
         self._lg = LG
@@ -88,45 +72,12 @@ class OnChannel(OnEvent):
         await self._inbox.recv()
 
 
-class Doubler(AsyncService):
-    def __init__(self, inbox: AsyncChannel) -> None:
-        self._lg = LG
-        self._inbox = inbox
-
-    @property
-    def name(self) -> str:
-        return "doubler"
-
-    async def run(self) -> None:
-        while True:
-            msg = await self._inbox.recv()
-            await self._inbox.send(Message(id=msg.id, payload=msg.payload * 2))
-
-
 @pytest.fixture
 def host() -> Iterator[LoopHost]:
     host = LoopHost(name="bench-loop")
     host.start()
     yield host
     host.stop(timeout=60.0)
-
-
-def _start_all(
-    host: LoopHost, cls: type[OnEvent], count: int
-) -> tuple[list[TaskRunner], float]:
-    """Start *count* services and wait until each run() has started.
-
-    Returns:
-        The runners, and how many start() calls per second the loop took.
-    """
-    arrivals = Arrivals(count)
-    runners = [host.runner(cls(i, arrivals)) for i in range(count)]
-    began = time.perf_counter()
-    for runner in runners:
-        runner.start()
-    rate = count / (time.perf_counter() - began)
-    assert arrivals.all.wait(timeout=60.0)
-    return runners, rate
 
 
 def _idle_cpu(window: float) -> float:
@@ -139,29 +90,20 @@ def _idle_cpu(window: float) -> float:
 
 class TestLoopHostCost:
     def test_memory_per_idle_service(self, host):
-        """An idle service on a host costs its runner, its task and itself."""
-        gc.collect()
-        tracemalloc.start()
-        try:
-            before = tracemalloc.take_snapshot()
-            runners, _ = _start_all(host, OnEvent, SERVICES)
-            after = tracemalloc.take_snapshot()
-        finally:
-            tracemalloc.stop()
-        per_service = sum(d.size_diff for d in after.compare_to(before, "filename"))
-        per_service /= SERVICES
-        for runner in runners:
-            runner.stop()
+        """Only the framework's part of the net cost is bounded: asyncio's part
+        varies with the Python version."""
+        cost = service_cost(host, LG, SERVICES)
 
-        print(f"\nidle service on a LoopHost: {per_service:,.0f} B each ({SERVICES:,})")
-        assert per_service < 6_000, f"{per_service:,.0f} B per idle service"
+        print(
+            f"\nnet cost of an idle service on a LoopHost ({SERVICES:,}): "
+            f"{cost.net:,.0f} B each: asyncio {cost.asyncio:,.0f} B, "
+            f"framework {cost.framework:,.0f} B"
+        )
+        assert cost.framework < 1_200, f"{cost.framework:,.0f} B per service"
 
     def test_start_and_stop_rate(self, host):
-        runners, start_rate = _start_all(host, OnEvent, SERVICES)
-        began = time.perf_counter()
-        for runner in runners:
-            runner.stop()
-        stop_rate = SERVICES / (time.perf_counter() - began)
+        runners, start_rate = start_runners(host, OnEvent, SERVICES)
+        stop_rate = stop_runners(runners)
 
         print(f"\nstart: {start_rate:,.0f}/s  stop: {stop_rate:,.0f}/s ({SERVICES:,})")
         assert start_rate > 5_000 * RATE_SHARE, f"start: {start_rate:,.0f}/s"
@@ -169,20 +111,18 @@ class TestLoopHostCost:
 
     def test_idle_services_use_no_cpu(self, host):
         """Services parked on an await leave the loop asleep."""
-        runners, _ = _start_all(host, OnEvent, SERVICES)
+        runners, _ = start_runners(host, OnEvent, SERVICES)
         cpu = _idle_cpu(IDLE_WINDOW)
-        for runner in runners:
-            runner.stop()
+        stop_runners(runners)
 
         print(f"\n{SERVICES:,} idle services: {cpu:.1%} of a core")
         assert cpu < 0.02, f"{cpu:.1%} of a core while idle"
 
     def test_idle_channel_receivers_use_no_cpu(self, host):
         """Services parked in recv() on an async channel leave the loop asleep."""
-        runners, _ = _start_all(host, OnChannel, SERVICES)
+        runners, _ = start_runners(host, OnChannel, SERVICES)
         cpu = _idle_cpu(IDLE_WINDOW)
-        for runner in runners:
-            runner.stop()
+        stop_runners(runners)
 
         print(f"\n{SERVICES:,} idle channel receivers: {cpu:.1%} of a core")
         assert cpu < 0.02, f"{cpu:.1%} of a core while idle"
@@ -194,20 +134,7 @@ class TestLoopHostCost:
     )
     def test_submit_reply_rate(self, host):
         """Round trips from a caller on the loop to a service and back."""
-        pair = AsyncQueueChannelFactory().create_pair()
-        runner = host.runner(Doubler(pair.child))
-        runner.start()
-        runner.wait_healthy(timeout=5.0)
-
-        async def round_trips(count: int) -> float:
-            began = time.perf_counter()
-            for i in range(count):
-                await pair.parent.submit(Message(payload=i), timeout=5.0)
-            return count / (time.perf_counter() - began)
-
-        rate = asyncio.run_coroutine_threadsafe(round_trips(SERVICES), host.loop)
-        trips = rate.result(timeout=120.0)
-        runner.stop()
+        trips = round_trip_rate(host, LG, SERVICES)
 
         print(f"\nsubmit/reply: {trips:,.0f} round trips/s")
         assert trips > 10_000, f"{trips:,.0f} round trips/s"
