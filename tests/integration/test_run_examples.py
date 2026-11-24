@@ -96,11 +96,11 @@ def test_full_output_shows_both_streams_whole(tmp_path: Path) -> None:
 def test_a_hung_example_times_out(tmp_path: Path) -> None:
     """Its output goes through the same path as any failure's
     (test_full_output_shows_both_streams_whole); asserting it here would race the example's
-    startup against the one-second timeout."""
-    source = "# ci-timeout: 1\nimport time\ntime.sleep(30)\n"
+    startup against the timeout."""
+    source = "# ci-timeout: 0.2\nimport time\ntime.sleep(30)\n"
     out = _run_failing_example(tmp_path, source, "--full-output")
 
-    assert "no exit within 1s" in out
+    assert "no exit within 0.2s" in out
 
 
 def test_passing_example_reports_its_warnings(tmp_path: Path) -> None:

@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-REPO = Path(__file__).resolve().parents[2]
+REPO = Path(__file__).resolve().parents[3]
 CHECK_SH = REPO / "appinfra" / "scripts" / "check.sh"
 MAKE_DIR = REPO / "appinfra" / "scripts" / "make"
 
