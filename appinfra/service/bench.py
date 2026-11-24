@@ -38,6 +38,16 @@ ServiceMaker = Callable[[int, "Arrivals"], AsyncService]
 """Makes the i-th service of a run, which calls arrive() once its run() has started."""
 
 
+def _check_count(count: int) -> None:
+    """Reject a count of services or round trips below 1, which no measurement can use.
+
+    Raises:
+        ValueError: If *count* is less than 1.
+    """
+    if count < 1:
+        raise ValueError(f"count must be at least 1, got {count}")
+
+
 class Arrivals:
     """Counts services whose run() has started; set once all *expected* have.
     Updated on the loop thread only."""
@@ -48,8 +58,7 @@ class Arrivals:
         Raises:
             ValueError: If *expected* is less than 1: no arrival would set ``all``.
         """
-        if expected < 1:
-            raise ValueError(f"expected must be at least 1, got {expected}")
+        _check_count(expected)
         self._left = expected
         self.all = threading.Event()
 
@@ -179,15 +188,24 @@ def end_plain(host: LoopHost, tasks: list[asyncio.Task[None]]) -> None:
 
 def bytes_per_service(start: Callable[[], T], count: int) -> tuple[float, T]:
     """Bytes allocated per service while *start* starts *count* of them, and what
-    *start* returned."""
+    *start* returned.
+
+    Raises:
+        ValueError: If *count* is less than 1.
+    """
+    _check_count(count)
     gc.collect()
-    tracemalloc.start()
+    # A session the caller started stays theirs: stopping it would discard its traces
+    owned = not tracemalloc.is_tracing()
+    if owned:
+        tracemalloc.start()
     try:
         before = tracemalloc.take_snapshot()
         started = start()
         after = tracemalloc.take_snapshot()
     finally:
-        tracemalloc.stop()
+        if owned:
+            tracemalloc.stop()
     size = sum(d.size_diff for d in after.compare_to(before, "filename"))
     return size / count, started
 
@@ -208,7 +226,12 @@ def service_cost(host: LoopHost, lg: Logger, count: int) -> Cost:
 
 def round_trip_rate(host: LoopHost, lg: Logger, count: int) -> float:
     """Round trips per second, *count* of them, from a caller on the loop to a
-    Doubler and back."""
+    Doubler and back.
+
+    Raises:
+        ValueError: If *count* is less than 1.
+    """
+    _check_count(count)
     pair = AsyncQueueChannelFactory().create_pair()
     runner = host.runner(Doubler(lg, pair.child))
     runner.start()
