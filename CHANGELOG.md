@@ -40,6 +40,8 @@ For API stability guarantees and deprecation policy, see
   plugins, dynamic contexts, or branch measurement before Python 3.14.
 - An async channel over `AsyncQueueTransport` waits in `recv()` without waking every 0.1 s:
   `close()` wakes it instead. A custom `AsyncTransport` opts in with `wakes_on_close = True`.
+- **Breaking:** the `appinfra.service.runner` package is `appinfra.service.runtime`, and its
+  `base` module is `runtime.runner`. Imports from `appinfra.service` are unchanged.
 - **Breaking:** `ProcessRunner` no longer injects `_shutdown_event` into the service; `run()`
   waits on `self.stopping` in the subprocess instead.
 - **Breaking:** `RestartPolicy` is frozen: runners share one policy, so a field cannot change for

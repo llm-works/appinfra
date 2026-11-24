@@ -21,8 +21,8 @@ from ...log.mp import LogQueueListener
 from ..base import Service
 from ..state import RestartPolicy, State
 from ..stop import StopToken
-from .base import Runner
 from .drive import check_drivable, drive
+from .runner import Runner
 
 
 class ProcessRunner(Runner):

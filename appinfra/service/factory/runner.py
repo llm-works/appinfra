@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from ...log import Logger
 from ..base import Service
 from ..channel.sync import Channel, ProcessQueueTransport
-from ..runner import ProcessRunner, Runner, ThreadRunner
+from ..runtime import ProcessRunner, Runner, ThreadRunner
 from ..state import RestartPolicy
 from .channel import (
     ChannelConfig,

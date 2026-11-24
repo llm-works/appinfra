@@ -30,7 +30,7 @@ from ..log import Logger
 from .base import AsyncService
 from .channel import AsyncChannel, Message
 from .factory import AsyncQueueChannelFactory
-from .runner import LoopHost, TaskRunner
+from .runtime import LoopHost, TaskRunner
 
 T = TypeVar("T")
 

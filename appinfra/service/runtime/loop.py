@@ -12,7 +12,7 @@ from types import TracebackType
 
 from ..base import AsyncService
 from ..state import RestartPolicy, State
-from .base import Runner
+from .runner import Runner
 
 
 class LoopHost:

@@ -9,8 +9,8 @@ import threading
 
 from ..base import ScheduledService, Service
 from ..state import RestartPolicy, State
-from .base import Runner
 from .drive import check_drivable, drive
+from .runner import Runner
 
 
 class ThreadRunner(Runner):
