@@ -47,9 +47,13 @@ TRANSITIONS: dict[State, set[State]] = {
 StateHook = Callable[[str, State, State], None]
 
 
-@dataclass
+@dataclass(frozen=True)
 class RestartPolicy:
     """Defines restart behavior for failed services.
+
+    Frozen: one policy is shared by every runner given it (and the default by
+    every runner given none), so a change to one would change them all. Use
+    dataclasses.replace() for a variant.
 
     Attributes:
         max_retries: Maximum restart attempts before giving up.

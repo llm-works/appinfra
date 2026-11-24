@@ -79,6 +79,18 @@ class Boom(Parked):
         raise RuntimeError("run failed")
 
 
+class Exits(Parked):
+    """Raises *exc_type* from run(): an exception asyncio re-raises out of the loop."""
+
+    def __init__(self, exc_type: type[BaseException]) -> None:
+        super().__init__("exits")
+        self._exc_type = exc_type
+
+    async def run(self) -> None:
+        self.entered.set()
+        raise self._exc_type()
+
+
 class HoldsCancel(Parked):
     """When cancelled, run() returns only once release() is called."""
 
@@ -244,6 +256,30 @@ class TestTaskRunner:
         assert "run failed" in str(boom_runner.exception)
         assert boom.torn_down.wait(timeout=5.0)
         assert other_runner.is_alive()
+        other_runner.stop()
+
+    @pytest.mark.parametrize("exc_type", [SystemExit, KeyboardInterrupt])
+    def test_run_exiting_fails_that_service_only(self, host, exc_type):
+        """asyncio re-raises SystemExit and KeyboardInterrupt out of the loop,
+        which would end every service on it; only the one service fails."""
+        exits, other = Exits(exc_type), Parked(name="other")
+        exits_runner, other_runner = host.runner(exits), host.runner(other)
+        failed = _on_state(exits_runner, State.FAILED)
+        other_runner.start()
+        assert other.entered.wait(timeout=5.0)
+
+        exits_runner.start()
+
+        assert failed.wait(timeout=5.0)
+        assert isinstance(exits_runner.exception, exc_type)
+        assert exits.torn_down.wait(timeout=5.0)
+        assert other_runner.is_alive()
+        # The loop runs on: a service started after it still runs
+        later = Parked(name="later")
+        later_runner = host.runner(later)
+        later_runner.start()
+        assert later.entered.wait(timeout=5.0)
+        later_runner.stop()
         other_runner.stop()
 
     def test_start_and_stop_from_a_state_hook_are_refused(self, host):
