@@ -54,7 +54,8 @@ def sysmon_usable(
 def _pytest_args() -> list[str]:
     """The pytest arguments the run takes from the environment."""
     args: list[str] = []
-    for name in ("APPINFRA_PYTEST_ARGS", "PYTEST_ADDOPTS"):
+    # pytest puts PYTEST_ADDOPTS before the command line, which APPINFRA_PYTEST_ARGS joins
+    for name in ("PYTEST_ADDOPTS", "APPINFRA_PYTEST_ARGS"):
         value = os.environ.get(name, "")
         try:
             args += shlex.split(value)
