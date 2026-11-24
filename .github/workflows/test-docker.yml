@@ -87,12 +87,15 @@ jobs:
                         -f docker-compose.override.py${{ matrix.python-version }}.yml \
                         build
 
+      # tests/e2e/check_sh runs check.sh, whose behaviour does not depend on the Python
+      # version; the jobs running make check.ci (Check, macOS) cover it once each
       - name: Run tests
         working-directory: appinfra/scripts/cicd
         run: |
           docker compose -f docker-compose.yml \
                         -f docker-compose.override.py${{ matrix.python-version }}.yml \
-                        run --rm cicd-test make test.all
+                        run --rm -e APPINFRA_PYTEST_ARGS=--ignore=tests/e2e/check_sh \
+                        cicd-test make test.all
 
       - name: Cleanup Docker resources
         if: always()

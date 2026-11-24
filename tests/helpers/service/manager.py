@@ -4,7 +4,6 @@
 """A service for the manager tests."""
 
 import threading
-import time
 
 from appinfra.service import Service, SetupError
 
@@ -17,12 +16,13 @@ class SimpleService(Service):
         name: str,
         depends_on: list[str] | None = None,
         setup_error: str | None = None,
-        health_delay: float = 0,
+        barrier: threading.Barrier | None = None,
     ) -> None:
         self._name = name
         self._depends_on = depends_on or []
         self._setup_error = setup_error
-        self._health_delay = health_delay
+        # run() waits here before it reports healthy
+        self._barrier = barrier
 
         self._setup_called = False
         self._run_called = False
@@ -46,8 +46,8 @@ class SimpleService(Service):
     def run(self) -> None:
         self._run_called = True
 
-        if self._health_delay:
-            time.sleep(self._health_delay)
+        if self._barrier is not None:
+            self._barrier.wait()
 
         self._healthy = True
         self._stop_event.wait()

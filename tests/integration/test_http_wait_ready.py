@@ -86,7 +86,7 @@ class _Server:
 def test_wait_ready_retries_polls_that_time_out(slow_polls: int) -> None:
     """A server that accepts but answers polls too late is not ready yet, not failed."""
     with _Server([None] * slow_polls + [_OK]) as server:
-        wait_ready(server.url, deadline_secs=10.0)
+        wait_ready(server.url, deadline_secs=10.0, poll_secs=0.05)
     assert server.pings >= slow_polls + 1
 
 

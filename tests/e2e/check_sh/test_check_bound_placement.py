@@ -11,7 +11,7 @@ from pathlib import Path
 
 from tests.helpers.check_sh import FIXTURE_WORKERS
 
-REPO = Path(__file__).resolve().parents[2]
+REPO = Path(__file__).resolve().parents[3]
 CHECK_SH = REPO / "appinfra" / "scripts" / "check.sh"
 
 _CONFTEST = 'pytest_plugins = ["appinfra.pytest_suites"]\n'

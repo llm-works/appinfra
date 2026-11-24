@@ -4,7 +4,6 @@
 """Tests for the service manager running services on threads."""
 
 import threading
-import time
 from unittest.mock import MagicMock
 
 import pytest
@@ -108,20 +107,19 @@ class TestManagerLifecycle:
         assert order.index("b") < order.index("c")
 
     def test_parallel_independent_services(self, lg):
-        """Independent services can start in parallel."""
+        """Independent services start in parallel: a and b each wait for the
+        other in run() before reporting healthy, so started one after the
+        other, the first never becomes healthy and the barrier times out."""
         mgr = Manager(lg)
-        svc_a = SimpleService("a", health_delay=1.0)
-        svc_b = SimpleService("b", health_delay=1.0)
+        both_running = threading.Barrier(2, timeout=10)
+        svc_a = SimpleService("a", barrier=both_running)
+        svc_b = SimpleService("b", barrier=both_running)
         svc_c = SimpleService("c", depends_on=["a", "b"])
 
         mgr.add_service(svc_a).add_service(svc_b).add_service(svc_c)
 
-        start = time.monotonic()
         with mgr:
-            elapsed = time.monotonic() - start
-
-        # If parallel: ~1s, if sequential: ~2s
-        assert elapsed < 1.5
+            assert svc_c.is_healthy()
 
     def test_setup_error_stops_started_services(self, lg):
         """If setup fails, already-started services are stopped."""

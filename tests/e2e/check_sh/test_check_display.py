@@ -21,7 +21,7 @@ import pytest
 
 from tests.helpers.check_sh import FIXTURE_WORKERS
 
-REPO = Path(__file__).resolve().parents[2]
+REPO = Path(__file__).resolve().parents[3]
 CHECK_SH = REPO / "appinfra" / "scripts" / "check.sh"
 HEIGHT = 12
 NARROW = 50

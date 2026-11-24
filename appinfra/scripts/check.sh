@@ -255,15 +255,13 @@ if [ -t 1 ]; then
     [ "$DISPLAY_HEIGHT" != 0 ] || DISPLAY_HEIGHT=""
 fi
 
-# Coverage tracer: on Python 3.12+, use sys.monitoring (PEP 669) via
-# COVERAGE_CORE=sysmon — roughly 2x faster than the default C-tracer on
-# Python-heavy suites. coverage.py refuses sysmon on 3.11 (raises
-# CoverageException), so the env var is set only when the interpreter is
-# 3.12 or newer; 3.11 keeps the C-tracer.
-COVERAGE_CORE_ENV=""
-if ${PYTHON} -c "import sys; sys.exit(0 if sys.version_info >= (3, 12) else 1)" 2>/dev/null; then
-    COVERAGE_CORE_ENV="COVERAGE_CORE=sysmon "
-fi
+# Coverage tracer: sys.monitoring (PEP 669) via COVERAGE_CORE=sysmon, roughly 2x faster than
+# the default C tracer on Python-heavy suites, where it can measure the run; coverage_core.py
+# decides from the Python version and the project's coverage settings. Run through eval, as
+# every command here is: PYTHON may hold a ~ path. If it fails, the default tracer measures.
+COVERAGE_CORE_ENV="$(eval "${PYTHON} $(printf '%q' "${SCRIPT_DIR}/coverage_core.py")" 2>/dev/null)" ||
+    COVERAGE_CORE_ENV=""
+[ -z "$COVERAGE_CORE_ENV" ] || COVERAGE_CORE_ENV+=" "
 
 MAX_INLINE_LINES=30
 
