@@ -58,9 +58,7 @@ class AsyncChannel(Protocol):
         """Send request and wait for matching response."""
         ...
 
-    def submit_stream(
-        self, request: Any, timeout: float | None = None
-    ) -> AsyncIterator[Any]:
+    def stream(self, request: Any, timeout: float | None = None) -> AsyncIterator[Any]:
         """Send request and yield streaming response chunks."""
         ...
 
@@ -142,7 +140,7 @@ class AsyncBufferedChannel(Generic[TRequest, TResponse]):
     1. Fire-and-forget: ``send()`` without waiting for response
     2. Receive: ``recv()`` to get next incoming message
     3. Request/response: ``submit()`` sends and waits for matching response
-    4. Streaming: ``submit_stream()`` yields response chunks until ``is_final``
+    4. Streaming: ``stream()`` yields response chunks until ``is_final``
 
     Args:
         transport: The underlying async wire transport.
@@ -238,7 +236,7 @@ class AsyncBufferedChannel(Generic[TRequest, TResponse]):
         await self.send(request, effective_timeout)
         return await self._poll_for_response(request_id, deadline, effective_timeout)
 
-    async def submit_stream(
+    async def stream(
         self, request: TRequest, timeout: float | None = None
     ) -> AsyncIterator[TResponse]:
         """

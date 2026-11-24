@@ -81,13 +81,13 @@ class TestIPCChannelStreaming:
     """Tests for streaming functionality."""
 
     @pytest.mark.asyncio
-    async def test_submit_stream_exceeds_max_pending(self, queues):
-        """Test submit_stream raises when max_pending exceeded."""
+    async def test_stream_exceeds_max_pending(self, queues):
+        """Test stream raises when max_pending exceeded."""
         request_q, response_q = queues
         channel = IPCChannel(request_q, response_q, IPCConfig(max_pending=0))
 
         with pytest.raises(RuntimeError, match="Max pending requests exceeded"):
-            async for _ in channel.submit_stream(MockRequest(id="s1", data="test")):
+            async for _ in channel.stream(MockRequest(id="s1", data="test")):
                 pass
 
 

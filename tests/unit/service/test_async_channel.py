@@ -271,8 +271,8 @@ class TestAsyncChannelStreaming:
     """Tests for streaming support in async channels."""
 
     @pytest.mark.asyncio
-    async def test_submit_stream_basic(self) -> None:
-        """submit_stream() yields chunks until is_final=True."""
+    async def test_stream_basic(self) -> None:
+        """stream() yields chunks until is_final=True."""
         pair = AsyncQueueChannelFactory().create_pair()
         parent, child = pair.parent, pair.child
 
@@ -287,7 +287,7 @@ class TestAsyncChannelStreaming:
 
         chunks = [
             chunk.data
-            async for chunk in parent.submit_stream(
+            async for chunk in parent.stream(
                 Request(id="req-1", data="test"), timeout=1.0
             )
         ]
@@ -297,8 +297,8 @@ class TestAsyncChannelStreaming:
         assert chunks == ["chunk1", "chunk2", "chunk3"]
 
     @pytest.mark.asyncio
-    async def test_submit_stream_single_chunk(self) -> None:
-        """submit_stream() works with single final chunk."""
+    async def test_stream_single_chunk(self) -> None:
+        """stream() works with single final chunk."""
         pair = AsyncQueueChannelFactory().create_pair()
         parent, child = pair.parent, pair.child
 
@@ -310,7 +310,7 @@ class TestAsyncChannelStreaming:
 
         chunks = [
             chunk.data
-            async for chunk in parent.submit_stream(
+            async for chunk in parent.stream(
                 Request(id="req-1", data="test"), timeout=1.0
             )
         ]
@@ -320,40 +320,40 @@ class TestAsyncChannelStreaming:
         assert chunks == ["only"]
 
     @pytest.mark.asyncio
-    async def test_submit_stream_timeout(self) -> None:
-        """submit_stream() raises ChannelTimeoutError if chunk not received."""
+    async def test_stream_timeout(self) -> None:
+        """stream() raises ChannelTimeoutError if chunk not received."""
         pair = AsyncQueueChannelFactory().create_pair()
 
         with pytest.raises(ChannelTimeoutError):
-            async for _ in pair.parent.submit_stream(
+            async for _ in pair.parent.stream(
                 Request(id="1", data="test"), timeout=0.1
             ):
                 pass
 
     @pytest.mark.asyncio
-    async def test_submit_stream_requires_id(self) -> None:
-        """submit_stream() raises ValueError if request has no id."""
+    async def test_stream_requires_id(self) -> None:
+        """stream() raises ValueError if request has no id."""
         pair = AsyncQueueChannelFactory().create_pair()
 
         with pytest.raises(ValueError, match="id"):
-            async for _ in pair.parent.submit_stream({"data": "no id"}, timeout=0.1):  # type: ignore
+            async for _ in pair.parent.stream({"data": "no id"}, timeout=0.1):  # type: ignore
                 pass
 
     @pytest.mark.asyncio
-    async def test_submit_stream_on_closed_raises(self) -> None:
-        """submit_stream() raises ChannelClosedError on closed channel."""
+    async def test_stream_on_closed_raises(self) -> None:
+        """stream() raises ChannelClosedError on closed channel."""
         pair = AsyncQueueChannelFactory().create_pair()
         await pair.parent.close()
 
         with pytest.raises(ChannelClosedError):
-            async for _ in pair.parent.submit_stream(
+            async for _ in pair.parent.stream(
                 Request(id="1", data="test"), timeout=0.1
             ):
                 pass
 
     @pytest.mark.asyncio
-    async def test_submit_stream_with_error(self) -> None:
-        """submit_stream() raises ChannelError if chunk has error."""
+    async def test_stream_with_error(self) -> None:
+        """stream() raises ChannelError if chunk has error."""
         pair = AsyncQueueChannelFactory().create_pair()
         parent, child = pair.parent, pair.child
 
@@ -364,16 +364,14 @@ class TestAsyncChannelStreaming:
         task = asyncio.create_task(responder())
 
         with pytest.raises(ChannelResponseError, match="stream failed") as exc:
-            async for _ in parent.submit_stream(
-                Request(id="1", data="test"), timeout=1.0
-            ):
+            async for _ in parent.stream(Request(id="1", data="test"), timeout=1.0):
                 pass
         assert exc.value.response == Response(id="1", result="", error="stream failed")
 
         await task
 
     @pytest.mark.asyncio
-    async def test_submit_stream_default_is_final(self) -> None:
+    async def test_stream_default_is_final(self) -> None:
         """Response without is_final attribute defaults to True (single response)."""
         pair = AsyncQueueChannelFactory().create_pair()
         parent, child = pair.parent, pair.child
@@ -387,7 +385,7 @@ class TestAsyncChannelStreaming:
 
         chunks = [
             chunk
-            async for chunk in parent.submit_stream(
+            async for chunk in parent.stream(
                 Request(id="req-1", data="test"), timeout=1.0
             )
         ]

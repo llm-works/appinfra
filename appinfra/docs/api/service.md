@@ -382,6 +382,11 @@ pair.parent.send(Message(payload="hello"))
 # Request/response (blocking)
 response = pair.parent.submit(Request(id="1", data="work"), timeout=5.0)
 
+# Streaming response: chunks carrying the request's id, up to the one with is_final=True;
+# the timeout applies to each chunk
+for chunk in pair.parent.stream(Request(id="2", data="stream"), timeout=5.0):
+    print(chunk.payload)
+
 # Receive messages
 msg = pair.child.recv(timeout=1.0)
 pair.child.send(Response(id=msg.id, result="done"))
@@ -405,7 +410,7 @@ await pair.parent.send(Message(payload="hello"))
 response = await pair.parent.submit(Request(id="1", data="work"), timeout=5.0)
 
 # Streaming response (async)
-async for chunk in pair.parent.submit_stream(Request(id="2", data="stream")):
+async for chunk in pair.parent.stream(Request(id="2", data="stream")):
     print(chunk.data)
     if chunk.is_final:
         break  # Automatically stops when is_final=True
@@ -420,7 +425,7 @@ pair.child.recv()  # Child uses sync in subprocess
 
 ### Error Responses
 
-A response whose `error` field is set makes `submit()` and `submit_stream()` raise
+A response whose `error` field is set makes `submit()` and `stream()` raise
 `ChannelResponseError`, a `ChannelError` subclass. Its `response` attribute holds the message as
 received, so fields beyond the error text stay readable:
 
@@ -446,6 +451,7 @@ class ZMQChannel:
     def send(self, message, timeout=None): ...
     def recv(self, timeout=None): ...
     def submit(self, request, timeout=None): ...
+    def stream(self, request, timeout=None): ...
     def close(self): ...
     @property
     def is_closed(self) -> bool: ...
@@ -575,7 +581,7 @@ worker = svc_factory.create("worker")
 
 ### Built-in Channels
 
-- `BufferedChannel` - Wraps a `Transport` with request/response correlation and redelivery
+- `BufferedChannel` - Wraps a `Transport` with correlation, streaming, and redelivery
 - `AsyncBufferedChannel` - Wraps an `AsyncTransport` with correlation, streaming, and redelivery
 - `Message` - Generic message with id for correlation
 

@@ -18,6 +18,7 @@ Smart transport (implements Channel directly)::
         def send(self, message): ...
         def recv(self, timeout=None): ...
         def submit(self, request, timeout=None): ...
+        def stream(self, request, timeout=None): ...
         def close(self): ...
         @property
         def is_closed(self) -> bool: ...
@@ -34,6 +35,7 @@ import multiprocessing as mp
 import queue
 import threading
 import time
+from collections.abc import Iterator
 from typing import Any, Generic, Protocol, TypeVar, cast, runtime_checkable
 
 from ..errors import ChannelClosedError, ChannelFullError, ChannelTimeoutError
@@ -69,6 +71,10 @@ class Channel(Protocol):
 
     def submit(self, request: Any, timeout: float | None = None) -> Any:
         """Send request and wait for matching response."""
+        ...
+
+    def stream(self, request: Any, timeout: float | None = None) -> Iterator[Any]:
+        """Send request and yield streaming response chunks."""
         ...
 
     def close(self) -> None:
@@ -156,11 +162,12 @@ class BufferedChannel(Generic[TRequest, TResponse]):
     - **Close management**: ``close()`` propagates to the transport and
       unblocks any waiting ``recv()``/``submit()`` calls.
 
-    Three communication patterns:
+    Four communication patterns:
 
     1. Fire-and-forget: ``send()`` without waiting for response
     2. Receive: ``recv()`` to get next incoming message
     3. Request/response: ``submit()`` sends and waits for matching response
+    4. Streaming: ``stream()`` yields response chunks until ``is_final``
 
     Note:
         ``submit()`` and ``recv()`` share the same inbound stream. If using
@@ -269,17 +276,30 @@ class BufferedChannel(Generic[TRequest, TResponse]):
         *timeout* covers both waiting for room to send and waiting for the
         response.
         """
-        if self.is_closed:
-            raise ChannelClosedError("Channel is closed")
-        if not hasattr(request, "id"):
-            raise ValueError("Request must have an 'id' attribute")
-
-        request_id = request.id
-        effective_timeout = timeout if timeout is not None else self._response_timeout
+        request_id, effective_timeout = self._request_id(request, timeout)
         deadline = time.monotonic() + effective_timeout
 
         self.send(request, effective_timeout)
         return self._poll_for_response(request_id, deadline, effective_timeout)
+
+    def stream(
+        self, request: TRequest, timeout: float | None = None
+    ) -> Iterator[TResponse]:
+        """Send request and yield the response chunks carrying its id, until
+        one with ``is_final=True``; a chunk without ``is_final`` is final.
+
+        Like ``AsyncBufferedChannel.stream()``, the request is sent when
+        iteration begins, and *timeout* applies to the send and to the wait for
+        each chunk on its own. Other messages go to the redelivery buffer.
+        """
+        request_id, effective_timeout = self._request_id(request, timeout)
+        self.send(request, effective_timeout)
+        while True:
+            deadline = time.monotonic() + effective_timeout
+            chunk = self._poll_for_response(request_id, deadline, effective_timeout)
+            yield chunk
+            if getattr(chunk, "is_final", True):
+                return
 
     def close(self) -> None:
         """Close the channel and its transport."""
@@ -288,6 +308,21 @@ class BufferedChannel(Generic[TRequest, TResponse]):
         self._transport.close()
 
     # -- internal helpers --------------------------------------------------
+
+    def _request_id(
+        self, request: TRequest, timeout: float | None
+    ) -> tuple[str, float]:
+        """The id of *request* and the timeout to use for it.
+
+        Raises:
+            ChannelClosedError: If the channel is closed.
+            ValueError: If *request* has no ``id``.
+        """
+        if self.is_closed:
+            raise ChannelClosedError("Channel is closed")
+        if not hasattr(request, "id"):
+            raise ValueError("Request must have an 'id' attribute")
+        return request.id, timeout if timeout is not None else self._response_timeout
 
     def _drain_or_raise(self) -> TResponse:
         """Try to drain one buffered message from the transport before raising."""

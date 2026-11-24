@@ -250,6 +250,65 @@ class TestSubmitOnClosedChannel:
             pair.parent.submit(Request(id="1", data="test"), timeout=0.1)
 
 
+class TestSubmitStream:
+    """BufferedChannel.stream(): the chunks are queued on the child's side
+    before the parent iterates, so no responder thread is needed."""
+
+    def test_yields_its_chunks_until_the_final_one(self) -> None:
+        """Chunks of the request are yielded in order; another request's message
+        is kept for recv(), and a chunk after the final one is not read."""
+        pair = QueueChannelFactory().create_pair()
+        pair.child.send(Message(id="1", payload="a", is_final=False))
+        pair.child.send(Message(id="other", payload="x"))
+        pair.child.send(Message(id="1", payload="b", is_final=False))
+        pair.child.send(Message(id="1", payload="c"))
+        pair.child.send(Message(id="1", payload="late"))
+
+        chunks = list(pair.parent.stream(Request(id="1", data="go"), 1.0))
+
+        assert [c.payload for c in chunks] == ["a", "b", "c"]
+        assert pair.child.recv(timeout=1.0).data == "go"
+        assert pair.parent.recv(timeout=1.0).payload == "x"
+        assert pair.parent.recv(timeout=1.0).payload == "late"
+
+    def test_a_reply_without_is_final_ends_the_stream(self) -> None:
+        """A plain response is one final chunk."""
+        pair = QueueChannelFactory().create_pair()
+        pair.child.send(Response(id="1", result="only"))
+
+        chunks = list(pair.parent.stream(Request(id="1", data="go"), 1.0))
+
+        assert [c.result for c in chunks] == ["only"]
+
+    def test_the_timeout_applies_to_each_chunk(self) -> None:
+        """A stream that stops before its final chunk times out on the next."""
+        pair = QueueChannelFactory().create_pair()
+        pair.child.send(Message(id="1", payload="a", is_final=False))
+
+        stream = pair.parent.stream(Request(id="1", data="go"), 0.1)
+
+        assert next(stream).payload == "a"
+        with pytest.raises(ChannelTimeoutError):
+            next(stream)
+
+    def test_an_error_chunk_raises(self) -> None:
+        """A chunk with error set raises ChannelResponseError carrying it."""
+        pair = QueueChannelFactory().create_pair()
+        pair.child.send(Message(id="1", error="lost", is_final=False))
+
+        with pytest.raises(ChannelResponseError, match="lost"):
+            list(pair.parent.stream(Request(id="1", data="go"), 1.0))
+
+    def test_requires_an_open_channel_and_a_request_id(self) -> None:
+        """The checks submit() makes apply."""
+        pair = QueueChannelFactory().create_pair()
+        with pytest.raises(ValueError, match="id"):
+            list(pair.parent.stream({"data": "no id"}, 0.1))  # type: ignore
+        pair.parent.close()
+        with pytest.raises(ChannelClosedError):
+            list(pair.parent.stream(Request(id="1", data="go"), 0.1))
+
+
 class TestProcessQueueChannel:
     """Tests for Channel with ProcessQueueTransport."""
 

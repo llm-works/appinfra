@@ -562,7 +562,7 @@ The server subprocess exits when:
 - It receives SIGTERM or SIGINT (uvicorn's own signal handling).
 
 In the first two cases the IPC channel closes before uvicorn drains in-flight requests: handlers
-waiting in `ipc.submit()` or `ipc.submit_stream()` raise `ChannelClosedError` (from
+waiting in `ipc.submit()` or `ipc.stream()` raise `ChannelClosedError` (from
 `appinfra.service`) at once instead of holding the shutdown for the response timeout. Unhandled,
 it becomes a 500; an exception handler can map it to another status such as 503.
 
@@ -598,7 +598,7 @@ async def stream_handler(request: Request):
     ipc: IPCChannel = request.app.state.ipc_channel
 
     async def generate():
-        async for chunk in ipc.submit_stream(WorkRequest(id="req-id", prompt="...")):
+        async for chunk in ipc.stream(WorkRequest(id="req-id", prompt="...")):
             yield chunk.data
             if chunk.is_final:
                 break
@@ -685,7 +685,7 @@ async def stream(body: GenerateRequest, request: Request):
     )
 
     async def generate():
-        async for chunk in ipc.submit_stream(work_request):
+        async for chunk in ipc.stream(work_request):
             yield chunk.data
             if chunk.is_final:
                 break
