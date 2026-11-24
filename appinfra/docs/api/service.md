@@ -24,8 +24,6 @@ Three-layer architecture separates concerns:
 ## Quick Start
 
 ```python
-import threading
-
 from appinfra.log import Logger
 from appinfra.service import Service, ThreadRunner
 
@@ -33,7 +31,6 @@ from appinfra.service import Service, ThreadRunner
 class MyService(Service):
     def __init__(self, lg: Logger):
         self._lg = lg
-        self._stop = threading.Event()
 
     @property
     def name(self) -> str:
@@ -41,10 +38,7 @@ class MyService(Service):
 
     def run(self) -> None:
         self._lg.info("service started")
-        self._stop.wait()  # Block until teardown
-
-    def teardown(self) -> None:
-        self._stop.set()
+        self.stopping.wait()  # Block until stopped
 
 
 # Run with ThreadRunner
@@ -156,7 +150,6 @@ thread.
 class Database(Service):
     def __init__(self, lg: Logger):
         self._lg = lg
-        self._stop = threading.Event()
 
     @property
     def name(self) -> str:
@@ -164,10 +157,7 @@ class Database(Service):
 
     def run(self) -> None:
         self._lg.info("service started")
-        self._stop.wait()  # Block until teardown
-
-    def teardown(self) -> None:
-        self._stop.set()
+        self.stopping.wait()  # Block until stopped
 ```
 
 Every runner gives the service a `StopToken` as `self.stopping`, set when the service is to stop:
