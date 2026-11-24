@@ -38,10 +38,10 @@ _APPINFRA_COVERAGE_DIR := $(APPINFRA_DEV_PROJECT_ROOT)/.cover
 # Build marker argument for coverage tests (empty if no markers specified)
 _APPINFRA_COVERAGE_MARKER_ARG := $(if $(APPINFRA_PYTEST_COVERAGE_MARKERS),-m "$(APPINFRA_PYTEST_COVERAGE_MARKERS)",)
 
-# Coverage tracer, chosen as check.sh chooses it: sys.monitoring (COVERAGE_CORE=sysmon) on
-# Python 3.12+, much faster than the C tracer; 3.11 keeps the C tracer, as coverage.py
-# refuses sysmon there. Recursive, so only the coverage targets run the probe.
-_APPINFRA_COVERAGE_CORE_ENV = $(if $(shell $(PYTHON) -c "import sys; sys.exit(sys.version_info < (3, 12))" 2>/dev/null && echo y),COVERAGE_CORE=sysmon)
+# Coverage tracer, chosen as check.sh chooses it: COVERAGE_CORE=sysmon where sys.monitoring
+# can measure the run (coverage_core.py), else coverage.py's default tracer. Recursive, so
+# only the coverage targets run the script.
+_APPINFRA_COVERAGE_CORE_ENV = $(shell $(PYTHON) $(APPINFRA_SCRIPTS)/coverage_core.py 2>/dev/null)
 
 # Helper to check pytest availability with helpful error
 define _APPINFRA_PYTEST_CHECK

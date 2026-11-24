@@ -32,8 +32,9 @@ For API stability guarantees and deprecation policy, see
   directly must add the method.
 - `make check.ci` gives each pytest run `APPINFRA_PYTEST_WORKERS` workers (default: one per CPU),
   since its stages run one after another; `make check` keeps its worker shares.
-- `make test.coverage` (and its `.v` / `.html` / `.json` variants) measures with
-  `sys.monitoring` on Python 3.12+, as `make check` already does.
+- `make test.coverage` (and its `.v` / `.html` / `.json` variants) and `make check` measure with
+  `sys.monitoring` on Python 3.12+ only where it can measure the run: not with coverage
+  plugins, dynamic contexts, or branch measurement before Python 3.14.
 - An async channel over `AsyncQueueTransport` waits in `recv()` without waking every 0.1 s:
   `close()` wakes it instead. A custom `AsyncTransport` opts in with `wakes_on_close = True`.
 - **Breaking:** `Service.execute()` is renamed `run()`. A `ScheduledService` override of it is
