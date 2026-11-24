@@ -43,7 +43,13 @@ class Arrivals:
     Updated on the loop thread only."""
 
     def __init__(self, expected: int) -> None:
-        """Wait for *expected* services."""
+        """Wait for *expected* services.
+
+        Raises:
+            ValueError: If *expected* is less than 1: no arrival would set ``all``.
+        """
+        if expected < 1:
+            raise ValueError(f"expected must be at least 1, got {expected}")
         self._left = expected
         self.all = threading.Event()
 

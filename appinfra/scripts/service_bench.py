@@ -11,6 +11,7 @@ and the submit/reply rate through an async channel. See appinfra.service.bench.
 
 from __future__ import annotations
 
+import argparse
 import platform
 import sys
 from pathlib import Path
@@ -45,8 +46,18 @@ app = (
 )
 
 
+def _positive(value: str) -> int:
+    """An argparse type: an integer of at least 1."""
+    count = int(value)
+    if count < 1:
+        raise argparse.ArgumentTypeError(f"must be at least 1, got {count}")
+    return count
+
+
 @app.tool(name="bench", help="Measure services on one LoopHost")
-@app.argument("-s", "--services", type=int, default=100_000, help="services to run")
+@app.argument(
+    "-s", "--services", type=_positive, default=100_000, help="services to run"
+)
 def bench(self: Tool) -> int:
     """Run the measurements and print their numbers."""
     count = self.args.services
