@@ -4,11 +4,14 @@
 """Tests for async service channel communication."""
 
 import asyncio
+from collections import deque
 from dataclasses import dataclass
+from typing import Any
 
 import pytest
 
 from appinfra.service import (
+    AsyncBufferedChannel,
     AsyncChannel,
     AsyncProcessQueueChannelFactory,
     AsyncQueueChannelFactory,
@@ -394,3 +397,90 @@ class TestAsyncChannelStreaming:
 
         assert len(chunks) == 1
         assert chunks[0].result == "done"
+
+    @pytest.mark.asyncio
+    async def test_a_chunk_another_task_buffers_keeps_its_place(self) -> None:
+        """A chunk another task's submit() receives and buffers while the stream
+        waits on the transport is yielded before the stream's next one."""
+        transport = AsyncRaceTransport(
+            Message(id="X", payload="X1", is_final=False),
+            Message(id="X", payload="X2"),
+            Message(id="Y", payload="Y"),
+        )
+        channel: AsyncBufferedChannel[Any, Any] = AsyncBufferedChannel(transport)
+        channel._recv_lock = AsyncSignallingLock(transport)  # type: ignore[assignment]
+
+        async def streamer() -> list[Any]:
+            stream = channel.stream(Request(id="X", data="go"), 5.0)
+            return [chunk.payload async for chunk in stream]
+
+        chunks = asyncio.create_task(streamer(), name="streamer")
+        await transport.wait("streamer-receiving")
+        reply = asyncio.create_task(
+            channel.submit(Request(id="Y", data="go"), 5.0), name="submitter"
+        )
+
+        assert await asyncio.wait_for(chunks, 5) == ["X1", "X2"]
+        assert (await asyncio.wait_for(reply, 5)).payload == "Y"
+
+
+class AsyncRaceTransport:
+    """Async counterpart of the sync test's RaceTransport: the streamer's first
+    receive waits until the submitter has buffered a message or waits for the
+    receive lock; the submitter's later receives wait until the streamer has
+    received. Waits are on events; their deadline is the failure path."""
+
+    def __init__(self, *messages: Any) -> None:
+        self.inbound = deque(messages)
+        self.events: dict[str, asyncio.Event] = {}
+        self.calls: dict[str, int] = {}
+        self.is_closed = False
+
+    def _event(self, name: str) -> asyncio.Event:
+        return self.events.setdefault(name, asyncio.Event())
+
+    def signal(self, name: str) -> None:
+        self._event(name).set()
+
+    async def wait(self, name: str) -> None:
+        await asyncio.wait_for(self._event(name).wait(), 5)
+
+    async def send(self, message: Any, timeout: float | None = None) -> None:
+        pass
+
+    async def recv(self, timeout: float | None = None) -> Any:
+        task = asyncio.current_task()
+        name = task.get_name() if task else ""
+        n = self.calls[name] = self.calls.get(name, 0) + 1
+        if name == "streamer" and n == 1:
+            self.signal("streamer-receiving")
+            await self.wait("submitter-progress")
+        if name == "submitter" and n > 1:
+            self.signal("submitter-progress")  # its first message is buffered
+            await self.wait("streamer-received")
+        if not self.inbound:
+            raise ChannelTimeoutError("empty")
+        message = self.inbound.popleft()
+        if name == "streamer":
+            self.signal("streamer-received")
+        return message
+
+    async def close(self) -> None:
+        self.is_closed = True
+
+
+class AsyncSignallingLock:
+    """An asyncio lock that tells the transport when the submitter waits for it."""
+
+    def __init__(self, transport: AsyncRaceTransport) -> None:
+        self._lock = asyncio.Lock()
+        self._transport = transport
+
+    async def __aenter__(self) -> None:
+        task = asyncio.current_task()
+        if self._lock.locked() and task and task.get_name() == "submitter":
+            self._transport.signal("submitter-progress")
+        await self._lock.acquire()
+
+    async def __aexit__(self, *exc: object) -> None:
+        self._lock.release()

@@ -24,7 +24,7 @@ from collections.abc import AsyncIterator
 from typing import Any, Generic, Protocol, TypeVar, cast, runtime_checkable
 
 from ..errors import ChannelClosedError, ChannelFullError, ChannelTimeoutError
-from .base import RedeliveryBuffer, send_slice, validate_response
+from .base import RedeliveryBuffer, recv_slice, route, send_slice, validate_response
 
 TRequest = TypeVar("TRequest")
 TResponse = TypeVar("TResponse")
@@ -156,6 +156,10 @@ class AsyncBufferedChannel(Generic[TRequest, TResponse]):
         self._response_timeout = response_timeout
         self._closed = False
         self._redelivery = RedeliveryBuffer()
+        # Held by submit() and stream() for one round: check the buffer, receive,
+        # route. A message another task received is then buffered before this
+        # task looks, so a stream's chunks stay in order.
+        self._recv_lock = asyncio.Lock()
 
     @property
     def transport(self) -> AsyncTransport:
@@ -311,68 +315,35 @@ class AsyncBufferedChannel(Generic[TRequest, TResponse]):
         self, request_id: str, deadline: float, timeout: float
     ) -> TResponse:
         """Poll for a response with the given request_id until *deadline*."""
-        poll_interval = 0.05
-
         while True:
-            if self.is_closed:
-                raise ChannelClosedError("Channel closed while waiting for response")
-
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                raise ChannelTimeoutError(
-                    f"Request {request_id} timed out after {timeout}s"
-                )
-
-            message = self._redelivery.check(request_id)
+            async with self._recv_lock:
+                message = await self._poll_once(request_id, deadline, timeout)
             if message is not None:
                 return cast(TResponse, validate_response(message))
 
-            message = await self._try_recv(min(poll_interval, remaining))
-            if message is None:
-                continue
-
-            if hasattr(message, "id") and message.id == request_id:
-                return cast(TResponse, validate_response(message))
-
-            self._redelivery.put(message)
+    async def _poll_once(self, request_id: str, deadline: float, timeout: float) -> Any:
+        """One round under _recv_lock: the buffered message for *request_id*, or
+        one received from the transport; a received message for another id is
+        buffered. None if nothing for *request_id* arrived this round."""
+        if self.is_closed:
+            raise ChannelClosedError("Channel closed while waiting for response")
+        message = self._redelivery.check(request_id)
+        if message is not None:
+            return message
+        message = await self._try_recv(recv_slice(request_id, deadline, timeout))
+        return route(message, request_id, self._redelivery)
 
     async def _poll_for_stream(
         self, request_id: str, timeout: float
     ) -> AsyncIterator[TResponse]:
-        """Poll for streaming response chunks until is_final=True."""
+        """Poll for streaming response chunks until is_final=True; *timeout*
+        applies to each chunk."""
         while True:
-            chunk = await self._get_next_chunk(request_id, timeout)
+            deadline = time.monotonic() + timeout
+            chunk = await self._poll_for_response(request_id, deadline, timeout)
             yield chunk
             if getattr(chunk, "is_final", True):
                 return
-
-    async def _get_next_chunk(self, request_id: str, timeout: float) -> TResponse:
-        """Wait for next chunk with matching request_id."""
-        deadline = time.monotonic() + timeout
-        poll_interval = 0.05
-
-        while True:
-            if self.is_closed:
-                raise ChannelClosedError("Channel closed while waiting for chunk")
-
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                raise ChannelTimeoutError(
-                    f"Stream {request_id} timed out waiting for chunk"
-                )
-
-            message = self._redelivery.check(request_id)
-            if message is not None:
-                return cast(TResponse, validate_response(message))
-
-            message = await self._try_recv(min(poll_interval, remaining))
-            if message is None:
-                continue
-
-            if hasattr(message, "id") and message.id == request_id:
-                return cast(TResponse, validate_response(message))
-
-            self._redelivery.put(message)
 
     async def _try_recv(self, timeout: float) -> Any | None:
         """Try to receive, returning None on timeout."""

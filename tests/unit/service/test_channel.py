@@ -250,7 +250,7 @@ class TestSubmitOnClosedChannel:
             pair.parent.submit(Request(id="1", data="test"), timeout=0.1)
 
 
-class TestSubmitStream:
+class TestStream:
     """BufferedChannel.stream(): the chunks are queued on the child's side
     before the parent iterates, so no responder thread is needed."""
 

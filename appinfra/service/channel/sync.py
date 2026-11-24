@@ -39,7 +39,7 @@ from collections.abc import Iterator
 from typing import Any, Generic, Protocol, TypeVar, cast, runtime_checkable
 
 from ..errors import ChannelClosedError, ChannelFullError, ChannelTimeoutError
-from .base import RedeliveryBuffer, send_slice, validate_response
+from .base import RedeliveryBuffer, recv_slice, route, send_slice, validate_response
 
 TRequest = TypeVar("TRequest")
 TResponse = TypeVar("TResponse")
@@ -190,6 +190,11 @@ class BufferedChannel(Generic[TRequest, TResponse]):
         self._closed = False
         self._redelivery = RedeliveryBuffer()
         self._lock = threading.Lock()
+        # Held by submit() and stream() for one round: check the buffer, receive,
+        # route. A message another caller received is then buffered before this
+        # caller looks, so a stream's chunks stay in order. close() takes _lock
+        # only, never waiting on a receive.
+        self._recv_lock = threading.Lock()
 
     def __getstate__(self) -> dict[str, Any]:
         """State pickled when the channel is passed to a spawn or forkserver child.
@@ -200,6 +205,7 @@ class BufferedChannel(Generic[TRequest, TResponse]):
         """
         state = self.__dict__.copy()
         del state["_lock"]
+        del state["_recv_lock"]
         del state["_redelivery"]
         return state
 
@@ -207,6 +213,7 @@ class BufferedChannel(Generic[TRequest, TResponse]):
         self.__dict__.update(state)
         self._redelivery = RedeliveryBuffer()
         self._lock = threading.Lock()
+        self._recv_lock = threading.Lock()
 
     @property
     def transport(self) -> Transport:
@@ -360,33 +367,25 @@ class BufferedChannel(Generic[TRequest, TResponse]):
         self, request_id: str, deadline: float, timeout: float
     ) -> TResponse:
         """Poll for a response with the given request_id until *deadline*."""
-        poll_interval = 0.05
-
         while True:
-            with self._lock:
-                if self.is_closed:
-                    raise ChannelClosedError(
-                        "Channel closed while waiting for response"
-                    )
-                message = self._redelivery.check(request_id)
-                if message is not None:
-                    return cast(TResponse, validate_response(message))
-
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                raise ChannelTimeoutError(
-                    f"Request {request_id} timed out after {timeout}s"
-                )
-
-            message = self._try_recv(min(poll_interval, remaining))
-            if message is None:
-                continue
-
-            if hasattr(message, "id") and message.id == request_id:
+            with self._recv_lock:
+                message = self._poll_once(request_id, deadline, timeout)
+            if message is not None:
                 return cast(TResponse, validate_response(message))
 
-            with self._lock:
-                self._redelivery.put(message)
+    def _poll_once(self, request_id: str, deadline: float, timeout: float) -> Any:
+        """One round under _recv_lock: the buffered message for *request_id*, or
+        one received from the transport; a received message for another id is
+        buffered. None if nothing for *request_id* arrived this round."""
+        with self._lock:
+            if self.is_closed:
+                raise ChannelClosedError("Channel closed while waiting for response")
+            message = self._redelivery.check(request_id)
+        if message is not None:
+            return message
+        message = self._try_recv(recv_slice(request_id, deadline, timeout))
+        with self._lock:
+            return route(message, request_id, self._redelivery)
 
     def _try_recv(self, timeout: float) -> Any | None:
         """Try to receive, returning None on timeout."""

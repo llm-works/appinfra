@@ -59,6 +59,8 @@ For API stability guarantees and deprecation policy, see
   `PYDANTIC_AVAILABLE`. `appinfra.config.schemas` needs pydantic to import.
 
 ### Fixed
+- A streamed reply on an `AsyncBufferedChannel` shared with other `submit()` or `stream()` callers
+  could lose a chunk or yield it out of order.
 - `make pg.server.up.repl` starts from any project, not only from the appinfra repo: the
   primary mounted its `pg_hba.conf` from a path under the project directory.
 - `pg.sh reboot` and the `pg.*` waits find the server however many other containers the runtime
