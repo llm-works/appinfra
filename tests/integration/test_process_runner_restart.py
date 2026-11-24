@@ -8,7 +8,6 @@ import os
 import subprocess
 import sys
 import time
-from multiprocessing.synchronize import Event as MPEvent
 from pathlib import Path
 
 import pytest
@@ -26,7 +25,6 @@ class FailOnceService(Service):
         self._lg = lg
         self._counter = Path(counter)
         self._failure = failure
-        self._shutdown_event: MPEvent | None = None  # injected
 
     @property
     def name(self) -> str:
@@ -40,8 +38,7 @@ class FailOnceService(Service):
             while not _go(self._counter).exists():
                 time.sleep(0.01)
             _fail(self._failure)
-        assert self._shutdown_event is not None
-        self._shutdown_event.wait()
+        self.stopping.wait()
 
     def is_healthy(self) -> bool:
         return True

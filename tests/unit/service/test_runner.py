@@ -5,7 +5,6 @@
 
 import itertools
 import threading
-import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
@@ -44,9 +43,11 @@ class IdleAsync(AsyncService):
 
 @contextmanager
 def _mock_mp_context() -> Iterator[tuple[MagicMock, MagicMock, MagicMock]]:
-    """Patch ProcessRunner's multiprocessing context; yield its Process, Event, Queue."""
+    """Patch ProcessRunner's multiprocessing context; yield its Process, Event, Queue.
+    Its Pipe gives a pair of mock ends."""
     with patch("appinfra.service.runner.process.mp.get_context") as get_context:
         ctx = get_context.return_value
+        ctx.Pipe.side_effect = lambda duplex=True: (MagicMock(), MagicMock())
         yield ctx.Process, ctx.Event, ctx.Queue
 
 
@@ -63,11 +64,7 @@ class MPSimpleService(Service):
         return self._name
 
     def run(self) -> None:
-        # Wait for shutdown signal (injected by ProcessRunner)
-        if hasattr(self, "_shutdown_event") and self._shutdown_event:
-            self._shutdown_event.wait()
-        else:
-            time.sleep(10)
+        self.stopping.wait()
 
     def is_healthy(self) -> bool:
         return True

@@ -25,6 +25,9 @@ For API stability guarantees and deprecation policy, see
   one shared event loop thread, so a service waiting on an `await` holds no thread of its own.
 - `BufferedChannel.stream()`: the sync counterpart of `AsyncBufferedChannel.stream()`, yielding
   the response chunks of a request until the one with `is_final=True`.
+- `Service.stopping`: a `StopToken` every runner sets before `setup()` and stops when the service
+  is to stop; `run()` returns on it under any runner. `stopping.child()` derives a token stopped
+  with it.
 
 ### Changed
 - **Breaking:** `submit_stream()` is renamed `stream()` on `AsyncChannel`, `AsyncBufferedChannel`
@@ -37,6 +40,8 @@ For API stability guarantees and deprecation policy, see
   plugins, dynamic contexts, or branch measurement before Python 3.14.
 - An async channel over `AsyncQueueTransport` waits in `recv()` without waking every 0.1 s:
   `close()` wakes it instead. A custom `AsyncTransport` opts in with `wakes_on_close = True`.
+- **Breaking:** `ProcessRunner` no longer injects `_shutdown_event` into the service; `run()`
+  waits on `self.stopping` in the subprocess instead.
 - **Breaking:** `RestartPolicy` is frozen: runners share one policy, so a field cannot change for
   one of them alone. Derive a variant with `dataclasses.replace()`.
 - **Breaking:** `Service.execute()` is renamed `run()`. A `ScheduledService` override of it is

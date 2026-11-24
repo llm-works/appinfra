@@ -182,11 +182,8 @@ class TaskRunner(Runner):
         self._host = host
         self._service = service
         self._exception: BaseException | None = None
-        # Plain flags, not threading.Events, so that an idle service costs no
+        # Plain counts, not threading.Events, so that an idle service costs no
         # lock or condition: an Event exists only while a stop() waits.
-        # Set by stop(); read on the loop, where a task that has not begun yet
-        # sees it and skips run()
-        self._stop_requested = False
         # Runs launched by start() and runs whose task has ended and torn the
         # service down; alive while they differ. Counts, each with one writer,
         # not a flag: a run ending after a start() on another thread launched
@@ -199,9 +196,6 @@ class TaskRunner(Runner):
         self._task: asyncio.Task[None] | None = None
         # Events of stop() calls waiting for the task to end; loop thread only
         self._waiters: list[threading.Event] | None = None
-
-    def _reset_stop(self) -> None:
-        self._stop_requested = False
 
     def start(self) -> None:
         """Run setup(), then start the service's task on the host's loop.
@@ -260,7 +254,7 @@ class TaskRunner(Runner):
     async def _run_service(self) -> None:
         """run(), unless a stop() came first. A cancel, from stop() or the host
         shutting down, ends it cleanly; any other exception is recorded."""
-        if self._stop_requested:
+        if self._service.stopping.is_set():
             return
         try:
             await self._service.run()
@@ -293,7 +287,8 @@ class TaskRunner(Runner):
             raise RuntimeError("TaskRunner.stop() on the loop thread would block it")
 
         self._transition(State.STOPPING)
-        self._stop_requested = True
+        # Before the cancel: a task not begun yet sees it and skips run()
+        self.service.stopping.stop()
         if self.is_alive() and not self._wait_ended(timeout):
             self.service.lg.warning(
                 "service task did not end in time",

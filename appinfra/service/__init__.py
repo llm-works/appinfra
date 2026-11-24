@@ -129,6 +129,7 @@ from .factory import (
 from .manager import Manager
 from .runner import LoopHost, ProcessRunner, Runner, TaskRunner, ThreadRunner
 from .state import RestartPolicy, State, StateHook
+from .stop import StopToken
 
 __all__ = [
     # Core classes
@@ -178,6 +179,7 @@ __all__ = [
     "State",
     "RestartPolicy",
     "StateHook",
+    "StopToken",
     # Errors
     "Error",
     "CycleError",

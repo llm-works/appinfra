@@ -8,6 +8,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 
 from ..log import Logger
+from .stop import StopToken
 
 
 class Service(ABC):
@@ -33,7 +34,6 @@ class Service(ABC):
                 self._lg = lg
                 self._config = config
                 self._pool: Pool | None = None
-                self._stop = threading.Event()
 
             @property
             def name(self) -> str:
@@ -46,10 +46,9 @@ class Service(ABC):
             def run(self) -> None:
                 self._pool = create_pool(self._config)
                 self._lg.info("database pool created")
-                self._stop.wait()  # Block until teardown
+                self.stopping.wait()  # Block until stopped
 
             def teardown(self) -> None:
-                self._stop.set()
                 if self._pool:
                     self._pool.close()
 
@@ -59,6 +58,14 @@ class Service(ABC):
 
     _lg: Logger
     """Logger instance. Set by subclass __init__ or by ProcessRunner."""
+
+    stopping: StopToken
+    """Set when this run of the service is to stop; set by the runner before
+    setup(), a new token for each start. run() checks it (``is_set()``) or blocks
+    on it (``wait()``) and returns once it is set; ``stopping.child()`` derives a
+    token stopped with it. The same under every runner: ThreadRunner,
+    ProcessRunner (in the subprocess) and TaskRunner, where stopping also
+    cancels the task."""
 
     @property
     def lg(self) -> Logger:
@@ -84,11 +91,10 @@ class Service(ABC):
     def run(self) -> None:
         """Do the service's work, blocking until it is stopped.
 
-        The runner calls it once. Under ThreadRunner, teardown() must make it
-        return; under ProcessRunner, the injected ``_shutdown_event`` is set
-        (teardown() runs in the subprocess after run() returns). ProcessRunner
-        injects it only into an attribute the service declares, e.g.
-        ``self._shutdown_event = None`` in ``__init__``.
+        The runner calls it once, and it returns once ``self.stopping`` is set.
+        Under ThreadRunner, stop() also calls teardown() while run() still runs,
+        so a run() blocked elsewhere can be released there; under ProcessRunner,
+        teardown() runs in the subprocess after run() returns.
         """
         ...
 

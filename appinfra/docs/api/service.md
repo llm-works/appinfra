@@ -170,9 +170,12 @@ class Database(Service):
         self._stop.set()
 ```
 
-Under `ProcessRunner`, `run()` watches the injected `_shutdown_event` instead: `teardown()` runs in
-the subprocess after `run()` returns. `ProcessRunner` injects it only into an attribute the service
-declares, e.g. `self._shutdown_event = None` in `__init__`.
+Every runner gives the service a `StopToken` as `self.stopping`, set when the service is to stop:
+`run()` can block on `self.stopping.wait()` or check `self.stopping.is_set()` instead of keeping
+an event of its own. It works the same under `ThreadRunner`, under `ProcessRunner` (in the
+subprocess, where `teardown()` runs after `run()` returns) and under a LoopHost's `TaskRunner`,
+where stopping also cancels the task. `self.stopping.child()` derives a token that is stopped
+with it, for work the service starts.
 
 ## State Machine
 

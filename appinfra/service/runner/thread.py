@@ -42,8 +42,6 @@ class ThreadRunner(Runner):
         check_drivable(self.service)
         self._thread: threading.Thread | None = None
         self._exception: BaseException | None = None
-        # Ends a scheduled service's loop; set by stop()
-        self._stop = threading.Event()
         # The thread whose run has ended, set by _run() as its last step.
         # Thread.is_alive() on Python 3.13+ stays True until the OS thread
         # handle is marked done, which happens after the GIL is released;
@@ -63,9 +61,6 @@ class ThreadRunner(Runner):
         )
         self._thread.start()
 
-    def _reset_stop(self) -> None:
-        self._stop.clear()
-
     @property
     def _loops_here(self) -> bool:
         """True if the runner loops the service (scheduled) and so tears it down
@@ -82,7 +77,7 @@ class ThreadRunner(Runner):
         """
         try:
             try:
-                drive(self.service, self._stop)
+                drive(self.service, self.service.stopping)
             except BaseException as e:
                 self._exception = e
             if self._loops_here:
@@ -96,9 +91,11 @@ class ThreadRunner(Runner):
     def stop(self, timeout: float = 5.0) -> None:
         """Stop the service.
 
-        A scheduled service's loop ends and the service thread tears it down; a
-        service with its own run() is torn down here, which tells run() to
-        return. Either way the thread is then joined for up to *timeout*
+        Sets the service's stopping token: a scheduled service's loop ends and
+        the service thread tears it down; a service with its own run() returns
+        on it, and is torn down here too, which releases a run() blocked on
+        something other than the token. Either way the thread is then joined
+        for up to *timeout*
         seconds. A start() in progress on another thread is waited for first;
         both waits together take at most *timeout*.
 
@@ -114,7 +111,7 @@ class ThreadRunner(Runner):
             return
 
         self._transition(State.STOPPING)
-        self._stop.set()
+        self.service.stopping.stop()
         if not self._loops_here:
             self._teardown()
 

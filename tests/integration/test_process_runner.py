@@ -5,7 +5,6 @@
 
 import threading
 import time
-from multiprocessing.synchronize import Event as MPEvent
 
 import pytest
 
@@ -20,7 +19,6 @@ class SimpleProcessService(Service):
     def __init__(self, lg: Logger, name: str = "mp-test") -> None:
         self._lg = lg
         self._name = name
-        self._shutdown_event: MPEvent | None = None  # injected by ProcessRunner
 
     @property
     def name(self) -> str:
@@ -28,8 +26,7 @@ class SimpleProcessService(Service):
 
     def run(self) -> None:
         self._lg.info("service started")
-        assert self._shutdown_event is not None
-        self._shutdown_event.wait()
+        self.stopping.wait()
         self._lg.info("service stopping")
 
     def is_healthy(self) -> bool:
