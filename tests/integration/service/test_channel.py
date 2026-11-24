@@ -218,13 +218,14 @@ class SignallingLock:
         self._lock = threading.Lock()
         self._transport = transport
 
-    def __enter__(self) -> None:
-        if not self._lock.acquire(blocking=False):
-            if threading.current_thread().name == "submitter":
-                self._transport.signal("submitter-progress")
-            self._lock.acquire()
+    def acquire(self, blocking: bool = True, timeout: float = -1) -> bool:
+        if self._lock.acquire(blocking=False):
+            return True
+        if threading.current_thread().name == "submitter":
+            self._transport.signal("submitter-progress")
+        return self._lock.acquire(blocking, timeout)
 
-    def __exit__(self, *exc: object) -> None:
+    def release(self) -> None:
         self._lock.release()
 
 

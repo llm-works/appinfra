@@ -39,7 +39,14 @@ from collections.abc import Iterator
 from typing import Any, Generic, Protocol, TypeVar, cast, runtime_checkable
 
 from ..errors import ChannelClosedError, ChannelFullError, ChannelTimeoutError
-from .base import RedeliveryBuffer, recv_slice, route, send_slice, validate_response
+from .base import (
+    RedeliveryBuffer,
+    recv_slice,
+    route,
+    send_slice,
+    timed_out,
+    validate_response,
+)
 
 TRequest = TypeVar("TRequest")
 TResponse = TypeVar("TResponse")
@@ -368,8 +375,14 @@ class BufferedChannel(Generic[TRequest, TResponse]):
     ) -> TResponse:
         """Poll for a response with the given request_id until *deadline*."""
         while True:
-            with self._recv_lock:
+            # The wait for the lock counts against the deadline
+            remaining = deadline - time.monotonic()
+            if remaining <= 0 or not self._recv_lock.acquire(timeout=remaining):
+                raise timed_out(request_id, timeout)
+            try:
                 message = self._poll_once(request_id, deadline, timeout)
+            finally:
+                self._recv_lock.release()
             if message is not None:
                 return cast(TResponse, validate_response(message))
 

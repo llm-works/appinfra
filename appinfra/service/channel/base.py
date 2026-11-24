@@ -77,8 +77,13 @@ def recv_slice(request_id: str, deadline: float, timeout: float) -> float:
     """
     remaining = deadline - time.monotonic()
     if remaining <= 0:
-        raise ChannelTimeoutError(f"Request {request_id} timed out after {timeout}s")
+        raise timed_out(request_id, timeout)
     return min(RECV_POLL_INTERVAL, remaining)
+
+
+def timed_out(request_id: str, timeout: float) -> ChannelTimeoutError:
+    """The error for a wait for *request_id* that passed its deadline."""
+    return ChannelTimeoutError(f"Request {request_id} timed out after {timeout}s")
 
 
 def route(message: Any, request_id: str, redelivery: RedeliveryBuffer) -> Any:

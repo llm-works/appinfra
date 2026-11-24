@@ -423,6 +423,40 @@ class TestAsyncChannelStreaming:
         assert await asyncio.wait_for(chunks, 5) == ["X1", "X2"]
         assert (await asyncio.wait_for(reply, 5)).payload == "Y"
 
+    @pytest.mark.asyncio
+    async def test_the_wait_for_the_lock_is_bounded_by_the_deadline(self) -> None:
+        """submit() waits for the receive lock only until its deadline, then
+        raises ChannelTimeoutError."""
+        channel = AsyncQueueChannelFactory().create_pair().parent
+        lock = AsyncBusyLock()
+        channel._recv_lock = lock  # type: ignore[assignment]
+
+        with pytest.raises(ChannelTimeoutError):
+            await channel.submit(Request(id="1", data="go"), 5.0)
+
+        assert lock.acquires == 1
+
+
+class AsyncBusyLock:
+    """An asyncio lock another task holds: acquire() raises the TimeoutError a
+    deadline-bounded wait for it raises once the deadline passes."""
+
+    def __init__(self) -> None:
+        self.acquires = 0
+
+    async def acquire(self) -> bool:
+        self.acquires += 1
+        raise TimeoutError
+
+    def release(self) -> None:
+        raise AssertionError("released a lock it did not hold")
+
+    async def __aenter__(self) -> None:
+        raise AssertionError("waited for the lock without a deadline")
+
+    async def __aexit__(self, *exc: object) -> None:
+        pass
+
 
 class AsyncRaceTransport:
     """Async counterpart of the sync test's RaceTransport: the streamer's first
@@ -476,11 +510,13 @@ class AsyncSignallingLock:
         self._lock = asyncio.Lock()
         self._transport = transport
 
-    async def __aenter__(self) -> None:
-        task = asyncio.current_task()
-        if self._lock.locked() and task and task.get_name() == "submitter":
+    async def acquire(self) -> bool:
+        # The streamer takes the lock first, uncontended, so a caller finding
+        # it held is the submitter; no task name check, since wait_for() runs
+        # this in a task of its own on Python 3.11
+        if self._lock.locked():
             self._transport.signal("submitter-progress")
-        await self._lock.acquire()
+        return await self._lock.acquire()
 
-    async def __aexit__(self, *exc: object) -> None:
+    def release(self) -> None:
         self._lock.release()

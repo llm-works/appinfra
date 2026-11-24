@@ -24,7 +24,14 @@ from collections.abc import AsyncIterator
 from typing import Any, Generic, Protocol, TypeVar, cast, runtime_checkable
 
 from ..errors import ChannelClosedError, ChannelFullError, ChannelTimeoutError
-from .base import RedeliveryBuffer, recv_slice, route, send_slice, validate_response
+from .base import (
+    RedeliveryBuffer,
+    recv_slice,
+    route,
+    send_slice,
+    timed_out,
+    validate_response,
+)
 
 TRequest = TypeVar("TRequest")
 TResponse = TypeVar("TResponse")
@@ -316,10 +323,30 @@ class AsyncBufferedChannel(Generic[TRequest, TResponse]):
     ) -> TResponse:
         """Poll for a response with the given request_id until *deadline*."""
         while True:
-            async with self._recv_lock:
+            await self._acquire_recv(request_id, deadline, timeout)
+            try:
                 message = await self._poll_once(request_id, deadline, timeout)
+            finally:
+                self._recv_lock.release()
             if message is not None:
                 return cast(TResponse, validate_response(message))
+
+    async def _acquire_recv(
+        self, request_id: str, deadline: float, timeout: float
+    ) -> None:
+        """Take _recv_lock, waiting for it no longer than *deadline*.
+
+        Raises:
+            ChannelTimeoutError: If the deadline passes first.
+        """
+        remaining = deadline - time.monotonic()
+        if remaining > 0:
+            try:
+                await asyncio.wait_for(self._recv_lock.acquire(), remaining)
+                return
+            except TimeoutError:
+                pass
+        raise timed_out(request_id, timeout)
 
     async def _poll_once(self, request_id: str, deadline: float, timeout: float) -> Any:
         """One round under _recv_lock: the buffered message for *request_id*, or

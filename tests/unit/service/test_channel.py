@@ -250,6 +250,44 @@ class TestSubmitOnClosedChannel:
             pair.parent.submit(Request(id="1", data="test"), timeout=0.1)
 
 
+class BusyLock:
+    """A receive lock another caller holds: acquire() records the timeout it is
+    given and fails, as it does once that timeout passes."""
+
+    def __init__(self) -> None:
+        self.timeouts: list[float] = []
+
+    def acquire(self, blocking: bool = True, timeout: float = -1) -> bool:
+        self.timeouts.append(timeout)
+        return False
+
+    def release(self) -> None:
+        raise AssertionError("released a lock it did not hold")
+
+    def __enter__(self) -> None:
+        raise AssertionError("waited for the lock without a deadline")
+
+    def __exit__(self, *exc: object) -> None:
+        pass
+
+
+class TestReceiveLock:
+    """Waiting for the receive lock counts against the caller's timeout."""
+
+    def test_the_wait_for_the_lock_is_bounded_by_the_deadline(self) -> None:
+        """submit() waits for the lock at most until its deadline, then raises
+        ChannelTimeoutError."""
+        channel = QueueChannelFactory().create_pair().parent
+        lock = BusyLock()
+        channel._recv_lock = lock  # type: ignore[attr-defined]
+
+        with pytest.raises(ChannelTimeoutError):
+            channel.submit(Request(id="1", data="go"), 5.0)
+
+        assert len(lock.timeouts) == 1
+        assert 0 < lock.timeouts[0] <= 5.0
+
+
 class TestStream:
     """BufferedChannel.stream(): the chunks are queued on the child's side
     before the parent iterates, so no responder thread is needed."""
