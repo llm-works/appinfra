@@ -105,15 +105,8 @@ BOUND_SUITES="$(appinfra_setting APPINFRA_PYTEST_BOUND_SUITES "" suites)" || exi
 CHECK_WORKERS="$(appinfra_setting APPINFRA_PYTEST_CHECK_WORKERS 0.25 share)" || exit 2
 COVERAGE_WORKERS="$(appinfra_setting APPINFRA_PYTEST_COVERAGE_WORKERS 0.5 share)" || exit 2
 
-# The worker count for a share: a whole number as it is, a fraction of NPROC, at least 2
-worker_count() {
-    case "$1" in
-        *.*) awk -v cpus="$NPROC" -v share="$1" 'BEGIN { n = int(cpus * share); print (n > 2 ? n : 2) }' ;;
-        *) echo "$1" ;;
-    esac
-}
-PYTEST_PARALLEL="${PYTEST_PARALLEL:--n $(worker_count "$CHECK_WORKERS") --dist=worksteal}"
-PYTEST_PARALLEL_COVERAGE="${PYTEST_PARALLEL_COVERAGE:--n $(worker_count "$COVERAGE_WORKERS") --dist=worksteal}"
+PYTEST_PARALLEL="${PYTEST_PARALLEL:--n $(appinfra_worker_count "$CHECK_WORKERS" "$NPROC") --dist=worksteal}"
+PYTEST_PARALLEL_COVERAGE="${PYTEST_PARALLEL_COVERAGE:--n $(appinfra_worker_count "$COVERAGE_WORKERS" "$NPROC") --dist=worksteal}"
 
 # Coverage's marker expression can subsume standalone test suites. When
 # check.sh runs both a standalone suite and coverage over the same marker

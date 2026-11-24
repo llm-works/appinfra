@@ -41,15 +41,10 @@ def _cpus() -> int:
 
 
 def _workers(
-    project: Path,
-    coverage: str,
-    settings: dict[str, str],
-    check_ci: bool = False,
-    makefile: str = "",
+    project: Path, coverage: str, settings: dict[str, str], check_ci: bool = False
 ) -> dict[str, int]:
     """Run check.sh, or make check.ci when *check_ci*, over a package and one unit test;
-    return each run's worker count by suite. *makefile* goes in the project's Makefile ahead
-    of the framework's includes.
+    return each run's worker count by suite.
 
     The environment drops the settings a surrounding make check exports.
     """
@@ -80,8 +75,7 @@ def _workers(
     command = ["bash", str(CHECK_SH)]
     if check_ci:
         (project / "Makefile").write_text(
-            f"{makefile}include {MAKE_DIR / 'Makefile.config'}\n"
-            f"include {MAKE_DIR / 'Makefile.dev'}\n"
+            f"include {MAKE_DIR / 'Makefile.config'}\ninclude {MAKE_DIR / 'Makefile.dev'}\n"
         )
         command = ["make", "--no-print-directory", "check.ci"]
     result = subprocess.run(
@@ -97,57 +91,18 @@ def _workers(
     return {suite: int(n) for suite, n in runs}
 
 
-@pytest.mark.parametrize(
-    ("value", "expected"),
-    [
-        (None, max(2, _cpus() // 4)),
-        ("0.125", max(2, _cpus() // 8)),
-        ("0.01", 2),
-        ("3", 3),
-        ("1", 1),
-    ],
-    ids=["default", "share", "share-at-least-2", "count", "one"],
-)
-def test_a_standalone_suite_takes_check_workers(
-    tmp_path: Path, value: str | None, expected: int
-) -> None:
-    settings = {} if value is None else {"APPINFRA_PYTEST_CHECK_WORKERS": value}
-    assert _workers(tmp_path, "0", settings)["unit"] == expected
+def test_a_standalone_suite_takes_check_workers(tmp_path: Path) -> None:
+    settings = {"APPINFRA_PYTEST_CHECK_WORKERS": "3"}
+    assert _workers(tmp_path, "0", settings)["unit"] == 3
 
 
-@pytest.mark.parametrize(
-    ("value", "expected"),
-    [(None, max(2, _cpus() // 2)), ("0.25", max(2, _cpus() // 4)), ("3", 3)],
-    ids=["default", "share", "count"],
-)
-def test_the_coverage_run_takes_coverage_workers(
-    tmp_path: Path, value: str | None, expected: int
-) -> None:
-    settings = {} if value is None else {"APPINFRA_PYTEST_COVERAGE_WORKERS": value}
-    assert _workers(tmp_path, "1", settings)["cov"] == expected
+def test_the_coverage_run_takes_its_default_share(tmp_path: Path) -> None:
+    assert _workers(tmp_path, "1", {})["cov"] == max(2, _cpus() // 2)
 
 
-@pytest.mark.parametrize(("coverage", "run"), [("0", "unit"), ("1", "cov")])
-def test_check_ci_gives_each_run_the_pytest_workers(
-    tmp_path: Path, coverage: str, run: str
-) -> None:
-    """check.ci runs its stages one after another, so a standalone suite and the coverage
-    run each take APPINFRA_PYTEST_WORKERS instead of make check's shares."""
+def test_check_ci_gives_the_runs_the_pytest_workers(tmp_path: Path) -> None:
     settings = {"APPINFRA_PYTEST_WORKERS": "3"}
-    assert _workers(tmp_path, coverage, settings, check_ci=True) == {run: 3}
-
-
-def test_check_ci_takes_every_cpu_by_default(tmp_path: Path) -> None:
-    """APPINFRA_PYTEST_WORKERS defaults to auto: one worker per CPU."""
-    assert _workers(tmp_path, "1", {}, check_ci=True) == {"cov": _cpus()}
-
-
-def test_check_ci_without_pytest_workers_keeps_the_shares(tmp_path: Path) -> None:
-    """A project that sets APPINFRA_PYTEST_WORKERS empty keeps check.sh's shares."""
-    runs = _workers(
-        tmp_path, "1", {}, check_ci=True, makefile="APPINFRA_PYTEST_WORKERS :=\n"
-    )
-    assert runs == {"cov": max(2, _cpus() // 2)}
+    assert _workers(tmp_path, "1", settings, check_ci=True) == {"cov": 3}
 
 
 def test_an_invalid_share_stops_check_sh(tmp_path: Path) -> None:

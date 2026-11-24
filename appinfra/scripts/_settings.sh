@@ -80,6 +80,16 @@ appinfra_setting() {
     printf '%s' "$value"
 }
 
+# appinfra_worker_count SHARE CPUS: prints the worker count for a share (a value
+# appinfra_setting accepted as a share): a whole number as it is; a fraction, that
+# share of CPUS, at least 2.
+appinfra_worker_count() {
+    case "$1" in
+        *.*) awk -v cpus="$2" -v share="$1" 'BEGIN { n = int(cpus * share); print (n > 2 ? n : 2) }' ;;
+        *) echo "$1" ;;
+    esac
+}
+
 # appinfra_pytest_args NAME: prints the variable NAME's value, pytest arguments,
 # or prints an error to stderr and returns 2 when one is an xdist worker option.
 # The arguments come after check.sh's own, so -n there would override the
