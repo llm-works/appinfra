@@ -30,6 +30,8 @@ For API stability guarantees and deprecation policy, see
 - **Breaking:** `submit_stream()` is renamed `stream()` on `AsyncChannel`, `AsyncBufferedChannel`
   and `IPCChannel`. The sync `Channel` protocol gains `stream()`, so a class implementing it
   directly must add the method.
+- `make check.ci` gives each pytest run `APPINFRA_PYTEST_WORKERS` workers (default: one per CPU),
+  since its stages run one after another; `make check` keeps its worker shares.
 - An async channel over `AsyncQueueTransport` waits in `recv()` without waking every 0.1 s:
   `close()` wakes it instead. A custom `AsyncTransport` opts in with `wakes_on_close = True`.
 - **Breaking:** `Service.execute()` is renamed `run()`. A `ScheduledService` override of it is
