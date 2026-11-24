@@ -323,7 +323,14 @@ class AsyncBufferedChannel(Generic[TRequest, TResponse]):
     ) -> TResponse:
         """Poll for a response with the given request_id until *deadline*."""
         while True:
-            await self._acquire_recv(request_id, deadline, timeout)
+            try:
+                await self._acquire_recv(request_id, deadline, timeout)
+            except ChannelTimeoutError:
+                # A reply another task buffered during the wait still counts
+                message = self._redelivery.check(request_id)
+                if message is None:
+                    raise
+                return cast(TResponse, validate_response(message))
             try:
                 message = await self._poll_once(request_id, deadline, timeout)
             finally:

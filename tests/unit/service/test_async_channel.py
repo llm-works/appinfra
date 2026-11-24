@@ -436,6 +436,18 @@ class TestAsyncChannelStreaming:
 
         assert lock.acquires == 1
 
+    @pytest.mark.asyncio
+    async def test_a_reply_buffered_while_waiting_is_returned(self) -> None:
+        """When the wait for the receive lock times out, a reply another task
+        has buffered meanwhile is returned instead of a timeout."""
+        channel = AsyncQueueChannelFactory().create_pair().parent
+        channel._recv_lock = AsyncBusyLock()  # type: ignore[assignment]
+        channel._redelivery.put(Response(id="1", result="buffered"))
+
+        reply = await channel.submit(Request(id="1", data="go"), 5.0)
+
+        assert reply == Response(id="1", result="buffered")
+
 
 class AsyncBusyLock:
     """An asyncio lock another task holds: acquire() raises the TimeoutError a

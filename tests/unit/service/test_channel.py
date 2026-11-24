@@ -287,6 +287,17 @@ class TestReceiveLock:
         assert len(lock.timeouts) == 1
         assert 0 < lock.timeouts[0] <= 5.0
 
+    def test_a_reply_buffered_while_waiting_is_returned(self) -> None:
+        """When the wait for the lock times out, a reply another caller has
+        buffered meanwhile is returned instead of a timeout."""
+        channel = QueueChannelFactory().create_pair().parent
+        channel._recv_lock = BusyLock()  # type: ignore[attr-defined]
+        channel._redelivery.put(Response(id="1", result="buffered"))
+
+        reply = channel.submit(Request(id="1", data="go"), 5.0)
+
+        assert reply == Response(id="1", result="buffered")
+
 
 class TestStream:
     """BufferedChannel.stream(): the chunks are queued on the child's side

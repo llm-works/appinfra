@@ -378,7 +378,12 @@ class BufferedChannel(Generic[TRequest, TResponse]):
             # The wait for the lock counts against the deadline
             remaining = deadline - time.monotonic()
             if remaining <= 0 or not self._recv_lock.acquire(timeout=remaining):
-                raise timed_out(request_id, timeout)
+                # A reply another caller buffered during the wait still counts
+                with self._lock:
+                    message = self._redelivery.check(request_id)
+                if message is None:
+                    raise timed_out(request_id, timeout)
+                return cast(TResponse, validate_response(message))
             try:
                 message = self._poll_once(request_id, deadline, timeout)
             finally:
