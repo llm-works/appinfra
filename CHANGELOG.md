@@ -37,6 +37,8 @@ For API stability guarantees and deprecation policy, see
   plugins, dynamic contexts, or branch measurement before Python 3.14.
 - An async channel over `AsyncQueueTransport` waits in `recv()` without waking every 0.1 s:
   `close()` wakes it instead. A custom `AsyncTransport` opts in with `wakes_on_close = True`.
+- **Breaking:** `RestartPolicy` is frozen: runners share one policy, so a field cannot change for
+  one of them alone. Derive a variant with `dataclasses.replace()`.
 - **Breaking:** `Service.execute()` is renamed `run()`. A `ScheduledService` override of it is
   never called: the runner runs the tick loop and calls `teardown()` on that thread after it ends.
 - **Breaking:** the local dev server listens on `127.0.0.1` by default instead of every

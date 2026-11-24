@@ -19,6 +19,9 @@ from .drive import check_service
 # The runners whose state hooks the current thread is running (_notify())
 _in_hooks = threading.local()
 
+# The policy of every runner given none; RestartPolicy is frozen, so one serves all
+_DEFAULT_POLICY = RestartPolicy()
+
 
 class Runner(ABC):
     """Abstract base for service execution and state management.
@@ -46,9 +49,10 @@ class Runner(ABC):
             TypeError: If *service* is not a Service (see check_service()).
         """
         self.service: Service = check_service(service)
-        self.policy = policy or RestartPolicy()
+        self.policy = policy or _DEFAULT_POLICY
         self._state = State.CREATED
-        self._hooks: list[StateHook] = []
+        # Created by the first on_state_change(): most runners have no hooks
+        self._hooks: list[StateHook] | None = None
         self._retries = 0
         self._restarting = False
         self._lock = threading.Lock()
@@ -101,7 +105,11 @@ class Runner(ABC):
         Args:
             hook: Callable(service_name, from_state, to_state).
         """
-        self._hooks.append(hook)
+        # Under the lock, so two first registrations cannot each create a list
+        with self._lock:
+            if self._hooks is None:
+                self._hooks = []
+            self._hooks.append(hook)
 
     def start(self) -> None:
         """Start the service (STOPPED -> STARTING -> begins execution).
