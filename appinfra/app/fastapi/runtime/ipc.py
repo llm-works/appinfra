@@ -116,7 +116,7 @@ class IPCChannel:
         finally:
             self._pending_count -= 1
 
-    async def submit_stream(
+    async def stream(
         self,
         request: Any,
         timeout: float | None = None,
@@ -145,7 +145,7 @@ class IPCChannel:
 
         self._pending_count += 1
         try:
-            async for chunk in self._channel.submit_stream(request, timeout):
+            async for chunk in self._channel.stream(request, timeout):
                 yield chunk
         finally:
             self._pending_count -= 1

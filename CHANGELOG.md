@@ -23,8 +23,13 @@ For API stability guarantees and deprecation policy, see
   `Store.object_types` and `Store.write_objects`; their defaults loop over the single-object calls.
 - `AsyncService`: a service whose `run()` is a coroutine. `LoopHost.runner()` runs it as a task on
   one shared event loop thread, so a service waiting on an `await` holds no thread of its own.
+- `BufferedChannel.stream()`: the sync counterpart of `AsyncBufferedChannel.stream()`, yielding
+  the response chunks of a request until the one with `is_final=True`.
 
 ### Changed
+- **Breaking:** `submit_stream()` is renamed `stream()` on `AsyncChannel`, `AsyncBufferedChannel`
+  and `IPCChannel`. The sync `Channel` protocol gains `stream()`, so a class implementing it
+  directly must add the method.
 - An async channel over `AsyncQueueTransport` waits in `recv()` without waking every 0.1 s:
   `close()` wakes it instead. A custom `AsyncTransport` opts in with `wakes_on_close = True`.
 - **Breaking:** `Service.execute()` is renamed `run()`. A `ScheduledService` override of it is
@@ -54,6 +59,8 @@ For API stability guarantees and deprecation policy, see
   `PYDANTIC_AVAILABLE`. `appinfra.config.schemas` needs pydantic to import.
 
 ### Fixed
+- A streamed reply on an `AsyncBufferedChannel` shared with other `submit()` or `stream()` callers
+  could lose a chunk or yield it out of order.
 - `make pg.server.up.repl` starts from any project, not only from the appinfra repo: the
   primary mounted its `pg_hba.conf` from a path under the project directory.
 - `pg.sh reboot` and the `pg.*` waits find the server however many other containers the runtime

@@ -45,4 +45,4 @@ class TestSyncSubmit:
 
 @pytest.mark.parametrize("factory", [AsyncProcessQueueChannelFactory])
 class TestAsyncSubmit(AsyncSubmitTests):
-    """AsyncBufferedChannel.submit() and submit_stream() over mp.Queue."""
+    """AsyncBufferedChannel.submit() and stream() over mp.Queue."""

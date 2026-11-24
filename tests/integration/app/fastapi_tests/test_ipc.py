@@ -115,8 +115,8 @@ class TestIPCChannelStreaming:
     """Tests for streaming functionality."""
 
     @pytest.mark.asyncio
-    async def test_submit_stream_yields_chunks(self, queues):
-        """Test submit_stream yields chunks until is_final."""
+    async def test_stream_yields_chunks(self, queues):
+        """Test stream yields chunks until is_final."""
         request_q, response_q = queues
         channel = IPCChannel(request_q, response_q, IPCConfig())
 
@@ -131,7 +131,7 @@ class TestIPCChannelStreaming:
 
         task = asyncio.create_task(send_chunks())
 
-        chunks = [chunk async for chunk in channel.submit_stream(request, timeout=1.0)]
+        chunks = [chunk async for chunk in channel.stream(request, timeout=1.0)]
 
         assert len(chunks) == 2
         assert chunks[0].data == "chunk1"
@@ -142,13 +142,13 @@ class TestIPCChannelStreaming:
         await task
 
     @pytest.mark.asyncio
-    async def test_submit_stream_timeout_is_builtin_timeout_error(self, queues):
-        """Test submit_stream timeout is caught by a plain `except TimeoutError`."""
+    async def test_stream_timeout_is_builtin_timeout_error(self, queues):
+        """Test stream timeout is caught by a plain `except TimeoutError`."""
         request_q, response_q = queues
         channel = IPCChannel(request_q, response_q, IPCConfig())
 
         with pytest.raises(TimeoutError):
-            async for _ in channel.submit_stream(
+            async for _ in channel.stream(
                 MockRequest(id="s1", data="test"), timeout=0.05
             ):
                 pass

@@ -35,4 +35,4 @@ class TestValidateResponse:
 
 @pytest.mark.parametrize("factory", [AsyncQueueChannelFactory])
 class TestAsyncSubmit(AsyncSubmitTests):
-    """AsyncBufferedChannel.submit() and submit_stream() over asyncio.Queue."""
+    """AsyncBufferedChannel.submit() and stream() over asyncio.Queue."""

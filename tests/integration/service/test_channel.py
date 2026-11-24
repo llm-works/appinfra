@@ -4,12 +4,17 @@
 """Tests for service channels with a peer on another thread."""
 
 import threading
+from collections import deque
+from typing import Any
 
 import pytest
 
 from appinfra.service import (
+    BufferedChannel,
     ChannelClosedError,
     ChannelResponseError,
+    ChannelTimeoutError,
+    Message,
     ProcessQueueChannelFactory,
     QueueChannelFactory,
 )
@@ -157,3 +162,103 @@ class TestProcessQueueChannel:
 
         assert parent.is_closed
         assert child.is_closed
+
+
+class RaceTransport:
+    """Transport scripted to open the window between a stream's buffer check and
+    its receive: the streamer's first receive waits until the submitter has
+    buffered a message or waits for the receive lock; the submitter's later
+    receives wait until the streamer has received. Waits are on a condition;
+    their deadline is the failure path."""
+
+    def __init__(self, *messages: Any) -> None:
+        self.inbound = deque(messages)
+        self.cond = threading.Condition()
+        self.events: set[str] = set()
+        self.calls: dict[str, int] = {}
+        self.is_closed = False
+
+    def signal(self, event: str) -> None:
+        with self.cond:
+            self.events.add(event)
+            self.cond.notify_all()
+
+    def wait(self, event: str) -> None:
+        with self.cond:
+            assert self.cond.wait_for(lambda: event in self.events, timeout=5)
+
+    def send(self, message: Any, timeout: float | None = None) -> None:
+        pass
+
+    def recv(self, timeout: float | None = None) -> Any:
+        name = threading.current_thread().name
+        n = self.calls[name] = self.calls.get(name, 0) + 1
+        if name == "streamer" and n == 1:
+            self.signal("streamer-receiving")
+            self.wait("submitter-progress")
+        if name == "submitter" and n > 1:
+            self.signal("submitter-progress")  # its first message is buffered
+            self.wait("streamer-received")
+        with self.cond:
+            if not self.inbound:
+                raise ChannelTimeoutError("empty")
+            message = self.inbound.popleft()
+        if name == "streamer":
+            self.signal("streamer-received")
+        return message
+
+    def close(self) -> None:
+        self.is_closed = True
+
+
+class SignallingLock:
+    """A lock that tells the transport when the submitter has to wait for it."""
+
+    def __init__(self, transport: RaceTransport) -> None:
+        self._lock = threading.Lock()
+        self._transport = transport
+
+    def acquire(self, blocking: bool = True, timeout: float = -1) -> bool:
+        if self._lock.acquire(blocking=False):
+            return True
+        if threading.current_thread().name == "submitter":
+            self._transport.signal("submitter-progress")
+        return self._lock.acquire(blocking, timeout)
+
+    def release(self) -> None:
+        self._lock.release()
+
+
+class TestStreamWithOtherCallers:
+    """BufferedChannel.stream() while another thread's submit() reads the channel."""
+
+    def test_a_chunk_another_thread_buffers_keeps_its_place(self) -> None:
+        """A chunk another thread's submit() receives and buffers while the
+        stream waits on the transport is yielded before the stream's next one;
+        the final chunk does not end the stream with an earlier one buffered."""
+        transport = RaceTransport(
+            Message(id="X", payload="X1", is_final=False),
+            Message(id="X", payload="X2"),
+            Message(id="Y", payload="Y"),
+        )
+        channel: BufferedChannel[Any, Any] = BufferedChannel(transport)
+        channel._recv_lock = SignallingLock(transport)  # type: ignore[assignment]
+        got: dict[str, Any] = {}
+
+        def streamer() -> None:
+            stream = channel.stream(Request(id="X", data="go"), 5.0)
+            got["chunks"] = [chunk.payload for chunk in stream]
+
+        def submitter() -> None:
+            got["reply"] = channel.submit(Request(id="Y", data="go"), 5.0).payload
+
+        threads = [threading.Thread(target=streamer, name="streamer")]
+        threads[0].start()
+        transport.wait("streamer-receiving")
+        threads.append(threading.Thread(target=submitter, name="submitter"))
+        threads[1].start()
+        for thread in threads:
+            thread.join(5)
+            assert not thread.is_alive()
+
+        assert got == {"chunks": ["X1", "X2"], "reply": "Y"}

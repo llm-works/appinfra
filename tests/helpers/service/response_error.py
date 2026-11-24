@@ -50,7 +50,7 @@ async def _send(channel: Any, message: Any) -> None:
 
 
 class AsyncSubmitTests:
-    """AsyncBufferedChannel.submit() and submit_stream()."""
+    """AsyncBufferedChannel.submit() and stream()."""
 
     @pytest.mark.asyncio
     async def test_error_response_is_attached(self, factory: Any) -> None:
@@ -73,11 +73,11 @@ class AsyncSubmitTests:
 
         async def consume() -> None:
             # A loop, not a comprehension: the chunks before the error must stay collected
-            async for chunk in pair.parent.submit_stream(Request("1"), timeout=2.0):
+            async for chunk in pair.parent.stream(Request("1"), timeout=2.0):
                 chunks.append(chunk)  # noqa: PERF401
 
         pending = asyncio.create_task(consume())
-        await asyncio.sleep(0.1)  # let submit_stream() send the request
+        await asyncio.sleep(0.1)  # let stream() send the request
 
         req = await _recv(pair.child)
         await _send(pair.child, Response(id=req.id, is_final=False))

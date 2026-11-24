@@ -19,7 +19,7 @@ from collections import deque
 from dataclasses import dataclass, field
 from typing import Any, Protocol, TypeVar, runtime_checkable
 
-from ..errors import ChannelResponseError
+from ..errors import ChannelResponseError, ChannelTimeoutError
 
 # Message types used by channel implementations
 TRequest = TypeVar("TRequest")
@@ -63,6 +63,36 @@ def send_slice(deadline: float | None) -> float:
     if deadline is None:
         return SEND_POLL_INTERVAL
     return max(0.0, min(SEND_POLL_INTERVAL, deadline - time.monotonic()))
+
+
+#: Longest a channel waits on the transport for a response before rechecking.
+RECV_POLL_INTERVAL = 0.05
+
+
+def recv_slice(request_id: str, deadline: float, timeout: float) -> float:
+    """Seconds for the next transport receive while waiting for *request_id*.
+
+    Raises:
+        ChannelTimeoutError: Once *deadline* has passed.
+    """
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise timed_out(request_id, timeout)
+    return min(RECV_POLL_INTERVAL, remaining)
+
+
+def timed_out(request_id: str, timeout: float) -> ChannelTimeoutError:
+    """The error for a wait for *request_id* that passed its deadline."""
+    return ChannelTimeoutError(f"Request {request_id} timed out after {timeout}s")
+
+
+def route(message: Any, request_id: str, redelivery: RedeliveryBuffer) -> Any:
+    """*message* if it answers *request_id*, or None if there is none; a message
+    for another id goes to *redelivery*, and None is returned."""
+    if message is None or getattr(message, "id", None) == request_id:
+        return message
+    redelivery.put(message)
+    return None
 
 
 class RedeliveryBuffer:
