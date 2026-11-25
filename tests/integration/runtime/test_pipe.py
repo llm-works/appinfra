@@ -4,6 +4,7 @@
 """pipe(): a channel between processes, its ends in one process or two."""
 
 import asyncio
+import contextlib
 import multiprocessing as mp
 import threading
 from unittest import mock
@@ -132,6 +133,18 @@ class TestInOneProcess:
             for _ in range(6):
                 sender.send(0, timeout=10.0)
 
+    def test_a_closed_receiver_holds_no_connection(self):
+        """The reader closes the wake pipe's write end too as it ends. The
+        sender sees the close once the reader closed its acks end, after
+        the wake pipe."""
+        send, recv = pipe(1)
+        sender, chan = send.open(), recv.open()
+        chan.close()
+        with pytest.raises(ChanClosedError):
+            for _ in range(4):  # room for at most 2 * capacity + 1 values
+                sender.send(0, timeout=10.0)
+        assert chan._wake is None  # Private: the wake pipe's write end
+
     def test_a_value_that_cannot_be_pickled_raises_in_the_send(self):
         send, recv = pipe(1)
         sender, chan = send.open(), recv.open()
@@ -194,6 +207,33 @@ class TestInOneProcess:
         blocked = runner.is_alive()
         # Draining lets the writer finish, which also frees a blocked close()
         assert [len(chan.recv(timeout=10.0)) for _ in range(2)] == [len(_BIG)] * 2
+        with pytest.raises(ChanClosedError):
+            chan.recv(timeout=10.0)
+        runner.join(10.0)
+        assert not blocked
+
+    def test_a_cancelled_aclose_leaves_no_wait_behind(self):
+        """Nobody receives, so the writer waits for room for good. Cancelling
+        aclose() must not leave a wait that asyncio.run() then joins."""
+        send, recv = pipe(1)
+        sender, chan = send.open(), recv.open()
+        for i in range(3):  # on the pipe, with the writer, in the buffer
+            sender.send(i, timeout=10.0)
+
+        async def cancel_aclose() -> None:
+            closing = asyncio.create_task(sender.aclose())
+            for _ in range(3):
+                await asyncio.sleep(0)  # aclose() is waiting by now
+            closing.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await closing
+
+        runner = threading.Thread(target=asyncio.run, args=(cancel_aclose(),))
+        runner.start()
+        runner.join(10.0)  # the deadline is the failure path
+        blocked = runner.is_alive()
+        # Draining lets the writer end, which also frees a blocked asyncio.run()
+        assert [chan.recv(timeout=10.0) for _ in range(3)] == [0, 1, 2]
         with pytest.raises(ChanClosedError):
             chan.recv(timeout=10.0)
         runner.join(10.0)

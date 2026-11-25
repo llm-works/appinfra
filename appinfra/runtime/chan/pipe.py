@@ -113,6 +113,7 @@ class Sender(Generic[T]):
         """Start the threads, on the *data* and *acks* connections."""
         self._chan = Chan[bytes](capacity)  # the values sent, for the writer
         self._room = Chan[None](capacity)  # values the receiving side has room for
+        self._done = Chan[None](0)  # closed by the writer as it ends
         for _ in range(capacity):
             self._room.send(None, timeout=0)  # fits; and open() may run on a loop
         self._writer = _start(self._write, data)
@@ -148,9 +149,12 @@ class Sender(Generic[T]):
 
     async def aclose(self) -> None:
         """Close the channel, awaiting until the values sent so far are on
-        the pipe; the loop runs meanwhile."""
+        the pipe; the loop runs meanwhile. The wait is a Chan's: cancelled, it
+        leaves nothing behind, and it ends with StoppedError as the task's
+        token stops."""
         self._chan.close()
-        await asyncio.to_thread(self._writer.join)
+        with contextlib.suppress(ClosedError):  # the writer ended
+            await self._done.arecv()
 
     def _shut(self) -> None:
         """Close the channel here and stop the writer at once, dropping the
@@ -172,6 +176,7 @@ class Sender(Generic[T]):
             self._shut()  # the receiving side is gone
         finally:
             data.close()
+            self._done.close()
 
     def _count(self, acks: Connection) -> None:
         """Counter thread: room for one more value for each one received; EOF
@@ -197,7 +202,10 @@ class Receiver(Chan[T]):
     def __init__(self, data: Connection, acks: Connection) -> None:
         """Start the reader, on the *data* and *acks* connections."""
         super().__init__(0)  # the reader acks a value once a receiver took it
-        wake, self._wake = mp.Pipe(duplex=False)
+        wake, wake_w = mp.Pipe(duplex=False)
+        # Written and closed under the channel's lock: a close() writing to
+        # it never races the reader closing it, and its fd being reused
+        self._wake: Connection | None = wake_w
         _start(self._read, data, acks, wake)
 
     def close(self) -> None:
@@ -205,8 +213,9 @@ class Receiver(Chan[T]):
         if self._closed:
             return
         super().close()
-        with contextlib.suppress(OSError):  # the reader is gone already
-            self._wake.send_bytes(b"")
+        with self._lock:
+            if self._wake is not None:  # else the reader is gone already
+                self._wake.send_bytes(b"")
 
     def _read(self, data: Connection, acks: Connection, wake: Connection) -> None:
         """Reader thread: each value from the pipe to a receiver, then an ack;
@@ -222,6 +231,10 @@ class Receiver(Chan[T]):
             pass
         finally:
             self.close()
+            with self._lock:
+                if self._wake is not None:
+                    self._wake.close()
+                    self._wake = None
             for conn in (data, acks, wake):
                 conn.close()
 
