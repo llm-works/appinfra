@@ -13,7 +13,7 @@ from typing import Any
 
 import uvicorn
 
-from ....service.stop import StopToken
+from ....runtime import StopToken
 from .ipc import IPCChannel
 
 

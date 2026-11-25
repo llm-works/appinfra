@@ -7,9 +7,9 @@ from __future__ import annotations
 
 import threading
 
+from ...runtime import StopToken
 from ..base import ScheduledService, Service
 from ..state import RestartPolicy, State
-from ..stop import StopToken
 from .drive import check_drivable, drive
 from .runner import Runner
 

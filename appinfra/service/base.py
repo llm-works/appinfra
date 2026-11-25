@@ -8,7 +8,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 
 from ..log import Logger
-from .stop import StopToken
+from ..runtime import StopToken
 
 
 class Service(ABC):
