@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import pickle
 import random
 import threading
 from collections import deque
@@ -18,6 +19,7 @@ from typing import Any, cast
 from ..errors import StoppedError
 from .chan import Chan, _check_off_loop, _check_timeout, _check_valid, _on_stop
 from .errors import ClosedError
+from .pipe import Sender
 from .waiter import LoopWaiter, Outcome, ThreadWaiter, Waiter
 
 
@@ -30,10 +32,17 @@ class Recv:
 
 @dataclass(frozen=True)
 class Send:
-    """A select case: send *value* on *chan*."""
+    """A select case: send *value* on *chan*. On a pipe's Sender, the case
+    is on its channel to the writer, the value pickled here."""
 
-    chan: Chan[Any]
+    chan: Chan[Any] | Sender[Any]
     value: Any
+
+    def __post_init__(self) -> None:
+        """Resolve a Sender's case to its channel."""
+        if isinstance(self.chan, Sender):
+            object.__setattr__(self, "value", pickle.dumps(self.value))
+            object.__setattr__(self, "chan", self.chan._chan)
 
 
 def select(*cases: Recv | Send, timeout: float | None = None) -> tuple[int, Any]:
@@ -78,9 +87,9 @@ class _Entry(Waiter):
         super().__init__(case.value if isinstance(case, Send) else None)
         self.select = select
         self.index = index
-        self.chan = case.chan
+        self.chan = _chan(case)
         recv = isinstance(case, Recv)
-        self.queue: deque[Waiter] = case.chan._receivers if recv else case.chan._senders
+        self.queue: deque[Waiter] = self.chan._receivers if recv else self.chan._senders
 
     def claim(self) -> bool:
         """Win the select for this case, unless it was won or ended already."""
@@ -120,7 +129,7 @@ class _Select:
         case. All the channels are locked meanwhile, in one order for every
         select, so no value slips past between the check and the queueing,
         and no entry of this select is queued while it checks."""
-        chans = {id(case.chan): case.chan for case in self.cases}
+        chans = {id(chan): chan for chan in map(_chan, self.cases)}
         with contextlib.ExitStack() as locks:
             for key in sorted(chans):
                 locks.enter_context(chans[key]._lock)
@@ -225,7 +234,12 @@ def _try(case: Recv | Send, index: int) -> tuple[bool, Any]:
     try:
         if isinstance(case, Recv):
             return case.chan._take()
-        return case.chan._put(case.value), None
+        return _chan(case)._put(case.value), None
     except ClosedError as e:
         e.index = index
         raise
+
+
+def _chan(case: Recv | Send) -> Chan[Any]:
+    """The channel of *case*: a Sender's was resolved in Send."""
+    return cast(Chan[Any], case.chan)
