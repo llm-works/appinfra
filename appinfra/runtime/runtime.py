@@ -14,6 +14,7 @@ from types import TracebackType
 from typing import Any
 
 from ..log import Logger
+from .errors import StoppedError
 from .loop import LoopHost
 from .stop import StopToken
 from .task import LoopTask, Task, ThreadTask, current_task
@@ -36,12 +37,17 @@ class Runtime:
     its id. stop() stops every task's token, cancels the tasks on the loop, and
     waits for the ones on threads; their outcomes stay to be waited for.
 
+    A task its stop ended has no result: wait() raises StoppedError for it,
+    and a detached one is not logged as failed. A function that sees the stop
+    and returns ends with its result.
+
     Example:
         with Runtime(lg) as rt:
             server = rt.spawn(serve, port)   # async def serve(port): ...
             rt.detach(rt.spawn(consume, q))  # def consume(q): ...
             rt.cancel(server)
-            rt.wait(server, timeout=5.0)
+            with contextlib.suppress(StoppedError):
+                rt.wait(server, timeout=5.0)
     """
 
     def __init__(self, lg: Logger) -> None:
@@ -148,6 +154,9 @@ class Runtime:
                 loop or the task's own thread.
             TimeoutError: If the task is still running after *timeout*; it is
                 not reaped.
+            StoppedError: If the task was stopped before it returned: its call
+                was skipped, cancelled, or ended by a wait the stop ended. A
+                function that sees the stop and returns gives its result.
             BaseException: Whatever the task's function raised.
         """
         with self._lock:
@@ -171,6 +180,8 @@ class Runtime:
             del self._tasks[task_id]
         if task.exception is not None:
             raise task.exception
+        if task.stopped:
+            raise StoppedError(f"task {task_id} was stopped")
         return task.result
 
     def cancel(self, task_id: int) -> None:
@@ -248,17 +259,22 @@ class Runtime:
             self._closing = True
             running = [t for t in self._tasks.values() if not t.ended]
         atexit.unregister(self._atexit_stop)
-        self._root.stop()
-        # A task spawned by another runtime's task derives from that task's
-        # token, outside this root's tree: its own token is stopped as well
-        for task in running:
-            task.token.stop()
-        self._host.stop(max(0.0, deadline - time.monotonic()))
-        for task in self._still_running(running, deadline):
-            self._lg.warning(
-                "task did not end in time",
-                extra={"task_id": task.task_id, "timeout": timeout},
-            )
+        try:
+            self._root.stop()
+            # A task spawned by another runtime's task derives from that
+            # task's token, outside this root's tree: its own token is stopped
+            # as well
+            for task in running:
+                task.token.stop()
+        finally:
+            # Ctrl-C during the stops reaches the caller once the shutdown is
+            # done: a second stop() returns at once
+            self._host.stop(max(0.0, deadline - time.monotonic()))
+            for task in self._still_running(running, deadline):
+                self._lg.warning(
+                    "task did not end in time",
+                    extra={"task_id": task.task_id, "timeout": timeout},
+                )
 
     def _still_running(self, tasks: list[Task], deadline: float) -> list[Task]:
         """The *tasks* still running once the loop has stopped. A thread task

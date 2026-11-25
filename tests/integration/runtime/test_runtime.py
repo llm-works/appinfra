@@ -11,7 +11,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from appinfra.runtime import Runtime, StopToken, stopping, task_id
+from appinfra.runtime import Runtime, StoppedError, StopToken, stopping, task_id
 from appinfra.runtime.loop import LoopHost
 from appinfra.runtime.task import LoopTask, ThreadTask
 from appinfra.testing import FakeClock
@@ -123,6 +123,26 @@ def _boom() -> None:
     raise ValueError("boom")
 
 
+def _raises_stopped_error() -> None:
+    raise StoppedError("not a stop")
+
+
+def _failing_callback() -> None:
+    raise ValueError("callback failed")
+
+
+def _interrupting_callback() -> None:
+    raise KeyboardInterrupt
+
+
+@pytest.fixture
+def reported(monkeypatch: pytest.MonkeyPatch) -> list[BaseException]:
+    """Errors reported through threading.excepthook, kept instead of printed."""
+    errors: list[BaseException] = []
+    monkeypatch.setattr(threading, "excepthook", lambda a: errors.append(a.exc_value))
+    return errors
+
+
 async def _async_boom() -> None:
     raise ValueError("boom")
 
@@ -184,7 +204,8 @@ class TestLoopTask:
         assert set(threading.enumerate()) <= threads_before
         for t in task_ids:
             rt.cancel(t)
-            rt.wait(t, timeout=5.0)
+            with pytest.raises(StoppedError):
+                rt.wait(t, timeout=5.0)
 
     def test_it_runs_on_the_loop_thread_with_its_args(self, rt):
         """Every async task runs on the one loop thread, not the caller's."""
@@ -205,7 +226,8 @@ class TestLoopTask:
 
         rt.cancel(t)
 
-        assert rt.wait(t, timeout=5.0) is None
+        with pytest.raises(StoppedError):  # it produced no result
+            rt.wait(t, timeout=5.0)
         assert fn.cancelled
         assert fn.token is not None and fn.token.is_set()
 
@@ -243,7 +265,8 @@ class TestLoopTask:
         for _ in range(20):
             t = rt.spawn(Parked().run)
             rt.cancel(t)
-            rt.wait(t, timeout=5.0)
+            with pytest.raises(StoppedError):
+                rt.wait(t, timeout=5.0)
 
     def test_a_task_cancelled_before_its_first_step_never_runs(self, rt):
         release = _hold_loop(rt)
@@ -253,7 +276,8 @@ class TestLoopTask:
             rt.cancel(t)
         finally:
             release.set()
-        rt.wait(t, timeout=5.0)
+        with pytest.raises(StoppedError):
+            rt.wait(t, timeout=5.0)
         assert not fn.entered.is_set()
 
     def test_wait_on_the_loop_is_refused(self, rt):
@@ -553,8 +577,180 @@ class TestTokens:
             return rt.spawn(async_marks if on_loop else marks)
 
         child = rt.wait(rt.spawn(parent), timeout=5.0)
-        rt.wait(child, timeout=5.0)
+        with pytest.raises(StoppedError):  # it produced no result
+            rt.wait(child, timeout=5.0)
         assert not entered.is_set()
+
+    @pytest.mark.parametrize("on_loop", [True, False], ids=["loop", "thread"])
+    def test_a_task_that_returns_after_its_stop_returns_its_value(self, rt, on_loop):
+        """The function saw the stop and chose what to return: that is its
+        result, not a stop."""
+        entered = threading.Event()
+
+        async def async_returns() -> str:
+            entered.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                return "done"
+            return "unreachable"
+
+        def returns() -> str:
+            entered.set()
+            stopping().wait()
+            return "done"
+
+        t = rt.spawn(async_returns if on_loop else returns)
+        assert entered.wait(5.0)
+        rt.cancel(t)
+        assert rt.wait(t, timeout=5.0) == "done"
+
+    @pytest.mark.parametrize("on_loop", [True, False], ids=["loop", "thread"])
+    def test_a_stopped_error_raised_without_a_stop_is_a_failure(self, rt, on_loop):
+        """StoppedError ends a task cleanly only when its token is stopped;
+        raised otherwise, it is the task's failure, kept and raised as is."""
+        error = StoppedError("not a stop")
+
+        async def async_raises() -> None:
+            raise error
+
+        def raises() -> None:
+            raise error
+
+        with pytest.raises(StoppedError) as caught:
+            rt.wait(rt.spawn(async_raises if on_loop else raises), timeout=5.0)
+        assert caught.value is error
+
+    def test_a_cancelled_error_raised_without_a_stop_is_a_failure(self, rt):
+        """On the loop, CancelledError is a stop only when the task's token is
+        stopped: one the function raises on its own is its failure."""
+
+        async def raises() -> None:
+            raise asyncio.CancelledError()
+
+        with pytest.raises(asyncio.CancelledError):
+            rt.wait(rt.spawn(raises), timeout=5.0)
+
+    def test_a_detached_task_failing_with_a_stopped_error_is_logged(self):
+        lg = MagicMock()
+        with Runtime(lg) as rt:
+            rt.detach(rt.spawn(_raises_stopped_error))
+            assert _wait_until(lambda: lg.warning.called)
+        args, _ = lg.warning.call_args
+        assert args[0] == "task failed"
+
+
+class TestFailingStopCallback:
+    """A callback on a task's token that raises is reported; it cuts nothing
+    short that stops the token."""
+
+    @pytest.mark.parametrize("on_loop", [True, False], ids=["loop", "thread"])
+    def test_a_task_that_returns_still_ends(self, rt, reported, on_loop):
+        async def async_returns() -> str:
+            stopping().on_stop(_failing_callback)
+            return "done"
+
+        def returns() -> str:
+            stopping().on_stop(_failing_callback)
+            return "done"
+
+        t = rt.spawn(async_returns if on_loop else returns)
+        assert rt.wait(t, timeout=5.0) == "done"
+        assert [str(e) for e in reported] == ["callback failed"]
+        # Its end ran in full: the token left the tree
+        assert not rt._root._children  # Private: the root's set of children
+
+    def test_cancel_still_cancels_a_parked_loop_task(self, rt, reported):
+        """The cancel is scheduled although the token's stop ran a failing
+        callback; the task, which never looks at its token, ends."""
+        entered = threading.Event()
+
+        async def parks() -> None:
+            stopping().on_stop(_failing_callback)
+            entered.set()
+            await asyncio.Event().wait()
+
+        t = rt.spawn(parks)
+        assert entered.wait(5.0)
+        rt.cancel(t)
+        with pytest.raises(StoppedError):
+            rt.wait(t, timeout=5.0)
+        assert len(reported) == 1
+
+    def test_stop_still_stops_the_loop_and_waits_for_threads(self, reported):
+        rt = Runtime(MagicMock())
+        rt.start()
+        parked = Parked()
+        loop_task = rt.spawn(parked.run)
+        assert parked.entered.wait(5.0)
+        entered = threading.Event()
+
+        def waits() -> None:
+            stopping().on_stop(_failing_callback)
+            entered.set()
+            stopping().wait()
+
+        thread_task = rt.spawn(waits)
+        assert entered.wait(5.0)
+        rt.stop()
+        assert parked.cancelled  # the loop's stop cancelled it
+        assert not rt.alive(loop_task)
+        assert not rt.alive(thread_task)  # waited for
+        assert len(reported) == 1
+
+    @pytest.mark.parametrize("on_loop", [True, False], ids=["loop", "thread"])
+    def test_an_interrupt_at_a_tasks_end_is_reported(self, rt, reported, on_loop):
+        """A task ends on its own thread or the loop's, never the main one: an
+        interrupt there is a callback's bug. The task ends in full, and the
+        loop, which asyncio would end with it, runs on."""
+
+        async def async_returns() -> str:
+            stopping().on_stop(_interrupting_callback)
+            return "done"
+
+        def returns() -> str:
+            stopping().on_stop(_interrupting_callback)
+            return "done"
+
+        t = rt.spawn(async_returns if on_loop else returns)
+        assert rt.wait(t, timeout=5.0) == "done"
+        assert not rt._root._children  # Private: its end ran in full
+        assert [type(e) for e in reported] == [KeyboardInterrupt]
+
+        async def later() -> str:
+            return "loop runs"
+
+        assert rt.wait(rt.spawn(later), timeout=5.0) == "loop runs"
+
+    def test_ctrl_c_in_cancel_or_stop_reaches_the_caller_after_the_work(self):
+        """On the main thread the interrupt is Ctrl-C: it reaches the caller,
+        once the cancel is scheduled and the shutdown done."""
+        rt = Runtime(MagicMock())
+        rt.start()
+        entered = threading.Event()
+
+        async def parks() -> None:
+            stopping().on_stop(_interrupting_callback)
+            entered.set()
+            await asyncio.Event().wait()
+
+        t = rt.spawn(parks)
+        assert entered.wait(5.0)
+        with pytest.raises(KeyboardInterrupt):
+            rt.cancel(t)
+        with pytest.raises(StoppedError):
+            rt.wait(t, timeout=5.0)  # cancelled all the same
+
+        parked = Parked()
+        loop_task = rt.spawn(parked.run)
+        assert parked.entered.wait(5.0)
+        entered.clear()
+        rt.spawn(parks)
+        assert entered.wait(5.0)
+        with pytest.raises(KeyboardInterrupt):
+            rt.stop()
+        assert parked.cancelled  # the loop's stop ran all the same
+        assert not rt.alive(loop_task)
 
 
 class TestSpawn:

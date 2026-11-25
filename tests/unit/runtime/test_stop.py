@@ -5,6 +5,9 @@
 
 import pickle
 import sys
+import threading
+
+import pytest
 
 from appinfra.runtime import StopToken
 
@@ -89,3 +92,186 @@ class TestStopToken:
         assert child2._parent._children == {child2}
         root.stop()
         assert not child2.is_set()
+
+
+class TestOnStop:
+    def test_stop_calls_it_once(self):
+        token = StopToken()
+        calls = []
+        token.on_stop(lambda: calls.append(1))
+        assert calls == []
+        token.stop()
+        token.stop()
+        assert calls == [1]
+
+    def test_on_a_stopped_token_it_is_called_at_once(self):
+        token = StopToken()
+        token.stop()
+        calls = []
+        remove = token.on_stop(lambda: calls.append(1))
+        assert calls == [1]
+        remove()  # harmless
+
+    def test_stopping_a_parent_calls_its_descendants_callbacks(self):
+        root = StopToken()
+        calls = []
+        root.child().child().on_stop(lambda: calls.append("grandchild"))
+        root.stop()
+        assert calls == ["grandchild"]
+
+    def test_an_unregistered_callback_is_not_called(self):
+        token = StopToken()
+        calls = []
+        remove = token.on_stop(lambda: calls.append(1))
+        remove()
+        remove()  # harmless
+        assert not token._callbacks[1]  # Private: nothing kept for a done waiter
+        token.stop()
+        assert calls == []
+
+    def test_a_function_registered_twice_is_called_twice(self):
+        """Each registration is its own: removing one leaves the other."""
+        token = StopToken()
+        calls = []
+
+        def fn():
+            calls.append(1)
+
+        token.on_stop(fn)
+        remove = token.on_stop(fn)
+        remove()
+        token.stop()
+        assert calls == [1]
+
+    def test_stop_drops_the_callbacks_it_called(self):
+        """A stopped token holds no references to what its waiters captured."""
+        token = StopToken()
+        token.on_stop(lambda: None)
+        token.stop()
+        assert token._callbacks is None  # Private: released
+
+    def test_a_callback_may_use_the_token(self):
+        """Callbacks run outside the lock: one that registers another callback
+        or derives a token does not deadlock."""
+        token = StopToken()
+        calls = []
+        token.on_stop(
+            lambda: token.on_stop(lambda: calls.append(token.child().is_set()))
+        )
+        token.stop()
+        assert calls == [True]
+
+    def test_a_failing_callback_is_reported_not_raised(self, monkeypatch):
+        """A stop is a broadcast: its caller cannot act on one listener's
+        failure, and must not be cut off by it. The error goes to
+        threading.excepthook; the rest of the tree is stopped and its
+        callbacks called."""
+        reported = []
+        monkeypatch.setattr(threading, "excepthook", reported.append)
+        root = StopToken()
+        child = root.child()
+        calls = []
+        error = ValueError("callback failed")
+
+        def fail():
+            raise error
+
+        root.on_stop(fail)
+        root.on_stop(lambda: calls.append("root"))
+        child.on_stop(lambda: calls.append("child"))
+        root.stop()
+        assert child.is_set()
+        assert sorted(calls) == ["child", "root"]
+        assert [args.exc_value for args in reported] == [error]
+
+    def test_an_interrupt_in_a_callback_propagates_once_the_tree_is_stopped(self):
+        """KeyboardInterrupt is not a callback's failure to report: it ends
+        the stop's callbacks, as an interrupt ends anything. The tree is
+        stopped before any callback runs, so no token is left running."""
+        root = StopToken()
+        child = root.child()
+
+        def interrupt():
+            raise KeyboardInterrupt
+
+        calls = []
+        root.on_stop(interrupt)
+        child.on_stop(lambda: calls.append("child"))  # runs after root's
+        with pytest.raises(KeyboardInterrupt):
+            root.stop()
+        assert root.is_set()
+        assert child.is_set()
+        assert calls == ["child"]  # it wakes its waiter despite the interrupt
+
+    @pytest.mark.integration  # starts a thread; kept with the other on_stop tests
+    def test_off_the_main_thread_an_interrupt_in_a_callback_is_reported(
+        self, monkeypatch
+    ):
+        """Ctrl-C reaches the main thread alone: elsewhere a KeyboardInterrupt
+        is a callback's bug, reported like any error, so it cannot end a
+        task's thread or the loop thread that stops a token."""
+        reported = []
+        monkeypatch.setattr(threading, "excepthook", reported.append)
+        token = StopToken()
+
+        def interrupt():
+            raise KeyboardInterrupt
+
+        token.on_stop(interrupt)
+        escaped = []
+
+        def stop():
+            try:
+                token.stop()
+            except BaseException as e:
+                escaped.append(e)
+
+        thread = threading.Thread(target=stop)
+        thread.start()
+        thread.join(5.0)
+        assert token.is_set()
+        assert escaped == []
+        assert [type(args.exc_value) for args in reported] == [KeyboardInterrupt]
+
+    def test_a_failing_hook_falls_back_and_the_stop_goes_on(self, monkeypatch):
+        """The hook reporting a callback's error raises too: as in threading,
+        the hook's error goes to sys.excepthook, and the rest of the tree is
+        stopped and its callbacks called."""
+        hook_error = RuntimeError("hook failed")
+        fallback = []
+
+        def failing_hook(args):
+            raise hook_error
+
+        monkeypatch.setattr(threading, "excepthook", failing_hook)
+        monkeypatch.setattr(sys, "excepthook", lambda t, v, tb: fallback.append(v))
+        root = StopToken()
+        child = root.child()
+        calls = []
+
+        def fail():
+            raise ValueError("callback failed")
+
+        root.on_stop(fail)
+        child.on_stop(lambda: calls.append("child"))
+        root.stop()
+        assert child.is_set()
+        assert calls == ["child"]
+        assert fallback == [hook_error]
+
+    def test_on_a_stopped_token_a_failing_callback_raises_to_its_registrant(self):
+        """Called at once, the callback runs for the caller of on_stop(),
+        who can handle its error."""
+        token = StopToken()
+        token.stop()
+
+        def fail():
+            raise ValueError("callback failed")
+
+        with pytest.raises(ValueError, match="callback failed"):
+            token.on_stop(fail)
+
+    def test_a_pickled_token_carries_no_callbacks(self):
+        token = StopToken()
+        token.on_stop(lambda: None)
+        assert pickle.loads(pickle.dumps(token))._callbacks is None
