@@ -287,8 +287,11 @@ class Receiver(Generic[T]):
 
     def __iter__(self) -> Iterator[T]:
         """Iterate with recv() until the channel is closed and drained. A
-        generator: a Chan's own iterator is the Chan, which sends."""
-        yield from self._chan
+        generator: a Chan's own iterator is the Chan, which sends. A loop, not
+        yield from, which would close the channel as the iterator is closed,
+        on a break."""
+        for value in self._chan:  # noqa: UP028 - yield from closes the channel
+            yield value
 
     async def __aiter__(self) -> AsyncIterator[T]:
         """Iterate with arecv() until the channel is closed and drained; an

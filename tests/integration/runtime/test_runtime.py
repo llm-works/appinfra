@@ -1212,6 +1212,13 @@ class TestSpawnHooks:
         for value in sent:
             sender.send(value, timeout=5.0)
         t = rt.spawn(_PicklesOnce, done=sender)
+        # Its end sent, or deferred, before anything is received: a receive
+        # first would make room, and the end go at once
+        assert _wait_until(lambda: not t._t.is_running())  # Private: end sent
+        if full:  # Private: the end waits on the loop
+            assert _wait_until(lambda: len(rt._sending) == 1)
+        else:
+            assert not rt._sending
         assert [chan.recv(timeout=5.0) for _ in sent] == sent
         end = chan.recv(timeout=5.0)  # the timeout is the failure path
         assert (end.task_id, end.error) == (t.id, None)

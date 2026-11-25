@@ -5,6 +5,7 @@
 
 import asyncio
 import contextlib
+import gc
 import multiprocessing as mp
 import threading
 from multiprocessing import connection
@@ -203,6 +204,28 @@ class TestInOneProcess:
         # Its iterators neither: a Chan's is the Chan itself
         assert not isinstance(iter(chan), Chan)
         assert not isinstance(aiter(chan), Chan)
+        sender.close()
+
+    def test_breaking_off_an_iteration_leaves_the_receiver_open(self):
+        """Ending the iterator ends nothing else: a generator delegating with
+        yield from would close the channel it delegates to."""
+        send, recv = pipe(4)
+        sender, chan = send.open(), recv.open()
+        for value in (1, 2, 3):
+            sender.send(value, timeout=10.0)
+        for _ in chan:
+            break
+        gc.collect()  # the iterator is gone, and closed
+        assert chan.recv(timeout=10.0) == 2
+
+        async def first() -> int:
+            async for value in chan:
+                return value
+            return -1
+
+        assert asyncio.run(first()) == 3  # asyncio.run() closes the iterator
+        sender.send(4, timeout=10.0)
+        assert chan.recv(timeout=10.0) == 4
         sender.close()
 
     def test_a_select_case_keeps_the_end_and_value_it_was_given(self):
