@@ -69,7 +69,7 @@ def test_a_forked_child_does_not_run_the_parents_callbacks():
     ctx = mp.get_context("fork")
     ran = ctx.Event()  # shared across the fork: set in either process, seen in both
     token = StopToken()
-    token.on_stop(ran.set)
+    token._on_stop(ran.set)
     process = ctx.Process(target=_stop, args=(token,), daemon=True)
     try:
         process.start()

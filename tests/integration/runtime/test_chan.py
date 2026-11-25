@@ -316,8 +316,8 @@ class TestAcrossTaskKinds:
             return [i async for i in ch]
 
         consumer = rt.spawn(consume)
-        rt.detach(rt.spawn(produce))
-        assert rt.wait(consumer, timeout=5.0) == [0, 1, 2]
+        rt.spawn(produce).detach()
+        assert consumer.wait(timeout=5.0) == [0, 1, 2]
 
     def test_a_loop_task_sends_to_a_thread_task(self, rt: Runtime):
         ch = Chan[int](1)
@@ -328,8 +328,8 @@ class TestAcrossTaskKinds:
             ch.close()
 
         consumer = rt.spawn(lambda: list(ch))
-        rt.detach(rt.spawn(produce))
-        assert rt.wait(consumer, timeout=5.0) == [0, 1, 2]
+        rt.spawn(produce).detach()
+        assert consumer.wait(timeout=5.0) == [0, 1, 2]
 
 
 class TestStop:
@@ -346,9 +346,9 @@ class TestStop:
 
         t = rt.spawn(consume)
         assert _wait_until(lambda: _waiting(ch, receivers=1))
-        rt.cancel(t)
+        t.cancel()
         with pytest.raises(StoppedError):  # it produced no result
-            rt.wait(t, timeout=5.0)
+            t.wait(timeout=5.0)
         assert stopped.is_set()
         assert _waiting(ch)
 
@@ -370,9 +370,9 @@ class TestStop:
                 await asyncio.sleep(0)
             return child
 
-        child = rt.wait(rt.spawn(parent), timeout=5.0)
+        child = rt.spawn(parent).wait(timeout=5.0)
         with pytest.raises(StoppedError):
-            rt.wait(child, timeout=5.0)
+            child.wait(timeout=5.0)
         assert stopped.is_set()
 
     def test_a_detached_task_ended_by_a_stop_is_not_logged_as_failed(self):
@@ -382,7 +382,7 @@ class TestStop:
         ch = Chan[int](0)
         t = rt.spawn(ch.recv)
         assert _wait_until(lambda: _waiting(ch, receivers=1))
-        rt.detach(t)
+        t.detach()
         rt.stop()
         assert _waiting(ch)
         lg.warning.assert_not_called()
@@ -400,7 +400,7 @@ class TestStop:
                 got.append("stopped")
             return got
 
-        assert rt.wait(rt.spawn(drain), timeout=5.0) == ["a", "stopped"]
+        assert rt.spawn(drain).wait(timeout=5.0) == ["a", "stopped"]
 
 
 class TestSelect:
@@ -457,9 +457,9 @@ class TestSelect:
         a = Chan[int](0)
         t = rt.spawn(lambda: select(Recv(a)))
         assert _wait_until(lambda: _waiting(a, receivers=1))
-        rt.cancel(t)
+        t.cancel()
         with pytest.raises(StoppedError):
-            rt.wait(t, timeout=5.0)
+            t.wait(timeout=5.0)
         assert _waiting(a)
 
     @pytest.mark.asyncio

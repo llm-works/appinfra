@@ -5,13 +5,15 @@
 
 import asyncio
 import contextlib
+import gc
 import multiprocessing as mp
 import threading
+from multiprocessing import connection
 from unittest import mock
 
 import pytest
 
-from appinfra.runtime import ChanClosedError, ChanRecv, ChanSend, select
+from appinfra.runtime import Chan, ChanClosedError, ChanRecv, ChanSend, select
 from appinfra.runtime.chan import PipeRecvEnd, PipeSendEnd, pipe
 
 METHODS = [
@@ -26,6 +28,22 @@ METHODS = [
 
 # Larger than any OS pipe buffer: the writer blocks until the reader reads
 _BIG = b"x" * 1_000_000
+
+
+class _UndecodableError(Exception):
+    """Pickles, but cannot be unpickled: its args do not fit its __init__."""
+
+    def __init__(self, a: int, b: int) -> None:
+        super().__init__(f"{a} {b}")
+
+
+@pytest.fixture
+def reported(monkeypatch: pytest.MonkeyPatch) -> list[BaseException]:
+    """Errors reported through threading.excepthook, kept instead of printed."""
+    errors: list[BaseException] = []
+    monkeypatch.setattr(threading, "excepthook", lambda a: errors.append(a.exc_value))
+    return errors
+
 
 # The test process runs threads; a child forked from it uses only the pipe
 pytestmark = pytest.mark.filterwarnings(
@@ -154,11 +172,69 @@ class TestInOneProcess:
         assert chan.recv(timeout=10.0) == 1
         sender.close()
 
+    def test_a_value_that_cannot_be_unpickled_is_reported_and_skipped(self, reported):
+        """It fails in the reader, where no caller can catch it: reported
+        through threading.excepthook. The channel goes on, and the value's
+        room comes back: with capacity 1, nothing else would get through."""
+        send, recv = pipe(1)
+        sender, chan = send.open(), recv.open()
+        sender.send(_UndecodableError(1, 2))
+        for i in range(3):
+            sender.send(i, timeout=10.0)
+            assert chan.recv(timeout=10.0) == i
+        assert len(reported) == 1
+        assert isinstance(reported[0], TypeError)
+        sender.close()
+
     def test_select_sends_and_receives_on_the_ends(self):
         send, recv = pipe(1)
         sender, chan = send.open(), recv.open()
         assert select(ChanSend(sender, 7), timeout=10.0) == (0, None)
         assert select(ChanRecv(chan), timeout=10.0) == (0, 7)
+        sender.close()
+
+    def test_the_receiving_end_only_receives(self):
+        """Its channel is the pipe's: a value sent into it here would pass
+        for one that came through the pipe."""
+        send, recv = pipe(1)
+        sender, chan = send.open(), recv.open()
+        assert not isinstance(chan, Chan)
+        assert not hasattr(chan, "send")
+        assert not hasattr(chan, "asend")
+        # Its iterators neither: a Chan's is the Chan itself
+        assert not isinstance(iter(chan), Chan)
+        assert not isinstance(aiter(chan), Chan)
+        sender.close()
+
+    def test_breaking_off_an_iteration_leaves_the_receiver_open(self):
+        """Ending the iterator ends nothing else: a generator delegating with
+        yield from would close the channel it delegates to."""
+        send, recv = pipe(4)
+        sender, chan = send.open(), recv.open()
+        for value in (1, 2, 3):
+            sender.send(value, timeout=10.0)
+        for _ in chan:
+            break
+        gc.collect()  # the iterator is gone, and closed
+        assert chan.recv(timeout=10.0) == 2
+
+        async def first() -> int:
+            async for value in chan:
+                return value
+            return -1
+
+        assert asyncio.run(first()) == 3  # asyncio.run() closes the iterator
+        sender.send(4, timeout=10.0)
+        assert chan.recv(timeout=10.0) == 4
+        sender.close()
+
+    def test_a_select_case_keeps_the_end_and_value_it_was_given(self):
+        """The channels and pickled bytes underneath stay out of reach."""
+        send, recv = pipe(1)
+        sender, chan = send.open(), recv.open()
+        case = ChanSend(sender, 7)
+        assert (case.chan, case.value) == (sender, 7)
+        assert ChanRecv(chan).chan is chan
         sender.close()
 
     def test_an_end_is_opened_or_released_once(self):
@@ -189,6 +265,83 @@ class TestInOneProcess:
             send.open()
         with pytest.raises(ChanClosedError):
             recv.open().recv(timeout=10.0)  # the timeout is the failure path
+
+    @pytest.mark.parametrize(
+        ("end", "fails", "closed"),
+        [
+            ("send", 1, ("data", "acks")),
+            ("send", 2, ("acks",)),  # data is the writer's, which ends and closes it
+            ("recv", 1, ("data", "acks", "wake", "wake_w")),
+        ],
+        ids=["sender-writer", "sender-counter", "receiver-reader"],
+    )
+    def test_an_end_whose_thread_cannot_start_closes_its_connections(
+        self, end: str, fails: int, closed: tuple[str, ...]
+    ):
+        """At once: not once the traceback holding them is dropped, which a
+        logged error can put off for good."""
+        ends = dict(zip(("send", "recv"), pipe(1)))
+        data, acks = ends[end]._conns[0]  # Private: the end's connections
+        conns = {"data": data, "acks": acks}
+        start, started, real_pipe = threading.Thread.start, [], mp.Pipe
+
+        def recording_pipe(duplex: bool) -> tuple:
+            conns["wake"], conns["wake_w"] = real_pipe(duplex)
+            return conns["wake"], conns["wake_w"]
+
+        def start_until_nth(thread: threading.Thread) -> None:
+            started.append(thread)
+            if len(started) == fails:
+                raise RuntimeError("can't start new thread")
+            start(thread)
+
+        with (
+            mock.patch.object(threading.Thread, "start", start_until_nth),
+            mock.patch.object(mp, "Pipe", recording_pipe),
+            pytest.raises(RuntimeError, match="start new thread"),
+        ):
+            ends[end].open()
+        assert [name for name in closed if not conns[name].closed] == []
+        ends["recv" if end == "send" else "send"].release()
+
+    def test_a_receiver_closed_again_wakes_its_reader_once(self):
+        """Nothing reads the wake pipe: a message per close() could fill it,
+        and a close() blocked writing holds the lock the reader's cleanup
+        takes. The reader is held once woken, so every close() lands first."""
+        send, recv = pipe(1)
+        real_wait, real_pipe = connection.wait, mp.Pipe
+        woken, release, wake_pipe = threading.Event(), threading.Event(), []
+
+        def recording_pipe(duplex: bool) -> tuple:
+            wake_pipe[:] = real_pipe(duplex)
+            return tuple(wake_pipe)
+
+        def held_wait(conns: list, *args: object) -> list:
+            ready = real_wait(conns, *args)
+            if wake_pipe[0] in ready:  # woken: held before its cleanup
+                woken.set()
+                release.wait(10.0)
+            return ready
+
+        try:
+            with (
+                mock.patch.object(mp, "Pipe", recording_pipe),
+                mock.patch.object(connection, "wait", held_wait),
+            ):
+                chan = recv.open()
+                for _ in range(3):
+                    chan.close()
+                assert woken.wait(5.0)
+            # The reader stays held in held_wait; poll() waits with the real
+            # connection.wait, which the patch would hold as well
+            wakes = 0
+            while wake_pipe[0].poll(0):
+                wake_pipe[0].recv_bytes()
+                wakes += 1
+        finally:
+            release.set()
+        assert wakes == 1
+        send.release()
 
     def test_close_on_a_loop_does_not_wait_for_the_writer(self):
         """Nobody receives, so the writer is stuck on a full OS pipe with the

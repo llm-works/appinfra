@@ -33,18 +33,22 @@ For API stability guarantees and deprecation policy, see
   is to stop; `run()` returns on it under any runner. `stopping.child()` derives a token stopped
   with it.
 - `appinfra.runtime`: `Runtime.spawn(fn, *args)` calls a function once as a task (an async one on
-  a shared event loop, any other on a thread of its own) and returns its task id, for `wait()`,
-  `cancel()`, `alive()` and `detach()`. Inside a task, `stopping()` and `task_id()` return its
-  token and id; `wait()` raises `StoppedError` for a task its stop ended without a result.
+  a shared event loop, any other on a thread of its own) and returns its `Task`: `wait()`, or
+  `await task` on any event loop, as often as wanted; `cancel()`, `alive()`, `detach()`. Inside a
+  task, `stopping()` and `task_id()` return its token and id; a task its stop ended without a
+  result raises `StoppedError`. A task runs in a copy of the spawner's `contextvars`.
+- `Runtime.spawn(..., name=, token=, done=)`: the task's name, on its thread and log records; its
+  token derives from the given one; its end (`TaskDone`: its name, result, or error as `wait()`
+  would raise it) is sent on a channel or pipe.
 - `StopToken` (`appinfra.runtime`, also exported by `appinfra.service`): a one-way stop signal
-  that derives tokens stopped with it (`child()`), and is checked (`is_set()`), waited on
-  (`wait()`) or calls back (`on_stop()`).
+  that derives tokens stopped with it (`child()`), and is checked (`is_set()`) or waited on
+  (`wait()`).
 - `appinfra.runtime.Chan`: a one-way FIFO channel like Go's, with a capacity (0: hand-over),
   `close()` and iteration, for thread tasks (`send`/`recv`) and loop tasks (`asend`/`arecv`)
   alike. A wait ends with `StoppedError` when the task's token stops.
 - `appinfra.runtime.select()` / `aselect()`: wait on several channel cases (`ChanRecv`,
   `ChanSend`) and complete exactly one, chosen at random among those ready, like Go's `select`.
-- `appinfra.runtime.chan.pipe()`: a channel between two processes, `send, recv = pipe(capacity)`;
+- `appinfra.runtime.pipe()`: a channel between two processes, `send, recv = pipe(capacity)`;
   each end is opened in the process that uses it, and the other process exiting closes it.
 
 ### Changed

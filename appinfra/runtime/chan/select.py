@@ -13,36 +13,50 @@ import random
 import threading
 from collections import deque
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, cast
 
 from ..errors import StoppedError
 from .chan import Chan, _check_off_loop, _check_timeout, _check_valid, _on_stop
 from .errors import ClosedError
-from .pipe import Sender
+from .pipe import Receiver, Sender
 from .waiter import LoopWaiter, Outcome, ThreadWaiter, Waiter
 
 
 @dataclass(frozen=True)
 class Recv:
-    """A select case: receive from *chan*."""
+    """A select case: receive from *chan*, a Chan or a pipe's Receiver."""
 
-    chan: Chan[Any]
+    chan: Chan[Any] | Receiver[Any]
+    # The channel the select waits on: a Receiver's own, out of reach
+    _target: Chan[Any] = field(init=False, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        """Resolve a Receiver's case to its channel."""
+        target = self.chan._chan if isinstance(self.chan, Receiver) else self.chan
+        object.__setattr__(self, "_target", target)
 
 
 @dataclass(frozen=True)
 class Send:
-    """A select case: send *value* on *chan*. On a pipe's Sender, the case
-    is on its channel to the writer, the value pickled here."""
+    """A select case: send *value* on *chan*, a Chan or a pipe's Sender. On
+    a Sender, the value is pickled here, so one that cannot be raises here."""
 
     chan: Chan[Any] | Sender[Any]
     value: Any
+    # The channel the select waits on, and what it sends there: a Sender's
+    # own channel to its writer, and the pickled value, out of reach
+    _target: Chan[Any] = field(init=False, repr=False, compare=False)
+    _payload: Any = field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
-        """Resolve a Sender's case to its channel."""
+        """Resolve a Sender's case to its channel and the pickled value."""
         if isinstance(self.chan, Sender):
-            object.__setattr__(self, "value", pickle.dumps(self.value))
-            object.__setattr__(self, "chan", self.chan._chan)
+            target, payload = self.chan._chan, pickle.dumps(self.value)
+        else:
+            target, payload = self.chan, self.value
+        object.__setattr__(self, "_target", target)
+        object.__setattr__(self, "_payload", payload)
 
 
 def select(*cases: Recv | Send, timeout: float | None = None) -> tuple[int, Any]:
@@ -84,7 +98,7 @@ class _Entry(Waiter):
 
     def __init__(self, select: _Select, index: int, case: Recv | Send) -> None:
         """The entry of case *index* of *select*."""
-        super().__init__(case.value if isinstance(case, Send) else None)
+        super().__init__(case._payload if isinstance(case, Send) else None)
         self.select = select
         self.index = index
         self.chan = _chan(case)
@@ -233,13 +247,13 @@ def _try(case: Recv | Send, index: int) -> tuple[bool, Any]:
     its channel's lock."""
     try:
         if isinstance(case, Recv):
-            return case.chan._take()
-        return _chan(case)._put(case.value), None
+            return case._target._take()
+        return case._target._put(case._payload), None
     except ClosedError as e:
         e.index = index
         raise
 
 
 def _chan(case: Recv | Send) -> Chan[Any]:
-    """The channel of *case*: a Sender's was resolved in Send."""
-    return cast(Chan[Any], case.chan)
+    """The channel *case* waits on, resolved as the case was made."""
+    return case._target
