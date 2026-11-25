@@ -11,7 +11,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from appinfra.runtime import Runtime, StopToken, stopping, task_id
+from appinfra.runtime import Runtime, StoppedError, StopToken, stopping, task_id
 from appinfra.runtime.loop import LoopHost
 from appinfra.runtime.task import LoopTask, ThreadTask
 from appinfra.testing import FakeClock
@@ -123,6 +123,10 @@ def _boom() -> None:
     raise ValueError("boom")
 
 
+def _raises_stopped_error() -> None:
+    raise StoppedError("not a stop")
+
+
 async def _async_boom() -> None:
     raise ValueError("boom")
 
@@ -184,7 +188,8 @@ class TestLoopTask:
         assert set(threading.enumerate()) <= threads_before
         for t in task_ids:
             rt.cancel(t)
-            rt.wait(t, timeout=5.0)
+            with pytest.raises(StoppedError):
+                rt.wait(t, timeout=5.0)
 
     def test_it_runs_on_the_loop_thread_with_its_args(self, rt):
         """Every async task runs on the one loop thread, not the caller's."""
@@ -205,7 +210,8 @@ class TestLoopTask:
 
         rt.cancel(t)
 
-        assert rt.wait(t, timeout=5.0) is None
+        with pytest.raises(StoppedError):  # it produced no result
+            rt.wait(t, timeout=5.0)
         assert fn.cancelled
         assert fn.token is not None and fn.token.is_set()
 
@@ -243,7 +249,8 @@ class TestLoopTask:
         for _ in range(20):
             t = rt.spawn(Parked().run)
             rt.cancel(t)
-            rt.wait(t, timeout=5.0)
+            with pytest.raises(StoppedError):
+                rt.wait(t, timeout=5.0)
 
     def test_a_task_cancelled_before_its_first_step_never_runs(self, rt):
         release = _hold_loop(rt)
@@ -253,7 +260,8 @@ class TestLoopTask:
             rt.cancel(t)
         finally:
             release.set()
-        rt.wait(t, timeout=5.0)
+        with pytest.raises(StoppedError):
+            rt.wait(t, timeout=5.0)
         assert not fn.entered.is_set()
 
     def test_wait_on_the_loop_is_refused(self, rt):
@@ -553,8 +561,67 @@ class TestTokens:
             return rt.spawn(async_marks if on_loop else marks)
 
         child = rt.wait(rt.spawn(parent), timeout=5.0)
-        rt.wait(child, timeout=5.0)
+        with pytest.raises(StoppedError):  # it produced no result
+            rt.wait(child, timeout=5.0)
         assert not entered.is_set()
+
+    @pytest.mark.parametrize("on_loop", [True, False], ids=["loop", "thread"])
+    def test_a_task_that_returns_after_its_stop_returns_its_value(self, rt, on_loop):
+        """The function saw the stop and chose what to return: that is its
+        result, not a stop."""
+        entered = threading.Event()
+
+        async def async_returns() -> str:
+            entered.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                return "done"
+            return "unreachable"
+
+        def returns() -> str:
+            entered.set()
+            stopping().wait()
+            return "done"
+
+        t = rt.spawn(async_returns if on_loop else returns)
+        assert entered.wait(5.0)
+        rt.cancel(t)
+        assert rt.wait(t, timeout=5.0) == "done"
+
+    @pytest.mark.parametrize("on_loop", [True, False], ids=["loop", "thread"])
+    def test_a_stopped_error_raised_without_a_stop_is_a_failure(self, rt, on_loop):
+        """StoppedError ends a task cleanly only when its token is stopped;
+        raised otherwise, it is the task's failure, kept and raised as is."""
+        error = StoppedError("not a stop")
+
+        async def async_raises() -> None:
+            raise error
+
+        def raises() -> None:
+            raise error
+
+        with pytest.raises(StoppedError) as caught:
+            rt.wait(rt.spawn(async_raises if on_loop else raises), timeout=5.0)
+        assert caught.value is error
+
+    def test_a_cancelled_error_raised_without_a_stop_is_a_failure(self, rt):
+        """On the loop, CancelledError is a stop only when the task's token is
+        stopped: one the function raises on its own is its failure."""
+
+        async def raises() -> None:
+            raise asyncio.CancelledError()
+
+        with pytest.raises(asyncio.CancelledError):
+            rt.wait(rt.spawn(raises), timeout=5.0)
+
+    def test_a_detached_task_failing_with_a_stopped_error_is_logged(self):
+        lg = MagicMock()
+        with Runtime(lg) as rt:
+            rt.detach(rt.spawn(_raises_stopped_error))
+            assert _wait_until(lambda: lg.warning.called)
+        args, _ = lg.warning.call_args
+        assert args[0] == "task failed"
 
 
 class TestSpawn:

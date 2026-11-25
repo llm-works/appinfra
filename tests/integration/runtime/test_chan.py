@@ -284,7 +284,8 @@ class TestStop:
         t = rt.spawn(consume)
         assert _wait_until(lambda: _waiting(ch, receivers=1))
         rt.cancel(t)
-        assert rt.wait(t, timeout=5.0) is None  # StoppedError is a clean end
+        with pytest.raises(StoppedError):  # it produced no result
+            rt.wait(t, timeout=5.0)
         assert stopped.is_set()
         assert _waiting(ch)
 
@@ -307,7 +308,8 @@ class TestStop:
             return child
 
         child = rt.wait(rt.spawn(parent), timeout=5.0)
-        assert rt.wait(child, timeout=5.0) is None
+        with pytest.raises(StoppedError):
+            rt.wait(child, timeout=5.0)
         assert stopped.is_set()
 
     def test_a_detached_task_ended_by_a_stop_is_not_logged_as_failed(self):

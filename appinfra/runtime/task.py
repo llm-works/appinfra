@@ -71,7 +71,15 @@ class Task(ABC):
 
     A failure ends this task only; it is kept in ``exception``. A task is not
     restarted.
+
+    A task ended by its stop is ``stopped``, without a result: its call was
+    skipped, or ended with the stop's own signal (*stop_signals*) while its
+    token was stopped. The same signal raised while the token runs is a
+    failure. A function that sees the stop and returns ends with its result.
     """
+
+    # What a stop ends a call with, on this kind of task
+    stop_signals: tuple[type[BaseException], ...] = (StoppedError,)
 
     def __init__(
         self,
@@ -97,6 +105,8 @@ class Task(ABC):
         self._on_end = on_end
         self._result: Any = None
         self._exception: BaseException | None = None
+        # Set by the task before it ends
+        self.stopped = False
         # Set by the runtime, under its lock
         self.ended = False  # the call has ended
         self.detached = False  # nobody waits: reaped as soon as it ends
@@ -130,6 +140,14 @@ class Task(ABC):
     def exception(self) -> BaseException | None:
         """Exception from the call, if any."""
         return self._exception
+
+    def _raised(self, e: BaseException) -> None:
+        """Record how the call ended on *e*: a stop if it is the stop's own
+        signal and the token is stopped, a failure otherwise."""
+        if isinstance(e, self.stop_signals) and self.token.is_set():
+            self.stopped = True
+        else:
+            self._exception = e
 
     def _end(self) -> None:
         """Once the call has ended: stop the token, so work derived from it is
@@ -168,17 +186,16 @@ class ThreadTask(Task):
 
     def _run(self) -> None:
         """Thread target: call the function with the task current, unless its
-        token was stopped before the thread got here, as on the loop. A
-        channel wait ended by the stop ends it cleanly."""
+        token was stopped before the thread got here, as on the loop."""
         try:
             _current.set(self)
-            try:
-                if not self.token.is_set():
+            if self.token.is_set():
+                self.stopped = True
+            else:
+                try:
                     self._result = self._fn(*self._args)
-            except StoppedError:
-                pass
-            except BaseException as e:
-                self._exception = e
+                except BaseException as e:
+                    self._raised(e)
             self._end()
         finally:
             # Last, so the outcome is settled before is_alive() reports the end
@@ -211,7 +228,9 @@ class ThreadTask(Task):
 class LoopTask(Task):
     """Runs an async function as a task on a LoopHost's loop, so one waiting on
     an await holds no thread. cancel() raises CancelledError at the await it is
-    parked on; a cancel ends it cleanly."""
+    parked on; a cancel is a stop."""
+
+    stop_signals = (asyncio.CancelledError, StoppedError)
 
     def __init__(
         self,
@@ -252,23 +271,25 @@ class LoopTask(Task):
         self._task = task
 
     async def _call(self) -> None:
-        """The call, unless a cancel came first. A cancel, from cancel() or the
-        host shutting down, ends it cleanly, as does a channel wait ended by
-        the stop; any other exception is kept."""
+        """The call, unless a stop came first. A cancel, from cancel() or the
+        host shutting down, comes with the token stopped: it is a stop."""
         if self.token.is_set():
+            self.stopped = True
             return
         try:
             self._result = await self._fn(*self._args)
-        except (asyncio.CancelledError, StoppedError):
-            pass
         except BaseException as e:
-            self._exception = e
+            self._raised(e)
 
     def _finish(self, task: asyncio.Task[None]) -> None:
         """On the loop, once the task has ended: end it and wake the wait()
         calls waiting for it."""
         self._task = None
         waiters, self._waiters = self._waiters, None
+        # Cancelled before its first step: _call() never ran to record it.
+        # _call() catches everything, so a task that ran is never cancelled
+        if task.cancelled():
+            self.stopped = True
         self._end()
         # Last, so the outcome is settled before is_alive() reports the end
         self._done = True
