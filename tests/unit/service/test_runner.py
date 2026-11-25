@@ -4,7 +4,6 @@
 """Tests for Runner classes."""
 
 import itertools
-import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
@@ -13,32 +12,15 @@ import pytest
 
 from appinfra.log import Logger
 from appinfra.service import (
-    AsyncService,
     InvalidTransitionError,
-    LoopHost,
     ProcessRunner,
     RestartPolicy,
     Service,
     SetupError,
     State,
     TaskRunner,
-    ThreadRunner,
 )
 from tests.helpers.service.runner import SimpleService
-
-
-class IdleAsync(AsyncService):
-    """An async service these tests never run."""
-
-    def __init__(self) -> None:
-        self._lg = MagicMock()
-
-    @property
-    def name(self) -> str:
-        return "idle-async"
-
-    async def run(self) -> None:
-        raise AssertionError("never run by these tests")
 
 
 @contextmanager
@@ -104,13 +86,13 @@ class SetupFailService(Service):
         pass
 
 
-class TestThreadRunner:
-    """Test ThreadRunner class."""
+class TestTaskRunner:
+    """Test TaskRunner class."""
 
     def test_setup_error_transitions_to_failed(self):
         """SetupError transitions to FAILED."""
         svc = SetupFailService()
-        runner = ThreadRunner(svc)
+        runner = TaskRunner(MagicMock(), svc)
 
         with pytest.raises(SetupError, match="config invalid"):
             runner.start()
@@ -120,7 +102,7 @@ class TestThreadRunner:
     def test_invalid_transition_raises(self):
         """Invalid state transition raises error."""
         svc = SimpleService()
-        runner = ThreadRunner(svc)
+        runner = TaskRunner(MagicMock(), svc)
 
         with pytest.raises(InvalidTransitionError):
             runner._transition(State.RUNNING)
@@ -128,7 +110,7 @@ class TestThreadRunner:
     def test_check_not_running(self):
         """check() returns False when not running."""
         svc = SimpleService()
-        runner = ThreadRunner(svc)
+        runner = TaskRunner(MagicMock(), svc)
 
         # Not started yet
         result = runner.check()
@@ -138,7 +120,7 @@ class TestThreadRunner:
         """The end state is chosen and set in one step: a stop() that moves
         the runner to STOPPING after the first lock release cannot strand it
         there once the work has ended."""
-        runner = ThreadRunner(SimpleService())
+        runner = TaskRunner(MagicMock(), SimpleService())
         runner._state = State.RUNNING  # Private: a running runner
         real = runner._lock
 
@@ -163,44 +145,12 @@ class TestThreadRunner:
 
         assert runner.state != State.STOPPING
 
-    def test_an_ended_thread_leaves_a_newer_run_alive(self):
-        """A thread that ends after start() has launched a newer one does not
-        mark the newer run as exited."""
-        runner = ThreadRunner(SetupFailService())  # its run() returns at once
-        runner._thread = MagicMock()  # Private: the newer run's thread
-
-        runner._run()  # the old thread's last steps, on this thread
-
-        assert runner.is_alive()
-
-    def test_a_run_launched_as_the_old_thread_ends_stays_alive(self):
-        """A start() on another thread that launches a newer run while the old
-        thread takes its last step leaves the newer run alive."""
-        runner = ThreadRunner(SetupFailService())  # its run() returns at once
-        old = threading.current_thread()
-        runner._thread = old  # Private: this thread plays the old run
-        newer = MagicMock()
-        newer.is_alive.return_value = True
-
-        def launch_newer() -> threading.Thread:
-            runner._launch()
-            return old
-
-        with patch("appinfra.service.runtime.thread.threading") as mod:
-            mod.Thread.return_value = newer
-            mod.current_thread.side_effect = launch_newer
-            runner._run()  # the old thread's last steps, on this thread
-
-        assert runner.is_alive()
-
-    def test_stop_joins_for_what_is_left_after_waiting_for_start(self):
+    def test_stop_waits_for_what_is_left_after_waiting_for_start(self):
         """The time stop() spends waiting for a start() in progress comes off
-        the time it then joins the service thread for."""
-        runner = ThreadRunner(SimpleService())
-        runner._state = State.RUNNING  # Private: a started runner, no thread
-        thread = MagicMock()
-        thread.is_alive.return_value = False
-        runner._thread = thread
+        the time it then waits for the service's task."""
+        runner = TaskRunner(MagicMock(), SimpleService())
+        runner._state = State.RUNNING  # Private: a started runner
+        task = runner._task = MagicMock()  # Private: its task
         clock = "appinfra.service.runtime.runner.time.monotonic"
 
         # The wait for start() takes 4 of the 5 seconds
@@ -210,7 +160,7 @@ class TestThreadRunner:
         ):
             runner.stop(timeout=5.0)
 
-        thread.join.assert_called_once_with(timeout=1.0)
+        task.wait.assert_called_once_with(1.0)
 
 
 class TestProcessRunner:
@@ -522,51 +472,18 @@ class TestProcessRunner:
         assert runner.exit_code == 0
 
 
-class TestTaskRunner:
-    """TaskRunner steps that need no running loop."""
-
-    def test_a_run_started_as_the_old_task_ends_stays_alive(self):
-        """A start() on another thread that launches a newer run while the old
-        task takes its last step leaves the newer run alive."""
-        host = LoopHost()
-        old = MagicMock()
-
-        class StartsOnRead(TaskRunner):
-            """Reading the old task, as it ends, is when the newer run's
-            start() lands."""
-
-            @property  # type: ignore[override]
-            def _task(self) -> object:
-                task = self.__dict__["task"]
-                if task is old:
-                    self._launch()
-                return task
-
-            @_task.setter
-            def _task(self, task: object) -> None:
-                self.__dict__["task"] = task
-
-        runner = StartsOnRead(host, IdleAsync())
-        with patch.object(host, "_schedule"):
-            runner._launch()  # the old run
-            runner._task = old
-            runner._finish(old)  # its last step, on the loop
-
-        assert runner.is_alive()
-
-
 class TestRunnerRestart:
     """Test restart functionality."""
 
     def test_can_restart(self):
         """can_restart holds until max_retries is reached, and never when disabled."""
-        runner = ThreadRunner(SimpleService(), RestartPolicy(max_retries=2))
+        runner = TaskRunner(MagicMock(), SimpleService(), RestartPolicy(max_retries=2))
         assert runner.can_restart
         runner._retries = 2
         assert not runner.can_restart
 
         disabled = RestartPolicy(restart_on_failure=False)
-        assert not ThreadRunner(SimpleService(), disabled).can_restart
+        assert not TaskRunner(MagicMock(), SimpleService(), disabled).can_restart
 
     def test_restart_pending_through_the_last_attempt(self):
         """The last allowed restart counts as pending while it runs.
@@ -574,7 +491,9 @@ class TestRunnerRestart:
         _maybe_restart() counts the attempt before making it, so can_restart is
         already False during it; a waiter must not give up on that attempt.
         """
-        runner = ThreadRunner(SimpleService(), RestartPolicy(max_retries=1, backoff=0))
+        runner = TaskRunner(
+            MagicMock(), SimpleService(), RestartPolicy(max_retries=1, backoff=0)
+        )
         during: list[bool] = []
         with (
             patch.object(

@@ -28,9 +28,8 @@ from .runner import Runner
 class ProcessRunner(Runner):
     """Runs a service in a separate process using multiprocessing.
 
-    Similar to ThreadRunner but uses a subprocess for isolation.
-    The service must be picklable for this to work. An AsyncService runs on a
-    LoopHost instead.
+    The service must be picklable for this to work. An AsyncService runs under
+    a TaskRunner instead, on its runtime's event loop.
 
     Note:
         In the subprocess, ``self.stopping`` is set when the parent stops the

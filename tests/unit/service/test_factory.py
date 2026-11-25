@@ -6,6 +6,7 @@
 import threading
 import time
 from typing import Any
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -26,7 +27,7 @@ from appinfra.service import (
     Service,
     ServiceFactory,
     ServiceRegistration,
-    ThreadRunner,
+    TaskRunner,
 )
 from tests.helpers.service.factory import SimpleService
 
@@ -155,46 +156,48 @@ class TestProcessQueueChannelFactory:
 class TestRunnerFactory:
     """Tests for RunnerFactory."""
 
-    def test_create_thread_runner(self, lg: Logger) -> None:
-        """Creates ThreadRunner for service."""
+    def test_create_task_runner(self, lg: Logger) -> None:
+        """Creates TaskRunner for service."""
         factory = RunnerFactory(lg)
         service = SimpleService(lg)
 
-        runner = factory.create_thread_runner(service)
+        runner = factory.create_task_runner(MagicMock(), service)
 
-        assert isinstance(runner, ThreadRunner)
+        assert isinstance(runner, TaskRunner)
         assert runner.service is service
 
-    def test_create_thread_runner_with_policy(self, lg: Logger) -> None:
+    def test_create_task_runner_with_policy(self, lg: Logger) -> None:
         """Applies restart policy to runner."""
         policy = RestartPolicy(max_retries=5)
         factory = RunnerFactory(lg, default_policy=policy)
         service = SimpleService(lg)
 
-        runner = factory.create_thread_runner(service)
+        runner = factory.create_task_runner(MagicMock(), service)
 
         assert runner.policy is policy
 
-    def test_create_thread_runner_override_policy(self, lg: Logger) -> None:
+    def test_create_task_runner_override_policy(self, lg: Logger) -> None:
         """Per-runner policy overrides default."""
         default_policy = RestartPolicy(max_retries=3)
         override_policy = RestartPolicy(max_retries=10)
         factory = RunnerFactory(lg, default_policy=default_policy)
         service = SimpleService(lg)
 
-        runner = factory.create_thread_runner(service, policy=override_policy)
+        runner = factory.create_task_runner(
+            MagicMock(), service, policy=override_policy
+        )
 
         assert runner.policy is override_policy
 
-    def test_create_thread_runner_with_channel(self, lg: Logger) -> None:
+    def test_create_task_runner_with_channel(self, lg: Logger) -> None:
         """Creates runner with channel pair."""
         factory = RunnerFactory(lg)
         service = SimpleService(lg)
 
-        result = factory.create_thread_runner_with_channel(service)
+        result = factory.create_task_runner_with_channel(MagicMock(), service)
 
         assert isinstance(result, RunnerWithChannel)
-        assert isinstance(result.runner, ThreadRunner)
+        assert isinstance(result.runner, TaskRunner)
         assert isinstance(result.channel, Channel)
         assert isinstance(result.service_channel, Channel)
 
@@ -448,7 +451,7 @@ class TestPluggableTransport:
         runner_factory = RunnerFactory(lg, channel_factory=stub_factory)
         service = SimpleService(lg)
 
-        result = runner_factory.create_thread_runner_with_channel(service)
+        result = runner_factory.create_task_runner_with_channel(MagicMock(), service)
 
         assert stub_factory.calls == 1
         assert isinstance(result.channel, Channel)
@@ -466,14 +469,14 @@ class TestPluggableTransport:
         assert isinstance(result.channel, Channel)
         assert isinstance(result.service_channel, Channel)
 
-    def test_thread_runner_with_injected_pair(self, lg: Logger) -> None:
+    def test_task_runner_with_injected_pair(self, lg: Logger) -> None:
         """Per-call channel_pair overrides factory."""
         pair = _stub_pair()
         runner_factory = RunnerFactory(lg)
         service = SimpleService(lg)
 
-        result = runner_factory.create_thread_runner_with_channel(
-            service, channel_pair=pair
+        result = runner_factory.create_task_runner_with_channel(
+            MagicMock(), service, channel_pair=pair
         )
 
         assert result.channel is pair.parent
@@ -499,8 +502,8 @@ class TestPluggableTransport:
         runner_factory = RunnerFactory(lg, channel_factory=stub_factory)
         service = SimpleService(lg)
 
-        result = runner_factory.create_thread_runner_with_channel(
-            service, channel_pair=pair
+        result = runner_factory.create_task_runner_with_channel(
+            MagicMock(), service, channel_pair=pair
         )
 
         assert stub_factory.calls == 0
@@ -512,7 +515,7 @@ class TestPluggableTransport:
         runner_factory = RunnerFactory(lg)
         service = SimpleService(lg)
 
-        result = runner_factory.create_thread_runner_with_channel(service)
+        result = runner_factory.create_task_runner_with_channel(MagicMock(), service)
 
         assert isinstance(result.channel, Channel)
         assert isinstance(result.service_channel, Channel)

@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright 2026 The appinfra Authors
 
-"""Runs a service's work on the thread or process a ThreadRunner or ProcessRunner
-gives it."""
+"""Runs a synchronous service's work on the thread a TaskRunner or the process a
+ProcessRunner gives it."""
 
 from __future__ import annotations
 
@@ -39,15 +39,16 @@ def check_service(service: object) -> Service:
 
 
 def check_drivable(service: Service) -> None:
-    """Refuse an AsyncService, which only a LoopHost runs.
+    """Refuse an AsyncService, which only a TaskRunner runs, on its runtime's
+    event loop.
 
     Raises:
         TypeError: If *service* is an AsyncService.
     """
     if isinstance(service, AsyncService):
         raise TypeError(
-            f"async service '{service.name}' runs on a LoopHost: use "
-            "host.runner(service), not ThreadRunner or ProcessRunner"
+            f"async service '{service.name}' runs on an event loop: use a "
+            "TaskRunner, not a ProcessRunner"
         )
 
 

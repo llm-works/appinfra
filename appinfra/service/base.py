@@ -20,8 +20,8 @@ class Service(ABC):
     A plain Service implements run(), which holds its thread, or process, until
     the service is stopped. Two subclasses work differently:
     - ScheduledService: the runner calls tick() every interval seconds
-    - AsyncService: run() is a coroutine; a LoopHost runs many of them as tasks
-      on one event loop, and one waiting on an await holds no thread
+    - AsyncService: run() is a coroutine; many of them run as tasks on one
+      event loop, and one waiting on an await holds no thread
 
     Lifecycle methods, common to all services:
     - setup(): Initialize resources, validate config
@@ -66,11 +66,11 @@ class Service(ABC):
     starts is told to stop with it, before teardown(); stopping does not wait
     for that work.
 
-    A synchronous run(), under ThreadRunner or ProcessRunner (in the
-    subprocess), checks it (``is_set()``) or blocks on it (``wait()``) and
-    returns once it is set. An AsyncService's run() never calls ``wait()``,
-    which would block the loop it shares: under TaskRunner, stopping cancels
-    its task, and it uses the token to derive tokens for what it starts."""
+    A synchronous run(), on its thread or in a ProcessRunner's subprocess,
+    checks it (``is_set()``) or blocks on it (``wait()``) and returns once it
+    is set. An AsyncService's run() never calls ``wait()``, which would block
+    the loop it shares: stopping it cancels its task, and it uses the token to
+    derive tokens for what it starts."""
 
     @property
     def lg(self) -> Logger:
@@ -97,7 +97,7 @@ class Service(ABC):
         """Do the service's work, blocking until it is stopped.
 
         The runner calls it once, and it returns once ``self.stopping`` is set.
-        Under ThreadRunner, stop() also calls teardown() while run() still runs,
+        Under TaskRunner, stop() also calls teardown() while run() still runs,
         so a run() blocked elsewhere can be released there; under ProcessRunner,
         teardown() runs in the subprocess after run() returns.
         """
@@ -121,9 +121,9 @@ class Service(ABC):
         releases resources. For a scheduled service, the runner calls it once
         the loop has ended (stopped or failed), on the thread or in the process
         that ran the loop, so it never overlaps tick(). For an async service, it
-        runs on the LoopHost's thread after run() has ended, so it must not
+        runs on the event loop's thread after run() has ended, so it must not
         block. For a service with its own run(), ProcessRunner calls it in the
-        subprocess after run() has returned; ThreadRunner's stop() calls it once
+        subprocess after run() has returned; TaskRunner's stop() calls it once
         the token is set, while run() may still be running, so there it can also
         release a run() blocked on something other than the token. Default does
         nothing.
@@ -144,11 +144,11 @@ class Service(ABC):
 class AsyncService(Service):
     """Service whose run() is a coroutine.
 
-    A LoopHost runs it as a task on its event loop, alongside many others
-    (``host.runner(service)``): while run() waits on an await, the service
-    holds no thread. It stays on that loop for its lifetime. Stopping it
-    cancels the task, raising CancelledError at the await it is parked on.
-    ThreadRunner and ProcessRunner refuse an AsyncService.
+    A TaskRunner runs it as a task on its runtime's event loop, alongside many
+    others: while run() waits on an await, the service holds no thread. It
+    stays on that loop for its lifetime. Stopping it cancels the task, raising
+    CancelledError at the await it is parked on. ProcessRunner refuses an
+    AsyncService.
 
     run() must not call anything that blocks without awaiting: that stalls
     every service on the loop. Run blocking code through asyncio.to_thread().
@@ -171,8 +171,8 @@ class AsyncService(Service):
                     await self._inbox.send(Message(id=msg.id, payload=msg.payload * 2))
     """
 
-    # A coroutine, unlike Service.run(): only a LoopHost runs it, and ThreadRunner
-    # and ProcessRunner refuse an AsyncService
+    # A coroutine, unlike Service.run(): a TaskRunner runs it on an event loop,
+    # and ProcessRunner refuses an AsyncService
     @abstractmethod
     async def run(self) -> None:  # type: ignore[override]
         """Do the service's work until it returns or is cancelled."""

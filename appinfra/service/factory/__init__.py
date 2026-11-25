@@ -21,7 +21,7 @@ Example:
 
     # Runner factory for runner + channel creation
     runner_factory = RunnerFactory(lg, default_policy=RestartPolicy(max_retries=3))
-    result = runner_factory.create_thread_runner_with_channel(service)
+    result = runner_factory.create_task_runner_with_channel(tasks, service)
 
     # Service factory for registry-based service creation
     svc_factory = ServiceFactory(lg)

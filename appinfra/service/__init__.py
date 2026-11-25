@@ -44,7 +44,8 @@ Usage:
 
 spawn() returns the service's runner; ``runner.on_state_change(hook)``
 observes its transitions. A runner can also be used on its own, without a
-runtime: ThreadRunner, ProcessRunner, or a LoopHost's TaskRunner.
+service Runtime: a TaskRunner on an appinfra.runtime Runtime, or a
+ProcessRunner.
 """
 
 from ..runtime import StopToken
@@ -92,14 +93,7 @@ from .factory import (
     ServiceFactory,
     ServiceRegistration,
 )
-from .runtime import (
-    LoopHost,
-    ProcessRunner,
-    Runner,
-    Runtime,
-    TaskRunner,
-    ThreadRunner,
-)
+from .runtime import ProcessRunner, Runner, Runtime, TaskRunner
 from .state import RestartPolicy, State, StateHook
 
 __all__ = [
@@ -108,10 +102,8 @@ __all__ = [
     "ScheduledService",
     "AsyncService",
     "Runner",
-    "ThreadRunner",
-    "ProcessRunner",
-    "LoopHost",
     "TaskRunner",
+    "ProcessRunner",
     "Runtime",
     # Transport (wire level)
     "Transport",

@@ -34,9 +34,9 @@ class Runner(ABC):
     - State change hooks
 
     Implementations:
-    - ThreadRunner: Runs the service in a daemon thread
+    - TaskRunner: Runs the service as a task on an appinfra.runtime Runtime,
+      on a thread of its own, or on the event loop for an AsyncService
     - ProcessRunner: Runs the service in a subprocess
-    - TaskRunner: Runs an AsyncService as a task on a LoopHost's event loop
     """
 
     def __init__(
@@ -191,14 +191,18 @@ class Runner(ABC):
             raise HealthTimeoutError(self.name, timeout)
 
         while time.monotonic() - start < timeout:
-            if not self.is_alive():
+            # FAILED: the run ended before it was healthy, settled by the
+            # runner; not alive: a process that is gone, which nothing settles
+            if self._state == State.FAILED or not self.is_alive():
                 self._handle_execution_exit()
 
             if self.is_healthy():
                 # Only from STARTING: another waiter may have moved it already,
-                # which is success; a stop() that ended the start is not
+                # which is success; the run ending or a stop() first is not
                 if self._transition_from(State.STARTING, State.RUNNING):
                     self._retries = 0
+                elif self._state == State.FAILED:
+                    self._handle_execution_exit()
                 elif self._state not in (State.RUNNING, State.IDLE):
                     raise RunError(self.name, "stopped during startup")
                 return
@@ -229,10 +233,9 @@ class Runner(ABC):
             True if a restart was initiated.
         """
         if self._state == State.FAILED:
-            # Only restart if not alive (avoid spawning on top of running process)
-            if not self.is_alive():
-                return self._maybe_restart()
-            return False
+            # The restart stops what is left of the failed run first, and waits
+            # for it: nothing starts on top of it
+            return self._maybe_restart()
 
         if self._state != State.RUNNING:
             return False
@@ -426,19 +429,19 @@ class Runner(ABC):
 
     def _settle_exit_state(self, exception: BaseException | None) -> None:
         """Once the service's work has ended: STOPPED if a stop() is waiting for
-        it or gave up waiting, else DONE after a clean end of a RUNNING service
-        and FAILED after *exception*, unless wait_healthy() has already moved
-        the state on. The end state is chosen and set under one hold of the
-        lock, so a stop() cannot move the state in between."""
+        it or gave up waiting, else DONE after a clean end of a RUNNING service,
+        and FAILED after *exception* or an end of any kind while STARTING: the
+        run is over before it was healthy. The end state is chosen and set
+        under one hold of the lock, so a stop() cannot move the state in
+        between."""
         with self._lock:
             from_state = self._state
             if from_state == State.STOPPING:
                 to = State.STOPPED
             elif exception is None and from_state == State.RUNNING:
                 to = State.DONE
-            elif exception is not None and from_state in (
-                State.STARTING,
-                State.RUNNING,
+            elif from_state == State.STARTING or (
+                exception is not None and from_state == State.RUNNING
             ):
                 to = State.FAILED
             else:

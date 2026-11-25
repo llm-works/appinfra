@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright 2026 The appinfra Authors
 
-"""Tests for how ThreadRunner and ProcessRunner drive a service, and which
-services each runner accepts."""
+"""Tests for how a TaskRunner's thread and a ProcessRunner drive a service, and
+which services each runner accepts."""
 
 from unittest.mock import MagicMock
 
@@ -10,11 +10,10 @@ import pytest
 
 from appinfra.service import (
     AsyncService,
-    LoopHost,
     ProcessRunner,
     ScheduledService,
     Service,
-    ThreadRunner,
+    TaskRunner,
 )
 from appinfra.service.runtime.drive import drive
 
@@ -117,7 +116,7 @@ class TestDrive:
 
     def test_drive_refuses_an_async_service(self):
         """drive() checks too: a subprocess runs it without a runner's check."""
-        with pytest.raises(TypeError, match="runs on a LoopHost"):
+        with pytest.raises(TypeError, match="runs on an event loop"):
             drive(Idle(), FakeStop())
 
 
@@ -126,19 +125,18 @@ class TestRunnerAccepts:
 
     def test_non_service_is_refused(self):
         with pytest.raises(TypeError, match="must be a Service"):
-            ThreadRunner(object())  # type: ignore[arg-type]  # the runtime check under test
+            TaskRunner(MagicMock(), object())
 
     def test_scheduled_and_async_at_once_is_refused(self):
         with pytest.raises(
             TypeError, match="both a ScheduledService and an AsyncService"
         ):
-            ThreadRunner(TickAndAwait())
+            TaskRunner(MagicMock(), TickAndAwait())
 
-    @pytest.mark.parametrize("runner_cls", [ThreadRunner, ProcessRunner])
-    def test_thread_and_process_runners_refuse_an_async_service(self, runner_cls: type):
-        with pytest.raises(TypeError, match="runs on a LoopHost"):
-            runner_cls(Idle())
+    def test_a_process_runner_refuses_an_async_service(self):
+        with pytest.raises(TypeError, match="runs on an event loop"):
+            ProcessRunner(Idle())
 
-    def test_task_runner_refuses_a_service_that_is_not_async(self):
-        with pytest.raises(TypeError, match="TaskRunner runs an AsyncService"):
-            LoopHost().runner(Once())  # type: ignore[arg-type]  # the runtime check under test
+    @pytest.mark.parametrize("service_cls", [Once, Ticker, Idle])
+    def test_a_task_runner_takes_every_kind(self, service_cls: type):
+        assert TaskRunner(MagicMock(), service_cls()).service is not None

@@ -29,7 +29,6 @@ from appinfra.service import (
     Service,
     State,
     TaskRunner,
-    ThreadRunner,
 )
 
 
@@ -97,6 +96,7 @@ class FailsOnRelease(AsyncService):
         self.runs = 0
         self.parked = threading.Event()
         self._release: asyncio.Event | None = None
+        self._loop: asyncio.AbstractEventLoop | None = None
 
     @property
     def name(self) -> str:
@@ -105,6 +105,7 @@ class FailsOnRelease(AsyncService):
     async def run(self) -> None:
         self.runs += 1
         self._release = asyncio.Event()
+        self._loop = asyncio.get_running_loop()
         self.parked.set()
         if self.runs > self._fails:
             await asyncio.Event().wait()
@@ -112,10 +113,10 @@ class FailsOnRelease(AsyncService):
         self.parked.clear()
         raise RuntimeError(f"run {self.runs} failed")
 
-    def release(self, rt: Runtime) -> None:
+    def release(self) -> None:
         """Let the parked run fail; call once parked is set."""
-        assert self._release is not None
-        rt._host.loop.call_soon_threadsafe(self._release.set)  # Private: the loop
+        assert self._release is not None and self._loop is not None
+        self._loop.call_soon_threadsafe(self._release.set)
 
 
 class MeetsAt(Service):
@@ -242,7 +243,7 @@ def _wait_until(condition: Callable[[], bool], timeout: float = 5.0) -> bool:
 class TestSpawn:
     def test_each_kind_gets_its_runner(self, rt):
         assert isinstance(rt.spawn(Parked("async")), TaskRunner)
-        assert isinstance(rt.spawn(Blocking("thread", [])), ThreadRunner)
+        assert isinstance(rt.spawn(Blocking("thread", [])), TaskRunner)
         isolated = rt.spawn(InProcess(), isolate=True)
         assert isinstance(isolated, ProcessRunner)
         rt.ready(isolated, timeout=30.0)
@@ -479,7 +480,7 @@ class TestSupervision:
         rt.ready(runner)
         assert svc.parked.wait(5.0)
 
-        svc.release(rt)
+        svc.release()
 
         assert _wait_until(lambda: svc.runs == 2 and runner.state == State.RUNNING)
         assert rt.services == {"fails": runner}
@@ -502,11 +503,11 @@ class TestSupervision:
                 restarts += 1
                 if restarts == 1:  # on the restart thread, before restart() returns
                     assert svc.parked.wait(5.0)
-                    svc.release(rt)
+                    svc.release()
                     assert failed_again.wait(5.0)  # the timeout is the failure path
 
         runner.on_state_change(hook)
-        svc.release(rt)  # the first run fails: a restart follows
+        svc.release()  # the first run fails: a restart follows
 
         assert _wait_until(lambda: svc.runs == 3 and runner.state == State.RUNNING)
 
@@ -517,7 +518,7 @@ class TestSupervision:
         rt.ready(runner, other)
         assert svc.parked.wait(5.0)
 
-        svc.release(rt)
+        svc.release()
 
         assert _wait_until(lambda: "fails" not in rt.services)
         assert runner.state == State.FAILED
@@ -598,24 +599,24 @@ class TestRefusedAtStop:
         stopper.join(10.0)
 
 
-class TestThreads:
+class TestStopAndStart:
     def test_stop_waits_for_a_start_it_admitted(self, monkeypatch):
         """A start the runtime admitted before stop() began, but that has not
         reached runner.start() yet, is waited for and then stopped with the
         rest: no service runs on after stop() returns."""
         in_gap, release = threading.Event(), threading.Event()
-        real_start = ThreadRunner.start
+        real_start = TaskRunner.start
 
-        def gated_start(runner: ThreadRunner) -> None:
+        def gated_start(runner: TaskRunner) -> None:
             if runner.name == "late":  # between admission and runner.start()
                 in_gap.set()
                 assert release.wait(5.0)  # the timeout is the failure path
             real_start(runner)
 
-        monkeypatch.setattr(ThreadRunner, "start", gated_start)
+        monkeypatch.setattr(TaskRunner, "start", gated_start)
         rt = Runtime(MagicMock(), name="gap")
         rt.start()
-        spawned: list[ThreadRunner] = []
+        spawned: list[TaskRunner] = []
         log: list[str] = []
         spawner = threading.Thread(
             target=lambda: spawned.append(rt.spawn(Blocking("late", log)))
@@ -634,30 +635,3 @@ class TestThreads:
         assert not runner.is_alive()
         assert runner.state == State.STOPPED
         assert log == ["late"]
-
-    def test_helper_and_restart_threads_start_under_the_lock(self, rt, monkeypatch):
-        """stop() joins the threads it finds in its sets, and join() raises on a
-        thread not started yet: each starts before the lock that added it is
-        released, so stop() never finds one unstarted."""
-        starts: dict[str, bool] = {}
-        prefixes = ("start-after-", "health-", "restart-")
-
-        class Recording(threading.Thread):
-            def start(self) -> None:
-                if self.name.startswith(prefixes):
-                    starts[self.name] = rt._lock.locked()  # Private: the lock
-                super().start()
-
-        monkeypatch.setattr(threading, "Thread", Recording)
-        waiter = rt.spawn(Parked("waiter", depends=("dep",)))
-        rt.spawn(Parked("dep"))  # a health watch, then a start for waiter
-        rt.ready(waiter)
-        svc = FailsOnRelease(fails=1)
-        runner = rt.spawn(svc, RestartPolicy(backoff=0.0))
-        rt.ready(runner)
-        assert svc.parked.wait(5.0)
-        svc.release(rt)
-        assert _wait_until(lambda: svc.runs == 2 and runner.state == State.RUNNING)
-
-        assert {n.split("-")[0] for n in starts} == {"start", "health", "restart"}
-        assert all(starts.values()), starts

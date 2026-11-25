@@ -45,7 +45,7 @@ class ServiceFactory:
     - Support custom factory functions for complex initialization
 
     For services that need channels, use RunnerFactory which provides
-    create_thread_runner_with_channel() and create_process_runner_with_channel().
+    create_task_runner_with_channel() and create_process_runner_with_channel().
 
     Example:
         factory = ServiceFactory(lg)
@@ -70,7 +70,7 @@ class ServiceFactory:
 
         # Check if service needs a channel (for use with RunnerFactory)
         if factory.needs_channel("worker"):
-            # Use RunnerFactory.create_thread_runner_with_channel()
+            # Use RunnerFactory.create_task_runner_with_channel()
             pass
     """
 

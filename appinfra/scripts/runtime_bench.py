@@ -34,7 +34,6 @@ from appinfra.runtime import Runtime  # noqa: E402
 from appinfra.runtime.bench import round_trip_rate as task_round_trip_rate  # noqa: E402
 from appinfra.runtime.bench import runtime_rates as task_runtime_rates  # noqa: E402
 from appinfra.runtime.bench import task_cost, task_rates  # noqa: E402
-from appinfra.service import LoopHost  # noqa: E402
 from appinfra.service.bench import (  # noqa: E402
     parked_maker,
     round_trip_rate,
@@ -118,15 +117,15 @@ def _measure_tasks(lg: Logger, count: int) -> _Column:
 
 
 def _measure_services(lg: Logger, count: int) -> _Column:
-    """A service's numbers, over *count* services."""
-    with LoopHost(name="bench") as host:
+    """A service's numbers, over *count* services, run on a runtime's loop."""
+    with Runtime(lg) as tasks:
         lg.info("measuring memory per service...", extra={"services": count})
-        cost = service_cost(host, lg, count)
+        cost = service_cost(tasks, lg, count)
         lg.info("measuring runner start and stop...", extra={"services": count})
-        runners, start = start_runners(host, parked_maker(lg), count)
+        runners, start = start_runners(tasks, parked_maker(lg), count)
         stop = stop_runners(runners)
         lg.info("measuring submit/reply rate...", extra={"round_trips": count})
-        trips = round_trip_rate(host, lg, count)
+        trips = round_trip_rate(tasks, lg, count)
     lg.info("measuring service runtime spawn and stop...", extra={"services": count})
     rt_spawn, rt_stop = runtime_rates(lg, parked_maker(lg), count)
     return _Column(

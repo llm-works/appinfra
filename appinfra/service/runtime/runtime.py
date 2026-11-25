@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import atexit
+import contextlib
 import threading
 import time
 import weakref
@@ -14,7 +15,8 @@ from types import TracebackType
 from typing import Any
 
 from ...log import Logger
-from ...runtime import StopToken
+from ...runtime import Runtime as Tasks
+from ...runtime import StoppedError, StopToken, Task, stopping, task_id
 from ..base import AsyncService, Service
 from ..errors import (
     CycleError,
@@ -23,10 +25,9 @@ from ..errors import (
     RunError,
 )
 from ..state import RestartPolicy, State
-from .loop import LoopHost
 from .process import ProcessRunner
 from .runner import Runner
-from .thread import ThreadRunner
+from .task import TaskRunner
 
 # What the runtime keeps per runner object, dropped with the runner
 _PerRunner = weakref.WeakKeyDictionary
@@ -51,9 +52,10 @@ class Runtime:
     """Runs services: spawn() takes each, in any order and from any thread, and
     starts it on the runner its kind needs once its dependencies run.
 
-    - AsyncService: a task on the runtime's event loop (a LoopHost), shared by
-      every async service, so one waiting on an await holds no thread
-    - any other Service: a thread of its own
+    Each service runs as a task on the appinfra.runtime Runtime this one owns:
+    - AsyncService: a task on its event loop, shared by every async service,
+      so one waiting on an await holds no thread
+    - any other Service: a task on a thread of its own
     - isolate=True: a process of its own; refused for an AsyncService, which
       runs on the loop
 
@@ -67,7 +69,7 @@ class Runtime:
 
     Every service's stopping token derives from the runtime's. A service under a
     thread or the loop that fails while running is restarted per its policy,
-    after the policy's backoff on a loop timer. A process service is restarted
+    after the policy's backoff, by a task. A process service is restarted
     by its runner's own monitor. A service that ends, is stopped, or fails with
     no restart left leaves the runtime.
 
@@ -80,10 +82,10 @@ class Runtime:
     """
 
     def __init__(self, lg: Logger, name: str = "runtime") -> None:
-        """A runtime not yet started; *name* names its event loop's thread."""
+        """A runtime not yet started; *name* names it in errors."""
         self._lg = lg
         self.name = name
-        self._host = LoopHost(name=name)
+        self._tasks = Tasks(lg)
         self._root = StopToken()
         self._lock = threading.Lock()  # guards everything below
         self._runners: dict[str, Runner] = {}  # every service, by name
@@ -99,8 +101,9 @@ class Runtime:
         self._failures: _PerRunner[Runner, BaseException] = _PerRunner()
         self._watched: set[str] = set()  # services whose health a helper waits for
         self._restarting: set[str] = set()  # restart armed or under way
-        self._restart_threads: set[threading.Thread] = set()
-        self._helpers: set[threading.Thread] = set()  # starts and health watches
+        # Restart tasks by task id, waiting out their backoff or restarting;
+        # stop() cancels the ones still waiting and waits for the rest
+        self._restarts: dict[int, Task] = {}
         # Starts let in before stop() began and not ended yet; stop() waits
         self._admitted: set[Runner] = set()
         self._admission_ended = threading.Condition(self._lock)
@@ -123,7 +126,7 @@ class Runtime:
         """
         if self._started_runtime:
             raise RuntimeError(f"runtime '{self.name}' was started already")
-        self._host.start()
+        self._tasks.start()
         self._started_runtime = True
         # Its threads are daemons, ended unwound at exit: a runtime left running
         # is stopped first, so its services' teardown() runs
@@ -215,10 +218,9 @@ class Runtime:
                     f"async service '{service.name}' cannot run isolated: an async "
                     "service runs on the runtime's event loop"
                 )
-            return self._host.runner(service, policy, parent=self._root)
-        if isolate:
+        elif isolate:
             return ProcessRunner(service, policy, parent=self._root)
-        return ThreadRunner(service, policy, parent=self._root)
+        return TaskRunner(self._tasks, service, policy, parent=self._root)
 
     def _check_spawn(self, service: Service) -> None:
         """Refuse a spawn the runtime cannot take; called under the lock."""
@@ -430,29 +432,21 @@ class Runtime:
                 self._watched.discard(runner.name)
 
     def _helper(self, target: Callable[..., None], arg: Any, *, name: str) -> bool:
-        """Run *target*(*arg*) on a daemon thread that stop() waits for. It
-        starts under the lock, so stop() never finds it in _helpers unstarted,
-        which join() refuses; the thread takes the lock only once *target* ran.
+        """Run *target*(*arg*) as a task, detached: a failure is logged.
+        stop() stops the services first, which ends the helpers' waits, then
+        the task runtime, which waits for them.
 
         Returns:
             False if refused, as stop() has begun.
         """
-        thread = threading.Thread(
-            target=self._run_helper, args=(target, arg), name=name, daemon=True
-        )
         with self._lock:
             if self._closing:
                 return False
-            self._helpers.add(thread)
-            thread.start()
+            # Under the lock, so stop() cannot begin between the check and it.
+            # From the root: the hook spawning it may run in a task that ends
+            # before the helper begins, which would skip its call
+            self._tasks.spawn(target, arg, name=name, token=self._root).detach()
         return True
-
-    def _run_helper(self, target: Callable[..., None], arg: Any) -> None:
-        try:
-            target(arg)
-        finally:
-            with self._lock:
-                self._helpers.discard(threading.current_thread())
 
     # -- state hook, leaving the runtime ------------------------------------
 
@@ -514,41 +508,45 @@ class Runtime:
     # -- restarts -----------------------------------------------------------
 
     def _arm_restart(self, runner: Runner) -> None:
-        """Set a loop timer for *runner*'s restart, after its policy's backoff."""
-        delay = runner.restart_delay
-        try:
-            self._host.loop.call_soon_threadsafe(
-                lambda: self._host.loop.call_later(delay, self._launch_restart, runner)
-            )
-        except RuntimeError:  # The loop is gone: the runtime is stopping
-            self._forget(runner)
-
-    def _launch_restart(self, runner: Runner) -> None:
-        """On the loop, once the backoff has passed: restart *runner* on a thread
-        of its own, as a restart blocks until the service is healthy."""
+        """Spawn a task that restarts *runner* after its policy's backoff."""
         with self._lock:
             if self._closing:
                 self._restarting.discard(runner.name)
                 return
-            # A daemon: a restart that hangs must not hold the interpreter's exit
-            thread = threading.Thread(
-                target=self._restart,
-                args=(runner,),
+            # Under the lock, which the task takes to take itself out, so it is
+            # in _restarts by then
+            task = self._tasks.spawn(
+                self._restart_later,
+                runner,
+                runner.restart_delay,
                 name=f"restart-{runner.name}",
-                daemon=True,
+                token=self._root,
             )
-            self._restart_threads.add(thread)
-            # Under the lock, as in _helper(): stop() joins what it finds here
-            thread.start()
+            self._restarts[task.id] = task
 
-    def _restart(self, runner: Runner) -> None:
-        """Restart thread: one attempt; if it fails, arm the next or let it go."""
+    def _restart_later(self, runner: Runner, delay: float) -> None:
+        """Restart task: wait out *delay*, unless stop() cancels it first, then
+        make one attempt."""
         try:
-            restarted = runner.restart()
+            if stopping().wait(delay):
+                with self._lock:
+                    self._restarting.discard(runner.name)
+                return
+            self._restart(runner)
+        except Exception as e:
+            self._lg.warning(
+                "service restart failed",
+                extra={"service": runner.name, "exception": e},
+            )
         finally:
             with self._lock:
-                self._restart_threads.discard(threading.current_thread())
-                closing = self._closing
+                self._restarts.pop(task_id(), None)
+
+    def _restart(self, runner: Runner) -> None:
+        """One attempt; if it fails, arm the next or let it go."""
+        restarted = runner.restart()
+        with self._lock:
+            closing = self._closing
         if restarted:
             with self._lock:
                 self._restarting.discard(runner.name)
@@ -577,10 +575,14 @@ class Runtime:
             if not self._started_runtime or self._closing:
                 return
             self._closing = True
-            restarts = list(self._restart_threads)
+            restarts = list(self._restarts.values())
         atexit.unregister(self._atexit_stop)
-        for thread in restarts:
-            thread.join(timeout)
+        # A restart still waiting out its backoff ends; one under way finishes
+        for task in restarts:
+            task.cancel()
+        for task in restarts:
+            with contextlib.suppress(StoppedError, TimeoutError):
+                task.wait(timeout)
         with self._lock:
             # A start admitted before _closing has launched or failed by now,
             # so the snapshot below stops it. Past the timeout, runner.stop()
@@ -588,12 +590,9 @@ class Runtime:
             self._admission_ended.wait_for(lambda: not self._admitted, timeout)
         for runner in self._stop_order():
             self._stop_one(runner, timeout)
-        with self._lock:
-            helpers = list(self._helpers)
-        for thread in helpers:
-            thread.join(timeout)
         self._root.stop()
-        self._host.stop(timeout)
+        # Waits for the helpers, whose waits the services' stops have ended
+        self._tasks.stop(timeout)
 
     def _stop_order(self) -> list[Runner]:
         """The started services, last started first; the pending ones are told

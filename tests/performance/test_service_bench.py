@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: Copyright 2026 The appinfra Authors
 
 """
-LoopHost benchmark: what many async services on one event loop thread cost.
+Service benchmark: what many async services on one event loop thread cost.
 
 The net memory cost of an idle service and the part of it the framework adds over
 plain asyncio tasks, the start and stop rate of runners and of a Runtime, idle CPU,
@@ -25,7 +25,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from appinfra.service import AsyncQueueChannelFactory, AsyncService, LoopHost
+from appinfra.runtime import Runtime as Tasks
+from appinfra.service import AsyncQueueChannelFactory, AsyncService
 from appinfra.service.bench import (
     Arrivals,
     round_trip_rate,
@@ -75,11 +76,11 @@ class OnChannel(OnEvent):
 
 
 @pytest.fixture
-def host() -> Iterator[LoopHost]:
-    host = LoopHost(name="bench-loop")
-    host.start()
-    yield host
-    host.stop(timeout=60.0)
+def tasks() -> Iterator[Tasks]:
+    tasks = Tasks(LG)
+    tasks.start()
+    yield tasks
+    tasks.stop(timeout=60.0)
 
 
 def _idle_cpu(window: float) -> float:
@@ -90,21 +91,21 @@ def _idle_cpu(window: float) -> float:
     return (time.process_time() - cpu) / (time.monotonic() - wall)
 
 
-class TestLoopHostCost:
-    def test_memory_per_idle_service(self, host):
+class TestServiceCost:
+    def test_memory_per_idle_service(self, tasks):
         """Only the framework's part of the net cost is bounded: asyncio's part
         varies with the Python version."""
-        cost = service_cost(host, LG, SERVICES)
+        cost = service_cost(tasks, LG, SERVICES)
 
         print(
-            f"\nnet cost of an idle service on a LoopHost ({SERVICES:,}): "
+            f"\nnet cost of an idle service on the loop ({SERVICES:,}): "
             f"{cost.net:,.0f} B each: asyncio {cost.asyncio:,.0f} B, "
             f"framework {cost.framework:,.0f} B"
         )
         assert cost.framework <= 1024, f"{cost.framework:,.0f} B per service"
 
-    def test_start_and_stop_rate(self, host):
-        runners, start_rate = start_runners(host, OnEvent, SERVICES)
+    def test_start_and_stop_rate(self, tasks):
+        runners, start_rate = start_runners(tasks, OnEvent, SERVICES)
         stop_rate = stop_runners(runners)
 
         print(f"\nstart: {start_rate:,.0f}/s  stop: {stop_rate:,.0f}/s ({SERVICES:,})")
@@ -123,18 +124,18 @@ class TestLoopHostCost:
         assert spawn_rate > 5_000 * RATE_SHARE, f"spawn: {spawn_rate:,.0f}/s"
         assert stop_rate > 5_000 * RATE_SHARE, f"stop: {stop_rate:,.0f}/s"
 
-    def test_idle_services_use_no_cpu(self, host):
+    def test_idle_services_use_no_cpu(self, tasks):
         """Services parked on an await leave the loop asleep."""
-        runners, _ = start_runners(host, OnEvent, SERVICES)
+        runners, _ = start_runners(tasks, OnEvent, SERVICES)
         cpu = _idle_cpu(IDLE_WINDOW)
         stop_runners(runners)
 
         print(f"\n{SERVICES:,} idle services: {cpu:.1%} of a core")
         assert cpu < 0.02, f"{cpu:.1%} of a core while idle"
 
-    def test_idle_channel_receivers_use_no_cpu(self, host):
+    def test_idle_channel_receivers_use_no_cpu(self, tasks):
         """Services parked in recv() on an async channel leave the loop asleep."""
-        runners, _ = start_runners(host, OnChannel, SERVICES)
+        runners, _ = start_runners(tasks, OnChannel, SERVICES)
         cpu = _idle_cpu(IDLE_WINDOW)
         stop_runners(runners)
 
@@ -146,9 +147,9 @@ class TestLoopHostCost:
         reason="macOS CI runners run this an order of magnitude slower than Linux; "
         "the floor is enforced on Linux only",
     )
-    def test_submit_reply_rate(self, host):
+    def test_submit_reply_rate(self, tasks):
         """Round trips from a caller on the loop to a service and back."""
-        trips = round_trip_rate(host, LG, SERVICES)
+        trips = round_trip_rate(tasks, LG, SERVICES)
 
         print(f"\nsubmit/reply: {trips:,.0f} round trips/s")
         assert trips > 10_000, f"{trips:,.0f} round trips/s"

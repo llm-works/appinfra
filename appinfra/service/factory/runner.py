@@ -8,9 +8,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from ...log import Logger
+from ...runtime import Runtime as Tasks
 from ..base import Service
 from ..channel.sync import Channel, ProcessQueueTransport
-from ..runtime import ProcessRunner, Runner, ThreadRunner
+from ..runtime import ProcessRunner, Runner, TaskRunner
 from ..state import RestartPolicy
 from .channel import (
     ChannelConfig,
@@ -51,11 +52,11 @@ class RunnerFactory:
             default_policy=RestartPolicy(max_retries=3),
         )
 
-        # Simple runner
-        runner = factory.create_thread_runner(my_service)
+        # Simple runner, on an appinfra.runtime Runtime
+        runner = factory.create_task_runner(tasks, my_service)
 
         # Runner with channel for request/response
-        result = factory.create_thread_runner_with_channel(my_service)
+        result = factory.create_task_runner_with_channel(tasks, my_service)
         runner = result.runner
         channel = result.channel  # Use to communicate with service
     """
@@ -91,34 +92,38 @@ class RunnerFactory:
         self._stop_timeout = stop_timeout
         self._start_method = start_method
 
-    def create_thread_runner(
+    def create_task_runner(
         self,
+        tasks: Tasks,
         service: Service,
         policy: RestartPolicy | None = None,
-    ) -> ThreadRunner:
+    ) -> TaskRunner:
         """
-        Create a ThreadRunner for the service.
+        Create a TaskRunner for the service.
 
         Args:
+            tasks: The appinfra.runtime Runtime the service runs on
             service: Service to run
             policy: Restart policy (uses default if not provided)
 
         Returns:
-            Configured ThreadRunner
+            Configured TaskRunner
         """
         effective_policy = policy if policy is not None else self._default_policy
-        return ThreadRunner(service, policy=effective_policy)
+        return TaskRunner(tasks, service, policy=effective_policy)
 
-    def create_thread_runner_with_channel(
+    def create_task_runner_with_channel(
         self,
+        tasks: Tasks,
         service: Service,
         policy: RestartPolicy | None = None,
         channel_pair: ChannelPair | None = None,
     ) -> RunnerWithChannel:
         """
-        Create a ThreadRunner with a channel pair for communication.
+        Create a TaskRunner with a channel pair for communication.
 
         Args:
+            tasks: The appinfra.runtime Runtime the service runs on
             service: Service to run
             policy: Restart policy (uses default if not provided)
             channel_pair: Pre-built channel pair (overrides factory).
@@ -126,7 +131,7 @@ class RunnerFactory:
         Returns:
             RunnerWithChannel containing runner and both channels
         """
-        runner = self.create_thread_runner(service, policy)
+        runner = self.create_task_runner(tasks, service, policy)
         pair = channel_pair or self._create_thread_pair()
 
         return RunnerWithChannel(
