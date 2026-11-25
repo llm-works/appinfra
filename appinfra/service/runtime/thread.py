@@ -9,6 +9,7 @@ import threading
 
 from ..base import ScheduledService, Service
 from ..state import RestartPolicy, State
+from ..stop import StopToken
 from .drive import check_drivable, drive
 from .runner import Runner
 
@@ -28,17 +29,24 @@ class ThreadRunner(Runner):
         runner.stop()
     """
 
-    def __init__(self, service: Service, policy: RestartPolicy | None = None) -> None:
+    def __init__(
+        self,
+        service: Service,
+        policy: RestartPolicy | None = None,
+        *,
+        parent: StopToken | None = None,
+    ) -> None:
         """Initialize thread runner.
 
         Args:
             service: The service to run.
             policy: Restart policy.
+            parent: The token the service's stopping token derives from.
 
         Raises:
             TypeError: If *service* is an AsyncService.
         """
-        super().__init__(service, policy)
+        super().__init__(service, policy, parent=parent)
         check_drivable(self.service)
         self._thread: threading.Thread | None = None
         self._exception: BaseException | None = None

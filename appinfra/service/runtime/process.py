@@ -70,12 +70,16 @@ class ProcessRunner(Runner):
         policy: RestartPolicy | None = None,
         stop_timeout: float = 5.0,
         start_method: str | None = None,
+        *,
+        parent: StopToken | None = None,
     ) -> None:
         """Initialize process runner.
 
         Args:
             service: Service to run (must be picklable).
             policy: Restart policy.
+            parent: The token the service's stopping token derives from, in
+                this process; the subprocess gives the service its own.
             stop_timeout: Seconds to wait for graceful stop.
             start_method: multiprocessing start method ("fork", "spawn",
                 "forkserver") for the service process and its queues and events;
@@ -86,7 +90,7 @@ class ProcessRunner(Runner):
         Raises:
             TypeError: If *service* is an AsyncService.
         """
-        super().__init__(service, policy)
+        super().__init__(service, policy, parent=parent)
         check_drivable(self.service)
         self.stop_timeout = stop_timeout
         self._start_method = start_method

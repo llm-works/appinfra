@@ -55,6 +55,15 @@ class DependencyFailedError(Error):
         super().__init__(f"{name}: dependency '{dependency}' failed to start")
 
 
+class DependencyNotRunningError(Error):
+    """A service was spawned before a service it depends on runs."""
+
+    def __init__(self, name: str, dependency: str) -> None:
+        self.name = name
+        self.dependency = dependency
+        super().__init__(f"{name}: dependency '{dependency}' is not running")
+
+
 class InvalidTransitionError(Error):
     """Invalid state transition attempted."""
 

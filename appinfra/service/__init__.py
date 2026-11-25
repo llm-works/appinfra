@@ -105,6 +105,7 @@ from .errors import (
     ChannelTimeoutError,
     CycleError,
     DependencyFailedError,
+    DependencyNotRunningError,
     Error,
     HealthTimeoutError,
     InvalidTransitionError,
@@ -127,7 +128,14 @@ from .factory import (
     ServiceRegistration,
 )
 from .manager import Manager
-from .runtime import LoopHost, ProcessRunner, Runner, TaskRunner, ThreadRunner
+from .runtime import (
+    LoopHost,
+    ProcessRunner,
+    Runner,
+    Runtime,
+    TaskRunner,
+    ThreadRunner,
+)
 from .state import RestartPolicy, State, StateHook
 from .stop import StopToken
 
@@ -142,6 +150,7 @@ __all__ = [
     "LoopHost",
     "TaskRunner",
     "Manager",
+    "Runtime",
     # Transport (wire level)
     "Transport",
     "QueueTransport",
@@ -187,5 +196,6 @@ __all__ = [
     "RunError",
     "HealthTimeoutError",
     "DependencyFailedError",
+    "DependencyNotRunningError",
     "InvalidTransitionError",
 ]
