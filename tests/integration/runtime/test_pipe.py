@@ -239,6 +239,44 @@ class TestInOneProcess:
         with pytest.raises(ChanClosedError):
             recv.open().recv(timeout=10.0)  # the timeout is the failure path
 
+    @pytest.mark.parametrize(
+        ("end", "fails", "closed"),
+        [
+            ("send", 1, ("data", "acks")),
+            ("send", 2, ("acks",)),  # data is the writer's, which ends and closes it
+            ("recv", 1, ("data", "acks", "wake", "wake_w")),
+        ],
+        ids=["sender-writer", "sender-counter", "receiver-reader"],
+    )
+    def test_an_end_whose_thread_cannot_start_closes_its_connections(
+        self, end: str, fails: int, closed: tuple[str, ...]
+    ):
+        """At once: not once the traceback holding them is dropped, which a
+        logged error can put off for good."""
+        ends = dict(zip(("send", "recv"), pipe(1)))
+        data, acks = ends[end]._conns[0]  # Private: the end's connections
+        conns = {"data": data, "acks": acks}
+        start, started, real_pipe = threading.Thread.start, [], mp.Pipe
+
+        def recording_pipe(duplex: bool) -> tuple:
+            conns["wake"], conns["wake_w"] = real_pipe(duplex)
+            return conns["wake"], conns["wake_w"]
+
+        def start_until_nth(thread: threading.Thread) -> None:
+            started.append(thread)
+            if len(started) == fails:
+                raise RuntimeError("can't start new thread")
+            start(thread)
+
+        with (
+            mock.patch.object(threading.Thread, "start", start_until_nth),
+            mock.patch.object(mp, "Pipe", recording_pipe),
+            pytest.raises(RuntimeError, match="start new thread"),
+        ):
+            ends[end].open()
+        assert [name for name in closed if not conns[name].closed] == []
+        ends["recv" if end == "send" else "send"].release()
+
     def test_close_on_a_loop_does_not_wait_for_the_writer(self):
         """Nobody receives, so the writer is stuck on a full OS pipe with the
         second value; a close() waiting for it would block the loop for good."""

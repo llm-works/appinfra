@@ -150,11 +150,19 @@ class Sender(Generic[T]):
         self._done = Chan[None](0)  # closed by the writer as it ends
         for _ in range(capacity):
             self._room.send(None, timeout=0)  # fits; and open() may run on a loop
-        self._writer = _start(self._write, data)
+        # A thread that cannot start leaves no connection open: one closed only
+        # once the traceback holding it is dropped could stay open for good
+        try:
+            self._writer = _start(self._write, data)
+        except BaseException:
+            data.close()
+            acks.close()
+            raise
         try:
             _start(self._count, acks)
         except BaseException:
-            self._shut()  # the writer ends, and closes the data pipe
+            self._shut()  # the writer ends, and closes the data pipe: its own
+            acks.close()
             raise
 
     def send(self, value: T, timeout: float | None = None) -> None:
@@ -254,11 +262,19 @@ class Receiver(Generic[T]):
         """Start the reader, on the *data* and *acks* connections."""
         self._chan = Chan[T](0)  # the reader acks a value once a receiver took it
         self._lock = threading.Lock()
-        wake, wake_w = mp.Pipe(duplex=False)
-        # Written and closed under _lock: a close() writing to it never races
-        # the reader closing it, and its fd being reused
-        self._wake: Connection | None = wake_w
-        _start(self._read, data, acks, wake)
+        # A thread that cannot start leaves no connection open, as in Sender
+        opened = [data, acks]
+        try:
+            wake, wake_w = mp.Pipe(duplex=False)
+            opened += [wake, wake_w]
+            # Written and closed under _lock: a close() writing to it never
+            # races the reader closing it, and its fd being reused
+            self._wake: Connection | None = wake_w
+            _start(self._read, data, acks, wake)
+        except BaseException:
+            for conn in opened:
+                conn.close()
+            raise
 
     def recv(self, timeout: float | None = None) -> T:
         """Receive the next value; as Chan.recv()."""
