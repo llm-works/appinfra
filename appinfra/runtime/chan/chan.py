@@ -38,6 +38,12 @@ class Chan(Generic[T]):
     stopped, with StoppedError. Only waiting is refused: a call that can
     complete at once does, so a stopped task can still drain a channel. A
     *timeout* bounds the wait (TimeoutError); 0 means do not wait.
+
+    On an event loop's thread, ``send()`` and ``recv()`` take only
+    ``timeout=0``, whatever the channel holds: a wait there would block the
+    loop, and refusing only the calls that happen to wait would make the error
+    depend on timing. Coroutines await ``asend()``/``arecv()``; sync code the
+    loop runs uses ``timeout=0``.
     """
 
     __slots__ = ("_capacity", "_lock", "_buffer", "_closed", "_senders", "_receivers")
@@ -66,12 +72,14 @@ class Chan(Generic[T]):
             ClosedError: If the channel is closed, also while waiting.
             StoppedError: If the task's token is stopped while waiting.
             TimeoutError: If there is no room after *timeout*.
-            RuntimeError: If it would wait on an event loop's thread.
+            RuntimeError: If called on an event loop's thread with a timeout
+                other than 0.
         """
+        _check_off_loop(timeout, "send")
         with self._lock:
             if self._put(value):
                 return
-            _check_wait(timeout, "send")
+            _check_timeout(timeout)
             waiter = ThreadWaiter(value)
             self._senders.append(waiter)
         self._block(waiter, self._senders, timeout)
@@ -83,13 +91,15 @@ class Chan(Generic[T]):
             ClosedError: If the channel is closed and drained, also while waiting.
             StoppedError: If the task's token is stopped while waiting.
             TimeoutError: If there is no value after *timeout*.
-            RuntimeError: If it would wait on an event loop's thread.
+            RuntimeError: If called on an event loop's thread with a timeout
+                other than 0.
         """
+        _check_off_loop(timeout, "recv")
         with self._lock:
             ready, value = self._take()
             if ready:
                 return cast(T, value)
-            _check_wait(timeout, "recv")
+            _check_timeout(timeout)
             waiter = ThreadWaiter()
             self._receivers.append(waiter)
         return cast(T, self._block(waiter, self._receivers, timeout))
@@ -265,15 +275,18 @@ def _check_timeout(timeout: float | None) -> None:
         raise TimeoutError("channel not ready")
 
 
-def _check_wait(timeout: float | None, call: str) -> None:
-    """Refuse a thread wait when *timeout* is 0 or less, or on an event loop's
-    thread, which the wait would block."""
-    _check_timeout(timeout)
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
+def _check_off_loop(timeout: float | None, call: str) -> None:
+    """Refuse a blocking call that may wait on an event loop's thread, whether
+    or not it would: only timeout=0 is sure not to block the loop.
+
+    _get_running_loop() returns None off a loop, where get_running_loop()
+    raises: thread tasks, the common case, pay no exception."""
+    if timeout is not None and timeout <= 0:
         return
-    raise RuntimeError(f"{call}() would block the event loop; await a{call}()")
+    if asyncio._get_running_loop() is not None:
+        raise RuntimeError(
+            f"{call}() may block the event loop; await a{call}(), or pass timeout=0"
+        )
 
 
 def _on_stop(fn: Callable[[], None]) -> Callable[[], None]:

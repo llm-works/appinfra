@@ -90,11 +90,9 @@ class LoopWaiter(Waiter):
     def wake(self) -> None:
         """Resolve the future: directly on its loop's thread, through
         call_soon_threadsafe() from any other."""
-        try:
-            on_loop = asyncio.get_running_loop() is self.loop
-        except RuntimeError:
-            on_loop = False
-        if on_loop:
+        # _get_running_loop(): None off a loop, without the exception
+        # get_running_loop() raises on every wake from a thread
+        if asyncio._get_running_loop() is self.loop:
             self._resolve()
             return
         # RuntimeError: the loop is closed, and the coroutine gone with it

@@ -215,10 +215,29 @@ class TestLoop:
         assert _waiting(ch)
 
     @pytest.mark.asyncio
-    async def test_a_blocking_call_that_need_not_wait_is_allowed_on_the_loop(self):
+    async def test_a_blocking_call_is_refused_on_the_loop_even_when_ready(self):
+        """Refusing only the calls that happen to wait would make the error
+        depend on timing: code that passes at low load would fail under load."""
         ch = Chan[int](1)
-        ch.send(1)
-        assert ch.recv() == 1
+        with pytest.raises(RuntimeError, match="await asend"):
+            ch.send(1)
+        await ch.asend(1)
+        with pytest.raises(RuntimeError, match="await arecv"):
+            ch.recv()
+        with pytest.raises(RuntimeError, match="await arecv"):
+            list(ch)
+        assert await ch.arecv(timeout=0) == 1  # the value is still there
+
+    @pytest.mark.asyncio
+    async def test_a_call_without_waiting_is_allowed_on_the_loop(self):
+        """Sync code the loop runs, which cannot await, uses timeout=0."""
+        ch = Chan[int](1)
+        ch.send(1, timeout=0)
+        with pytest.raises(TimeoutError):
+            ch.send(2, timeout=0)
+        assert ch.recv(timeout=0) == 1
+        with pytest.raises(TimeoutError):
+            ch.recv(timeout=0)
 
 
 class TestAcrossTaskKinds:
