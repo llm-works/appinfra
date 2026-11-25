@@ -9,20 +9,20 @@ import multiprocessing as mp
 import socket
 from ctypes import c_int
 from multiprocessing.connection import wait
-from multiprocessing.synchronize import Event as MPEvent
 from typing import Any
 
 import uvicorn
 
+from ....service.stop import StopToken
 from .ipc import IPCChannel
 
 
 class WatchedServer(uvicorn.Server):
-    """uvicorn Server that stops on parent death or a set shutdown event.
+    """uvicorn Server that stops on parent death or once its service is stopping.
 
     uvicorn calls ``on_tick()`` from its main loop every 0.1s. Each tick checks,
     without blocking, whether the parent's process sentinel is readable (the
-    parent exited, including by SIGKILL) or the shutdown event is set. On
+    parent exited, including by SIGKILL) or the service's stopping token is set. On
     either, the IPC channel is closed first: uvicorn drains in-flight requests
     before the lifespan shutdown would close it, so requests waiting for a
     reply from a dead parent would otherwise hold the process for up to the
@@ -44,12 +44,12 @@ class WatchedServer(uvicorn.Server):
     def __init__(
         self,
         config: uvicorn.Config,
-        shutdown_event: MPEvent,
+        stopping: StopToken,
         ipc_channel: IPCChannel | None,
         bound_port: c_int,
     ) -> None:
         super().__init__(config)
-        self._shutdown_event = shutdown_event
+        self._stopping = stopping
         self._ipc_channel = ipc_channel
         self._bound_port = bound_port
         self.ready = False
@@ -73,7 +73,7 @@ class WatchedServer(uvicorn.Server):
         return result
 
     def _exit_requested(self) -> bool:
-        if self._shutdown_event.is_set():
+        if self._stopping.is_set():
             return True
         if self._parent_sentinel is None:
             return False

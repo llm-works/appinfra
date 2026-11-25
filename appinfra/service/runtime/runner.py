@@ -14,6 +14,7 @@ from contextlib import contextmanager
 from ..base import Service
 from ..errors import HealthTimeoutError, InvalidTransitionError, RunError, SetupError
 from ..state import TRANSITIONS, RestartPolicy, State, StateHook
+from ..stop import StopToken
 from .drive import check_service
 
 # The runners whose state hooks the current thread is running (_notify())
@@ -49,6 +50,8 @@ class Runner(ABC):
             TypeError: If *service* is not a Service (see check_service()).
         """
         self.service: Service = check_service(service)
+        # Before setup(), which may already derive from it
+        self.service.stopping = StopToken()
         self.policy = policy or _DEFAULT_POLICY
         self._state = State.CREATED
         # Created by the first on_state_change(): most runners have no hooks
@@ -348,8 +351,13 @@ class Runner(ABC):
         return max(0.0, timeout - (time.monotonic() - began))
 
     def _reset_stop(self) -> None:
-        """Clear the runner's stop request before a start; called under the lock.
-        A runner whose stop goes through its own signal overrides it."""
+        """Give the service a token for the coming run; called under the lock.
+        A token stays stopped, so a run after a stopped one gets a new token,
+        and the old one leaves the tree it was derived in."""
+        token = self.service.stopping
+        if token.is_set():
+            token.detach()
+            self.service.stopping = StopToken()
 
     def _run_setup(self) -> None:
         """Run service setup, transition to FAILED on error."""

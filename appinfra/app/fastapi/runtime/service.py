@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import multiprocessing as mp
 from ctypes import c_int
-from multiprocessing.synchronize import Event as MPEvent
 from typing import TYPE_CHECKING, Any
 
 from ....service import Service
@@ -70,8 +69,6 @@ class UvicornService(Service):
         self._bound_port: c_int | None = None
         self._request_q = request_q
         self._response_q = response_q
-        # Injected by ProcessRunner in subprocess
-        self._shutdown_event: MPEvent | None = None
         # Set by run() in the subprocess
         self._server: WatchedServer | None = None
 
@@ -160,14 +157,12 @@ class UvicornService(Service):
     def run(self) -> None:
         """Run uvicorn (runs in subprocess).
 
-        Exits on SIGTERM/SIGINT, when the shutdown event is set, or when the
-        parent process dies (see ``WatchedServer``).
+        Exits on SIGTERM/SIGINT, once ``stopping`` is set, or when the parent
+        process dies (see ``WatchedServer``).
         """
         from ....subprocess import SubprocessContext
         from .watched_server import WatchedServer
 
-        if self._shutdown_event is None:
-            raise RuntimeError("_shutdown_event must be injected by ProcessRunner")
         if self._bound_port is None:
             raise RuntimeError("setup() must run before run()")
         bound_port = self._bound_port
@@ -181,9 +176,7 @@ class UvicornService(Service):
             ipc_channel = self._create_ipc_channel()
             app = self._adapter.build(ipc_channel=ipc_channel)
             config = self._build_uvicorn_config(app)
-            server = WatchedServer(
-                config, self._shutdown_event, ipc_channel, bound_port
-            )
+            server = WatchedServer(config, self.stopping, ipc_channel, bound_port)
             self._server = server
             server.run()
             if not server.started:

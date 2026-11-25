@@ -1,11 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright 2026 The appinfra Authors
 
-"""Service runners - execution and state management."""
+"""What runs services: the runners for a thread, a process and a task on a LoopHost's loop,
+and their execution and state management."""
 
-from .base import Runner
 from .loop import LoopHost, TaskRunner
 from .process import ProcessRunner
+from .runner import Runner
 from .thread import ThreadRunner
 
 __all__ = [

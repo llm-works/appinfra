@@ -17,6 +17,7 @@ from appinfra.service import (
     ScheduledService,
     Service,
     State,
+    StopToken,
     ThreadRunner,
 )
 from tests.helpers.service.runner import SimpleService
@@ -116,8 +117,35 @@ class OutlivesStop(Service):
         self.release.wait(5.0)
 
 
+class DerivesThenFails(Service):
+    """run() derives a token for its work from its own, then fails."""
+
+    def __init__(self) -> None:
+        self._lg = MagicMock()
+        self.work: StopToken | None = None
+        self.derived = threading.Event()
+
+    @property
+    def name(self) -> str:
+        return "derives-then-fails"
+
+    def run(self) -> None:
+        self.work = self.stopping.child()
+        self.derived.set()
+        raise RuntimeError("run() fails")
+
+
 class TestThreadRunner:
     """Test ThreadRunner class."""
+
+    def test_a_run_that_ends_stops_its_token(self):
+        """A run that ends without a stop(), here by failing, stops its token,
+        so work derived from it ends with the run instead of outliving it."""
+        svc = DerivesThenFails()
+        ThreadRunner(svc).start()
+        assert svc.derived.wait(timeout=5.0)
+        assert svc.work is not None
+        assert svc.work.wait(timeout=5.0)  # the deadline is the failure path
 
     def test_stop_during_a_start_from_failed_leaves_the_start_alone(self):
         """A stop() that lands while a start() from FAILED is in setup() does

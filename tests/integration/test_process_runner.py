@@ -3,14 +3,20 @@
 
 """Integration tests for ProcessRunner with real subprocesses."""
 
+import multiprocessing as mp
 import threading
 import time
-from multiprocessing.synchronize import Event as MPEvent
 
 import pytest
 
 from appinfra.log import Logger
-from appinfra.service import InvalidTransitionError, ProcessRunner, Service, State
+from appinfra.service import (
+    InvalidTransitionError,
+    ProcessRunner,
+    Service,
+    State,
+    StopToken,
+)
 from tests.helpers.fork import forks_in_xdist_worker
 
 
@@ -20,7 +26,6 @@ class SimpleProcessService(Service):
     def __init__(self, lg: Logger, name: str = "mp-test") -> None:
         self._lg = lg
         self._name = name
-        self._shutdown_event: MPEvent | None = None  # injected by ProcessRunner
 
     @property
     def name(self) -> str:
@@ -28,8 +33,7 @@ class SimpleProcessService(Service):
 
     def run(self) -> None:
         self._lg.info("service started")
-        assert self._shutdown_event is not None
-        self._shutdown_event.wait()
+        self.stopping.wait()
         self._lg.info("service stopping")
 
     def is_healthy(self) -> bool:
@@ -46,6 +50,24 @@ class CountsSetup(SimpleProcessService):
 
     def setup(self) -> None:
         self.setups += 1
+
+
+class WaitsOnTokenFromSetup(SimpleProcessService):
+    """run() waits on a token setup() took from self.stopping, the token itself
+    or a child of it; setup() runs in the parent, before the subprocess starts.
+    Module level so the spawn start method can pickle it."""
+
+    def __init__(self, lg: Logger, derive: bool) -> None:
+        super().__init__(lg, name="token-from-setup")
+        self.derive = derive
+        self.work: StopToken | None = None
+
+    def setup(self) -> None:
+        self.work = self.stopping.child() if self.derive else self.stopping
+
+    def run(self) -> None:
+        assert self.work is not None
+        self.work.wait()
 
 
 @forks_in_xdist_worker
@@ -73,6 +95,41 @@ class TestProcessRunnerIntegration:
 
         assert runner.state == State.STOPPED
         assert not runner.is_alive()
+
+    @pytest.mark.skipif(
+        "fork" not in mp.get_all_start_methods(), reason="needs the fork start method"
+    )
+    def test_forked_child_stops_once_the_parent_writer_closes(self, lg):
+        """The stop pipe reaches EOF when the parent's writer closes, as when the
+        parent dies: a forked child closes the copy of the writer it inherits,
+        so nothing else holds the pipe open and its token stops."""
+        runner = ProcessRunner(SimpleProcessService(lg), start_method="fork")
+        runner.start()
+        runner.wait_healthy(timeout=5.0)
+        process = runner.process
+        assert process is not None
+        try:
+            runner._stop_writer.close()
+            process.join(timeout=10.0)  # the deadline is the failure path
+            assert not process.is_alive()
+            assert process.exitcode == 0
+        finally:
+            runner.stop()
+
+    @pytest.mark.parametrize("derive", [False, True], ids=["alias", "child"])
+    @pytest.mark.parametrize("method", mp.get_all_start_methods())
+    def test_stop_reaches_a_token_setup_took(self, lg, method, derive):
+        """stop() ends a run() that waits on a token setup() kept, gracefully:
+        exit code 0, not the terminate() that follows a stop_timeout."""
+        runner = ProcessRunner(
+            WaitsOnTokenFromSetup(lg, derive), start_method=method, stop_timeout=5.0
+        )
+        runner.start()
+        runner.wait_healthy(timeout=10.0)
+        process = runner.process
+        assert process is not None
+        runner.stop()
+        assert process.exitcode == 0
 
     def test_start_while_running_is_refused_before_setup(self, lg):
         """A second start() fails on the state check, without running setup()."""

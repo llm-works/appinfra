@@ -10,6 +10,7 @@ import multiprocessing as mp
 import sys
 import threading
 import time
+from multiprocessing.connection import Connection
 from multiprocessing.context import BaseContext
 from multiprocessing.process import BaseProcess
 from multiprocessing.synchronize import Event as MPEvent
@@ -19,8 +20,9 @@ from ...log import Logger
 from ...log.mp import LogQueueListener
 from ..base import Service
 from ..state import RestartPolicy, State
-from .base import Runner
+from ..stop import StopToken
 from .drive import check_drivable, drive
+from .runner import Runner
 
 
 class ProcessRunner(Runner):
@@ -31,10 +33,9 @@ class ProcessRunner(Runner):
     LoopHost instead.
 
     Note:
-        A service with its own run() should use ``_shutdown_event`` (injected
-        by ProcessRunner) to detect shutdown signals from the parent process. Do
-        NOT create your own multiprocessing.Event - it won't be shared across
-        processes. Scheduled services need nothing: the runner ends their loop.
+        In the subprocess, ``self.stopping`` is set when the parent stops the
+        service, as under any runner. Scheduled services need nothing: the
+        runner ends their loop.
 
     Example:
         from appinfra.service import ProcessRunner, Service
@@ -42,17 +43,16 @@ class ProcessRunner(Runner):
         class MyService(Service):
             def __init__(self, lg: Logger):
                 self._lg = lg
-                self._shutdown_event: mp.Event | None = None  # Injected
 
             @property
             def name(self) -> str:
                 return "worker"
 
             def run(self) -> None:
-                while not self._shutdown_event.is_set():
+                while not self.stopping.is_set():
                     self._lg.debug("doing work")
                     do_work()
-                    self._shutdown_event.wait(1.0)
+                    self.stopping.wait(1.0)
 
             def teardown(self) -> None:
                 pass  # Runs in the subprocess after run() returns
@@ -91,7 +91,15 @@ class ProcessRunner(Runner):
         self.stop_timeout = stop_timeout
         self._start_method = start_method
         self._process: BaseProcess | None = None
+        # Read by the subprocess's health poller, which only checks it: nothing
+        # waits on it, so set() never waits for a waiter (see _stop_writer)
         self._shutdown_event: MPEvent | None = None
+        # The stop signal itself. The subprocess blocks on its read end and stops
+        # the service's token on a message or EOF. Not an mp.Event: Event.set()
+        # waits until every process waiting on the event has woken, so a
+        # subprocess that died while waiting would block set() for good.
+        self._stop_reader: Connection | None = None
+        self._stop_writer: Connection | None = None
         self._healthy_event: MPEvent | None = None
         self._error_queue: mp.Queue[BaseException] | None = None
         self._exception: BaseException | None = None
@@ -146,8 +154,15 @@ class ProcessRunner(Runner):
     def _create_ipc_primitives(self, ctx: BaseContext) -> None:
         """Create IPC primitives for subprocess communication."""
         self._shutdown_event = ctx.Event()
+        self._stop_reader, self._stop_writer = ctx.Pipe(duplex=False)
         self._healthy_event = ctx.Event()
         self._error_queue = ctx.Queue()
+
+    def _inherited_writer(self, ctx: BaseContext) -> Connection | None:
+        """The stop pipe's writer as the child inherits it: a forked child holds
+        a copy, which it must close for the pipe to reach EOF once the parent's
+        copy closes; a spawned child has none."""
+        return self._stop_writer if ctx.get_start_method() == "fork" else None
 
     def _spawn_process(self, ctx: BaseContext, log_config: dict[str, Any]) -> None:
         """Spawn the subprocess."""
@@ -166,6 +181,8 @@ class ProcessRunner(Runner):
                 args=(
                     self.service,
                     self._shutdown_event,
+                    self._stop_reader,
+                    self._inherited_writer(ctx),
                     self._healthy_event,
                     self._error_queue,
                     log_config,
@@ -209,9 +226,15 @@ class ProcessRunner(Runner):
         if timeout is None:
             timeout = self.stop_timeout
 
-        # Signal shutdown
+        # Signal shutdown: the parent's token, and through the pipe the
+        # subprocess's own. A write never waits for the reader, so a subprocess
+        # that has died cannot block it.
+        self.service.stopping.stop()
         if self._shutdown_event is not None:
             self._shutdown_event.set()
+        if self._stop_writer is not None:
+            with contextlib.suppress(OSError):
+                self._stop_writer.send_bytes(b"")
 
         # Wait for graceful exit
         process_stopped = True
@@ -312,6 +335,11 @@ class ProcessRunner(Runner):
         """Clean up IPC resources."""
         self._process = None
         self._shutdown_event = None
+        for end in (self._stop_reader, self._stop_writer):
+            if end is not None:
+                with contextlib.suppress(OSError):
+                    end.close()
+        self._stop_reader = self._stop_writer = None
         self._healthy_event = None
         if self._error_queue is not None:
             try:
@@ -404,18 +432,44 @@ def _start_health_poller(
     threading.Thread(target=poll, daemon=True).start()
 
 
+def _bridge_stop(
+    token: StopToken, stop_reader: Connection, inherited_writer: Connection | None
+) -> None:
+    """Stop *token*, the service's own, from a daemon thread once the parent
+    writes to *stop_reader*'s pipe or the pipe reaches EOF. The service's token,
+    not a new one: setup() ran in the parent and may have kept it or derived
+    from it, and the subprocess has those tokens as copies of it.
+
+    EOF comes only once every copy of the writer is closed. A forked child
+    closes its own copy, *inherited_writer*, here. Children forked later by the
+    same parent hold copies too, so when the parent dies without closing its
+    writer, EOF is certain only for a single forked child."""
+    if inherited_writer is not None:
+        with contextlib.suppress(OSError):
+            inherited_writer.close()
+
+    def bridge() -> None:
+        with contextlib.suppress(EOFError, OSError):
+            stop_reader.recv_bytes()
+        token.stop()
+
+    threading.Thread(target=bridge, name="stopping", daemon=True).start()
+
+
 def _process_entry(
     service: Any,
     shutdown_event: MPEvent,
+    stop_reader: Connection,
+    inherited_writer: Connection | None,
     healthy_event: MPEvent,
     error_queue: mp.Queue[BaseException],
     log_config: dict[str, Any],
 ) -> None:
     """Entry point for service subprocess.
 
-    Injects runtime dependencies into the service:
+    Gives the service what it runs with here:
     - ``_lg``: Logger configured to forward to parent via queue
-    - ``_shutdown_event``: Event signaled when parent requests shutdown
+    - ``stopping``: its own token, stopped here when the parent requests shutdown
 
     The process exits non-zero when the service failed, so the parent's monitor
     restarts it; exit code 0 means a clean shutdown.
@@ -423,19 +477,20 @@ def _process_entry(
     exit_code = 0
     try:
         lg = Logger.from_queue_config(log_config, name=f"svc/{service.name}")
-        # Inject runtime dependencies (services must have these attributes)
         if hasattr(service, "_lg"):
             service._lg = lg
-        if hasattr(service, "_shutdown_event"):
-            service._shutdown_event = shutdown_event
+        _bridge_stop(service.stopping, stop_reader, inherited_writer)
 
         _start_health_poller(service, shutdown_event, healthy_event)
-        drive(service, shutdown_event)
+        drive(service, service.stopping)
     except BaseException as e:
         exit_code = _exit_code(e)
         with contextlib.suppress(Exception):
             error_queue.put(e)
     finally:
+        # The run has ended: work derived from its token is told to stop
+        with contextlib.suppress(Exception):
+            service.stopping.stop()
         with contextlib.suppress(Exception):
             service.teardown()
     if exit_code:

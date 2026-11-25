@@ -8,6 +8,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 
 from ..log import Logger
+from .stop import StopToken
 
 
 class Service(ABC):
@@ -33,7 +34,6 @@ class Service(ABC):
                 self._lg = lg
                 self._config = config
                 self._pool: Pool | None = None
-                self._stop = threading.Event()
 
             @property
             def name(self) -> str:
@@ -46,10 +46,9 @@ class Service(ABC):
             def run(self) -> None:
                 self._pool = create_pool(self._config)
                 self._lg.info("database pool created")
-                self._stop.wait()  # Block until teardown
+                self.stopping.wait()  # Block until stopped
 
             def teardown(self) -> None:
-                self._stop.set()
                 if self._pool:
                     self._pool.close()
 
@@ -59,6 +58,19 @@ class Service(ABC):
 
     _lg: Logger
     """Logger instance. Set by subclass __init__ or by ProcessRunner."""
+
+    stopping: StopToken
+    """Set when this run of the service is to stop, and once the run has ended
+    however it ended; set by the runner before setup(), a new token for each
+    start. ``stopping.child()`` derives a token stopped with it, so work the run
+    starts is told to stop with it, before teardown(); stopping does not wait
+    for that work.
+
+    A synchronous run(), under ThreadRunner or ProcessRunner (in the
+    subprocess), checks it (``is_set()``) or blocks on it (``wait()``) and
+    returns once it is set. An AsyncService's run() never calls ``wait()``,
+    which would block the loop it shares: under TaskRunner, stopping cancels
+    its task, and it uses the token to derive tokens for what it starts."""
 
     @property
     def lg(self) -> Logger:
@@ -84,11 +96,10 @@ class Service(ABC):
     def run(self) -> None:
         """Do the service's work, blocking until it is stopped.
 
-        The runner calls it once. Under ThreadRunner, teardown() must make it
-        return; under ProcessRunner, the injected ``_shutdown_event`` is set
-        (teardown() runs in the subprocess after run() returns). ProcessRunner
-        injects it only into an attribute the service declares, e.g.
-        ``self._shutdown_event = None`` in ``__init__``.
+        The runner calls it once, and it returns once ``self.stopping`` is set.
+        Under ThreadRunner, stop() also calls teardown() while run() still runs,
+        so a run() blocked elsewhere can be released there; under ProcessRunner,
+        teardown() runs in the subprocess after run() returns.
         """
         ...
 
@@ -104,15 +115,18 @@ class Service(ABC):
         """
 
     def teardown(self) -> None:
-        """Cleanup the service.
+        """Cleanup the service, once the run is told to stop.
 
-        For a scheduled service, the runner calls it once the loop has ended
-        (stopped or failed), on the thread or in the process that ran the loop,
-        so it never overlaps tick(). For an async service, it runs on the
-        LoopHost's thread after run() has ended, so it must not block. For a
-        service with its own run(), it must make run() return: under
-        ThreadRunner, stop() calls it while run() is still running. Default
-        does nothing.
+        run() returns on ``self.stopping``, under every runner; teardown()
+        releases resources. For a scheduled service, the runner calls it once
+        the loop has ended (stopped or failed), on the thread or in the process
+        that ran the loop, so it never overlaps tick(). For an async service, it
+        runs on the LoopHost's thread after run() has ended, so it must not
+        block. For a service with its own run(), ProcessRunner calls it in the
+        subprocess after run() has returned; ThreadRunner's stop() calls it once
+        the token is set, while run() may still be running, so there it can also
+        release a run() blocked on something other than the token. Default does
+        nothing.
         """
 
     def is_healthy(self) -> bool:

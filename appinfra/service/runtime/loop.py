@@ -12,7 +12,7 @@ from types import TracebackType
 
 from ..base import AsyncService
 from ..state import RestartPolicy, State
-from .base import Runner
+from .runner import Runner
 
 
 class LoopHost:
@@ -45,6 +45,9 @@ class LoopHost:
         # begins runs before the loop stops, so its shutdown sees the task
         self._lock = threading.Lock()
         self._closing = False
+        # Runners whose task is alive; loop thread only. The shutdown stops their
+        # tokens before it cancels the tasks, as TaskRunner.stop() does
+        self._runners: set[TaskRunner] = set()
 
     @property
     def loop(self) -> asyncio.AbstractEventLoop:
@@ -91,6 +94,7 @@ class LoopHost:
         self._thread = threading.Thread(
             target=self._serve, args=(self._loop,), name=self.name, daemon=True
         )
+        self._runners = set()
         self._thread.start()
 
     def stop(self, timeout: float = 5.0) -> None:
@@ -116,13 +120,16 @@ class LoopHost:
         self._thread = None
         self._loop = None
 
-    @staticmethod
-    def _serve(loop: asyncio.AbstractEventLoop) -> None:
+    def _serve(self, loop: asyncio.AbstractEventLoop) -> None:
         """Thread target: run *loop* until stop(), then end its tasks, as
-        asyncio.run() does, and close it."""
+        asyncio.run() does, and close it. The services' tokens stop before
+        their tasks are cancelled: a run that waits for its own work while it
+        is cancelled needs that work told to stop first."""
         asyncio.set_event_loop(loop)
         try:
             loop.run_forever()
+            for runner in list(self._runners):
+                runner.service.stopping.stop()
             tasks = asyncio.all_tasks(loop)
             for task in tasks:
                 task.cancel()
@@ -182,11 +189,8 @@ class TaskRunner(Runner):
         self._host = host
         self._service = service
         self._exception: BaseException | None = None
-        # Plain flags, not threading.Events, so that an idle service costs no
+        # Plain counts, not threading.Events, so that an idle service costs no
         # lock or condition: an Event exists only while a stop() waits.
-        # Set by stop(); read on the loop, where a task that has not begun yet
-        # sees it and skips run()
-        self._stop_requested = False
         # Runs launched by start() and runs whose task has ended and torn the
         # service down; alive while they differ. Counts, each with one writer,
         # not a flag: a run ending after a start() on another thread launched
@@ -199,9 +203,6 @@ class TaskRunner(Runner):
         self._task: asyncio.Task[None] | None = None
         # Events of stop() calls waiting for the task to end; loop thread only
         self._waiters: list[threading.Event] | None = None
-
-    def _reset_stop(self) -> None:
-        self._stop_requested = False
 
     def start(self) -> None:
         """Run setup(), then start the service's task on the host's loop.
@@ -226,6 +227,8 @@ class TaskRunner(Runner):
             self._host._schedule(self._spawn)
         except RuntimeError:
             self._launched -= 1
+            # As when a run ends: work setup() derived stops before teardown()
+            self.service.stopping.stop()
             self._teardown()
             self._transition(State.FAILED)
             raise
@@ -239,15 +242,21 @@ class TaskRunner(Runner):
         )
         task.add_done_callback(self._finish)
         self._task = task
+        self._host._runners.add(self)
 
     def _finish(self, task: asyncio.Task[None]) -> None:
-        """On the loop, once *task* has ended: tear the service down, settle
-        the state, and wake the stop() calls waiting for it.
+        """On the loop, once *task* has ended: stop the run's token, tear the
+        service down, settle the state, and wake the stop() calls waiting for it.
 
-        The state settles before the run is counted ended, so is_alive() never
-        reports a RUNNING service as gone. Once it has settled, a start() on
-        another thread may begin a new run, which resets _task; the new run's
-        task is then left alone."""
+        The token stops however the task ended, also when the host cancelled it
+        without a stop(): work derived from it is told to stop before
+        teardown(). The state settles before the run is counted ended, so
+        is_alive() never reports a RUNNING service as gone. Once it has settled,
+        a start() on another thread may begin a new run, which resets _task;
+        the new run's task is then left alone."""
+        self.service.stopping.stop()
+        if self._task is task:
+            self._host._runners.discard(self)
         self._teardown()
         waiters, self._waiters = self._waiters, None
         self._settle_exit_state(self._exception)
@@ -260,7 +269,7 @@ class TaskRunner(Runner):
     async def _run_service(self) -> None:
         """run(), unless a stop() came first. A cancel, from stop() or the host
         shutting down, ends it cleanly; any other exception is recorded."""
-        if self._stop_requested:
+        if self._service.stopping.is_set():
             return
         try:
             await self._service.run()
@@ -293,7 +302,8 @@ class TaskRunner(Runner):
             raise RuntimeError("TaskRunner.stop() on the loop thread would block it")
 
         self._transition(State.STOPPING)
-        self._stop_requested = True
+        # Before the cancel: a task not begun yet sees it and skips run()
+        self.service.stopping.stop()
         if self.is_alive() and not self._wait_ended(timeout):
             self.service.lg.warning(
                 "service task did not end in time",

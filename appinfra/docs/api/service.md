@@ -24,8 +24,6 @@ Three-layer architecture separates concerns:
 ## Quick Start
 
 ```python
-import threading
-
 from appinfra.log import Logger
 from appinfra.service import Service, ThreadRunner
 
@@ -33,7 +31,6 @@ from appinfra.service import Service, ThreadRunner
 class MyService(Service):
     def __init__(self, lg: Logger):
         self._lg = lg
-        self._stop = threading.Event()
 
     @property
     def name(self) -> str:
@@ -41,10 +38,7 @@ class MyService(Service):
 
     def run(self) -> None:
         self._lg.info("service started")
-        self._stop.wait()  # Block until teardown
-
-    def teardown(self) -> None:
-        self._stop.set()
+        self.stopping.wait()  # Block until stopped
 
 
 # Run with ThreadRunner
@@ -83,7 +77,7 @@ class Service(ABC):
         """Initialize resources. Raise SetupError to abort."""
 
     def teardown(self) -> None:
-        """Cleanup. Scheduled/async: runs after the work ends. Otherwise: must make run() return."""
+        """Cleanup, once the run is told to stop. run() returns on self.stopping, not on teardown()."""
 
     def is_healthy(self) -> bool:
         """Check if ready. Runner waits for this before RUNNING state."""
@@ -156,7 +150,6 @@ thread.
 class Database(Service):
     def __init__(self, lg: Logger):
         self._lg = lg
-        self._stop = threading.Event()
 
     @property
     def name(self) -> str:
@@ -164,15 +157,23 @@ class Database(Service):
 
     def run(self) -> None:
         self._lg.info("service started")
-        self._stop.wait()  # Block until teardown
-
-    def teardown(self) -> None:
-        self._stop.set()
+        self.stopping.wait()  # Block until stopped
 ```
 
-Under `ProcessRunner`, `run()` watches the injected `_shutdown_event` instead: `teardown()` runs in
-the subprocess after `run()` returns. `ProcessRunner` injects it only into an attribute the service
-declares, e.g. `self._shutdown_event = None` in `__init__`.
+Every runner gives the service a `StopToken` as `self.stopping`, set when the service is to stop.
+`self.stopping.child()` derives a token that is stopped with it, for work the service starts. The
+runner also stops the token once `run()` has ended, however it ended, before it calls
+`teardown()`: work derived from the token is told to stop first. Stopping a token does not wait for
+that work; a service that must not release resources while its workers still use them waits for
+them, for instance by joining them in `teardown()`.
+
+- **A service with a synchronous `run()`**, under `ThreadRunner` or `ProcessRunner` (in the
+  subprocess, where `teardown()` runs after `run()` returns), blocks on `self.stopping.wait()` or
+  checks `self.stopping.is_set()` instead of keeping an event of its own.
+- **An `AsyncService`**, under a LoopHost's `TaskRunner`, needs no token to learn of a stop:
+  stopping cancels its task at the `await` it is parked on. It never calls `self.stopping.wait()`,
+  which blocks the thread and so the loop every service on the host shares. It derives tokens for
+  work it hands to threads (`await asyncio.to_thread(token.wait)`), and may check `is_set()`.
 
 ## State Machine
 

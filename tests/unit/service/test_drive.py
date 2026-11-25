@@ -16,7 +16,7 @@ from appinfra.service import (
     Service,
     ThreadRunner,
 )
-from appinfra.service.runner.drive import drive
+from appinfra.service.runtime.drive import drive
 
 
 class FakeStop:

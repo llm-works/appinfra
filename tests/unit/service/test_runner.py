@@ -5,7 +5,6 @@
 
 import itertools
 import threading
-import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
@@ -44,9 +43,11 @@ class IdleAsync(AsyncService):
 
 @contextmanager
 def _mock_mp_context() -> Iterator[tuple[MagicMock, MagicMock, MagicMock]]:
-    """Patch ProcessRunner's multiprocessing context; yield its Process, Event, Queue."""
-    with patch("appinfra.service.runner.process.mp.get_context") as get_context:
+    """Patch ProcessRunner's multiprocessing context; yield its Process, Event, Queue.
+    Its Pipe gives a pair of mock ends."""
+    with patch("appinfra.service.runtime.process.mp.get_context") as get_context:
         ctx = get_context.return_value
+        ctx.Pipe.side_effect = lambda duplex=True: (MagicMock(), MagicMock())
         yield ctx.Process, ctx.Event, ctx.Queue
 
 
@@ -63,11 +64,7 @@ class MPSimpleService(Service):
         return self._name
 
     def run(self) -> None:
-        # Wait for shutdown signal (injected by ProcessRunner)
-        if hasattr(self, "_shutdown_event") and self._shutdown_event:
-            self._shutdown_event.wait()
-        else:
-            time.sleep(10)
+        self.stopping.wait()
 
     def is_healthy(self) -> bool:
         return True
@@ -189,7 +186,7 @@ class TestThreadRunner:
             runner._launch()
             return old
 
-        with patch("appinfra.service.runner.thread.threading") as mod:
+        with patch("appinfra.service.runtime.thread.threading") as mod:
             mod.Thread.return_value = newer
             mod.current_thread.side_effect = launch_newer
             runner._run()  # the old thread's last steps, on this thread
@@ -204,7 +201,7 @@ class TestThreadRunner:
         thread = MagicMock()
         thread.is_alive.return_value = False
         runner._thread = thread
-        clock = "appinfra.service.runner.base.time.monotonic"
+        clock = "appinfra.service.runtime.runner.time.monotonic"
 
         # The wait for start() takes 4 of the 5 seconds
         with (
@@ -228,7 +225,7 @@ class TestProcessRunner:
         """start() transitions through INITD -> STARTING."""
         with (
             _mock_mp_context() as (mock_process, _, _),
-            patch("appinfra.service.runner.process.LogQueueListener"),
+            patch("appinfra.service.runtime.process.LogQueueListener"),
         ):
             mock_process.return_value.is_alive.return_value = True
             mock_process.return_value.pid = 12345
@@ -279,7 +276,7 @@ class TestProcessRunner:
         """State hooks are called on transitions."""
         with (
             _mock_mp_context(),
-            patch("appinfra.service.runner.process.LogQueueListener"),
+            patch("appinfra.service.runtime.process.LogQueueListener"),
         ):
             transitions = []
 
@@ -309,7 +306,7 @@ class TestProcessRunner:
         """stop() terminates a running process."""
         with (
             _mock_mp_context() as (mock_process, mock_event, _),
-            patch("appinfra.service.runner.process.LogQueueListener"),
+            patch("appinfra.service.runtime.process.LogQueueListener"),
         ):
             mock_process.return_value.is_alive.return_value = False
             mock_event.return_value.set = lambda: None
@@ -328,7 +325,7 @@ class TestProcessRunner:
         """A failure after the fork terminates the forked child before start() raises."""
         with (
             _mock_mp_context() as (mock_process, _, _),
-            patch("appinfra.service.runner.process.LogQueueListener") as mock_listener,
+            patch("appinfra.service.runtime.process.LogQueueListener") as mock_listener,
         ):
             child = mock_process.return_value
             child.is_alive.return_value = True  # alive until terminated
@@ -351,7 +348,7 @@ class TestProcessRunner:
         """A child still alive after terminate() is killed."""
         with (
             _mock_mp_context() as (mock_process, _, _),
-            patch("appinfra.service.runner.process.LogQueueListener") as mock_listener,
+            patch("appinfra.service.runtime.process.LogQueueListener") as mock_listener,
         ):
             child = mock_process.return_value
             child.is_alive.return_value = True
@@ -370,7 +367,7 @@ class TestProcessRunner:
         """is_alive() returns True when process is alive."""
         with (
             _mock_mp_context() as (mock_process, _, _),
-            patch("appinfra.service.runner.process.LogQueueListener"),
+            patch("appinfra.service.runtime.process.LogQueueListener"),
         ):
             mock_process.return_value.is_alive.return_value = True
 
@@ -384,7 +381,7 @@ class TestProcessRunner:
         """is_healthy() returns True when process alive and healthy event set."""
         with (
             _mock_mp_context() as (mock_process, mock_event, _),
-            patch("appinfra.service.runner.process.LogQueueListener"),
+            patch("appinfra.service.runtime.process.LogQueueListener"),
         ):
             mock_process.return_value.is_alive.return_value = True
             mock_event.return_value.is_set.return_value = True
@@ -399,7 +396,7 @@ class TestProcessRunner:
         """pid returns process ID when running."""
         with (
             _mock_mp_context() as (mock_process, _, _),
-            patch("appinfra.service.runner.process.LogQueueListener"),
+            patch("appinfra.service.runtime.process.LogQueueListener"),
         ):
             mock_process.return_value.is_alive.return_value = True
             mock_process.return_value.pid = 12345
@@ -414,7 +411,7 @@ class TestProcessRunner:
         """exit_code returns code when process stopped."""
         with (
             _mock_mp_context() as (mock_process, _, _),
-            patch("appinfra.service.runner.process.LogQueueListener"),
+            patch("appinfra.service.runtime.process.LogQueueListener"),
         ):
             mock_process.return_value.is_alive.return_value = False
             mock_process.return_value.exitcode = 0
@@ -431,7 +428,7 @@ class TestProcessRunner:
 
         with (
             _mock_mp_context() as (_, _, mock_queue_cls),
-            patch("appinfra.service.runner.process.LogQueueListener"),
+            patch("appinfra.service.runtime.process.LogQueueListener"),
         ):
             # Create separate mocks for log queue and error queue
             log_queue_mock = MagicMock()
@@ -464,7 +461,7 @@ class TestProcessRunner:
         """stop() kills a process that won't terminate."""
         with (
             _mock_mp_context() as (mock_process, mock_event, _),
-            patch("appinfra.service.runner.process.LogQueueListener"),
+            patch("appinfra.service.runtime.process.LogQueueListener"),
         ):
             # Process stays alive through terminate, dies on kill()
             # Calls: 1) after join (alive->terminate), 2) after terminate (alive->kill), 3) final check (dead)

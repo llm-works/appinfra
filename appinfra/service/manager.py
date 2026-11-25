@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Self
 
 from .errors import DependencyFailedError
 from .graph import dependency_levels, validate_dependencies
-from .runner import Runner, ThreadRunner
+from .runtime import Runner, ThreadRunner
 from .state import RestartPolicy, State, StateHook
 
 if TYPE_CHECKING:

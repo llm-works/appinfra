@@ -29,7 +29,6 @@ class EchoService(Service):
 
     def __init__(self, lg: Logger) -> None:
         self._lg = lg
-        self._shutdown_event: mp.synchronize.Event | None = None  # injected
         self.channel: Channel | None = None
 
     @property
@@ -37,8 +36,8 @@ class EchoService(Service):
         return "echo"
 
     def run(self) -> None:
-        assert self._shutdown_event is not None and self.channel is not None
-        while not self._shutdown_event.is_set():
+        assert self.channel is not None
+        while not self.stopping.is_set():
             try:
                 request = self.channel.recv(timeout=0.1)
             except ChannelTimeoutError:
