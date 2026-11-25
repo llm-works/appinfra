@@ -91,7 +91,8 @@ class LoopWaiter(Waiter):
         """Resolve the future: directly on its loop's thread, through
         call_soon_threadsafe() from any other."""
         # _get_running_loop(): None off a loop, without the exception
-        # get_running_loop() raises on every wake from a thread
+        # get_running_loop() raises on every wake from a thread. Private; see
+        # chan._check_off_loop() for why it is used and its fallback
         if asyncio._get_running_loop() is self.loop:
             self._resolve()
             return

@@ -280,7 +280,10 @@ def _check_off_loop(timeout: float | None, call: str) -> None:
     or not it would: only timeout=0 is sure not to block the loop.
 
     _get_running_loop() returns None off a loop, where get_running_loop()
-    raises: thread tasks, the common case, pay no exception."""
+    raises: thread tasks, the common case, pay no exception. It is private, but
+    exported in asyncio.__all__ and used by anyio and uvloop; should it go,
+    get_running_loop() in a try gives the same answer at the cost of an
+    exception."""
     if timeout is not None and timeout <= 0:
         return
     if asyncio._get_running_loop() is not None:
