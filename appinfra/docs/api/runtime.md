@@ -252,7 +252,9 @@ if __name__ == "__main__":
 - `capacity` must be at least 1: a send cannot wait for a receiver in another process
 - a close on either side, or the other process exiting, closes the channel; a close on the
   receiving side drops what is still on its way
-- a process that hands an end to another `release()`s its own copy
+- EOF comes once every copy of an end is closed: a process that hands an end to another
+  `release()`s its own copy, and a forked child, which inherits both ends, `release()`s the
+  one it does not use
 - a value the receiving side cannot unpickle is skipped and reported through
   `threading.excepthook`
 - `ChanSend(sender, v)` and `ChanRecv(receiver)` work in `select`
