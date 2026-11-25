@@ -36,6 +36,8 @@ For API stability guarantees and deprecation policy, see
   a shared event loop, any other on a thread of its own) and returns its task id, for `wait()`,
   `cancel()`, `alive()` and `detach()`. Inside a task, `stopping()` and `task_id()` return its
   token and id. `StopToken` lives here; `appinfra.service` re-exports it.
+- `StopToken.on_stop(fn)`: calls `fn` once the token is stopped, and returns a function that
+  unregisters it.
 
 ### Changed
 - **Breaking:** `submit_stream()` is renamed `stream()` on `AsyncChannel`, `AsyncBufferedChannel`

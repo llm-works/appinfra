@@ -5,32 +5,44 @@
 
 from __future__ import annotations
 
+import functools
 import os
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 
 # Guards every token's children and wait event. One lock for all tokens, not one
 # each: a lock costs more than a token, and these sections are short and rare
 # (deriving, stopping, the first wait).
 _lock = threading.Lock()
 
+# Raised in each forked child. Callbacks carry the generation they were
+# registered in; a child drops those it copied from its parent without running
+# them.
+_generation = 0
 
-def _reset_lock_after_fork() -> None:
-    """A fork copies _lock as it is: held by another thread at that moment, it
-    would stay held in the child, where that thread does not exist."""
-    global _lock
+
+def _after_fork_in_child() -> None:
+    """A fork copies the parent's state as it is.
+
+    _lock, held by another thread at that moment, would stay held in the child,
+    where that thread does not exist. Callbacks registered on tokens belong to
+    the parent's waiters, which do not exist in the child either: running them
+    there could block for good on a lock the fork copied held."""
+    global _lock, _generation
     _lock = threading.Lock()
+    _generation += 1
 
 
 if hasattr(os, "register_at_fork"):  # POSIX only; nothing forks elsewhere
-    os.register_at_fork(after_in_child=_reset_lock_after_fork)
+    os.register_at_fork(after_in_child=_after_fork_in_child)
 
 
 class StopToken:
     """A one-way stop signal: once stopped, it stays stopped.
 
     A runner gives each run of a service its own token; the service checks it
-    (``is_set()``) or blocks on it (``wait()``) to learn when to return. Tokens
+    (``is_set()``), blocks on it (``wait()``) or has it call back (``on_stop()``)
+    to learn when to return. Tokens
     form a tree, like Go's context: ``child()`` derives a token that is stopped
     when its parent is, so stopping one token stops everything derived from it.
     A derived token that is no longer needed leaves the tree with ``detach()``.
@@ -39,7 +51,7 @@ class StopToken:
     task. It uses the token to derive tokens for what it starts.
     """
 
-    __slots__ = ("_stopped", "_event", "_children", "_parent")
+    __slots__ = ("_stopped", "_event", "_children", "_callbacks", "_parent")
 
     def __init__(self) -> None:
         """A token not yet stopped, with no parent."""
@@ -47,6 +59,10 @@ class StopToken:
         # Created by the first wait(): most tokens are only checked or never read
         self._event: threading.Event | None = None
         self._children: set[StopToken] | None = None
+        # The generation they were registered in, and the callbacks keyed by
+        # registration, so removal is O(1) and one function can be registered
+        # twice
+        self._callbacks: tuple[int, dict[object, Callable[[], None]]] | None = None
         self._parent: StopToken | None = None
 
     def __reduce__(
@@ -68,7 +84,10 @@ class StopToken:
         """Stop the token and every token derived from it. Idempotent.
 
         Walks the tree with a worklist, not recursion, so no depth stops it
-        partway: the part already stopped would ignore a second stop()."""
+        partway: the part already stopped would ignore a second stop(). For the
+        same reason a callback that raises does not end the walk: the first
+        error is raised once the whole tree is stopped."""
+        error: BaseException | None = None
         pending = [self]
         while pending:
             token = pending.pop()
@@ -77,11 +96,16 @@ class StopToken:
                     continue
                 token._stopped = True
                 event, children = token._event, token._children
+                callbacks = token._take_callbacks()
                 token._children = None
             if event is not None:
                 event.set()
             if children:
                 pending.extend(children)
+            if callbacks:
+                error = _run(callbacks, error)
+        if error is not None:
+            raise error
 
     def wait(self, timeout: float | None = None) -> bool:
         """Block until the token is stopped or *timeout* seconds pass.
@@ -98,6 +122,42 @@ class StopToken:
                     self._event.set()
             event = self._event
         return event.wait(timeout)
+
+    def on_stop(self, fn: Callable[[], None]) -> Callable[[], None]:
+        """Call *fn* once when the token is stopped; at once if it is already.
+
+        *fn* runs on the thread that calls stop(), and it must be short and
+        not block: stop() calls each token's callbacks in turn. Its error
+        reaches that caller; on a stopped token, the caller of on_stop().
+
+        Returns:
+            A function that unregisters *fn*. A caller done waiting calls it,
+            so a long-lived token does not collect callbacks. It does nothing
+            once *fn* has run, and calling it twice is harmless.
+        """
+        key = object()
+        with _lock:
+            if not self._stopped:
+                if self._callbacks is None or self._callbacks[0] != _generation:
+                    self._callbacks = (_generation, {})
+                self._callbacks[1][key] = fn
+                return functools.partial(self._remove_callback, key)
+        fn()
+        return _noop
+
+    def _remove_callback(self, key: object) -> None:
+        """Unregister the callback registered as *key*, if it is still there."""
+        with _lock:
+            if self._callbacks is not None:
+                self._callbacks[1].pop(key, None)
+
+    def _take_callbacks(self) -> list[Callable[[], None]]:
+        """Clear the callbacks; returns those registered in this process.
+        Called under _lock."""
+        callbacks, self._callbacks = self._callbacks, None
+        if callbacks is None or callbacks[0] != _generation:
+            return []
+        return list(callbacks[1].values())
 
     def child(self) -> StopToken:
         """A token stopped when this one is; stopped already if this one is."""
@@ -119,6 +179,24 @@ class StopToken:
             parent, self._parent = self._parent, None
             if parent is not None and parent._children is not None:
                 parent._children.discard(self)
+
+
+def _run(
+    callbacks: Iterable[Callable[[], None]], error: BaseException | None
+) -> BaseException | None:
+    """Call each of *callbacks*; returns *error*, or the first one raised if
+    *error* is None."""
+    for fn in callbacks:
+        try:
+            fn()
+        except BaseException as e:
+            if error is None:
+                error = e
+    return error
+
+
+def _noop() -> None:
+    """The unregister function of a callback that has run already."""
 
 
 def _unpickle(parent: StopToken | None) -> StopToken:

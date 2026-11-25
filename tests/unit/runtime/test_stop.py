@@ -6,6 +6,8 @@
 import pickle
 import sys
 
+import pytest
+
 from appinfra.runtime import StopToken
 
 
@@ -89,3 +91,94 @@ class TestStopToken:
         assert child2._parent._children == {child2}
         root.stop()
         assert not child2.is_set()
+
+
+class TestOnStop:
+    def test_stop_calls_it_once(self):
+        token = StopToken()
+        calls = []
+        token.on_stop(lambda: calls.append(1))
+        assert calls == []
+        token.stop()
+        token.stop()
+        assert calls == [1]
+
+    def test_on_a_stopped_token_it_is_called_at_once(self):
+        token = StopToken()
+        token.stop()
+        calls = []
+        remove = token.on_stop(lambda: calls.append(1))
+        assert calls == [1]
+        remove()  # harmless
+
+    def test_stopping_a_parent_calls_its_descendants_callbacks(self):
+        root = StopToken()
+        calls = []
+        root.child().child().on_stop(lambda: calls.append("grandchild"))
+        root.stop()
+        assert calls == ["grandchild"]
+
+    def test_an_unregistered_callback_is_not_called(self):
+        token = StopToken()
+        calls = []
+        remove = token.on_stop(lambda: calls.append(1))
+        remove()
+        remove()  # harmless
+        assert not token._callbacks[1]  # Private: nothing kept for a done waiter
+        token.stop()
+        assert calls == []
+
+    def test_a_function_registered_twice_is_called_twice(self):
+        """Each registration is its own: removing one leaves the other."""
+        token = StopToken()
+        calls = []
+
+        def fn():
+            calls.append(1)
+
+        token.on_stop(fn)
+        remove = token.on_stop(fn)
+        remove()
+        token.stop()
+        assert calls == [1]
+
+    def test_stop_drops_the_callbacks_it_called(self):
+        """A stopped token holds no references to what its waiters captured."""
+        token = StopToken()
+        token.on_stop(lambda: None)
+        token.stop()
+        assert token._callbacks is None  # Private: released
+
+    def test_a_callback_may_use_the_token(self):
+        """Callbacks run outside the lock: one that registers another callback
+        or derives a token does not deadlock."""
+        token = StopToken()
+        calls = []
+        token.on_stop(
+            lambda: token.on_stop(lambda: calls.append(token.child().is_set()))
+        )
+        token.stop()
+        assert calls == [True]
+
+    def test_a_failing_callback_does_not_end_the_walk(self):
+        """The rest of the tree is stopped and its callbacks called; the first
+        error is raised once the walk is done."""
+        root = StopToken()
+        child = root.child()
+        calls = []
+
+        def fail():
+            raise ValueError("first")
+
+        root.on_stop(fail)
+        root.on_stop(lambda: calls.append("root"))
+        child.on_stop(lambda: calls.append("child"))
+        with pytest.raises(ValueError, match="first"):
+            root.stop()
+        assert child.is_set()
+        assert sorted(calls) == ["child", "root"]
+
+    def test_a_pickled_token_carries_no_callbacks(self):
+        token = StopToken()
+        token.on_stop(lambda: None)
+        assert pickle.loads(pickle.dumps(token))._callbacks is None
