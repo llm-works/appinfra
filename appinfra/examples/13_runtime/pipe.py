@@ -62,12 +62,15 @@ def square_server(requests: PipeRecvEnd[int], replies: PipeSendEnd[int]) -> None
 
 
 def run_jobs(done: PipeSendEnd[TaskDone]) -> None:
-    """In the child: run tasks on a runtime of its own, ends on the pipe."""
-    ends = done.open()
+    """In the child: run tasks on a runtime of its own; forward their ends to
+    the pipe as they arrive."""
+    ends, local = done.open(), Chan[TaskDone](3)
     with Runtime(_logger()) as rt:
         for n in (16, 81, -1):
-            rt.spawn(math.isqrt, n, name=f"isqrt({n})", done=ends)
-    ends.close()  # the runtime's stop has sent every end
+            rt.spawn(math.isqrt, n, name=f"isqrt({n})", done=local)
+        for _ in range(3):  # leaving the block before every end stops tasks not yet run
+            ends.send(local.recv(timeout=10.0))
+    ends.close()  # every end is on the pipe
 
 
 def greet(send: PipeSendEnd[str]) -> None:

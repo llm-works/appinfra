@@ -237,14 +237,18 @@ def child(send: PipeSendEnd[int]) -> None:
     out.close()  # returns once the values are on the pipe
 
 
-send, recv = pipe(4)
-proc = mp.get_context("spawn").Process(target=child, args=(send,))
-proc.start()
-send.release()  # the child has its copy
-assert list(recv.open()) == [0, 1, 4]  # a PipeReceiver: recv, arecv, iteration, close
-proc.join()
+if __name__ == "__main__":
+    send, recv = pipe(4)
+    proc = mp.get_context("spawn").Process(target=child, args=(send,))
+    proc.start()
+    send.release()  # the child has its copy
+    # a PipeReceiver: recv, arecv, iteration, close
+    assert list(recv.open()) == [0, 1, 4]
+    proc.join()
 ```
 
+- with the `spawn` start method the child imports the main module again: process creation
+  goes under `if __name__ == "__main__":`, the child's function at module level
 - `capacity` must be at least 1: a send cannot wait for a receiver in another process
 - a close on either side, or the other process exiting, closes the channel; a close on the
   receiving side drops what is still on its way
