@@ -131,8 +131,8 @@ class _Select:
                 if ready:
                     return index, value
             _check_timeout(timeout)
-            for index, case in enumerate(self.cases):
-                entry = _Entry(self, index, case)
+            for index in order:
+                entry = _Entry(self, index, self.cases[index])
                 entry.queue.append(entry)
                 self.entries.append(entry)
         return None

@@ -481,6 +481,19 @@ class TestSelect:
         assert await a.arecv(timeout=0) == 1
 
     @pytest.mark.asyncio
+    async def test_waiting_cases_on_one_channel_are_chosen_at_random(self):
+        """The queue order decides which entry the channel hands over to.
+        100 rounds miss a case with probability 2**-99."""
+        a = Chan[int](0)
+        chosen = set()
+        for _ in range(100):
+            task = asyncio.create_task(aselect(Send(a, 0), Send(a, 1)))
+            await _parked(task)
+            chosen.add(a.recv(timeout=0))
+            await task
+        assert chosen == {0, 1}
+
+    @pytest.mark.asyncio
     async def test_a_blocking_select_is_refused_on_the_loop(self):
         a = Chan[int](1)
         a.send(1, timeout=0)
