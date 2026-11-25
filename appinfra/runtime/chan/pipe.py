@@ -10,10 +10,10 @@ import contextlib
 import multiprocessing as mp
 import pickle
 import threading
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable, Iterator
 from multiprocessing import connection
 from multiprocessing.connection import Connection
-from typing import Any, Generic, TypeVar
+from typing import Any, Generic, Self, TypeVar
 
 from ..stop import _report
 from .chan import Chan
@@ -45,18 +45,36 @@ def pipe(capacity: int) -> tuple[PipeSendEnd[Any], PipeRecvEnd[Any]]:
         raise ValueError(f"capacity must be 1 or more, not {capacity}")
     data_r, data_w = mp.Pipe(duplex=False)
     acks_r, acks_w = mp.Pipe(duplex=False)
-    return PipeSendEnd(capacity, data_w, acks_r), PipeRecvEnd(capacity, data_r, acks_w)
+    return (
+        PipeSendEnd._of(capacity, data_w, acks_r),
+        PipeRecvEnd._of(capacity, data_r, acks_w),
+    )
 
 
 class PipeEnd:
     """One end of a pipe, either one, not opened yet: picklable, to be
-    handed to the process that uses it."""
+    handed to the process that uses it. Made by pipe(); unpickling does not
+    construct it either."""
 
-    def __init__(self, capacity: int, data: Connection, acks: Connection) -> None:
-        """The end on the *data* and *acks* connections of a pipe."""
-        self._capacity = capacity
-        # Popped once, by open() or release()
-        self._conns: list[tuple[Connection, Connection]] = [(data, acks)]
+    _capacity: int
+    # Popped once, by open() or release()
+    _conns: list[tuple[Connection, Connection]]
+
+    def __init__(self) -> None:
+        """Refused: a pipe end comes from pipe().
+
+        Raises:
+            TypeError: Always.
+        """
+        raise TypeError("a pipe end comes from pipe()")
+
+    @classmethod
+    def _of(cls, capacity: int, data: Connection, acks: Connection) -> Self:
+        """The end on the *data* and *acks* connections of a pipe; for pipe()."""
+        end = object.__new__(cls)
+        end._capacity = capacity
+        end._conns = [(data, acks)]
+        return end
 
     def release(self) -> None:
         """Close this process's copy of the end, leaving the channel open for
@@ -86,7 +104,7 @@ class PipeSendEnd(PipeEnd, Generic[T]):
         Raises:
             RuntimeError: If the end was opened or released here already.
         """
-        return Sender(self._capacity, *self._claim())
+        return Sender._of(self._capacity, *self._claim())
 
 
 class PipeRecvEnd(PipeEnd, Generic[T]):
@@ -98,7 +116,7 @@ class PipeRecvEnd(PipeEnd, Generic[T]):
         Raises:
             RuntimeError: If the end was opened or released here already.
         """
-        return Receiver(*self._claim())
+        return Receiver._of(*self._claim())
 
 
 class Sender(Generic[T]):
@@ -108,9 +126,24 @@ class Sender(Generic[T]):
 
     The values wait in a buffer here, as in a Chan's; a writer thread puts
     each on the pipe, once the receiving side has room for it, and a second
-    one counts the values received there."""
+    one counts the values received there. Made by PipeSendEnd.open()."""
 
-    def __init__(self, capacity: int, data: Connection, acks: Connection) -> None:
+    def __init__(self) -> None:
+        """Refused: a Sender comes from PipeSendEnd.open().
+
+        Raises:
+            TypeError: Always.
+        """
+        raise TypeError("a pipe's Sender comes from PipeSendEnd.open()")
+
+    @classmethod
+    def _of(cls, capacity: int, data: Connection, acks: Connection) -> Self:
+        """The sender on the *data* and *acks* connections; for open()."""
+        sender = object.__new__(cls)
+        sender._open(capacity, data, acks)
+        return sender
+
+    def _open(self, capacity: int, data: Connection, acks: Connection) -> None:
         """Start the threads, on the *data* and *acks* connections."""
         self._chan = Chan[bytes](capacity)  # the values sent, for the writer
         self._room = Chan[None](capacity)  # values the receiving side has room for
@@ -193,27 +226,59 @@ class Sender(Generic[T]):
             acks.close()
 
 
-class Receiver(Chan[T]):
-    """A pipe's receiving end, open in its process: a Chan, received from as
-    any, that a reader thread sends the pipe's values on. close() here drops
-    the values still on their way."""
+class Receiver(Generic[T]):
+    """A pipe's receiving end, open in its process: received from as a Chan
+    is, and only received from; a select receives with ``Recv(receiver)``.
+    close() here drops the values still on their way.
 
-    __slots__ = ("_wake",)
+    A reader thread sends the pipe's values on a Chan of its own, which no
+    one else can send on: a value sent there would pass for one that came
+    through the pipe. Made by PipeRecvEnd.open()."""
 
-    def __init__(self, data: Connection, acks: Connection) -> None:
+    def __init__(self) -> None:
+        """Refused: a Receiver comes from PipeRecvEnd.open().
+
+        Raises:
+            TypeError: Always.
+        """
+        raise TypeError("a pipe's Receiver comes from PipeRecvEnd.open()")
+
+    @classmethod
+    def _of(cls, data: Connection, acks: Connection) -> Self:
+        """The receiver on the *data* and *acks* connections; for open()."""
+        receiver = object.__new__(cls)
+        receiver._open(data, acks)
+        return receiver
+
+    def _open(self, data: Connection, acks: Connection) -> None:
         """Start the reader, on the *data* and *acks* connections."""
-        super().__init__(0)  # the reader acks a value once a receiver took it
+        self._chan = Chan[T](0)  # the reader acks a value once a receiver took it
+        self._lock = threading.Lock()
         wake, wake_w = mp.Pipe(duplex=False)
-        # Written and closed under the channel's lock: a close() writing to
-        # it never races the reader closing it, and its fd being reused
+        # Written and closed under _lock: a close() writing to it never races
+        # the reader closing it, and its fd being reused
         self._wake: Connection | None = wake_w
         _start(self._read, data, acks, wake)
 
+    def recv(self, timeout: float | None = None) -> T:
+        """Receive the next value; as Chan.recv()."""
+        return self._chan.recv(timeout)
+
+    async def arecv(self, timeout: float | None = None) -> T:
+        """Receive the next value; as Chan.arecv()."""
+        return await self._chan.arecv(timeout)
+
+    def __iter__(self) -> Iterator[T]:
+        """Iterate with recv() until the channel is closed and drained."""
+        return iter(self._chan)
+
+    def __aiter__(self) -> AsyncIterator[T]:
+        """Iterate with arecv() until the channel is closed and drained."""
+        return aiter(self._chan)
+
     def close(self) -> None:
         """Close the channel, here and for the sending side."""
-        if self._closed:
-            return
-        super().close()
+        self._chan.close()
         with self._lock:
             if self._wake is not None:  # else the reader is gone already
                 self._wake.send_bytes(b"")
@@ -249,7 +314,7 @@ class Receiver(Chan[T]):
         except Exception as e:
             _report(e)
             return
-        self.send(value)
+        self._chan.send(value)
 
 
 def _start(target: Callable[..., None], *args: Any) -> threading.Thread:

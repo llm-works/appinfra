@@ -34,11 +34,25 @@ class Task:
     keeps the outcome as long as it is held. Not to be subclassed."""
 
     __slots__ = ("_rt", "_t")
+    _rt: Runtime
+    _t: _Task
 
-    def __init__(self, rt: Runtime, t: _Task) -> None:
-        """The handle to *t*, run by *rt*; made by Runtime.spawn()."""
-        self._rt = rt
-        self._t = t
+    def __init__(self) -> None:
+        """Refused: a Task comes from Runtime.spawn(), as re.Match from a
+        pattern.
+
+        Raises:
+            TypeError: Always.
+        """
+        raise TypeError("a Task comes from Runtime.spawn()")
+
+    @classmethod
+    def _of(cls, rt: Runtime, t: _Task) -> Task:
+        """The handle to *t*, run by *rt*; for Runtime.spawn()."""
+        task = object.__new__(cls)
+        task._rt = rt
+        task._t = t
+        return task
 
     @property
     def id(self) -> int:
@@ -219,7 +233,7 @@ class Runtime:
             self._tasks[task_id] = t
             # Under the lock, so stop() never finds a task here not launched
             self._launch(t)
-        return Task(self, t)
+        return Task._of(self, t)
 
     def _task_for(
         self,

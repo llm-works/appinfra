@@ -629,17 +629,21 @@ class TestTokens:
     def test_a_task_spawned_by_a_task_derives_from_its_token(self, rt, on_loop):
         """Cancelling a task stops every task it spawned."""
         children: list[Task] = []
-        child = WaitsForStop()
+        child, spawned = WaitsForStop(), threading.Event()
 
         async def async_parent() -> None:
             children.append(rt.spawn(child))
+            spawned.set()
             await asyncio.Event().wait()
 
         def parent() -> None:
             children.append(rt.spawn(child))
+            spawned.set()
             stopping().wait()
 
         t = rt.spawn(async_parent if on_loop else parent)
+        # The child can enter before spawn() returns to the parent: both
+        assert spawned.wait(5.0)
         assert child.entered.wait(5.0)
 
         t.cancel()
@@ -1379,15 +1383,18 @@ class TestStop:
         rt_a.start()
         rt_b.start()
         onto_b: list[Task] = []
-        child = WaitsForStop()
+        child, spawned = WaitsForStop(), threading.Event()
         release = threading.Event()
 
         def spawns_onto_b() -> None:
             onto_b.append(rt_b.spawn(child))
+            spawned.set()
             release.wait(10.0)  # stays alive, so its token is not stopped
 
         try:
             rt_a.spawn(spawns_onto_b)
+            # The child can enter before spawn() returns to its spawner: both
+            assert spawned.wait(5.0)
             assert child.entered.wait(5.0)
             rt_b.stop(timeout=5.0)  # the deadline is the failure path
             lg.warning.assert_not_called()

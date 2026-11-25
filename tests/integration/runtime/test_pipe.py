@@ -11,7 +11,7 @@ from unittest import mock
 
 import pytest
 
-from appinfra.runtime import ChanClosedError, ChanRecv, ChanSend, select
+from appinfra.runtime import Chan, ChanClosedError, ChanRecv, ChanSend, select
 from appinfra.runtime.chan import PipeRecvEnd, PipeSendEnd, pipe
 
 METHODS = [
@@ -189,6 +189,25 @@ class TestInOneProcess:
         sender, chan = send.open(), recv.open()
         assert select(ChanSend(sender, 7), timeout=10.0) == (0, None)
         assert select(ChanRecv(chan), timeout=10.0) == (0, 7)
+        sender.close()
+
+    def test_the_receiving_end_only_receives(self):
+        """Its channel is the pipe's: a value sent into it here would pass
+        for one that came through the pipe."""
+        send, recv = pipe(1)
+        sender, chan = send.open(), recv.open()
+        assert not isinstance(chan, Chan)
+        assert not hasattr(chan, "send")
+        assert not hasattr(chan, "asend")
+        sender.close()
+
+    def test_a_select_case_keeps_the_end_and_value_it_was_given(self):
+        """The channels and pickled bytes underneath stay out of reach."""
+        send, recv = pipe(1)
+        sender, chan = send.open(), recv.open()
+        case = ChanSend(sender, 7)
+        assert (case.chan, case.value) == (sender, 7)
+        assert ChanRecv(chan).chan is chan
         sender.close()
 
     def test_an_end_is_opened_or_released_once(self):

@@ -48,7 +48,7 @@ For API stability guarantees and deprecation policy, see
   alike. A wait ends with `StoppedError` when the task's token stops.
 - `appinfra.runtime.select()` / `aselect()`: wait on several channel cases (`ChanRecv`,
   `ChanSend`) and complete exactly one, chosen at random among those ready, like Go's `select`.
-- `appinfra.runtime.chan.pipe()`: a channel between two processes, `send, recv = pipe(capacity)`;
+- `appinfra.runtime.pipe()`: a channel between two processes, `send, recv = pipe(capacity)`;
   each end is opened in the process that uses it, and the other process exiting closes it.
 
 ### Changed
