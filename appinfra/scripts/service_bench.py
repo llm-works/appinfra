@@ -5,8 +5,9 @@
 
 """
 Print what services on a LoopHost cost on this machine and Python version: the net
-memory cost of an idle service (asyncio's part and appinfra's), start and stop rate,
-and the submit/reply rate through an async channel. See appinfra.service.bench.
+memory cost of an idle service (asyncio's part and appinfra's), the start and stop
+rate of runners and of a Runtime's spawn() and stop(), and the submit/reply rate
+through an async channel. See appinfra.service.bench.
 """
 
 from __future__ import annotations
@@ -28,8 +29,9 @@ from appinfra.app import AppBuilder, Tool  # noqa: E402
 from appinfra.service import LoopHost  # noqa: E402
 from appinfra.service.bench import (  # noqa: E402
     Cost,
-    minimal_maker,
+    parked_maker,
     round_trip_rate,
+    runtime_rates,
     service_cost,
     start_runners,
     stop_runners,
@@ -64,25 +66,35 @@ def bench(self: Tool) -> int:
     with LoopHost(name="bench") as host:
         self.lg.info("measuring memory per service...", extra={"services": count})
         cost = service_cost(host, self.lg, count)
-        self.lg.info("measuring start and stop rate...", extra={"services": count})
-        runners, start = start_runners(host, minimal_maker(self.lg), count)
+        self.lg.info("measuring runner start and stop...", extra={"services": count})
+        runners, start = start_runners(host, parked_maker(self.lg), count)
         stop = stop_runners(runners)
         self.lg.info("measuring submit/reply rate...", extra={"round_trips": count})
         trips = round_trip_rate(host, self.lg, count)
+    self.lg.info("measuring runtime spawn and stop...", extra={"services": count})
+    spawn, rt_stop = runtime_rates(self.lg, parked_maker(self.lg), count)
     self.lg.info("done")
-    _report(count, cost, start, stop, trips)
+    _report(count, cost, (start, stop), (spawn, rt_stop), trips)
     return 0
 
 
-def _report(count: int, cost: Cost, start: float, stop: float, trips: float) -> None:
-    """Print the numbers of one run."""
+def _report(
+    count: int,
+    cost: Cost,
+    runner: tuple[float, float],
+    runtime: tuple[float, float],
+    trips: float,
+) -> None:
+    """Print the numbers of one run; *runner* and *runtime* are (start, stop) rates."""
     python = f"{platform.python_implementation()} {platform.python_version()}"
     print(f"\n{count:,} idle services on one LoopHost, {python}\n")
     print(f"  net cost per service  {cost.net:>9,.0f} B")
     print(f"    asyncio             {cost.asyncio:>9,.0f} B")
     print(f"    appinfra            {cost.framework:>9,.0f} B")
-    print(f"  start                 {start:>9,.0f} /s")
-    print(f"  stop                  {stop:>9,.0f} /s")
+    print(f"  runner start          {runner[0]:>9,.0f} /s")
+    print(f"  runner stop           {runner[1]:>9,.0f} /s")
+    print(f"  runtime spawn         {runtime[0]:>9,.0f} /s")
+    print(f"  runtime stop          {runtime[1]:>9,.0f} /s")
     print(f"  submit/reply          {trips:>9,.0f} round trips/s")
 
 

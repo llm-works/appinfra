@@ -5,8 +5,9 @@
 LoopHost benchmark: what many async services on one event loop thread cost.
 
 The net memory cost of an idle service and the part of it the framework adds over
-plain asyncio tasks, start and stop rate, idle CPU, and the submit/reply rate through
-an async channel, measured with appinfra.service.bench. Each test prints its numbers;
+plain asyncio tasks, the start and stop rate of runners and of a Runtime, idle CPU,
+and the submit/reply rate through an async channel, measured with
+appinfra.service.bench. Each test prints its numbers;
 run with ``make test.perf.v`` to see them.
 
 By default the benchmark runs 1,000 services, as a regression check that fits
@@ -28,6 +29,7 @@ from appinfra.service import AsyncQueueChannelFactory, AsyncService, LoopHost
 from appinfra.service.bench import (
     Arrivals,
     round_trip_rate,
+    runtime_rates,
     service_cost,
     start_runners,
     stop_runners,
@@ -107,6 +109,18 @@ class TestLoopHostCost:
 
         print(f"\nstart: {start_rate:,.0f}/s  stop: {stop_rate:,.0f}/s ({SERVICES:,})")
         assert start_rate > 5_000 * RATE_SHARE, f"start: {start_rate:,.0f}/s"
+        assert stop_rate > 5_000 * RATE_SHARE, f"stop: {stop_rate:,.0f}/s"
+
+    def test_runtime_spawn_and_stop_rate(self):
+        """A Runtime's spawn() and stop(), over services that wait on events of
+        their own (see parked_maker)."""
+        spawn_rate, stop_rate = runtime_rates(LG, OnEvent, SERVICES)
+
+        print(
+            f"\nruntime spawn: {spawn_rate:,.0f}/s  stop: {stop_rate:,.0f}/s "
+            f"({SERVICES:,})"
+        )
+        assert spawn_rate > 5_000 * RATE_SHARE, f"spawn: {spawn_rate:,.0f}/s"
         assert stop_rate > 5_000 * RATE_SHARE, f"stop: {stop_rate:,.0f}/s"
 
     def test_idle_services_use_no_cpu(self, host):

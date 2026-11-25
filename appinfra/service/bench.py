@@ -2,8 +2,9 @@
 # SPDX-FileCopyrightText: Copyright 2026 The appinfra Authors
 
 """
-Measure what services on a LoopHost cost: memory per service, start and stop rate,
-and the submit/reply rate through an async channel.
+Measure what services on a LoopHost cost: memory per service, start and stop rate of
+their runners and of a Runtime's spawn() and stop(), and the submit/reply rate through
+an async channel.
 
 The memory figure is the net cost of a service: a service holding nothing of its own,
 idle on the loop, as an idle goroutine parks on a channel. It is asyncio's part (the
@@ -30,7 +31,7 @@ from ..log import Logger
 from .base import AsyncService
 from .channel import AsyncChannel, Message
 from .factory import AsyncQueueChannelFactory
-from .runtime import LoopHost, TaskRunner
+from .runtime import LoopHost, Runtime, TaskRunner
 
 T = TypeVar("T")
 
@@ -126,8 +127,22 @@ class Cost:
 
 
 def minimal_maker(lg: Logger) -> ServiceMaker:
-    """A maker of Minimal services sharing one event."""
+    """A maker of Minimal services sharing one event: for memory, as they then
+    hold nothing of their own."""
     return functools.partial(Minimal, lg, shared=asyncio.Event())
+
+
+def parked_maker(lg: Logger) -> ServiceMaker:
+    """A maker of Minimal services each parked on an event of its own: for rates.
+    Cancelling a waiter of an asyncio.Event removes it from the event's waiters
+    by a linear scan; a stop in reverse start order, as a Runtime's, scans all
+    of one shared event's waiters each time, which would time asyncio, not the
+    framework."""
+
+    def make(i: int, arrivals: Arrivals) -> AsyncService:
+        return Minimal(lg, i, arrivals, asyncio.Event())
+
+    return make
 
 
 def start_runners(
@@ -155,6 +170,32 @@ def stop_runners(runners: list[TaskRunner]) -> float:
     for runner in runners:
         runner.stop()
     return len(runners) / (time.perf_counter() - began)
+
+
+def runtime_rates(lg: Logger, make: ServiceMaker, count: int) -> tuple[float, float]:
+    """spawn() and stop() rates of a Runtime over *count* services made by *make*,
+    independent of each other: it picks each a runner on its own loop and tracks
+    it for ordering, restarts and stop.
+
+    Returns:
+        spawn() calls per second, and services stopped per second by one stop(),
+        which stops them in reverse start order and then the runtime's loop.
+
+    Raises:
+        ValueError: If *count* is less than 1.
+    """
+    arrivals = Arrivals(count)
+    with Runtime(lg, name="bench-runtime") as rt:
+        began = time.perf_counter()
+        for i in range(count):
+            rt.spawn(make(i, arrivals))
+        spawn = count / (time.perf_counter() - began)
+        if not arrivals.all.wait(timeout=60.0):
+            raise TimeoutError(f"{count:,} spawned services did not all start in 60 s")
+        began = time.perf_counter()
+        rt.stop(timeout=60.0)
+        stop = count / (time.perf_counter() - began)
+    return spawn, stop
 
 
 def start_plain(
