@@ -13,7 +13,7 @@ from collections.abc import Callable
 from typing import Any, Generic, TypeVar, cast
 
 from ..errors import StoppedError
-from ..task import current_task
+from ..task import _current_task
 from .errors import ClosedError
 from .waiter import LoopWaiter, Outcome, ThreadWaiter, Waiter
 
@@ -354,7 +354,7 @@ def _on_stop(fn: Callable[[], None]) -> Callable[[], None]:
     """Call *fn* when the token of the task the caller runs in is stopped;
     returns the function that unregisters it. Outside a task, nothing stops
     the wait."""
-    task = current_task()
+    task = _current_task()
     if task is None:
         return _noop
     return task.token._on_stop(fn)

@@ -3,16 +3,20 @@
 
 """Tasks, and the runtime that runs them: an async function as a task on the
 runtime's event loop, any other function on a thread of its own. Imports
-nothing from appinfra.service."""
+nothing from appinfra.service.
+
+Built on, not extended: what is exported here is the whole API. Runtime and
+Task are final, and the kinds of task are the runtime's own; layers above
+compose spawn(), Chan, pipe() and StopToken."""
 
 from .chan import Chan, aselect, select
 from .chan import ClosedError as ChanClosedError
 from .chan import Recv as ChanRecv
 from .chan import Send as ChanSend
 from .errors import StoppedError
-from .runtime import Runtime
+from .runtime import Runtime, Task
 from .stop import StopToken
-from .task import TaskEnd, stopping, task_id
+from .task import TaskDone, stopping, task_id
 
 __all__ = [
     "Chan",
@@ -22,7 +26,8 @@ __all__ = [
     "Runtime",
     "StopToken",
     "StoppedError",
-    "TaskEnd",
+    "Task",
+    "TaskDone",
     "aselect",
     "select",
     "stopping",
