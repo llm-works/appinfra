@@ -6,7 +6,7 @@
 import pickle
 import sys
 
-from appinfra.service.stop import StopToken
+from appinfra.runtime import StopToken
 
 
 class TestStopToken:

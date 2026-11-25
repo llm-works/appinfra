@@ -8,8 +8,7 @@ import threading
 
 import pytest
 
-from appinfra.service import stop
-from appinfra.service.stop import StopToken
+from appinfra.runtime import StopToken, stop
 
 
 def _use_tokens() -> None:

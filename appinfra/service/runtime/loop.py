@@ -10,9 +10,9 @@ import threading
 from collections.abc import Callable
 from types import TracebackType
 
+from ...runtime import StopToken
 from ..base import AsyncService
 from ..state import RestartPolicy, State
-from ..stop import StopToken
 from .runner import Runner
 
 

@@ -11,10 +11,10 @@ from abc import ABC, abstractmethod
 from collections.abc import Iterator
 from contextlib import contextmanager
 
+from ...runtime import StopToken
 from ..base import Service
 from ..errors import HealthTimeoutError, InvalidTransitionError, RunError, SetupError
 from ..state import TRANSITIONS, RestartPolicy, State, StateHook
-from ..stop import StopToken
 from .drive import check_service
 
 # The runners whose state hooks the current thread is running (_notify())

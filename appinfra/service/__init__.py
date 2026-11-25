@@ -47,6 +47,7 @@ observes its transitions. A runner can also be used on its own, without a
 runtime: ThreadRunner, ProcessRunner, or a LoopHost's TaskRunner.
 """
 
+from ..runtime import StopToken
 from .base import AsyncService, ScheduledService, Service
 from .channel import (
     AsyncBufferedChannel,
@@ -100,7 +101,6 @@ from .runtime import (
     ThreadRunner,
 )
 from .state import RestartPolicy, State, StateHook
-from .stop import StopToken
 
 __all__ = [
     # Core classes

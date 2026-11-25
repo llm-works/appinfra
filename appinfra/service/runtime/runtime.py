@@ -14,6 +14,7 @@ from types import TracebackType
 from typing import Any
 
 from ...log import Logger
+from ...runtime import StopToken
 from ..base import AsyncService, Service
 from ..errors import (
     CycleError,
@@ -22,7 +23,6 @@ from ..errors import (
     RunError,
 )
 from ..state import RestartPolicy, State
-from ..stop import StopToken
 from .loop import LoopHost
 from .process import ProcessRunner
 from .runner import Runner

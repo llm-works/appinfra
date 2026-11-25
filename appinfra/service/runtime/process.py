@@ -18,9 +18,9 @@ from typing import Any
 
 from ...log import Logger
 from ...log.mp import LogQueueListener
+from ...runtime import StopToken
 from ..base import Service
 from ..state import RestartPolicy, State
-from ..stop import StopToken
 from .drive import check_drivable, drive
 from .runner import Runner
 
