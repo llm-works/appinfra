@@ -138,6 +138,46 @@ class DerivesThenFails(Service):
 class TestThreadRunner:
     """Test ThreadRunner class."""
 
+    def test_wait_healthy_waits_for_a_start_in_progress(self):
+        """Between setup() and launching its thread, a runner is STARTING but
+        not alive yet: a wait_healthy() on another thread then waits for the
+        start() to return instead of taking the service for one that exited."""
+        runner = ThreadRunner(SimpleService())
+        at_starting, release = threading.Event(), threading.Event()
+
+        def hold(name: str, old: State, new: State) -> None:
+            if new == State.STARTING:  # on the starting thread, before the launch
+                at_starting.set()
+                release.wait(5.0)
+
+        runner.on_state_change(hold)
+        starter = threading.Thread(target=runner.start)
+        starter.start()
+        assert at_starting.wait(5.0)
+        errors: list[BaseException] = []
+
+        def wait() -> None:
+            try:
+                runner.wait_healthy(timeout=5.0)
+            except Exception as e:
+                errors.append(e)
+
+        waiter = threading.Thread(target=wait)
+        waiter.start()
+        # Until it waits for the start() or has given up; the deadline is the
+        # failure path. Private: the condition a wait for start() creates
+        deadline = time.monotonic() + 5.0
+        while waiter.is_alive() and runner._start_done is None:
+            assert time.monotonic() < deadline
+            time.sleep(0.01)
+        release.set()
+        starter.join(5.0)
+        waiter.join(5.0)
+
+        assert errors == []
+        assert runner.state == State.RUNNING
+        runner.stop()
+
     def test_a_run_that_ends_stops_its_token(self):
         """A run that ends without a stop(), here by failing, stops its token,
         so work derived from it ends with the run instead of outliving it."""

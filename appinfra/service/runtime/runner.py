@@ -173,6 +173,10 @@ class Runner(ABC):
         """Block until healthy or timeout. Several threads may wait at once:
         the first to see the service healthy moves it to RUNNING.
 
+        A start() in progress on another thread is waited for first, within
+        *timeout*: between setup() and the launch of its work a runner is
+        STARTING but not alive, which is no exit.
+
         Args:
             timeout: Max seconds to wait.
             interval: Seconds between health checks.
@@ -182,6 +186,9 @@ class Runner(ABC):
             HealthTimeoutError: If timeout reached before healthy.
         """
         start = time.monotonic()
+        on_start_thread = self._start_thread == threading.get_ident()
+        if not on_start_thread and not self._await_start(timeout):
+            raise HealthTimeoutError(self.name, timeout)
 
         while time.monotonic() - start < timeout:
             if not self.is_alive():
