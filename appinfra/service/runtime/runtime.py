@@ -8,6 +8,7 @@ from __future__ import annotations
 import atexit
 import threading
 import time
+import weakref
 from collections.abc import Callable
 from types import TracebackType
 from typing import Any
@@ -27,19 +28,23 @@ from .process import ProcessRunner
 from .runner import Runner
 from .thread import ThreadRunner
 
+# What the runtime keeps per runner object, dropped with the runner
+_PerRunner = weakref.WeakKeyDictionary
+
 # States a service leaves the runtime in, unless a restart is under way
 _ENDED = (State.DONE, State.STOPPED, State.FAILED)
 
 
-def _restarted_by_monitor(runner: Runner) -> bool:
-    """True for a process service its runner's monitor may still restart: its
-    FAILED and the STOPPED of a restart do not end it. stop() ends the monitor
-    first, so a service stopped on purpose is not kept."""
-    return (
-        isinstance(runner, ProcessRunner)
-        and runner.monitoring
-        and runner.restart_pending
-    )
+def _restarted_by_monitor(runner: Runner, new: State) -> bool:
+    """True if *new* does not end a process service, as its runner's monitor
+    restarts it: the STOPPED a restart under way brings, or a FAILED another
+    attempt follows. A FAILED of the last attempt ends it. stop() ends the
+    monitor first, so a service stopped on purpose is not kept."""
+    if not isinstance(runner, ProcessRunner) or not runner.monitoring:
+        return False
+    if new == State.FAILED:
+        return runner.can_restart
+    return runner.restart_pending
 
 
 class Runtime:
@@ -85,13 +90,20 @@ class Runtime:
         self._started: dict[str, None] = {}  # in start order, for stop()
         self._pending: set[str] = set()  # waiting for dependencies
         self._waiters: dict[str, set[str]] = {}  # dependency -> pending waiting on it
+        # By runner, not name: a service spawned after one of its name left must
+        # not see that one's outcome. Weak: a runner no one holds is never
+        # ready()'d, so its entry goes with it.
         # Set once a pending service starts or fails; read by ready()
-        self._start_events: dict[str, threading.Event] = {}
-        self._failures: dict[str, BaseException] = {}  # failed before starting
+        self._start_events: _PerRunner[Runner, threading.Event] = _PerRunner()
+        # Why a service failed before starting; consumed by ready()
+        self._failures: _PerRunner[Runner, BaseException] = _PerRunner()
         self._watched: set[str] = set()  # services whose health a helper waits for
         self._restarting: set[str] = set()  # restart armed or under way
         self._restart_threads: set[threading.Thread] = set()
         self._helpers: set[threading.Thread] = set()  # starts and health watches
+        # Starts let in before stop() began and not ended yet; stop() waits
+        self._admitted: set[Runner] = set()
+        self._admission_ended = threading.Condition(self._lock)
         self._started_runtime = False
         self._closing = False
         # One bound method for every runner's hooks, not one each
@@ -151,7 +163,7 @@ class Runtime:
             self._runners[runner.name] = runner
             start_now = self._dependencies_run(runner.service)
             if not start_now:
-                self._wait(runner.service)
+                self._wait(runner)
         if start_now:
             self._start(runner, raise_errors=True)
         else:
@@ -176,11 +188,11 @@ class Runtime:
     def _await_start(self, runner: Runner, deadline: float) -> None:
         """Wait until a pending *runner* has started; raise why it did not."""
         with self._lock:
-            event = self._start_events.get(runner.name)
+            event = self._start_events.get(runner)
         if event is not None and not event.wait(max(0.0, deadline - time.monotonic())):
             raise DependencyNotRunningError(runner.name, self._missing(runner))
         with self._lock:
-            failure = self._failures.pop(runner.name, None)
+            failure = self._failures.pop(runner, None)
         if failure is not None:
             raise failure
 
@@ -241,12 +253,14 @@ class Runtime:
             for dep in service.depends_on
         )
 
-    def _wait(self, service: Service) -> None:
-        """Record *service* as waiting for its dependencies; under the lock."""
-        self._pending.add(service.name)
-        self._start_events[service.name] = threading.Event()
-        for dependency in service.depends_on:
-            self._waiters.setdefault(dependency, set()).add(service.name)
+    def _wait(self, runner: Runner) -> None:
+        """Record *runner*'s service as waiting for its dependencies; under the
+        lock."""
+        self._pending.add(runner.name)
+        # Kept if there: a waiter waiting again keeps the event ready() waits on
+        self._start_events.setdefault(runner, threading.Event())
+        for dependency in runner.service.depends_on:
+            self._waiters.setdefault(dependency, set()).add(runner.name)
 
     def _unindex(self, name: str) -> None:
         """Take *name* out of the waiters of its dependencies; under the lock."""
@@ -263,9 +277,28 @@ class Runtime:
         """Start *runner*. A failure is raised to spawn()'s caller, or kept for
         ready() when the runtime started it on its own."""
         with self._lock:
-            if self._closing:
-                return
-            self._started[runner.name] = None
+            refused = self._closing
+            if not refused:
+                self._started[runner.name] = None
+                # In stop()'s snapshot from here on, but CREATED until its
+                # start() claims it: stop() waits for the admitted starts first
+                self._admitted.add(runner)
+        if refused:
+            self._refuse(runner)
+            return
+        try:
+            started = self._start_admitted(runner, raise_errors)
+        finally:
+            with self._lock:
+                self._admitted.discard(runner)
+                self._admission_ended.notify_all()
+        if started:
+            self._signal_start(runner)
+            self._watch_if_awaited(runner)
+
+    def _start_admitted(self, runner: Runner, raise_errors: bool) -> bool:
+        """Start *runner* once admitted; False if it failed and the failure
+        was kept for ready(). Raises the failure if *raise_errors*."""
         try:
             runner.start()
         except BaseException as e:
@@ -273,11 +306,10 @@ class Runtime:
                 self._forget(runner)
                 raise
             self._fail_start(runner, e)
-            return
+            return False
         if isinstance(runner, ProcessRunner):
             runner.start_monitor()
-        self._signal_start(runner.name)
-        self._watch_if_awaited(runner)
+        return True
 
     def _fail_start(self, runner: Runner, error: BaseException) -> None:
         """Record why a service the runtime started on its own failed to."""
@@ -286,14 +318,21 @@ class Runtime:
             extra={"service": runner.name, "exception": error},
         )
         with self._lock:
-            self._failures[runner.name] = error
-        self._signal_start(runner.name)
+            self._failures[runner] = error
+        self._signal_start(runner)
         self._forget(runner)
 
-    def _signal_start(self, name: str) -> None:
-        """Wake ready() calls waiting for *name* to start."""
+    def _refuse(self, runner: Runner) -> None:
+        """Tell ready() that *runner* will not start, as stop() has begun; as
+        _stop_order() does for the services still pending."""
         with self._lock:
-            event = self._start_events.pop(name, None)
+            self._failures[runner] = RunError(runner.name, "the runtime stopped first")
+        self._signal_start(runner)
+
+    def _signal_start(self, runner: Runner) -> None:
+        """Wake ready() calls waiting for *runner* to start."""
+        with self._lock:
+            event = self._start_events.pop(runner, None)
         if event is not None:
             event.set()
 
@@ -314,15 +353,38 @@ class Runtime:
                 self._pending.discard(waiter)
                 self._unindex(waiter)
             runners = [self._runners[w] for w in startable]
-        if runners:
-            # Not on this thread: the hook runs on whatever thread moved the
-            # dependency, the event loop's included, and setup() may block
-            self._helper(self._start_all, runners, name=f"start-after-{name}")
+        if not runners:
+            return
+        # Not on this thread: the hook runs on whatever thread moved the
+        # dependency, the event loop's included, and setup() may block
+        if not self._helper(self._start_all, runners, name=f"start-after-{name}"):
+            # stop() began after they left _pending: they are not in the set
+            # it refuses, so they are refused here
+            for runner in runners:
+                self._refuse(runner)
 
     def _start_all(self, runners: list[Runner]) -> None:
-        """Helper thread: start *runners*, each once its turn comes."""
+        """Helper thread: start *runners*, each once its turn comes. Each checks
+        its dependencies again first, as one may have left or stopped running
+        while an earlier one ran setup(): one gone fails it, one in the runtime
+        but not running makes it wait again."""
         for runner in runners:
-            self._start(runner, raise_errors=False)
+            with self._lock:
+                gone = self._gone_dependency(runner.service)
+                runs = gone is None and self._dependencies_run(runner.service)
+                if gone is None and not runs:
+                    self._wait(runner)
+            if runs:
+                self._start(runner, raise_errors=False)
+            elif gone is not None:
+                self._abandon(runner, DependencyFailedError(runner.name, gone))
+            else:
+                self._watch_dependencies(runner.service)
+
+    def _gone_dependency(self, service: Service) -> str | None:
+        """The first dependency of *service* no longer in the runtime; under
+        the lock."""
+        return next((d for d in service.depends_on if d not in self._runners), None)
 
     # -- health watches -----------------------------------------------------
 
@@ -367,18 +429,23 @@ class Runtime:
             with self._lock:
                 self._watched.discard(runner.name)
 
-    def _helper(self, target: Callable[..., None], arg: Any, *, name: str) -> None:
+    def _helper(self, target: Callable[..., None], arg: Any, *, name: str) -> bool:
         """Run *target*(*arg*) on a daemon thread that stop() waits for. It
         starts under the lock, so stop() never finds it in _helpers unstarted,
-        which join() refuses; the thread takes the lock only once *target* ran."""
+        which join() refuses; the thread takes the lock only once *target* ran.
+
+        Returns:
+            False if refused, as stop() has begun.
+        """
         thread = threading.Thread(
             target=self._run_helper, args=(target, arg), name=name, daemon=True
         )
         with self._lock:
             if self._closing:
-                return
+                return False
             self._helpers.add(thread)
             thread.start()
+        return True
 
     def _run_helper(self, target: Callable[..., None], arg: Any) -> None:
         try:
@@ -400,7 +467,7 @@ class Runtime:
             runner = self._runners.get(name)
             if runner is None or new not in _ENDED or name in self._restarting:
                 return
-            if new != State.DONE and _restarted_by_monitor(runner):
+            if new != State.DONE and _restarted_by_monitor(runner, new):
                 return
             restart = (
                 new == State.FAILED
@@ -440,8 +507,8 @@ class Runtime:
         """Fail a waiting service that can no longer start; its FAILED takes it
         out of the runtime, and what waits on it in turn."""
         with self._lock:
-            self._failures[runner.name] = error
-        self._signal_start(runner.name)
+            self._failures[runner] = error
+        self._signal_start(runner)
         runner._transition(State.FAILED)  # Never started: CREATED -> FAILED
 
     # -- restarts -----------------------------------------------------------
@@ -485,6 +552,12 @@ class Runtime:
         if restarted:
             with self._lock:
                 self._restarting.discard(runner.name)
+                failed_since = runner.state == State.FAILED
+            if failed_since:
+                # It failed again before the marker went: _on_state() ignored
+                # that FAILED, so it gets it now; a hook seeing it as well is
+                # turned away by the marker a restart sets, or by _forget()
+                self._on_state(runner.name, State.RUNNING, State.FAILED)
         elif runner.can_restart and not closing:
             self._arm_restart(runner)
         else:
@@ -508,6 +581,11 @@ class Runtime:
         atexit.unregister(self._atexit_stop)
         for thread in restarts:
             thread.join(timeout)
+        with self._lock:
+            # A start admitted before _closing has launched or failed by now,
+            # so the snapshot below stops it. Past the timeout, runner.stop()
+            # waits for a start that has claimed its runner
+            self._admission_ended.wait_for(lambda: not self._admitted, timeout)
         for runner in self._stop_order():
             self._stop_one(runner, timeout)
         with self._lock:
@@ -523,8 +601,9 @@ class Runtime:
         with self._lock:
             runners = [self._runners[n] for n in reversed(self._started)]
             for name in self._pending:
-                self._failures[name] = RunError(name, "the runtime stopped first")
-                event = self._start_events.pop(name, None)
+                waiter = self._runners[name]
+                self._failures[waiter] = RunError(name, "the runtime stopped first")
+                event = self._start_events.pop(waiter, None)
                 if event is not None:
                     event.set()
         return runners

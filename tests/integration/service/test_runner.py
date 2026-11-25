@@ -16,6 +16,7 @@ from appinfra.service import (
     RunError,
     ScheduledService,
     Service,
+    SetupError,
     State,
     StopToken,
     ThreadRunner,
@@ -117,6 +118,28 @@ class OutlivesStop(Service):
         self.release.wait(5.0)
 
 
+class CountsTeardowns(Service):
+    """run() returns at once, or fails if *fails*; counts its teardowns."""
+
+    def __init__(self, fails: bool = False) -> None:
+        self._lg = MagicMock()
+        self._fails = fails
+        self.teardowns = 0
+        self.torn_down = threading.Event()
+
+    @property
+    def name(self) -> str:
+        return "counts-teardowns"
+
+    def run(self) -> None:
+        if self._fails:
+            raise RuntimeError("run fails")
+
+    def teardown(self) -> None:
+        self.teardowns += 1
+        self.torn_down.set()
+
+
 class DerivesThenFails(Service):
     """run() derives a token for its work from its own, then fails."""
 
@@ -137,6 +160,75 @@ class DerivesThenFails(Service):
 
 class TestThreadRunner:
     """Test ThreadRunner class."""
+
+    @pytest.mark.parametrize("fails", [False, True], ids=["returns", "raises"])
+    def test_a_run_that_ends_on_its_own_is_torn_down_once(self, fails):
+        """However run() ends, the service is torn down when it does, once:
+        a stop() after that does not tear it down again."""
+        svc = CountsTeardowns(fails=fails)
+        runner = ThreadRunner(svc)
+        runner.start()
+
+        assert svc.torn_down.wait(5.0)  # the timeout is the failure path
+        runner.stop()
+        assert svc.teardowns == 1
+
+    def test_a_start_after_stop_whose_setup_fails_fails(self):
+        """A start from STOPPED that fails in setup() is a failed start, as one
+        from CREATED is: SetupError, and the runner FAILED."""
+
+        class SecondSetupFails(SimpleService):
+            setups = 0
+
+            def setup(self) -> None:
+                SecondSetupFails.setups += 1
+                if SecondSetupFails.setups > 1:
+                    raise RuntimeError("no second setup")
+
+        runner = ThreadRunner(SecondSetupFails())
+        runner.start()
+        runner.wait_healthy(timeout=5.0)
+        runner.stop()
+
+        with pytest.raises(SetupError, match="no second setup"):
+            runner.start()
+        assert runner.state == State.FAILED
+
+    def test_wait_healthy_does_not_report_health_a_stop_overtook(self):
+        """The service looks healthy, but a stop() has ended the start before
+        wait_healthy() could move it to RUNNING: that is no success."""
+
+        class HealthyAfterGate(SimpleService):
+            def __init__(self) -> None:
+                super().__init__()
+                self.asked = threading.Event()
+                self.answer = threading.Event()
+
+            def is_healthy(self) -> bool:
+                self.asked.set()
+                assert self.answer.wait(5.0)  # the timeout is the failure path
+                return True
+
+        svc = HealthyAfterGate()
+        runner = ThreadRunner(svc)
+        runner.start()
+        errors: list[BaseException] = []
+
+        def wait() -> None:
+            try:
+                runner.wait_healthy(timeout=5.0)
+            except Exception as e:
+                errors.append(e)
+
+        waiter = threading.Thread(target=wait)
+        waiter.start()
+        assert svc.asked.wait(5.0)
+        runner.stop()  # completes while wait_healthy() holds a "healthy"
+        svc.answer.set()
+        waiter.join(5.0)
+
+        assert runner.state == State.STOPPED
+        assert len(errors) == 1 and isinstance(errors[0], RunError), errors
 
     def test_wait_healthy_waits_for_a_start_in_progress(self):
         """Between setup() and launching its thread, a runner is STARTING but
@@ -200,6 +292,7 @@ class TestThreadRunner:
         svc.release.set()
         runner.start()
         assert failed.wait(5.0)
+        torn_down = svc.teardowns  # the failed first run's, done as it ended
         svc.in_setup.clear()
         svc.release.clear()
         errors: list[BaseException] = []
@@ -216,7 +309,7 @@ class TestThreadRunner:
 
         runner.stop(timeout=0)  # the start is in progress: no time to wait for it
 
-        assert svc.teardowns == 0
+        assert svc.teardowns == torn_down
         assert runner.state == State.FAILED
         svc.release.set()
         first.join(5.0)

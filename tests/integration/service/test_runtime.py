@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import random
 import threading
 import time
@@ -23,6 +24,7 @@ from appinfra.service import (
     HealthTimeoutError,
     ProcessRunner,
     RestartPolicy,
+    RunError,
     Runtime,
     Service,
     State,
@@ -136,6 +138,55 @@ class MeetsAt(Service):
 
     def is_healthy(self) -> bool:
         return self._met.is_set()
+
+
+class SetupGate:
+    """Holds the first setup() that reaches it until released; notes them all."""
+
+    def __init__(self) -> None:
+        self.setups: list[str] = []
+        self.blocked = threading.Event()
+        self.release = threading.Event()
+        self._first = threading.Lock()
+
+    def enter(self, name: str) -> None:
+        self.setups.append(name)
+        if self._first.acquire(blocking=False):
+            self.blocked.set()
+            assert self.release.wait(5.0)  # the timeout is the failure path
+
+
+class GatedSetup(Parked):
+    """setup() passes through a SetupGate shared with others."""
+
+    def __init__(self, name: str, depends: tuple[str, ...], gate: SetupGate) -> None:
+        super().__init__(name, depends=depends)
+        self._gate = gate
+
+    def setup(self) -> None:
+        self._gate.enter(self.name)
+
+
+class FailsInProcess(Service):
+    """Its run() fails in the subprocess at once; setup(), in the parent, fails
+    from its second call on. Module level, so the spawn start method can
+    pickle it."""
+
+    def __init__(self) -> None:
+        self._lg = Logger(name="test")
+        self.setups = 0
+
+    @property
+    def name(self) -> str:
+        return "fails-in-process"
+
+    def setup(self) -> None:
+        self.setups += 1
+        if self.setups > 1:
+            raise RuntimeError("no second setup")
+
+    def run(self) -> None:
+        raise RuntimeError("run fails")
 
 
 class Spawner(AsyncService):
@@ -313,6 +364,44 @@ class TestDependencies:
             rt.ready(web)
         assert rt.services == {}
 
+    def test_a_queued_waiter_whose_dependency_left_is_not_started(self, rt):
+        """Waiters released together start one after another: one queued behind
+        a slow setup() checks its dependencies again before it starts, and fails
+        if one left meanwhile."""
+        gate = SetupGate()
+        a = rt.spawn(GatedSetup("a", ("d",), gate))
+        b = rt.spawn(GatedSetup("b", ("d",), gate))
+        d = rt.spawn(Parked("d"))  # RUNNING releases a and b
+        assert gate.blocked.wait(5.0)
+        first = gate.setups[0]
+        queued = b if first == "a" else a
+
+        d.stop()  # d leaves the runtime while the first waiter is in setup()
+        assert "d" not in rt.services
+        gate.release.set()
+
+        with pytest.raises(DependencyFailedError, match="'d'"):
+            rt.ready(queued, timeout=5.0)
+        assert gate.setups == [first]
+
+    def test_a_new_service_does_not_get_a_failure_of_one_with_its_name(self, rt):
+        """A failure belongs to its runner: a service spawned after another of
+        its name failed and left is not given that failure by ready()."""
+
+        class FailsSetup(Parked):
+            def setup(self) -> None:
+                raise RuntimeError("no setup")
+
+        rt.spawn(Parked("x", depends=("db",)))
+        with pytest.raises(Exception, match="no setup"):
+            rt.spawn(FailsSetup("db"))  # x fails and leaves, never ready()'d
+        assert "x" not in rt.services
+
+        again = rt.spawn(Parked("x"))
+        rt.ready(again)
+
+        assert again.state == State.RUNNING
+
     @pytest.mark.parametrize("seed", range(20))
     def test_concurrent_spawns_in_any_order_start_each_once_after_its_dependencies(
         self, seed
@@ -395,6 +484,32 @@ class TestSupervision:
         assert _wait_until(lambda: svc.runs == 2 and runner.state == State.RUNNING)
         assert rt.services == {"fails": runner}
 
+    def test_a_restart_failing_right_after_it_runs_is_restarted_again(self, rt):
+        """The restarted service fails before the restart's own bookkeeping is
+        done: that failure is not lost, the next attempt follows."""
+        svc = FailsOnRelease(fails=2)
+        runner = rt.spawn(svc, RestartPolicy(backoff=0.0))
+        rt.ready(runner)
+        assert svc.parked.wait(5.0)
+        restarts = 0
+        failed_again = threading.Event()
+
+        def hook(_name: str, _old: State, new: State) -> None:
+            nonlocal restarts
+            if new == State.FAILED and svc.runs == 2:
+                failed_again.set()
+            if new == State.RUNNING:
+                restarts += 1
+                if restarts == 1:  # on the restart thread, before restart() returns
+                    assert svc.parked.wait(5.0)
+                    svc.release(rt)
+                    assert failed_again.wait(5.0)  # the timeout is the failure path
+
+        runner.on_state_change(hook)
+        svc.release(rt)  # the first run fails: a restart follows
+
+        assert _wait_until(lambda: svc.runs == 3 and runner.state == State.RUNNING)
+
     def test_a_service_with_no_restart_left_leaves_the_runtime(self, rt):
         svc = FailsOnRelease(fails=1)
         runner = rt.spawn(svc, RestartPolicy(restart_on_failure=False))
@@ -408,6 +523,44 @@ class TestSupervision:
         assert runner.state == State.FAILED
         assert other.state == State.RUNNING
 
+    def test_a_thread_service_failing_with_no_restart_left_is_torn_down(self, rt):
+        """It leaves the runtime, which then no longer stops it: its runner
+        tears it down when run() fails."""
+
+        class FailsOnce(Service):
+            def __init__(self) -> None:
+                self._lg = MagicMock()
+                self.torn_down = threading.Event()
+
+            @property
+            def name(self) -> str:
+                return "fails"
+
+            def run(self) -> None:
+                raise RuntimeError("run fails")
+
+            def teardown(self) -> None:
+                self.torn_down.set()
+
+        svc = FailsOnce()
+        rt.spawn(svc, RestartPolicy(restart_on_failure=False))
+
+        assert svc.torn_down.wait(5.0)  # the timeout is the failure path
+        assert _wait_until(lambda: "fails" not in rt.services)
+
+    def test_a_process_service_failing_its_last_restart_leaves_the_runtime(self, rt):
+        """Its monitor's last restart fails in setup(): no attempt follows, so
+        the service leaves the runtime instead of staying FAILED in it."""
+        runner = rt.spawn(
+            FailsInProcess(), RestartPolicy(max_retries=1, backoff=0.0), isolate=True
+        )
+        with contextlib.suppress(RunError):  # it may die before it is healthy
+            rt.ready(runner, timeout=10.0)
+
+        # The monitor checks once a second; the deadline is the failure path
+        assert _wait_until(lambda: "fails-in-process" not in rt.services, 15.0)
+        assert runner.state == State.FAILED
+
     def test_a_service_failing_to_start_is_not_restarted(self, rt):
         class FailsSetup(Parked):
             def setup(self) -> None:
@@ -418,7 +571,70 @@ class TestSupervision:
         assert rt.services == {}
 
 
+class TestRefusedAtStop:
+    def test_a_waiter_refused_as_the_runtime_stops_learns_it_at_once(self, monkeypatch):
+        """Its dependency runs, but stop() begins before the thread that would
+        start it does: ready() reports the stop at once instead of timing out
+        on a dependency that is running."""
+        rt = Runtime(MagicMock(), name="refused")
+        rt.start()
+        real_helper = rt._helper
+        stopper = threading.Thread(target=rt.stop)
+
+        def helper(target: Callable[..., None], arg: object, *, name: str) -> None:
+            if name.startswith("start-after-"):  # stop() lands right here
+                stopper.start()
+                assert _wait_until(lambda: rt._closing)  # Private: stop() began
+            real_helper(target, arg, name=name)
+
+        monkeypatch.setattr(rt, "_helper", helper)
+        waiter = rt.spawn(Parked("waiter", depends=("d",)))
+        rt.spawn(Parked("d"))  # its RUNNING releases the waiter
+
+        began = time.monotonic()
+        with pytest.raises(RunError, match="stopped first"):
+            rt.ready(waiter, timeout=5.0)
+        assert time.monotonic() - began < 5.0  # told, not timed out
+        stopper.join(10.0)
+
+
 class TestThreads:
+    def test_stop_waits_for_a_start_it_admitted(self, monkeypatch):
+        """A start the runtime admitted before stop() began, but that has not
+        reached runner.start() yet, is waited for and then stopped with the
+        rest: no service runs on after stop() returns."""
+        in_gap, release = threading.Event(), threading.Event()
+        real_start = ThreadRunner.start
+
+        def gated_start(runner: ThreadRunner) -> None:
+            if runner.name == "late":  # between admission and runner.start()
+                in_gap.set()
+                assert release.wait(5.0)  # the timeout is the failure path
+            real_start(runner)
+
+        monkeypatch.setattr(ThreadRunner, "start", gated_start)
+        rt = Runtime(MagicMock(), name="gap")
+        rt.start()
+        spawned: list[ThreadRunner] = []
+        log: list[str] = []
+        spawner = threading.Thread(
+            target=lambda: spawned.append(rt.spawn(Blocking("late", log)))
+        )
+        spawner.start()
+        assert in_gap.wait(5.0)
+
+        stopper = threading.Thread(target=rt.stop)
+        stopper.start()
+        assert _wait_until(lambda: rt._closing)  # Private: stop() has begun
+        release.set()
+        stopper.join(10.0)
+        spawner.join(10.0)
+
+        runner = spawned[0]
+        assert not runner.is_alive()
+        assert runner.state == State.STOPPED
+        assert log == ["late"]
+
     def test_helper_and_restart_threads_start_under_the_lock(self, rt, monkeypatch):
         """stop() joins the threads it finds in its sets, and join() raises on a
         thread not started yet: each starts before the lock that added it is

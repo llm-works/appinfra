@@ -195,9 +195,12 @@ class Runner(ABC):
                 self._handle_execution_exit()
 
             if self.is_healthy():
-                # Only from STARTING: another waiter may have moved it already
+                # Only from STARTING: another waiter may have moved it already,
+                # which is success; a stop() that ended the start is not
                 if self._transition_from(State.STARTING, State.RUNNING):
                     self._retries = 0
+                elif self._state not in (State.RUNNING, State.IDLE):
+                    raise RunError(self.name, "stopped during startup")
                 return
 
             time.sleep(interval)
