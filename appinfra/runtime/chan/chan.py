@@ -160,7 +160,8 @@ class Chan(Generic[T]):
             self._receivers.clear()
             self._senders.clear()
             for waiter in waiters:
-                waiter.settle(Outcome.CLOSED)
+                if waiter.claim():
+                    waiter.settle(Outcome.CLOSED)
 
     def __iter__(self) -> Chan[T]:
         """Iterate with recv() until the channel is closed and drained."""
@@ -189,9 +190,10 @@ class Chan(Generic[T]):
         the sender has to wait. Under the lock."""
         if self._closed:
             raise ClosedError("send on a closed channel")
-        if self._receivers:
+        receiver = _first(self._receivers)
+        if receiver is not None:
             self._handed += 1
-            _hand(self._receivers.popleft(), value, self._handed)
+            _hand(receiver, value, self._handed)
             return True
         if len(self._buffer) < self._capacity:
             self._buffer.append(value)
@@ -209,13 +211,14 @@ class Chan(Generic[T]):
             value = self._buffer.popleft()
             # Its slot is free now. The buffer never holds more than the
             # capacity; the refill relies on that, so it checks
-            if self._senders and len(self._buffer) < self._capacity:
-                sender = self._senders.popleft()
-                self._buffer.append(sender.value)
-                sender.settle(Outcome.DONE)
+            if len(self._buffer) < self._capacity:
+                sender = _first(self._senders)
+                if sender is not None:
+                    self._buffer.append(sender.value)
+                    sender.settle(Outcome.DONE)
             return True, value
-        if self._senders:
-            sender = self._senders.popleft()
+        sender = _first(self._senders)
+        if sender is not None:
             sender.settle(Outcome.DONE)
             return True, sender.value
         if self._closed:
@@ -287,12 +290,24 @@ class Chan(Generic[T]):
     def _return(self, value: Any, seq: int) -> None:
         """Put *value*, from hand-over *seq*, back to be received in its send
         order. Under the lock."""
-        if self._receivers:
+        receiver = _first(self._receivers)
+        if receiver is not None:
             # Receivers wait only while nothing is given back: it is next
-            _hand(self._receivers.popleft(), value, seq)
+            _hand(receiver, value, seq)
         else:
             at = bisect.bisect_right(self._given_back, seq, key=lambda e: e[0])
             self._given_back.insert(at, (seq, value))
+
+
+def _first(queue: deque[Waiter]) -> Waiter | None:
+    """Pop the first waiter of *queue* that may still be settled, or None. A
+    select's case whose select another channel completed is dropped. Under
+    the channel's lock."""
+    while queue:
+        waiter = queue.popleft()
+        if waiter.claim():
+            return waiter
+    return None
 
 
 def _hand(receiver: Waiter, value: Any, seq: int) -> None:

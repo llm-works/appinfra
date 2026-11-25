@@ -12,7 +12,17 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from appinfra.runtime import Chan, ChanClosedError, Runtime, StoppedError, stopping
+from appinfra.runtime import (
+    Chan,
+    ChanClosedError,
+    Runtime,
+    StoppedError,
+    aselect,
+    select,
+    stopping,
+)
+from appinfra.runtime import ChanRecv as Recv
+from appinfra.runtime import ChanSend as Send
 
 
 @pytest.fixture
@@ -391,3 +401,89 @@ class TestStop:
             return got
 
         assert rt.wait(rt.spawn(drain), timeout=5.0) == ["a", "stopped"]
+
+
+class TestSelect:
+    def test_it_waits_for_a_case_and_leaves_no_entry_behind(self):
+        a, b = Chan[int](0), Chan[int](0)
+        call = Call(lambda: select(Recv(a), Recv(b)))
+        assert _wait_until(
+            lambda: _waiting(a, receivers=1) and _waiting(b, receivers=1)
+        )
+        b.send(2)
+        call.join()
+        assert call.result == (1, 2)
+        assert _waiting(a) and _waiting(b)
+
+    def test_only_one_case_completes(self):
+        """Its other entry is dead once it completed: a second sender finds no
+        receiver, and its value stays unsent."""
+        a, b = Chan[int](0), Chan[int](0)
+        call = Call(lambda: select(Recv(a), Recv(b)))
+        assert _wait_until(
+            lambda: _waiting(a, receivers=1) and _waiting(b, receivers=1)
+        )
+        a.send(1)
+        with pytest.raises(TimeoutError):
+            b.send(2, timeout=0)
+        call.join()
+        assert call.result == (0, 1)
+
+    def test_a_send_case_waits_for_a_receiver(self):
+        a = Chan[int](0)
+        call = Call(lambda: select(Send(a, 5)))
+        assert _wait_until(lambda: _waiting(a, senders=1))
+        assert a.recv() == 5
+        call.join()
+        assert call.result == (0, None)
+
+    def test_close_ends_it_with_the_case_index(self):
+        a, b = Chan[int](0), Chan[int](0)
+        call = Call(lambda: select(Recv(a), Recv(b)))
+        assert _wait_until(lambda: _waiting(b, receivers=1))
+        b.close()
+        call.join()
+        assert isinstance(call.error, ChanClosedError)
+        assert call.error.index == 1
+        assert _waiting(a)
+
+    def test_a_timeout_leaves_no_entry_behind(self):
+        a = Chan[int](0)
+        with pytest.raises(TimeoutError):
+            select(Recv(a), timeout=0.001)
+        assert _waiting(a)
+
+    def test_a_waiting_task_ends_on_a_cancel(self, rt: Runtime):
+        a = Chan[int](0)
+        t = rt.spawn(lambda: select(Recv(a)))
+        assert _wait_until(lambda: _waiting(a, receivers=1))
+        rt.cancel(t)
+        with pytest.raises(StoppedError):
+            rt.wait(t, timeout=5.0)
+        assert _waiting(a)
+
+    @pytest.mark.asyncio
+    async def test_aselect_receives_from_a_thread(self):
+        a, b = Chan[int](0), Chan[int](0)
+        sender = Call(lambda: b.send(3))
+        assert await aselect(Recv(a), Recv(b), timeout=5.0) == (1, 3)
+        sender.join()
+
+    @pytest.mark.asyncio
+    async def test_a_value_handed_to_a_cancelled_aselect_is_not_lost(self):
+        a = Chan[int](0)
+        task = asyncio.create_task(aselect(Recv(a)))
+        await _parked(task)
+        await a.asend(1)  # handed over at once: the aselect is waiting
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert await a.arecv(timeout=0) == 1
+
+    @pytest.mark.asyncio
+    async def test_a_blocking_select_is_refused_on_the_loop(self):
+        a = Chan[int](1)
+        a.send(1, timeout=0)
+        with pytest.raises(RuntimeError, match="await aselect"):
+            select(Recv(a))
+        assert select(Recv(a), timeout=0) == (0, 1)
