@@ -20,6 +20,7 @@ from appinfra.service import (
     CycleError,
     DependencyFailedError,
     DependencyNotRunningError,
+    HealthTimeoutError,
     ProcessRunner,
     RestartPolicy,
     Runtime,
@@ -115,6 +116,28 @@ class FailsOnRelease(AsyncService):
         rt._host.loop.call_soon_threadsafe(self._release.set)  # Private: the loop
 
 
+class MeetsAt(Service):
+    """Healthy only once its run() and every other one at *barrier* have met."""
+
+    def __init__(self, name: str, barrier: threading.Barrier) -> None:
+        self._lg = MagicMock()
+        self._name = name
+        self._barrier = barrier
+        self._met = threading.Event()
+
+    @property
+    def name(self) -> str:
+        return self._name
+
+    def run(self) -> None:
+        self._barrier.wait(timeout=5.0)  # the timeout is the failure path
+        self._met.set()
+        self.stopping.wait()
+
+    def is_healthy(self) -> bool:
+        return self._met.is_set()
+
+
 class Spawner(AsyncService):
     """Derives a token from its own, as a service does for work it starts."""
 
@@ -192,6 +215,43 @@ class TestSpawn:
         with pytest.raises(RuntimeError, match="not running"):
             runtime.spawn(Parked("late"))
 
+    def test_a_runtime_starts_once(self):
+        """Single use: not started again while running nor after stop(), and a
+        stopped runtime takes no more services."""
+        rt = Runtime(MagicMock(), name="once")
+        rt.start()
+        with pytest.raises(RuntimeError, match="started already"):
+            rt.start()
+        rt.stop()
+        with pytest.raises(RuntimeError, match="started already"):
+            rt.start()
+        with pytest.raises(RuntimeError, match="not running"):
+            rt.spawn(Parked("late"))
+
+    def test_ready_on_a_service_never_healthy_times_out(self, rt):
+        """ready() gives up on a service that runs but never reports healthy;
+        the timeout is what is under test."""
+
+        class NeverHealthy(Parked):
+            def is_healthy(self) -> bool:
+                return False
+
+        runner = rt.spawn(NeverHealthy("sick"))
+        with pytest.raises(HealthTimeoutError):
+            rt.ready(runner, timeout=0.2)
+
+    def test_independent_services_run_at_once(self, rt):
+        """spawn() starts a service without waiting for its health, so services
+        independent of each other run together: neither becomes healthy until
+        both run()s have reached the barrier."""
+        barrier = threading.Barrier(2)
+        a = rt.spawn(MeetsAt("a", barrier))
+        b = rt.spawn(MeetsAt("b", barrier))
+
+        rt.ready(a, b, timeout=10.0)
+
+        assert a.state == State.RUNNING and b.state == State.RUNNING
+
 
 class TestDependencies:
     def test_a_service_spawned_before_its_dependency_waits_for_it(self, rt):
@@ -213,6 +273,29 @@ class TestDependencies:
         with pytest.raises(CycleError, match="b → a → b"):
             rt.spawn(Parked("b", depends=("a",)))
         assert list(rt.services) == ["a"]
+
+    def test_a_service_depending_on_itself_is_refused(self, rt):
+        with pytest.raises(CycleError, match="a → a"):
+            rt.spawn(Parked("a", depends=("a",)))
+        assert rt.services == {}
+
+    def test_the_spawn_that_closes_a_longer_cycle_is_refused(self, rt):
+        rt.spawn(Parked("a", depends=("b",)))
+        rt.spawn(Parked("b", depends=("c",)))
+        with pytest.raises(CycleError, match="c → a → b → c"):
+            rt.spawn(Parked("c", depends=("a",)))
+        assert set(rt.services) == {"a", "b"}
+
+    def test_a_diamond_is_no_cycle(self, rt):
+        """d needs b and c, which both need a: a is reached twice, not a cycle."""
+        d = rt.spawn(Parked("d", depends=("b", "c")))
+        rt.spawn(Parked("b", depends=("a",)))
+        rt.spawn(Parked("c", depends=("a",)))
+        rt.spawn(Parked("a"))
+
+        rt.ready(d)
+
+        assert all(r.state == State.RUNNING for r in rt.services.values())
 
     def test_waiters_fail_when_their_dependency_cannot_start(self, rt):
         class FailsSetup(Parked):
@@ -333,3 +416,32 @@ class TestSupervision:
         with pytest.raises(Exception, match="no setup"):
             rt.spawn(FailsSetup("broken"), RestartPolicy(backoff=0.0))
         assert rt.services == {}
+
+
+class TestThreads:
+    def test_helper_and_restart_threads_start_under_the_lock(self, rt, monkeypatch):
+        """stop() joins the threads it finds in its sets, and join() raises on a
+        thread not started yet: each starts before the lock that added it is
+        released, so stop() never finds one unstarted."""
+        starts: dict[str, bool] = {}
+        prefixes = ("start-after-", "health-", "restart-")
+
+        class Recording(threading.Thread):
+            def start(self) -> None:
+                if self.name.startswith(prefixes):
+                    starts[self.name] = rt._lock.locked()  # Private: the lock
+                super().start()
+
+        monkeypatch.setattr(threading, "Thread", Recording)
+        waiter = rt.spawn(Parked("waiter", depends=("dep",)))
+        rt.spawn(Parked("dep"))  # a health watch, then a start for waiter
+        rt.ready(waiter)
+        svc = FailsOnRelease(fails=1)
+        runner = rt.spawn(svc, RestartPolicy(backoff=0.0))
+        rt.ready(runner)
+        assert svc.parked.wait(5.0)
+        svc.release(rt)
+        assert _wait_until(lambda: svc.runs == 2 and runner.state == State.RUNNING)
+
+        assert {n.split("-")[0] for n in starts} == {"start", "health", "restart"}
+        assert all(starts.values()), starts

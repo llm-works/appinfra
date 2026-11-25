@@ -70,7 +70,9 @@ For API stability guarantees and deprecation policy, see
 
 ### Removed
 - **Breaking:** `appinfra.service.Manager`: `Runtime` replaces it. `rt.spawn(service)` takes the
-  place of `add_service()`/`add()`, in any order, and `with Runtime(lg) as rt:` of `with mgr:`.
+  place of `add_service()`/`add()`: a service whose dependency is not running yet waits for it
+  instead of being refused. `rt.services[name].state` replaces `is_running(name)`; a stopped
+  `Runtime` is not started again.
 - **Breaking:** the MkDocs build: the `docs.serve`, `docs.build`, `docs.check` and `docs.deploy`
   Make targets, their `APPINFRA_DOCS_CONFIG_FILE` and `APPINFRA_DOCS_OUTPUT_DIR` settings (set in
   a makefile, either now stops make as unknown) and the `docs` extra.

@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import atexit
 import threading
 import time
 from collections.abc import Callable
@@ -112,6 +113,16 @@ class Runtime:
             raise RuntimeError(f"runtime '{self.name}' was started already")
         self._host.start()
         self._started_runtime = True
+        # Its threads are daemons, ended unwound at exit: a runtime left running
+        # is stopped first, so its services' teardown() runs
+        atexit.register(self._atexit_stop)
+
+    def _atexit_stop(self) -> None:
+        """At interpreter exit: stop a runtime nothing stopped."""
+        try:
+            self.stop()
+        except Exception as e:
+            self._lg.warning("runtime stop at exit failed", extra={"exception": e})
 
     # -- spawn --------------------------------------------------------------
 
@@ -357,7 +368,9 @@ class Runtime:
                 self._watched.discard(runner.name)
 
     def _helper(self, target: Callable[..., None], arg: Any, *, name: str) -> None:
-        """Run *target*(*arg*) on a daemon thread that stop() waits for."""
+        """Run *target*(*arg*) on a daemon thread that stop() waits for. It
+        starts under the lock, so stop() never finds it in _helpers unstarted,
+        which join() refuses; the thread takes the lock only once *target* ran."""
         thread = threading.Thread(
             target=self._run_helper, args=(target, arg), name=name, daemon=True
         )
@@ -365,7 +378,7 @@ class Runtime:
             if self._closing:
                 return
             self._helpers.add(thread)
-        thread.start()
+            thread.start()
 
     def _run_helper(self, target: Callable[..., None], arg: Any) -> None:
         try:
@@ -458,7 +471,8 @@ class Runtime:
                 daemon=True,
             )
             self._restart_threads.add(thread)
-        thread.start()
+            # Under the lock, as in _helper(): stop() joins what it finds here
+            thread.start()
 
     def _restart(self, runner: Runner) -> None:
         """Restart thread: one attempt; if it fails, arm the next or let it go."""
@@ -491,6 +505,7 @@ class Runtime:
                 return
             self._closing = True
             restarts = list(self._restart_threads)
+        atexit.unregister(self._atexit_stop)
         for thread in restarts:
             thread.join(timeout)
         for runner in self._stop_order():
