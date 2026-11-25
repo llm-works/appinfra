@@ -77,7 +77,7 @@ class Service(ABC):
         """Initialize resources. Raise SetupError to abort."""
 
     def teardown(self) -> None:
-        """Cleanup. Scheduled/async: runs after the work ends. Otherwise: must make run() return."""
+        """Cleanup, once the run is told to stop. run() returns on self.stopping, not on teardown()."""
 
     def is_healthy(self) -> bool:
         """Check if ready. Runner waits for this before RUNNING state."""
@@ -162,8 +162,10 @@ class Database(Service):
 
 Every runner gives the service a `StopToken` as `self.stopping`, set when the service is to stop.
 `self.stopping.child()` derives a token that is stopped with it, for work the service starts. The
-runner also stops the token once `run()` has ended, however it ended, before `teardown()`: work
-derived from it does not outlive the run.
+runner also stops the token once `run()` has ended, however it ended, before it calls
+`teardown()`: work derived from the token is told to stop first. Stopping a token does not wait for
+that work; a service that must not release resources while its workers still use them waits for
+them, for instance by joining them in `teardown()`.
 
 - **A service with a synchronous `run()`**, under `ThreadRunner` or `ProcessRunner` (in the
   subprocess, where `teardown()` runs after `run()` returns), blocks on `self.stopping.wait()` or

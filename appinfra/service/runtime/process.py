@@ -488,7 +488,7 @@ def _process_entry(
         with contextlib.suppress(Exception):
             error_queue.put(e)
     finally:
-        # The run has ended: work derived from its token ends with it
+        # The run has ended: work derived from its token is told to stop
         with contextlib.suppress(Exception):
             service.stopping.stop()
         with contextlib.suppress(Exception):

@@ -45,6 +45,9 @@ class LoopHost:
         # begins runs before the loop stops, so its shutdown sees the task
         self._lock = threading.Lock()
         self._closing = False
+        # Runners whose task is alive; loop thread only. The shutdown stops their
+        # tokens before it cancels the tasks, as TaskRunner.stop() does
+        self._runners: set[TaskRunner] = set()
 
     @property
     def loop(self) -> asyncio.AbstractEventLoop:
@@ -91,6 +94,7 @@ class LoopHost:
         self._thread = threading.Thread(
             target=self._serve, args=(self._loop,), name=self.name, daemon=True
         )
+        self._runners = set()
         self._thread.start()
 
     def stop(self, timeout: float = 5.0) -> None:
@@ -116,13 +120,16 @@ class LoopHost:
         self._thread = None
         self._loop = None
 
-    @staticmethod
-    def _serve(loop: asyncio.AbstractEventLoop) -> None:
+    def _serve(self, loop: asyncio.AbstractEventLoop) -> None:
         """Thread target: run *loop* until stop(), then end its tasks, as
-        asyncio.run() does, and close it."""
+        asyncio.run() does, and close it. The services' tokens stop before
+        their tasks are cancelled: a run that waits for its own work while it
+        is cancelled needs that work told to stop first."""
         asyncio.set_event_loop(loop)
         try:
             loop.run_forever()
+            for runner in list(self._runners):
+                runner.service.stopping.stop()
             tasks = asyncio.all_tasks(loop)
             for task in tasks:
                 task.cancel()
@@ -220,6 +227,8 @@ class TaskRunner(Runner):
             self._host._schedule(self._spawn)
         except RuntimeError:
             self._launched -= 1
+            # As when a run ends: work setup() derived stops before teardown()
+            self.service.stopping.stop()
             self._teardown()
             self._transition(State.FAILED)
             raise
@@ -233,18 +242,21 @@ class TaskRunner(Runner):
         )
         task.add_done_callback(self._finish)
         self._task = task
+        self._host._runners.add(self)
 
     def _finish(self, task: asyncio.Task[None]) -> None:
         """On the loop, once *task* has ended: stop the run's token, tear the
         service down, settle the state, and wake the stop() calls waiting for it.
 
         The token stops however the task ended, also when the host cancelled it
-        without a stop(): work derived from it ends with the run, before
+        without a stop(): work derived from it is told to stop before
         teardown(). The state settles before the run is counted ended, so
         is_alive() never reports a RUNNING service as gone. Once it has settled,
         a start() on another thread may begin a new run, which resets _task;
         the new run's task is then left alone."""
         self.service.stopping.stop()
+        if self._task is task:
+            self._host._runners.discard(self)
         self._teardown()
         waiters, self._waiters = self._waiters, None
         self._settle_exit_state(self._exception)

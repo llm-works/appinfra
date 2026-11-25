@@ -463,7 +463,62 @@ class WaitsOnAThread(Parked):
         await asyncio.to_thread(self.work.wait)
 
 
+class JoinsItsWorkerOnCancel(Parked):
+    """Runs a worker thread on a token derived from its own and, cancelled,
+    waits for that thread before letting the cancel through."""
+
+    def __init__(self) -> None:
+        super().__init__("joins-its-worker")
+        self.work: StopToken | None = None
+
+    async def run(self) -> None:
+        self.work = self.stopping.child()
+        worker = threading.Thread(target=self.work.wait, daemon=True)
+        worker.start()
+        self.entered.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            await asyncio.to_thread(worker.join)
+            raise
+
+
+class WaitsInTeardown(Parked):
+    """setup() derives a token for its work; teardown() waits for it to stop."""
+
+    def __init__(self) -> None:
+        super().__init__("waits-in-teardown")
+        self.work: StopToken | None = None
+        self.work_stopped: bool | None = None
+
+    def setup(self) -> None:
+        self.work = self.stopping.child()
+
+    def teardown(self) -> None:
+        assert self.work is not None
+        self.work_stopped = self.work.wait(timeout=5.0)  # the deadline fails it
+        super().teardown()
+
+
 class TestLoopHostStop:
+    def test_stop_signals_the_token_before_cancelling(self):
+        """The host stops each running service's token before it cancels the
+        task, as TaskRunner.stop() does: a run that waits for its worker on
+        cancel would otherwise wait for a token that only its end stops."""
+        host = LoopHost(name=LOOP_THREAD)
+        host.start()
+        svc = JoinsItsWorkerOnCancel()
+        host.runner(svc).start()
+        assert svc.entered.wait(timeout=5.0)
+        try:
+            host.stop(timeout=5.0)  # the deadline is the failure path
+            with pytest.raises(RuntimeError, match="not running"):
+                host.loop
+        finally:
+            if svc.work is not None:
+                svc.work.stop()  # release the worker if the test failed
+            host.stop()
+
     def test_stop_releases_work_derived_from_the_token(self):
         """The host cancels the task itself, not through TaskRunner.stop(): the
         run's token stops all the same, or the thread waiting on a child of it
@@ -554,6 +609,28 @@ class TestLoopHostStop:
         assert runner.state == State.FAILED
         assert svc.torn_down.is_set()
         assert not runner.is_alive()
+
+    def test_a_refused_start_stops_the_token_before_teardown(self):
+        """The refused start tears down as a run's end does: token first, so a
+        teardown() that waits for work setup() derived from it returns."""
+        host = LoopHost(name=LOOP_THREAD)
+        host.start()
+        release = _hold_loop(host)
+        stopper = threading.Thread(target=host.stop)
+        stopper.start()
+        # Private: the window in which stop() has begun but the loop still runs
+        assert _wait_until(lambda: host._closing)
+        svc = WaitsInTeardown()
+        runner = host.runner(svc)
+
+        try:
+            with pytest.raises(RuntimeError, match="is stopping"):
+                runner.start()
+        finally:
+            release.set()
+            stopper.join(timeout=5.0)
+
+        assert svc.work_stopped is True
 
     def test_stop_ends_the_services_still_running(self):
         host = LoopHost(name=LOOP_THREAD)

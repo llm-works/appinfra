@@ -63,7 +63,8 @@ class Service(ABC):
     """Set when this run of the service is to stop, and once the run has ended
     however it ended; set by the runner before setup(), a new token for each
     start. ``stopping.child()`` derives a token stopped with it, so work the run
-    starts ends with it, before teardown().
+    starts is told to stop with it, before teardown(); stopping does not wait
+    for that work.
 
     A synchronous run(), under ThreadRunner or ProcessRunner (in the
     subprocess), checks it (``is_set()``) or blocks on it (``wait()``) and
@@ -114,15 +115,18 @@ class Service(ABC):
         """
 
     def teardown(self) -> None:
-        """Cleanup the service.
+        """Cleanup the service, once the run is told to stop.
 
-        For a scheduled service, the runner calls it once the loop has ended
-        (stopped or failed), on the thread or in the process that ran the loop,
-        so it never overlaps tick(). For an async service, it runs on the
-        LoopHost's thread after run() has ended, so it must not block. For a
-        service with its own run(), it must make run() return: under
-        ThreadRunner, stop() calls it while run() is still running. Default
-        does nothing.
+        run() returns on ``self.stopping``, under every runner; teardown()
+        releases resources. For a scheduled service, the runner calls it once
+        the loop has ended (stopped or failed), on the thread or in the process
+        that ran the loop, so it never overlaps tick(). For an async service, it
+        runs on the LoopHost's thread after run() has ended, so it must not
+        block. For a service with its own run(), ProcessRunner calls it in the
+        subprocess after run() has returned; ThreadRunner's stop() calls it once
+        the token is set, while run() may still be running, so there it can also
+        release a run() blocked on something other than the token. Default does
+        nothing.
         """
 
     def is_healthy(self) -> bool:

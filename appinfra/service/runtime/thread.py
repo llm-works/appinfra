@@ -72,7 +72,7 @@ class ThreadRunner(Runner):
         """Thread target.
 
         Records how the service's work ended, stops the run's token so work
-        derived from it ends with the run, tears down a service the runner
+        derived from it is told to stop, tears down a service the runner
         loops, then settles the state. Transitions are guarded to handle races
         with stop() or wait_healthy().
         """
