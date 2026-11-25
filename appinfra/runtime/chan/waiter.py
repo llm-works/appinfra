@@ -33,11 +33,13 @@ class Waiter(ABC):
     the wait ends. Waking under that lock is safe: it releases a lock or
     schedules a callback, and waits for nothing."""
 
-    __slots__ = ("value", "outcome")
+    __slots__ = ("value", "seq", "outcome")
 
     def __init__(self, value: Any = None) -> None:
         """A pending waiter, carrying *value* if it is a sender's."""
         self.value = value
+        # A receiver's: the number of the hand-over that gave it *value*
+        self.seq = 0
         self.outcome = Outcome.PENDING
 
     def settle(self, outcome: Outcome) -> None:

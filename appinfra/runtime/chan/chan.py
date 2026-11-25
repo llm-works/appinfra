@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import asyncio
+import bisect
 import threading
 from collections import deque
 from collections.abc import Callable
@@ -37,7 +38,8 @@ class Chan(Generic[T]):
     A call that has to wait ends when the token of the task it runs in is
     stopped, with StoppedError. Only waiting is refused: a call that can
     complete at once does, so a stopped task can still drain a channel. A
-    *timeout* bounds the wait (TimeoutError); 0 means do not wait.
+    *timeout* bounds the wait (TimeoutError); 0 means do not wait, and a
+    negative one, which Python gives no one meaning, is refused (ValueError).
 
     On an event loop's thread, ``send()`` and ``recv()`` take only
     ``timeout=0``, whatever the channel holds: a wait there would block the
@@ -46,7 +48,16 @@ class Chan(Generic[T]):
     loop runs uses ``timeout=0``.
     """
 
-    __slots__ = ("_capacity", "_lock", "_buffer", "_closed", "_senders", "_receivers")
+    __slots__ = (
+        "_capacity",
+        "_lock",
+        "_buffer",
+        "_given_back",
+        "_handed",
+        "_closed",
+        "_senders",
+        "_receivers",
+    )
 
     def __init__(self, capacity: int) -> None:
         """A channel buffering up to *capacity* values; 0 for none.
@@ -59,6 +70,12 @@ class Chan(Generic[T]):
         self._capacity = capacity
         self._lock = threading.Lock()
         self._buffer: deque[T] = deque()
+        # Values handed to receivers that left before taking them, by the
+        # number of their hand-over: received before the buffer, in send order.
+        # A hand-over happens only while the buffer is empty, so every value
+        # given back was sent before all the buffer holds
+        self._given_back: list[tuple[int, T]] = []
+        self._handed = 0  # hand-overs so far, numbering them
         self._closed = False
         # Waiters in the order they came. A waiter that leaves early (timeout,
         # stop, cancel) is removed in O(n); handing over pops the first
@@ -72,6 +89,7 @@ class Chan(Generic[T]):
             ClosedError: If the channel is closed, also while waiting.
             StoppedError: If the task's token is stopped while waiting.
             TimeoutError: If there is no room after *timeout*.
+            ValueError: If *timeout* is negative.
             RuntimeError: If called on an event loop's thread with a timeout
                 other than 0.
         """
@@ -91,6 +109,7 @@ class Chan(Generic[T]):
             ClosedError: If the channel is closed and drained, also while waiting.
             StoppedError: If the task's token is stopped while waiting.
             TimeoutError: If there is no value after *timeout*.
+            ValueError: If *timeout* is negative.
             RuntimeError: If called on an event loop's thread with a timeout
                 other than 0.
         """
@@ -107,6 +126,7 @@ class Chan(Generic[T]):
     async def asend(self, value: T, timeout: float | None = None) -> None:
         """Send *value*, awaiting up to *timeout* seconds for room. Raises as
         send(), except RuntimeError."""
+        _check_valid(timeout)
         with self._lock:
             if self._put(value):
                 return
@@ -118,6 +138,7 @@ class Chan(Generic[T]):
     async def arecv(self, timeout: float | None = None) -> T:
         """Receive the next value, awaiting up to *timeout* seconds for one.
         Raises as recv(), except RuntimeError."""
+        _check_valid(timeout)
         with self._lock:
             ready, value = self._take()
             if ready:
@@ -169,9 +190,8 @@ class Chan(Generic[T]):
         if self._closed:
             raise ClosedError("send on a closed channel")
         if self._receivers:
-            receiver = self._receivers.popleft()
-            receiver.value = value
-            receiver.settle(Outcome.DONE)
+            self._handed += 1
+            _hand(self._receivers.popleft(), value, self._handed)
             return True
         if len(self._buffer) < self._capacity:
             self._buffer.append(value)
@@ -179,12 +199,17 @@ class Chan(Generic[T]):
         return False
 
     def _take(self) -> tuple[bool, Any]:
-        """The next value: from the buffer, refilled from the first waiting
-        sender, or with no buffer from that sender directly; (False, None) if
-        the receiver has to wait. Under the lock."""
+        """The next value: one given back, then from the buffer, refilled from
+        the first waiting sender, or with no buffer from that sender directly;
+        (False, None) if the receiver has to wait. Under the lock."""
+        if self._given_back:
+            # Frees no buffer slot: a waiting sender still waits
+            return True, self._given_back.pop(0)[1]
         if self._buffer:
             value = self._buffer.popleft()
-            if self._senders:  # Its slot is free now
+            # Its slot is free now. The buffer never holds more than the
+            # capacity; the refill relies on that, so it checks
+            if self._senders and len(self._buffer) < self._capacity:
                 sender = self._senders.popleft()
                 self._buffer.append(sender.value)
                 sender.settle(Outcome.DONE)
@@ -250,41 +275,59 @@ class Chan(Generic[T]):
         """The waiting side left with an exception (a cancel, an interrupt).
         Pending, it leaves the queue. A receiver that was handed a value
         already passes it on, so no value is lost: to the next waiting
-        receiver, or back to the front of the buffer, past its capacity if
-        need be. A sender's value handed over is delivered."""
+        receiver, or given back, ahead of the buffer in send order. A sender's
+        value handed over is delivered."""
         with self._lock:
             if waiter.outcome is Outcome.PENDING:
                 queue.remove(waiter)
                 waiter.settle(Outcome.GONE)
             elif waiter.outcome is Outcome.DONE and queue is self._receivers:
-                self._return(waiter.value)
+                self._return(waiter.value, waiter.seq)
 
-    def _return(self, value: Any) -> None:
-        """Put *value* back as the next to receive. Under the lock."""
+    def _return(self, value: Any, seq: int) -> None:
+        """Put *value*, from hand-over *seq*, back to be received in its send
+        order. Under the lock."""
         if self._receivers:
-            receiver = self._receivers.popleft()
-            receiver.value = value
-            receiver.settle(Outcome.DONE)
+            # Receivers wait only while nothing is given back: it is next
+            _hand(self._receivers.popleft(), value, seq)
         else:
-            self._buffer.appendleft(value)
+            at = bisect.bisect_right(self._given_back, seq, key=lambda e: e[0])
+            self._given_back.insert(at, (seq, value))
+
+
+def _hand(receiver: Waiter, value: Any, seq: int) -> None:
+    """Hand *value*, from hand-over *seq*, to a waiting *receiver*. Under the
+    channel's lock."""
+    receiver.value = value
+    receiver.seq = seq
+    receiver.settle(Outcome.DONE)
+
+
+def _check_valid(timeout: float | None) -> None:
+    """Refuse a negative *timeout*: Python gives it no one meaning (queue
+    refuses it, threading waits for ever on -1), so none is guessed."""
+    if timeout is not None and timeout < 0:
+        raise ValueError(f"timeout must be 0 or more, or None, not {timeout}")
 
 
 def _check_timeout(timeout: float | None) -> None:
-    """Refuse to wait when *timeout* is 0 or less."""
-    if timeout is not None and timeout <= 0:
+    """Refuse to wait when *timeout* is 0."""
+    if timeout == 0:
         raise TimeoutError("channel not ready")
 
 
 def _check_off_loop(timeout: float | None, call: str) -> None:
-    """Refuse a blocking call that may wait on an event loop's thread, whether
-    or not it would: only timeout=0 is sure not to block the loop.
+    """Refuse a negative *timeout*, and a blocking call that may wait on an
+    event loop's thread, whether or not it would: only timeout=0 is sure not to
+    block the loop.
 
     _get_running_loop() returns None off a loop, where get_running_loop()
     raises: thread tasks, the common case, pay no exception. It is private, but
     exported in asyncio.__all__ and used by anyio and uvloop; should it go,
     get_running_loop() in a try gives the same answer at the cost of an
     exception."""
-    if timeout is not None and timeout <= 0:
+    _check_valid(timeout)
+    if timeout == 0:
         return
     if asyncio._get_running_loop() is not None:
         raise RuntimeError(

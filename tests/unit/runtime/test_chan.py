@@ -66,6 +66,17 @@ class TestChan:
         with pytest.raises(ChanClosedError):
             ch.send(1)
 
+    def test_a_negative_timeout_is_refused(self):
+        """It has no one meaning in Python (queue: an error, threading: wait
+        for ever); here it is an error, ready or not."""
+        ch = Chan[int](1)
+        with pytest.raises(ValueError, match="timeout"):
+            ch.send(1, timeout=-1)
+        ch.send(1)
+        with pytest.raises(ValueError, match="timeout"):
+            ch.recv(timeout=-1)
+        assert ch.recv(timeout=0) == 1  # the refused calls changed nothing
+
     def test_iteration_drains_and_ends_at_the_close(self):
         ch = Chan[int](3)
         for i in range(3):

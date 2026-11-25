@@ -215,6 +215,45 @@ class TestLoop:
         assert _waiting(ch)
 
     @pytest.mark.asyncio
+    async def test_values_given_back_keep_their_send_order(self):
+        """Two receives handed 1 and 2 are cancelled before they resume; their
+        cleanups run in the order they resume, first 1's, then 2's. The values
+        still come back out as sent."""
+        ch = Chan[int](0)
+        first = asyncio.create_task(ch.arecv())
+        await _parked(first)
+        second = asyncio.create_task(ch.arecv())
+        await _parked(second)
+        await ch.asend(1)  # handed to the first receive
+        await ch.asend(2)  # handed to the second
+        first.cancel()
+        second.cancel()
+        for task in (first, second):
+            with pytest.raises(asyncio.CancelledError):
+                await task
+        assert [await ch.arecv(timeout=0), await ch.arecv(timeout=0)] == [1, 2]
+
+    @pytest.mark.asyncio
+    async def test_a_value_given_back_keeps_a_waiting_sender_waiting(self):
+        """A given-back value overfills the buffer. Taking it frees no slot:
+        a sender waiting on a channel without a buffer still waits for a
+        receiver to take its own value."""
+        ch = Chan[int](0)
+        recv = asyncio.create_task(ch.arecv())
+        await _parked(recv)
+        await ch.asend(1)  # handed over at once: the receive is waiting
+        recv.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await recv  # 1 goes back to the buffer
+        send = asyncio.create_task(ch.asend(2))
+        await _parked(send)
+
+        assert await ch.arecv(timeout=0) == 1
+        await _parked(send)  # nobody has received 2 yet
+        assert await ch.arecv(timeout=0) == 2
+        await asyncio.wait_for(send, timeout=5.0)
+
+    @pytest.mark.asyncio
     async def test_a_blocking_call_is_refused_on_the_loop_even_when_ready(self):
         """Refusing only the calls that happen to wait would make the error
         depend on timing: code that passes at low load would fail under load."""
@@ -227,6 +266,20 @@ class TestLoop:
         with pytest.raises(RuntimeError, match="await arecv"):
             list(ch)
         assert await ch.arecv(timeout=0) == 1  # the value is still there
+
+    @pytest.mark.asyncio
+    async def test_a_negative_timeout_is_refused_on_the_loop(self):
+        """Blocking or async, ready or not: only 0 means do not wait."""
+        ch = Chan[int](1)
+        for call in (lambda: ch.send(1, timeout=-1), lambda: ch.recv(timeout=-1)):
+            with pytest.raises(ValueError, match="timeout"):
+                call()
+        with pytest.raises(ValueError, match="timeout"):
+            await ch.asend(1, timeout=-1)
+        await ch.asend(1)
+        with pytest.raises(ValueError, match="timeout"):
+            await ch.arecv(timeout=-1)
+        assert await ch.arecv(timeout=0) == 1
 
     @pytest.mark.asyncio
     async def test_a_call_without_waiting_is_allowed_on_the_loop(self):
