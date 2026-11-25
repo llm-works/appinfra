@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright 2026 The appinfra Authors
 
-"""Tests for the Runtime and its tasks: on the loop, on threads, tids, and stop."""
+"""Tests for the Runtime and its tasks: on the loop, on threads, ids, and stop."""
 
 import asyncio
 import threading
@@ -11,9 +11,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from appinfra.runtime import Runtime, StopToken, stopping, tid
-
-LOOP_THREAD = "runtime-loop"
+from appinfra.runtime import Runtime, StopToken, stopping, task_id
 
 
 class Parked:
@@ -147,19 +145,25 @@ class TestLoopTask:
         # A set, not a count: a thread an earlier test left may end meanwhile
         threads_before = set(threading.enumerate())
         fns = [Parked() for _ in range(50)]
-        tids = [rt.spawn(fn.run) for fn in fns]
+        task_ids = [rt.spawn(fn.run) for fn in fns]
 
         assert all(fn.entered.wait(timeout=5.0) for fn in fns)
         assert set(threading.enumerate()) <= threads_before
-        for t in tids:
+        for t in task_ids:
             rt.cancel(t)
             rt.wait(t, timeout=5.0)
 
     def test_it_runs_on_the_loop_thread_with_its_args(self, rt):
-        async def where(x: int) -> tuple[str, int]:
-            return threading.current_thread().name, x
+        """Every async task runs on the one loop thread, not the caller's."""
 
-        assert rt.wait(rt.spawn(where, 21), timeout=5.0) == (LOOP_THREAD, 21)
+        async def where(x: int) -> tuple[threading.Thread, int]:
+            return threading.current_thread(), x
+
+        first, x = rt.wait(rt.spawn(where, 21), timeout=5.0)
+        second, _ = rt.wait(rt.spawn(where, 0), timeout=5.0)
+        assert x == 21
+        assert first is second
+        assert first is not threading.current_thread()
 
     def test_cancel_cancels_it_and_stops_its_token(self, rt):
         fn = Parked()
@@ -174,12 +178,12 @@ class TestLoopTask:
 
     def test_a_failure_fails_that_task_only(self, rt):
         other = Parked()
-        other_tid = rt.spawn(other.run)
+        other_task_id = rt.spawn(other.run)
         assert other.entered.wait(timeout=5.0)
 
         with pytest.raises(ValueError, match="boom"):
             rt.wait(rt.spawn(_async_boom), timeout=5.0)
-        assert rt.alive(other_tid)
+        assert rt.alive(other_task_id)
 
     @pytest.mark.parametrize("exc_type", [SystemExit, KeyboardInterrupt])
     def test_an_exit_fails_that_task_only(self, rt, exc_type):
@@ -190,12 +194,12 @@ class TestLoopTask:
             raise exc_type()
 
         other = Parked()
-        other_tid = rt.spawn(other.run)
+        other_task_id = rt.spawn(other.run)
         assert other.entered.wait(timeout=5.0)
 
         with pytest.raises(exc_type):
             rt.wait(rt.spawn(exits), timeout=5.0)
-        assert rt.alive(other_tid)
+        assert rt.alive(other_task_id)
         # The loop runs on: a task spawned after it still runs
         later = Parked()
         rt.spawn(later.run)
@@ -247,11 +251,23 @@ class TestThreadTask:
     """A function as a task on a thread of its own."""
 
     def test_it_runs_on_a_thread_of_its_own_with_its_args(self, rt):
-        def where(x: int) -> tuple[str, int]:
-            return threading.current_thread().name, x
+        """Neither the caller's thread nor the loop's."""
 
-        t = rt.spawn(where, 21)
-        assert rt.wait(t, timeout=5.0) == (f"task-{t}", 21)
+        async def on_loop() -> threading.Thread:
+            return threading.current_thread()
+
+        def where(x: int) -> tuple[threading.Thread, int]:
+            return threading.current_thread(), x
+
+        loop_thread = rt.wait(rt.spawn(on_loop), timeout=5.0)
+        thread, x = rt.wait(rt.spawn(where, 21), timeout=5.0)
+        assert x == 21
+        assert thread not in (threading.current_thread(), loop_thread)
+
+    def test_its_thread_name_carries_its_id(self, rt):
+        """A thread dump ties the thread to the task's log records."""
+        t = rt.spawn(lambda: threading.current_thread().name)
+        assert rt.wait(t, timeout=5.0) == f"appinfra-task-{t}"
 
     def test_cancel_stops_its_token(self, rt):
         t = rt.spawn(_waits_for_stop)
@@ -276,14 +292,14 @@ class TestThreadTask:
 
     def test_a_task_waiting_for_itself_is_refused(self, rt):
         def waits_for_itself() -> None:
-            rt.wait(tid(), timeout=1.0)
+            rt.wait(task_id(), timeout=1.0)
 
         with pytest.raises(RuntimeError, match="itself"):
             rt.wait(rt.spawn(waits_for_itself), timeout=5.0)
 
 
-class TestTids:
-    def test_tids_count_up_and_are_never_reused(self, rt):
+class TestTaskIds:
+    def test_task_ids_count_up_and_are_never_reused(self, rt):
         first = rt.spawn(lambda: None)
         rt.wait(first, timeout=5.0)
         second = rt.spawn(lambda: None)
@@ -291,19 +307,19 @@ class TestTids:
         rt.wait(second, timeout=5.0)
 
     @pytest.mark.parametrize("on_loop", [True, False], ids=["loop", "thread"])
-    def test_a_task_knows_its_own_tid(self, rt, on_loop):
+    def test_a_task_knows_its_own_task_id(self, rt, on_loop):
         async def mine_async() -> int:
-            return tid()
+            return task_id()
 
         def mine() -> int:
-            return tid()
+            return task_id()
 
         t = rt.spawn(mine_async if on_loop else mine)
         assert rt.wait(t, timeout=5.0) == t
 
     def test_tid_and_stopping_outside_a_task_are_refused(self):
         with pytest.raises(RuntimeError, match="outside a task"):
-            tid()
+            task_id()
         with pytest.raises(RuntimeError, match="outside a task"):
             stopping()
 
@@ -401,9 +417,9 @@ class TestTokens:
         async def on_loop() -> None:
             pass
 
-        tids = [rt.spawn(on_loop) for _ in range(10)]
-        tids += [rt.spawn(lambda: None) for _ in range(10)]
-        for t in tids:
+        task_ids = [rt.spawn(on_loop) for _ in range(10)]
+        task_ids += [rt.spawn(lambda: None) for _ in range(10)]
+        for t in task_ids:
             rt.wait(t, timeout=5.0)
         assert not rt._root._children  # Private: the root's set of children
 

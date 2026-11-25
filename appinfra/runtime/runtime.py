@@ -20,7 +20,7 @@ from .task import LoopTask, Task, ThreadTask, current_task
 
 class Runtime:
     """Runs tasks: spawn() takes a function, calls it once, from any thread,
-    and returns the task's id (tid), assigned by the runtime and never reused.
+    and returns the task's id, assigned by the runtime and never reused.
 
     - an async function: a task on the runtime's event loop (a LoopHost), shared
       by every async task, so one waiting on an await holds no thread
@@ -31,8 +31,8 @@ class Runtime:
     it ends. A detached task's failure is logged, as nobody else sees it.
 
     Every task's token derives from the token of the task that spawned it, or
-    from the runtime's; ``stopping()`` returns it inside the task, ``tid()`` its
-    id. stop() stops every task's token, cancels the tasks on the loop, and
+    from the runtime's; ``stopping()`` returns it inside the task, ``task_id()``
+    its id. stop() stops every task's token, cancels the tasks on the loop, and
     waits for the ones on threads; their outcomes stay to be waited for.
 
     Example:
@@ -51,7 +51,7 @@ class Runtime:
         self._lock = threading.Lock()  # guards everything below
         # Tasks not reaped: running, and ended ones not waited for yet
         self._tasks: dict[int, Task] = {}
-        self._next_tid = 1
+        self._next_task_id = 1
         self._started_runtime = False
         self._closing = False
 
@@ -91,21 +91,25 @@ class Runtime:
             if not self._started_runtime or self._closing:
                 token.detach()
                 raise RuntimeError("runtime is not running")
-            tid = self._next_tid
-            self._next_tid += 1
-            task = self._task_for(tid, fn, args, token)
-            self._tasks[tid] = task
+            task_id = self._next_task_id
+            self._next_task_id += 1
+            task = self._task_for(task_id, fn, args, token)
+            self._tasks[task_id] = task
             # Under the lock, so stop() never finds a task here not launched
             self._launch(task)
-        return tid
+        return task_id
 
     def _task_for(
-        self, tid: int, fn: Callable[..., Any], args: tuple[Any, ...], token: StopToken
+        self,
+        task_id: int,
+        fn: Callable[..., Any],
+        args: tuple[Any, ...],
+        token: StopToken,
     ) -> Task:
         """The task that calls *fn*: on the loop if it is an async function."""
         if inspect.iscoroutinefunction(fn):
-            return LoopTask(self._host, tid, fn, args, token, self._on_end)
-        return ThreadTask(tid, fn, args, token, self._on_end)
+            return LoopTask(self._host, task_id, fn, args, token, self._on_end)
+        return ThreadTask(task_id, fn, args, token, self._on_end)
 
     def _launch(self, task: Task) -> None:
         """Launch *task*; under the lock. A task the loop refuses leaves the
@@ -113,26 +117,26 @@ class Runtime:
         try:
             task._launch()
         except BaseException:
-            del self._tasks[task.tid]
+            del self._tasks[task.task_id]
             task.token.stop()
             task.token.detach()
             raise
 
-    # -- tasks by tid -------------------------------------------------------
+    # -- tasks by id --------------------------------------------------------
 
-    def _get(self, tid: int) -> Task:
-        """The task *tid*; under the lock.
+    def _get(self, task_id: int) -> Task:
+        """The task *task_id*; under the lock.
 
         Raises:
             LookupError: If no task has that id, or it was reaped.
         """
-        task = self._tasks.get(tid)
+        task = self._tasks.get(task_id)
         if task is None:
-            raise LookupError(f"no task {tid}")
+            raise LookupError(f"no task {task_id}")
         return task
 
-    def wait(self, tid: int, timeout: float | None = None) -> Any:
-        """Wait up to *timeout* seconds for task *tid* to end, then reap it.
+    def wait(self, task_id: int, timeout: float | None = None) -> Any:
+        """Wait up to *timeout* seconds for task *task_id* to end, then reap it.
 
         Returns:
             What the task's function returned.
@@ -146,52 +150,52 @@ class Runtime:
             BaseException: Whatever the task's function raised.
         """
         with self._lock:
-            task = self._get(tid)
+            task = self._get(task_id)
             if task.detached:
-                raise RuntimeError(f"task {tid} is detached")
+                raise RuntimeError(f"task {task_id} is detached")
         if not task.wait(timeout):
-            raise TimeoutError(f"task {tid} is still running")
+            raise TimeoutError(f"task {task_id} is still running")
         with self._lock:
-            if self._tasks.get(tid) is not task:
-                raise LookupError(f"no task {tid}")
-            del self._tasks[tid]
+            if self._tasks.get(task_id) is not task:
+                raise LookupError(f"no task {task_id}")
+            del self._tasks[task_id]
         if task.exception is not None:
             raise task.exception
         return task.result
 
-    def cancel(self, tid: int) -> None:
-        """Stop task *tid*'s token and, on the loop, cancel it; returns at once.
+    def cancel(self, task_id: int) -> None:
+        """Stop task *task_id*'s token and, on the loop, cancel it; returns at once.
         A task on a thread sees its token and returns.
 
         Raises:
             LookupError: If no task has that id, or it was reaped.
         """
         with self._lock:
-            task = self._get(tid)
+            task = self._get(task_id)
         task.cancel()
 
-    def alive(self, tid: int) -> bool:
-        """True while task *tid* has not ended.
+    def alive(self, task_id: int) -> bool:
+        """True while task *task_id* has not ended.
 
         Raises:
             LookupError: If no task has that id, or it was reaped.
         """
         with self._lock:
-            return not self._get(tid).ended
+            return not self._get(task_id).ended
 
-    def detach(self, tid: int) -> None:
-        """Give up waiting for task *tid*: it is reaped as soon as it ends, now
+    def detach(self, task_id: int) -> None:
+        """Give up waiting for task *task_id*: it is reaped as soon as it ends, now
         if it has ended already.
 
         Raises:
             LookupError: If no task has that id, or it was reaped.
         """
         with self._lock:
-            task = self._get(tid)
+            task = self._get(task_id)
             task.detached = True
             reap = task.ended
             if reap:
-                del self._tasks[tid]
+                del self._tasks[task_id]
         if reap:
             self._log_failure(task)
 
@@ -201,7 +205,7 @@ class Runtime:
             task.ended = True
             reap = task.detached
             if reap:
-                self._tasks.pop(task.tid, None)
+                self._tasks.pop(task.task_id, None)
         if reap:
             self._log_failure(task)
 
@@ -209,7 +213,8 @@ class Runtime:
         """Log the failure of a task nobody waits for."""
         if task.exception is not None:
             self._lg.warning(
-                "task failed", extra={"tid": task.tid, "exception": task.exception}
+                "task failed",
+                extra={"task_id": task.task_id, "exception": task.exception},
             )
 
     # -- stop ---------------------------------------------------------------
@@ -238,7 +243,7 @@ class Runtime:
             if task is not caller and not task.wait(timeout):
                 self._lg.warning(
                     "task did not end in time",
-                    extra={"tid": task.tid, "timeout": timeout},
+                    extra={"task_id": task.task_id, "timeout": timeout},
                 )
 
     def __enter__(self) -> Runtime:

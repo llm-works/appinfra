@@ -43,13 +43,13 @@ def stopping() -> StopToken:
     return _running("stopping").token
 
 
-def tid() -> int:
+def task_id() -> int:
     """The id of the task the caller runs in.
 
     Raises:
         RuntimeError: If called outside a task.
     """
-    return _running("tid").tid
+    return _running("task_id").task_id
 
 
 def current_task() -> Task | None:
@@ -57,8 +57,14 @@ def current_task() -> Task | None:
     return _current.get(None)
 
 
+def _name(task_id: int) -> str:
+    """The name of a task's thread or asyncio task: prefixed, so a thread dump
+    shows whose it is, and carrying the id the runtime's log records carry."""
+    return f"appinfra-task-{task_id}"
+
+
 class Task(ABC):
-    """One call of a function, run once, known by its tid. Its token derives
+    """One call of a function, run once, known by its id. Its token derives
     from the token of the task that spawned it, or from the runtime's; it stops
     when the call ends, and leaves its parent's tree then.
 
@@ -68,7 +74,7 @@ class Task(ABC):
 
     def __init__(
         self,
-        tid: int,
+        task_id: int,
         fn: Callable[..., Any],
         args: tuple[Any, ...],
         token: StopToken,
@@ -77,13 +83,13 @@ class Task(ABC):
         """Initialize task.
 
         Args:
-            tid: The id the runtime assigned.
+            task_id: The id the runtime assigned.
             fn: The function to call.
             args: Its arguments.
             token: The task's token, derived from its parent's.
             on_end: Called once the call has ended, on the thread that ran it.
         """
-        self.tid = tid
+        self.task_id = task_id
         self.token = token
         self._fn = fn
         self._args = args
@@ -138,14 +144,14 @@ class ThreadTask(Task):
 
     def __init__(
         self,
-        tid: int,
+        task_id: int,
         fn: Callable[..., Any],
         args: tuple[Any, ...],
         token: StopToken,
         on_end: Callable[[Task], None],
     ) -> None:
         """Initialize task; see Task."""
-        super().__init__(tid, fn, args, token, on_end)
+        super().__init__(task_id, fn, args, token, on_end)
         self._thread: threading.Thread | None = None
         # Set by _run() as its last step. Thread.is_alive() on Python 3.13+
         # stays True until the OS thread handle is marked done, after the GIL
@@ -155,7 +161,7 @@ class ThreadTask(Task):
     def _launch(self) -> None:
         """Start the task's thread."""
         self._thread = threading.Thread(
-            target=self._run, name=f"task-{self.tid}", daemon=True
+            target=self._run, name=_name(self.task_id), daemon=True
         )
         self._thread.start()
 
@@ -185,7 +191,7 @@ class ThreadTask(Task):
         """
         thread = self._thread
         if thread is threading.current_thread():
-            raise RuntimeError(f"task {self.tid} cannot wait for itself")
+            raise RuntimeError(f"task {self.task_id} cannot wait for itself")
         if thread is not None:
             thread.join(timeout)
         return not self.is_alive()
@@ -204,14 +210,14 @@ class LoopTask(Task):
     def __init__(
         self,
         host: LoopHost,
-        tid: int,
+        task_id: int,
         fn: Callable[..., Any],
         args: tuple[Any, ...],
         token: StopToken,
         on_end: Callable[[Task], None],
     ) -> None:
         """Initialize task on *host*'s loop; see Task for the rest."""
-        super().__init__(tid, fn, args, token, on_end)
+        super().__init__(task_id, fn, args, token, on_end)
         self._host = host
         # Held here: the loop keeps only a weak reference to a task
         self._task: asyncio.Task[None] | None = None
@@ -234,7 +240,7 @@ class LoopTask(Task):
         context = contextvars.copy_context()
         context.run(_current.set, self)
         task = asyncio.get_running_loop().create_task(
-            self._call(), name=f"task-{self.tid}", context=context
+            self._call(), name=_name(self.task_id), context=context
         )
         task.add_done_callback(self._finish)
         self._task = task
@@ -257,6 +263,7 @@ class LoopTask(Task):
         self._task = None
         waiters, self._waiters = self._waiters, None
         self._end()
+        # Last, so the outcome is settled before is_alive() reports the end
         self._done = True
         for waiter in waiters or ():
             waiter.set()
@@ -285,7 +292,7 @@ class LoopTask(Task):
             return True
         if self._host.on_loop_thread():
             raise RuntimeError(
-                f"waiting for task {self.tid} on the loop would block it"
+                f"waiting for task {self.task_id} on the loop would block it"
             )
         ended = threading.Event()
         try:

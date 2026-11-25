@@ -33,9 +33,9 @@ For API stability guarantees and deprecation policy, see
   is to stop; `run()` returns on it under any runner. `stopping.child()` derives a token stopped
   with it.
 - `appinfra.runtime`: `Runtime.spawn(fn, *args)` calls a function once as a task (an async one on
-  a shared event loop, any other on a thread of its own) and returns its tid, for `wait()`,
-  `cancel()`, `alive()` and `detach()`. Inside a task, `stopping()` and `tid()` return its token
-  and id. `StopToken` lives here; `appinfra.service` re-exports it.
+  a shared event loop, any other on a thread of its own) and returns its task id, for `wait()`,
+  `cancel()`, `alive()` and `detach()`. Inside a task, `stopping()` and `task_id()` return its
+  token and id. `StopToken` lives here; `appinfra.service` re-exports it.
 
 ### Changed
 - **Breaking:** `submit_stream()` is renamed `stream()` on `AsyncChannel`, `AsyncBufferedChannel`

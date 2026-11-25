@@ -7,11 +7,11 @@ nothing from appinfra.service."""
 
 from .runtime import Runtime
 from .stop import StopToken
-from .task import stopping, tid
+from .task import stopping, task_id
 
 __all__ = [
     "Runtime",
     "StopToken",
     "stopping",
-    "tid",
+    "task_id",
 ]

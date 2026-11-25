@@ -9,7 +9,8 @@ import asyncio
 import threading
 from collections.abc import Callable
 
-THREAD_NAME = "runtime-loop"
+# Prefixed, as the stdlib names the threads it creates: a thread dump shows whose it is
+THREAD_NAME = "appinfra-loop"
 
 
 class LoopHost:
