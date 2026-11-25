@@ -184,18 +184,47 @@ class TestOnStop:
         assert sorted(calls) == ["child", "root"]
         assert [args.exc_value for args in reported] == [error]
 
-    def test_an_interrupt_in_a_callback_propagates(self):
+    def test_an_interrupt_in_a_callback_propagates_once_the_tree_is_stopped(self):
         """KeyboardInterrupt is not a callback's failure to report: it ends
-        the stop, as an interrupt ends anything."""
-        token = StopToken()
+        the stop's callbacks, as an interrupt ends anything. The tree is
+        stopped before any callback runs, so no token is left running."""
+        root = StopToken()
+        child = root.child()
 
         def interrupt():
             raise KeyboardInterrupt
 
-        token.on_stop(interrupt)
+        root.on_stop(interrupt)
         with pytest.raises(KeyboardInterrupt):
-            token.stop()
-        assert token.is_set()
+            root.stop()
+        assert root.is_set()
+        assert child.is_set()
+
+    def test_a_failing_hook_falls_back_and_the_stop_goes_on(self, monkeypatch):
+        """The hook reporting a callback's error raises too: as in threading,
+        the hook's error goes to sys.excepthook, and the rest of the tree is
+        stopped and its callbacks called."""
+        hook_error = RuntimeError("hook failed")
+        fallback = []
+
+        def failing_hook(args):
+            raise hook_error
+
+        monkeypatch.setattr(threading, "excepthook", failing_hook)
+        monkeypatch.setattr(sys, "excepthook", lambda t, v, tb: fallback.append(v))
+        root = StopToken()
+        child = root.child()
+        calls = []
+
+        def fail():
+            raise ValueError("callback failed")
+
+        root.on_stop(fail)
+        child.on_stop(lambda: calls.append("child"))
+        root.stop()
+        assert child.is_set()
+        assert calls == ["child"]
+        assert fallback == [hook_error]
 
     def test_on_a_stopped_token_a_failing_callback_raises_to_its_registrant(self):
         """Called at once, the callback runs for the caller of on_stop(),

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import functools
 import os
+import sys
 import threading
 from collections.abc import Callable, Iterable
 
@@ -85,10 +86,13 @@ class StopToken:
 
         Walks the tree with a worklist, not recursion, so no depth stops it
         partway: the part already stopped would ignore a second stop(). For the
-        same reason a callback that raises does not end the walk, nor reach the
-        caller, who cannot act on one listener's failure: the error goes to
-        threading.excepthook, as one nothing can catch. KeyboardInterrupt and
-        other non-Exception errors still propagate."""
+        same reason the whole tree is stopped before any callback runs: nothing
+        a callback does can leave a token running. A callback that raises does
+        not reach the caller either, who cannot act on one listener's failure:
+        the error goes to threading.excepthook, as one nothing can catch, and
+        the other callbacks still run. KeyboardInterrupt and other
+        non-Exception errors propagate."""
+        callbacks: list[Callable[[], None]] = []
         pending = [self]
         while pending:
             token = pending.pop()
@@ -97,14 +101,13 @@ class StopToken:
                     continue
                 token._stopped = True
                 event, children = token._event, token._children
-                callbacks = token._take_callbacks()
+                callbacks.extend(token._take_callbacks())
                 token._children = None
             if event is not None:
                 event.set()
             if children:
                 pending.extend(children)
-            if callbacks:
-                _run(callbacks)
+        _run(callbacks)
 
     def wait(self, timeout: float | None = None) -> bool:
         """Block until the token is stopped or *timeout* seconds pass.
@@ -190,11 +193,21 @@ def _run(callbacks: Iterable[Callable[[], None]]) -> None:
         try:
             fn()
         except Exception as e:
-            threading.excepthook(
-                threading.ExceptHookArgs(
-                    [type(e), e, e.__traceback__, threading.current_thread()]
-                )
+            _report(e)
+
+
+def _report(error: Exception) -> None:
+    """Report a callback's *error* through threading.excepthook. A hook that
+    raises falls back to sys.excepthook with its own error, as threading does
+    for a failing hook, so the stop's other callbacks still run."""
+    try:
+        threading.excepthook(
+            threading.ExceptHookArgs(
+                [type(error), error, error.__traceback__, threading.current_thread()]
             )
+        )
+    except Exception as hook_error:
+        sys.excepthook(type(hook_error), hook_error, hook_error.__traceback__)
 
 
 def _noop() -> None:
