@@ -71,7 +71,8 @@ class ThreadRunner(Runner):
     def _run(self) -> None:
         """Thread target.
 
-        Records how the service's work ended, tears down a service the runner
+        Records how the service's work ended, stops the run's token so work
+        derived from it ends with the run, tears down a service the runner
         loops, then settles the state. Transitions are guarded to handle races
         with stop() or wait_healthy().
         """
@@ -80,6 +81,7 @@ class ThreadRunner(Runner):
                 drive(self.service, self.service.stopping)
             except BaseException as e:
                 self._exception = e
+            self.service.stopping.stop()
             if self._loops_here:
                 self._teardown()
             self._settle_exit_state(self._exception)

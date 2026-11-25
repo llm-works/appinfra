@@ -5,12 +5,25 @@
 
 from __future__ import annotations
 
+import os
 import threading
+from collections.abc import Callable
 
 # Guards every token's children and wait event. One lock for all tokens, not one
 # each: a lock costs more than a token, and these sections are short and rare
 # (deriving, stopping, the first wait).
 _lock = threading.Lock()
+
+
+def _reset_lock_after_fork() -> None:
+    """A fork copies _lock as it is: held by another thread at that moment, it
+    would stay held in the child, where that thread does not exist."""
+    global _lock
+    _lock = threading.Lock()
+
+
+if hasattr(os, "register_at_fork"):  # POSIX only; nothing forks elsewhere
+    os.register_at_fork(after_in_child=_reset_lock_after_fork)
 
 
 class StopToken:
@@ -36,28 +49,39 @@ class StopToken:
         self._children: set[StopToken] | None = None
         self._parent: StopToken | None = None
 
-    def __reduce__(self) -> tuple[type[StopToken], tuple[()]]:
-        """Pickle as a new token: a token signals within one process, so a
-        service sent to a subprocess arrives with a fresh one (the subprocess
-        gives it its own), not a copy of this one and the tree it belongs to."""
-        return (StopToken, ())
+    def __reduce__(
+        self,
+    ) -> tuple[Callable[[StopToken | None], StopToken], tuple[StopToken | None]]:
+        """Pickle as a new token, not stopped: a token signals within one
+        process, so a service sent to a subprocess arrives with fresh ones that
+        the subprocess stops. A derived token arrives derived from a new copy of
+        its parent, the one pickled with it if any, so the tokens a service's
+        setup() derives stay tied to its own. Only the chain to the root comes
+        along, not the rest of the tree."""
+        return (_unpickle, (self._parent,))
 
     def is_set(self) -> bool:
         """True once the token, or one it derives from, is stopped."""
         return self._stopped
 
     def stop(self) -> None:
-        """Stop the token and every token derived from it. Idempotent."""
-        with _lock:
-            if self._stopped:
-                return
-            self._stopped = True
-            event, children = self._event, self._children
-            self._children = None
-        if event is not None:
-            event.set()
-        for child in children or ():
-            child.stop()
+        """Stop the token and every token derived from it. Idempotent.
+
+        Walks the tree with a worklist, not recursion, so no depth stops it
+        partway: the part already stopped would ignore a second stop()."""
+        pending = [self]
+        while pending:
+            token = pending.pop()
+            with _lock:
+                if token._stopped:
+                    continue
+                token._stopped = True
+                event, children = token._event, token._children
+                token._children = None
+            if event is not None:
+                event.set()
+            if children:
+                pending.extend(children)
 
     def wait(self, timeout: float | None = None) -> bool:
         """Block until the token is stopped or *timeout* seconds pass.
@@ -95,3 +119,8 @@ class StopToken:
             parent, self._parent = self._parent, None
             if parent is not None and parent._children is not None:
                 parent._children.discard(self)
+
+
+def _unpickle(parent: StopToken | None) -> StopToken:
+    """A token unpickled: a new root, or a new child of its unpickled parent."""
+    return StopToken() if parent is None else parent.child()

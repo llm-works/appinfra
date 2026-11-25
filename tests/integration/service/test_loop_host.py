@@ -20,6 +20,7 @@ from appinfra.service import (
     RestartPolicy,
     Runner,
     State,
+    StopToken,
 )
 
 LOOP_THREAD = "test-loop"
@@ -449,7 +450,39 @@ class BlocksTeardown(Parked):
         super().teardown()
 
 
+class WaitsOnAThread(Parked):
+    """Hands its wait to a thread, on a token derived from its own."""
+
+    def __init__(self) -> None:
+        super().__init__("waits-on-a-thread")
+        self.work: StopToken | None = None
+
+    async def run(self) -> None:
+        self.work = self.stopping.child()
+        self.entered.set()
+        await asyncio.to_thread(self.work.wait)
+
+
 class TestLoopHostStop:
+    def test_stop_releases_work_derived_from_the_token(self):
+        """The host cancels the task itself, not through TaskRunner.stop(): the
+        run's token stops all the same, or the thread waiting on a child of it
+        holds shutdown_default_executor() and the host never ends."""
+        host = LoopHost(name=LOOP_THREAD)
+        host.start()
+        svc = WaitsOnAThread()
+        host.runner(svc).start()
+        assert svc.entered.wait(timeout=5.0)
+        try:
+            host.stop(timeout=5.0)  # the deadline is the failure path
+            assert svc.work is not None and svc.work.is_set()
+            with pytest.raises(RuntimeError, match="not running"):
+                host.loop
+        finally:
+            if svc.work is not None:
+                svc.work.stop()  # release the thread if the test failed
+            host.stop()
+
     def test_stop_that_times_out_keeps_the_host_until_shutdown_ends(self):
         """A stop() whose wait ends before the shutdown does leaves the host
         running, not started anew; a later stop() waits for the shutdown."""

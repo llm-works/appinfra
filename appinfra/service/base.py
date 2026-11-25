@@ -60,12 +60,16 @@ class Service(ABC):
     """Logger instance. Set by subclass __init__ or by ProcessRunner."""
 
     stopping: StopToken
-    """Set when this run of the service is to stop; set by the runner before
-    setup(), a new token for each start. run() checks it (``is_set()``) or blocks
-    on it (``wait()``) and returns once it is set; ``stopping.child()`` derives a
-    token stopped with it. The same under every runner: ThreadRunner,
-    ProcessRunner (in the subprocess) and TaskRunner, where stopping also
-    cancels the task."""
+    """Set when this run of the service is to stop, and once the run has ended
+    however it ended; set by the runner before setup(), a new token for each
+    start. ``stopping.child()`` derives a token stopped with it, so work the run
+    starts ends with it, before teardown().
+
+    A synchronous run(), under ThreadRunner or ProcessRunner (in the
+    subprocess), checks it (``is_set()``) or blocks on it (``wait()``) and
+    returns once it is set. An AsyncService's run() never calls ``wait()``,
+    which would block the loop it shares: under TaskRunner, stopping cancels
+    its task, and it uses the token to derive tokens for what it starts."""
 
     @property
     def lg(self) -> Logger:

@@ -3,6 +3,9 @@
 
 """Tests for StopToken."""
 
+import pickle
+import sys
+
 from appinfra.service.stop import StopToken
 
 
@@ -34,6 +37,15 @@ class TestStopToken:
         assert child.is_set()
         assert grandchild.is_set()
 
+    def test_stop_reaches_the_end_of_a_chain_deeper_than_the_recursion_limit(self):
+        """Depth costs no stack: a partial stop would leave the rest of the
+        tree running for good, since the stopped part ignores a second stop()."""
+        root = token = StopToken()
+        for _ in range(sys.getrecursionlimit() + 100):
+            token = token.child()
+        root.stop()
+        assert token.is_set()
+
     def test_stopping_a_child_leaves_its_parent_running(self):
         root = StopToken()
         child = root.child()
@@ -55,3 +67,25 @@ class TestStopToken:
         root.stop()
         assert not child.is_set()
         assert not root._children  # Private: the parent dropped its reference
+
+    def test_a_pickled_child_stays_linked_to_its_pickled_parent(self):
+        """A service sent to a subprocess keeps the tokens its setup() derived
+        tied to its own: stopping the unpickled parent stops the child."""
+        root = StopToken()
+        child = root.child()
+        root2, child2 = pickle.loads(pickle.dumps((root, child)))
+        assert not child2.is_set()
+        root2.stop()
+        assert child2.is_set()
+
+    def test_a_pickled_token_carries_its_ancestors_not_its_siblings(self):
+        """Pickling keeps the chain to the root and no other part of the tree;
+        the copies are new tokens, not stopped with the originals."""
+        root = StopToken()
+        child = root.child()
+        root.child()  # a sibling, left behind
+        child2 = pickle.loads(pickle.dumps(child))
+        assert child2._parent is not None  # Private: the link to the parent
+        assert child2._parent._children == {child2}
+        root.stop()
+        assert not child2.is_set()

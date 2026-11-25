@@ -158,6 +158,12 @@ class ProcessRunner(Runner):
         self._healthy_event = ctx.Event()
         self._error_queue = ctx.Queue()
 
+    def _inherited_writer(self, ctx: BaseContext) -> Connection | None:
+        """The stop pipe's writer as the child inherits it: a forked child holds
+        a copy, which it must close for the pipe to reach EOF once the parent's
+        copy closes; a spawned child has none."""
+        return self._stop_writer if ctx.get_start_method() == "fork" else None
+
     def _spawn_process(self, ctx: BaseContext, log_config: dict[str, Any]) -> None:
         """Spawn the subprocess."""
         # Temporarily nullify logger to make service picklable on macOS.
@@ -176,6 +182,7 @@ class ProcessRunner(Runner):
                     self.service,
                     self._shutdown_event,
                     self._stop_reader,
+                    self._inherited_writer(ctx),
                     self._healthy_event,
                     self._error_queue,
                     log_config,
@@ -425,12 +432,21 @@ def _start_health_poller(
     threading.Thread(target=poll, daemon=True).start()
 
 
-def _subprocess_token(stop_reader: Connection) -> StopToken:
-    """The service's stopping token in the subprocess: a daemon thread stops it
-    once the parent writes to *stop_reader*'s pipe, or once the pipe closes as
-    the parent dies. A token, unlike the pipe, derives tokens for what the
-    service starts."""
-    token = StopToken()
+def _bridge_stop(
+    token: StopToken, stop_reader: Connection, inherited_writer: Connection | None
+) -> None:
+    """Stop *token*, the service's own, from a daemon thread once the parent
+    writes to *stop_reader*'s pipe or the pipe reaches EOF. The service's token,
+    not a new one: setup() ran in the parent and may have kept it or derived
+    from it, and the subprocess has those tokens as copies of it.
+
+    EOF comes only once every copy of the writer is closed. A forked child
+    closes its own copy, *inherited_writer*, here. Children forked later by the
+    same parent hold copies too, so when the parent dies without closing its
+    writer, EOF is certain only for a single forked child."""
+    if inherited_writer is not None:
+        with contextlib.suppress(OSError):
+            inherited_writer.close()
 
     def bridge() -> None:
         with contextlib.suppress(EOFError, OSError):
@@ -438,13 +454,13 @@ def _subprocess_token(stop_reader: Connection) -> StopToken:
         token.stop()
 
     threading.Thread(target=bridge, name="stopping", daemon=True).start()
-    return token
 
 
 def _process_entry(
     service: Any,
     shutdown_event: MPEvent,
     stop_reader: Connection,
+    inherited_writer: Connection | None,
     healthy_event: MPEvent,
     error_queue: mp.Queue[BaseException],
     log_config: dict[str, Any],
@@ -453,7 +469,7 @@ def _process_entry(
 
     Gives the service what it runs with here:
     - ``_lg``: Logger configured to forward to parent via queue
-    - ``stopping``: a token set when the parent requests shutdown
+    - ``stopping``: its own token, stopped here when the parent requests shutdown
 
     The process exits non-zero when the service failed, so the parent's monitor
     restarts it; exit code 0 means a clean shutdown.
@@ -463,7 +479,7 @@ def _process_entry(
         lg = Logger.from_queue_config(log_config, name=f"svc/{service.name}")
         if hasattr(service, "_lg"):
             service._lg = lg
-        service.stopping = _subprocess_token(stop_reader)
+        _bridge_stop(service.stopping, stop_reader, inherited_writer)
 
         _start_health_poller(service, shutdown_event, healthy_event)
         drive(service, service.stopping)
@@ -472,6 +488,9 @@ def _process_entry(
         with contextlib.suppress(Exception):
             error_queue.put(e)
     finally:
+        # The run has ended: work derived from its token ends with it
+        with contextlib.suppress(Exception):
+            service.stopping.stop()
         with contextlib.suppress(Exception):
             service.teardown()
     if exit_code:

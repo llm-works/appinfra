@@ -235,13 +235,16 @@ class TaskRunner(Runner):
         self._task = task
 
     def _finish(self, task: asyncio.Task[None]) -> None:
-        """On the loop, once *task* has ended: tear the service down, settle
-        the state, and wake the stop() calls waiting for it.
+        """On the loop, once *task* has ended: stop the run's token, tear the
+        service down, settle the state, and wake the stop() calls waiting for it.
 
-        The state settles before the run is counted ended, so is_alive() never
-        reports a RUNNING service as gone. Once it has settled, a start() on
-        another thread may begin a new run, which resets _task; the new run's
-        task is then left alone."""
+        The token stops however the task ended, also when the host cancelled it
+        without a stop(): work derived from it ends with the run, before
+        teardown(). The state settles before the run is counted ended, so
+        is_alive() never reports a RUNNING service as gone. Once it has settled,
+        a start() on another thread may begin a new run, which resets _task;
+        the new run's task is then left alone."""
+        self.service.stopping.stop()
         self._teardown()
         waiters, self._waiters = self._waiters, None
         self._settle_exit_state(self._exception)

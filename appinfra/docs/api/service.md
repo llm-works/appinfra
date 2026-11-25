@@ -160,12 +160,18 @@ class Database(Service):
         self.stopping.wait()  # Block until stopped
 ```
 
-Every runner gives the service a `StopToken` as `self.stopping`, set when the service is to stop:
-`run()` can block on `self.stopping.wait()` or check `self.stopping.is_set()` instead of keeping
-an event of its own. It works the same under `ThreadRunner`, under `ProcessRunner` (in the
-subprocess, where `teardown()` runs after `run()` returns) and under a LoopHost's `TaskRunner`,
-where stopping also cancels the task. `self.stopping.child()` derives a token that is stopped
-with it, for work the service starts.
+Every runner gives the service a `StopToken` as `self.stopping`, set when the service is to stop.
+`self.stopping.child()` derives a token that is stopped with it, for work the service starts. The
+runner also stops the token once `run()` has ended, however it ended, before `teardown()`: work
+derived from it does not outlive the run.
+
+- **A service with a synchronous `run()`**, under `ThreadRunner` or `ProcessRunner` (in the
+  subprocess, where `teardown()` runs after `run()` returns), blocks on `self.stopping.wait()` or
+  checks `self.stopping.is_set()` instead of keeping an event of its own.
+- **An `AsyncService`**, under a LoopHost's `TaskRunner`, needs no token to learn of a stop:
+  stopping cancels its task at the `await` it is parked on. It never calls `self.stopping.wait()`,
+  which blocks the thread and so the loop every service on the host shares. It derives tokens for
+  work it hands to threads (`await asyncio.to_thread(token.wait)`), and may check `is_set()`.
 
 ## State Machine
 
