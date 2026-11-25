@@ -154,13 +154,16 @@ class Runtime:
             task = self._get(task_id)
             if task.detached:
                 raise RuntimeError(f"task {task_id} is detached")
+            # Its outcome is settled once the end is recorded, though its
+            # thread may not have run its last line yet: no wait for it then
+            ended = task.ended
             # For both kinds: joining a thread blocks the loop as much as an
             # Event.wait() on it does. An ended task can still be collected
-            if not task.ended and self._host.on_loop_thread():
+            if not ended and self._host.on_loop_thread():
                 raise RuntimeError(
                     f"waiting for task {task_id} on the loop would block it"
                 )
-        if not task.wait(timeout):
+        if not ended and not task.wait(timeout):
             raise TimeoutError(f"task {task_id} is still running")
         with self._lock:
             if self._tasks.get(task_id) is not task:
@@ -250,7 +253,7 @@ class Runtime:
         # token, outside this root's tree: its own token is stopped as well
         for task in running:
             task.token.stop()
-        self._host.stop(timeout)
+        self._host.stop(max(0.0, deadline - time.monotonic()))
         for task in self._still_running(running, deadline):
             self._lg.warning(
                 "task did not end in time",

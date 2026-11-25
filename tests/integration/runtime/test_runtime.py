@@ -12,6 +12,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from appinfra.runtime import Runtime, StopToken, stopping, task_id
+from appinfra.runtime.loop import LoopHost
 from appinfra.runtime.task import LoopTask, ThreadTask
 from appinfra.testing import FakeClock
 
@@ -103,6 +104,19 @@ class WaitsForStop:
     def __call__(self) -> StopToken:
         self.entered.set()
         return _waits_for_stop()
+
+
+class IgnoresItsToken:
+    """Runs until *release* is set, whatever its token says; notes it has
+    begun, so a test cancels or stops it only once it runs."""
+
+    def __init__(self) -> None:
+        self.entered = threading.Event()
+        self.release = threading.Event()
+
+    def __call__(self) -> bool:
+        self.entered.set()
+        return self.release.wait(10.0)
 
 
 def _boom() -> None:
@@ -334,16 +348,39 @@ class TestThreadTask:
         with pytest.raises(ValueError, match="boom"):
             rt.wait(rt.spawn(_boom), timeout=5.0)
 
+    def test_an_ended_task_is_collected_before_its_thread_finishes(
+        self, rt, monkeypatch
+    ):
+        """Once the runtime has recorded the end, wait() collects the outcome,
+        even while the task's thread has not yet run its last line."""
+        in_window, release = threading.Event(), threading.Event()
+        real_on_end = Runtime._on_end
+
+        def on_end_then_hold(self: Runtime, task: object) -> None:
+            real_on_end(self, task)
+            in_window.set()
+            release.wait(10.0)  # holds the thread after the end is recorded
+
+        monkeypatch.setattr(Runtime, "_on_end", on_end_then_hold)
+        t = rt.spawn(lambda: 42)
+        try:
+            assert in_window.wait(5.0)
+            assert not rt.alive(t)
+            assert rt.wait(t, timeout=0) == 42
+        finally:
+            release.set()
+
     def test_wait_gives_up_on_a_task_that_ignores_its_token(self, rt):
-        release = threading.Event()
-        t = rt.spawn(release.wait, 10.0)
+        fn = IgnoresItsToken()
+        t = rt.spawn(fn)
+        assert fn.entered.wait(5.0)
         rt.cancel(t)
         try:
             with pytest.raises(TimeoutError):
                 rt.wait(t, timeout=0)
             assert rt.alive(t)
         finally:
-            release.set()
+            fn.release.set()
         assert rt.wait(t, timeout=5.0) is True
 
     def test_a_task_waiting_for_itself_is_refused(self, rt):
@@ -686,26 +723,54 @@ class TestStop:
     def test_a_task_that_ignores_its_token_is_logged_and_left(self):
         """A thread cannot be killed: stop() reports it and returns."""
         lg = MagicMock()
-        release = threading.Event()
+        fn = IgnoresItsToken()
         rt = Runtime(lg)
         rt.start()
-        t = rt.spawn(release.wait, 10.0)
+        t = rt.spawn(fn)
+        assert fn.entered.wait(5.0)
         try:
             rt.stop(timeout=0)
             lg.warning.assert_called_once()
             assert lg.warning.call_args.args[0] == "task did not end in time"
         finally:
-            release.set()
+            fn.release.set()
         assert rt.wait(t, timeout=5.0) is True
+
+    def test_the_loop_gets_what_is_left_of_the_budget(self, monkeypatch):
+        """Time stop() spends before the loop's stop counts against the one
+        budget: the loop gets what is left, not the full timeout."""
+        rt = Runtime(MagicMock())
+        rt.start()
+        rt.spawn(Parked().run)
+        loop_timeouts: list[float] = []
+        real_token_stop, real_host_stop = StopToken.stop, LoopHost.stop
+        with FakeClock(modules=["appinfra.runtime.runtime"]) as clock:
+
+            def slow_token_stop(token: StopToken) -> None:
+                clock.sleep(0.4)  # stopping tokens takes time before the loop's stop
+                real_token_stop(token)
+
+            def recording_host_stop(host: LoopHost, timeout: float = 5.0) -> None:
+                loop_timeouts.append(timeout)
+                real_host_stop(host, 5.0)  # the real loop gets real time to end
+
+            monkeypatch.setattr(StopToken, "stop", slow_token_stop)
+            monkeypatch.setattr(LoopHost, "stop", recording_host_stop)
+            try:
+                rt.stop(timeout=1.0)
+            finally:
+                monkeypatch.undo()
+        assert loop_timeouts and loop_timeouts[0] < 1.0
 
     def test_stop_shares_one_timeout_across_the_tasks_it_waits_for(self, monkeypatch):
         """Thread tasks that ignore their tokens get what is left of one budget,
         not the full timeout each; a loop task is not waited for again once the
         loop has stopped."""
-        release = threading.Event()
+        fns = [IgnoresItsToken() for _ in range(3)]
         rt = Runtime(MagicMock())
         rt.start()
-        hung = [rt.spawn(release.wait, 10.0) for _ in range(3)]
+        hung = [rt.spawn(fn) for fn in fns]
+        assert all(fn.entered.wait(5.0) for fn in fns)
         rt.spawn(Parked().run)
         thread_waits: list[float | None] = []
         loop_waits: list[float | None] = []
@@ -726,7 +791,8 @@ class TestStop:
                 rt.stop(timeout=1.0)
             finally:
                 monkeypatch.undo()
-                release.set()
+                for fn in fns:
+                    fn.release.set()
         assert thread_waits == [1.0, 0.0, 0.0]
         assert loop_waits == []
         for t in hung:
