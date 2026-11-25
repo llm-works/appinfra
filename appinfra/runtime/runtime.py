@@ -5,8 +5,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import atexit
+import contextlib
+import contextvars
 import inspect
+import pickle
 import threading
 import time
 from collections.abc import Callable
@@ -14,10 +18,11 @@ from types import TracebackType
 from typing import Any
 
 from ..log import Logger
+from .chan import Chan, ClosedError, Sender
 from .errors import StoppedError
 from .loop import LoopHost
 from .stop import StopToken
-from .task import LoopTask, Task, ThreadTask, current_task
+from .task import LoopTask, Task, TaskEnd, ThreadTask, current_task
 
 
 class Runtime:
@@ -41,6 +46,10 @@ class Runtime:
     and a detached one is not logged as failed. A function that sees the stop
     and returns ends with its result.
 
+    A task spawned with ``ends`` is detached, and its TaskEnd is sent on that
+    channel (or pipe) as it ends, instead: one receiver learns of the ends of
+    many tasks, as a Go supervisor reads them from one channel.
+
     Example:
         with Runtime(lg) as rt:
             server = rt.spawn(serve, port)   # async def serve(port): ...
@@ -61,6 +70,9 @@ class Runtime:
         self._next_task_id = 1
         self._started_runtime = False
         self._closing = False
+        # Ends awaiting room on a full channel; loop thread only. Held here:
+        # the loop keeps only a weak reference to a task
+        self._sending: set[asyncio.Task[None]] = set()
 
     def start(self) -> None:
         """Start the runtime's event loop.
@@ -85,15 +97,40 @@ class Runtime:
 
     # -- spawn --------------------------------------------------------------
 
-    def spawn(self, fn: Callable[..., Any], *args: Any) -> int:
+    def spawn(
+        self,
+        fn: Callable[..., Any],
+        *args: Any,
+        token: StopToken | None = None,
+        ends: Chan[TaskEnd] | Sender[TaskEnd] | None = None,
+    ) -> int:
         """Call *fn*(*args*) as a task: on the loop if it is an async function,
         else on a thread of its own. Returns the task's id.
+
+        Args:
+            fn: The function to call.
+            *args: Its arguments.
+            token: The token the task's derives from, instead of the spawning
+                task's or the runtime's. stop() stops the task all the same.
+            ends: A channel, or a pipe's sending end, the task's TaskEnd is
+                sent on as it ends; one channel can take the ends of many
+                tasks. The task is detached: reaped as it ends, not waited
+                for, its failure sent, not logged. The ending task does not
+                wait for room: an end that finds the channel full waits on
+                the loop, so ends come in end order only while there is room,
+                and one still waiting when the runtime stops is lost. On a
+                closed channel the end is dropped. Through a pipe, an end
+                that cannot be pickled and unpickled again is sent with a
+                RuntimeError naming why, in place of its result and
+                exception.
 
         Raises:
             RuntimeError: If the runtime is not running.
         """
-        parent = current_task()
-        token = (self._root if parent is None else parent.token).child()
+        if token is None:
+            parent = current_task()
+            token = self._root if parent is None else parent.token
+        token = token.child()
         with self._lock:
             if not self._started_runtime or self._closing:
                 token.detach()
@@ -101,6 +138,8 @@ class Runtime:
             task_id = self._next_task_id
             self._next_task_id += 1
             task = self._task_for(task_id, fn, args, token)
+            task.ends = ends
+            task.detached = ends is not None
             self._tasks[task_id] = task
             # Under the lock, so stop() never finds a task here not launched
             self._launch(task)
@@ -221,14 +260,44 @@ class Runtime:
             self._log_failure(task)
 
     def _on_end(self, task: Task) -> None:
-        """Once *task*'s call has ended: reap it if it is detached."""
+        """Once *task*'s call has ended: reap it if it is detached, then send
+        its end on its *ends*, or log its failure if it has none."""
         with self._lock:
             task.ended = True
             reap = task.detached
             if reap:
                 self._tasks.pop(task.task_id, None)
-        if reap:
+        if not reap:
+            return
+        if task.ends is None:
             self._log_failure(task)
+            return
+        end = TaskEnd(task.task_id, task.result, task.exception, task.stopped)
+        self._send_end(task.ends, end)
+
+    def _send_end(self, ends: Chan[TaskEnd] | Sender[TaskEnd], end: TaskEnd) -> None:
+        """Send *end* without waiting, on the ending task's thread or the
+        loop's: neither may block on a receiver. A full channel gets it from
+        the loop, once it has room."""
+        if isinstance(ends, Sender):
+            end = _portable(end)
+        try:
+            ends.send(end, timeout=0)
+        except TimeoutError:
+            # An empty context: the ending task's, copied by default, has its
+            # stopped token, which would end the wait at once
+            with contextlib.suppress(RuntimeError):  # the loop has stopped
+                self._host.loop.call_soon_threadsafe(
+                    self._send_later, ends, end, context=contextvars.Context()
+                )
+        except ClosedError:
+            pass  # nobody receives any more
+
+    def _send_later(self, ends: Chan[TaskEnd] | Sender[TaskEnd], end: TaskEnd) -> None:
+        """On the loop: await room for *end* in an asyncio task of its own."""
+        sending = asyncio.get_running_loop().create_task(_asend(ends, end))
+        self._sending.add(sending)
+        sending.add_done_callback(self._sending.discard)
 
     def _log_failure(self, task: Task) -> None:
         """Log the failure of a task nobody waits for."""
@@ -307,3 +376,22 @@ class Runtime:
     ) -> None:
         """Stop the runtime."""
         self.stop()
+
+
+def _portable(end: TaskEnd) -> TaskEnd:
+    """*end*, if it survives a pickle round trip here; else one with a
+    RuntimeError naming why, in place of its result and exception. The
+    receiving side skips a value it cannot unpickle, and an end skipped
+    there would never arrive. Costs a second pickle, once per task end."""
+    try:
+        pickle.loads(pickle.dumps(end))
+    except Exception as e:
+        error = RuntimeError(f"task {end.task_id} ended unpicklable: {e!r}")
+        return TaskEnd(end.task_id, None, error, end.stopped)
+    return end
+
+
+async def _asend(ends: Chan[TaskEnd] | Sender[TaskEnd], end: TaskEnd) -> None:
+    """Send *end* once *ends* has room; dropped if it is closed meanwhile."""
+    with contextlib.suppress(ClosedError):
+        await ends.asend(end)

@@ -357,7 +357,7 @@ def _on_stop(fn: Callable[[], None]) -> Callable[[], None]:
     task = current_task()
     if task is None:
         return _noop
-    return task.token.on_stop(fn)
+    return task.token._on_stop(fn)
 
 
 def _noop() -> None:

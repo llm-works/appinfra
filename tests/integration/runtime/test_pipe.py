@@ -27,6 +27,22 @@ METHODS = [
 # Larger than any OS pipe buffer: the writer blocks until the reader reads
 _BIG = b"x" * 1_000_000
 
+
+class _UndecodableError(Exception):
+    """Pickles, but cannot be unpickled: its args do not fit its __init__."""
+
+    def __init__(self, a: int, b: int) -> None:
+        super().__init__(f"{a} {b}")
+
+
+@pytest.fixture
+def reported(monkeypatch: pytest.MonkeyPatch) -> list[BaseException]:
+    """Errors reported through threading.excepthook, kept instead of printed."""
+    errors: list[BaseException] = []
+    monkeypatch.setattr(threading, "excepthook", lambda a: errors.append(a.exc_value))
+    return errors
+
+
 # The test process runs threads; a child forked from it uses only the pipe
 pytestmark = pytest.mark.filterwarnings(
     "ignore:This process .* is multi-threaded:DeprecationWarning"
@@ -152,6 +168,20 @@ class TestInOneProcess:
             sender.send(threading.Lock())
         sender.send(1)
         assert chan.recv(timeout=10.0) == 1
+        sender.close()
+
+    def test_a_value_that_cannot_be_unpickled_is_reported_and_skipped(self, reported):
+        """It fails in the reader, where no caller can catch it: reported
+        through threading.excepthook. The channel goes on, and the value's
+        room comes back: with capacity 1, nothing else would get through."""
+        send, recv = pipe(1)
+        sender, chan = send.open(), recv.open()
+        sender.send(_UndecodableError(1, 2))
+        for i in range(3):
+            sender.send(i, timeout=10.0)
+            assert chan.recv(timeout=10.0) == i
+        assert len(reported) == 1
+        assert isinstance(reported[0], TypeError)
         sender.close()
 
     def test_select_sends_and_receives_on_the_ends(self):

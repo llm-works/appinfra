@@ -42,8 +42,7 @@ class StopToken:
     """A one-way stop signal: once stopped, it stays stopped.
 
     A runner gives each run of a service its own token; the service checks it
-    (``is_set()``), blocks on it (``wait()``) or has it call back (``on_stop()``)
-    to learn when to return. Tokens
+    (``is_set()``) or blocks on it (``wait()``) to learn when to return. Tokens
     form a tree, like Go's context: ``child()`` derives a token that is stopped
     when its parent is, so stopping one token stops everything derived from it.
     A derived token that is no longer needed leaves the tree with ``detach()``.
@@ -126,15 +125,17 @@ class StopToken:
             event = self._event
         return event.wait(timeout)
 
-    def on_stop(self, fn: Callable[[], None]) -> Callable[[], None]:
+    def _on_stop(self, fn: Callable[[], None]) -> Callable[[], None]:
         """Call *fn* once when the token is stopped; at once if it is already.
+        For the runtime's own waits, which a stop ends (a channel's): user
+        code checks or waits on the token instead.
 
         *fn* runs on the thread that calls stop(), and it must be short and
         not block: stop() calls each token's callbacks in turn. An error it
         raises there goes to threading.excepthook, and the stop goes on; on
         the main thread a KeyboardInterrupt or exit reaches stop()'s caller.
         On a token already stopped, *fn* runs at once and its error reaches
-        the caller of on_stop().
+        the caller of _on_stop().
 
         Returns:
             A function that unregisters *fn*. A caller done waiting calls it,

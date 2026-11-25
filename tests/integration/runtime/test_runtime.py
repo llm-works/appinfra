@@ -11,7 +11,17 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from appinfra.runtime import Runtime, StoppedError, StopToken, stopping, task_id
+from appinfra.runtime import (
+    Chan,
+    ChanClosedError,
+    Runtime,
+    StoppedError,
+    StopToken,
+    TaskEnd,
+    stopping,
+    task_id,
+)
+from appinfra.runtime.chan import pipe
 from appinfra.runtime.loop import LoopHost
 from appinfra.runtime.task import LoopTask, ThreadTask
 from appinfra.testing import FakeClock
@@ -121,6 +131,17 @@ class IgnoresItsToken:
 
 def _boom() -> None:
     raise ValueError("boom")
+
+
+class _UndecodableError(Exception):
+    """Pickles, but cannot be unpickled: its args do not fit its __init__."""
+
+    def __init__(self, a: int, b: int) -> None:
+        super().__init__(f"{a} {b}")
+
+
+def _raises_undecodable() -> None:
+    raise _UndecodableError(1, 2)
 
 
 def _raises_stopped_error() -> None:
@@ -647,11 +668,11 @@ class TestFailingStopCallback:
     @pytest.mark.parametrize("on_loop", [True, False], ids=["loop", "thread"])
     def test_a_task_that_returns_still_ends(self, rt, reported, on_loop):
         async def async_returns() -> str:
-            stopping().on_stop(_failing_callback)
+            stopping()._on_stop(_failing_callback)
             return "done"
 
         def returns() -> str:
-            stopping().on_stop(_failing_callback)
+            stopping()._on_stop(_failing_callback)
             return "done"
 
         t = rt.spawn(async_returns if on_loop else returns)
@@ -666,7 +687,7 @@ class TestFailingStopCallback:
         entered = threading.Event()
 
         async def parks() -> None:
-            stopping().on_stop(_failing_callback)
+            stopping()._on_stop(_failing_callback)
             entered.set()
             await asyncio.Event().wait()
 
@@ -686,7 +707,7 @@ class TestFailingStopCallback:
         entered = threading.Event()
 
         def waits() -> None:
-            stopping().on_stop(_failing_callback)
+            stopping()._on_stop(_failing_callback)
             entered.set()
             stopping().wait()
 
@@ -705,11 +726,11 @@ class TestFailingStopCallback:
         loop, which asyncio would end with it, runs on."""
 
         async def async_returns() -> str:
-            stopping().on_stop(_interrupting_callback)
+            stopping()._on_stop(_interrupting_callback)
             return "done"
 
         def returns() -> str:
-            stopping().on_stop(_interrupting_callback)
+            stopping()._on_stop(_interrupting_callback)
             return "done"
 
         t = rt.spawn(async_returns if on_loop else returns)
@@ -730,7 +751,7 @@ class TestFailingStopCallback:
         entered = threading.Event()
 
         async def parks() -> None:
-            stopping().on_stop(_interrupting_callback)
+            stopping()._on_stop(_interrupting_callback)
             entered.set()
             await asyncio.Event().wait()
 
@@ -834,6 +855,181 @@ class TestSpawn:
         for thread in threads:
             thread.join(10.0)
         assert all(not rt.alive(t) for t in spawned)
+
+
+class TestSpawnHooks:
+    """spawn(token=, on_end=): for a layer that runs its own units as tasks,
+    under its own tokens, and learns of their ends."""
+
+    def test_a_task_spawned_with_a_token_derives_from_it(self, rt):
+        """Not from the spawner's: it stops with the given token, and leaves
+        that token's tree, not the runtime's, as it ends."""
+        parent, fn = StopToken(), WaitsForStop()
+        t = rt.spawn(fn, token=parent)
+        assert fn.entered.wait(5.0)
+        assert parent._children  # Private: the token's set of children
+        assert not rt._root._children
+        parent.stop()
+        assert rt.wait(t, timeout=5.0).is_set()
+        assert not parent._children
+
+    def test_a_task_spawned_with_a_token_leaves_it_running(self, rt):
+        parent = StopToken()
+        rt.wait(rt.spawn(lambda: None, token=parent), timeout=5.0)
+        assert not parent.is_set()
+
+    @pytest.mark.parametrize("on_loop", [True, False], ids=["loop", "thread"])
+    def test_a_task_spawned_with_a_stopped_token_never_runs(self, rt, on_loop):
+        entered = threading.Event()
+
+        async def async_marks() -> None:
+            entered.set()
+
+        def marks() -> None:
+            entered.set()
+
+        parent = StopToken()
+        parent.stop()
+        t = rt.spawn(async_marks if on_loop else marks, token=parent)
+        with pytest.raises(StoppedError):
+            rt.wait(t, timeout=5.0)
+        assert not entered.is_set()
+
+    def test_stop_ends_a_task_spawned_with_an_outside_token(self):
+        fn = WaitsForStop()
+        with Runtime(MagicMock()) as rt:
+            t = rt.spawn(fn, token=StopToken())
+            assert fn.entered.wait(5.0)
+        assert rt.wait(t, timeout=0).is_set()
+
+    @pytest.mark.parametrize("on_loop", [True, False], ids=["loop", "thread"])
+    def test_its_end_is_sent_with_what_it_returned(self, rt, on_loop):
+        async def async_returns() -> int:
+            return 42
+
+        ends = Chan[TaskEnd](1)
+        t = rt.spawn(async_returns if on_loop else (lambda: 42), ends=ends)
+        assert ends.recv(timeout=5.0) == TaskEnd(t, 42, None, False)
+
+    @pytest.mark.parametrize("on_loop", [True, False], ids=["loop", "thread"])
+    def test_its_end_is_sent_with_its_failure_which_is_not_logged(self, on_loop):
+        lg, ends = MagicMock(), Chan[TaskEnd](1)
+        with Runtime(lg) as rt:
+            rt.spawn(_async_boom if on_loop else _boom, ends=ends)
+            assert isinstance(ends.recv(timeout=5.0).exception, ValueError)
+        lg.warning.assert_not_called()
+
+    @pytest.mark.parametrize("on_loop", [True, False], ids=["loop", "thread"])
+    def test_its_end_is_sent_with_its_stop(self, rt, on_loop):
+        parked, entered = Parked(), threading.Event()
+
+        def stops() -> None:
+            entered.set()
+            stopping().wait()
+            raise StoppedError("stopped")
+
+        ends = Chan[TaskEnd](1)
+        t = rt.spawn(parked.run if on_loop else stops, ends=ends)
+        assert (parked.entered if on_loop else entered).wait(5.0)
+        rt.cancel(t)
+        assert ends.recv(timeout=5.0) == TaskEnd(t, None, None, True)
+
+    def test_a_task_with_ends_is_reaped_as_it_ends_not_waited_for(self, rt):
+        fn, ends = WaitsForStop(), Chan[TaskEnd](1)
+        t = rt.spawn(fn, ends=ends)
+        with pytest.raises(RuntimeError, match="detached"):
+            rt.wait(t)
+        assert fn.entered.wait(5.0)
+        rt.cancel(t)
+        ends.recv(timeout=5.0)
+        assert not _known(rt, t)  # reaped before its end is sent
+
+    @pytest.mark.parametrize("on_loop", [True, False], ids=["loop", "thread"])
+    def test_tasks_ending_on_a_full_channel_do_not_wait_for_room(self, rt, on_loop):
+        """Their ends wait on the loop instead, and none is lost."""
+
+        async def async_returns(i: int) -> int:
+            return i
+
+        ends = Chan[TaskEnd](1)
+        ids = {
+            rt.spawn(async_returns if on_loop else abs, i, ends=ends) for i in range(20)
+        }
+        # All ended and reaped with nobody receiving, on room for one end
+        assert _wait_until(lambda: not any(_known(rt, t) for t in ids))
+        received = [ends.recv(timeout=5.0) for _ in range(20)]
+        assert {end.task_id for end in received} == ids
+        assert sorted(end.result for end in received) == list(range(20))
+
+    def test_an_end_on_a_closed_channel_is_dropped(self, reported):
+        lg, ends = MagicMock(), Chan[TaskEnd](1)
+        ends.close()
+        with Runtime(lg) as rt:
+            t = rt.spawn(_boom, ends=ends)
+            assert _wait_until(lambda: not _known(rt, t))
+        lg.warning.assert_not_called()
+        assert not reported
+
+    def test_an_end_waiting_for_room_is_dropped_as_the_channel_closes(self, rt):
+        ends = Chan[TaskEnd](1)
+        first, second = rt.spawn(abs, 1, ends=ends), rt.spawn(abs, 2, ends=ends)
+        assert _wait_until(lambda: not _known(rt, first) and not _known(rt, second))
+        assert _wait_until(lambda: len(rt._sending) == 1)  # Private: ends waiting
+        ends.close()
+        assert _wait_until(lambda: not rt._sending)
+        assert ends.recv(timeout=5.0).task_id in (first, second)  # buffered
+        with pytest.raises(ChanClosedError):
+            ends.recv(timeout=5.0)
+
+    def test_an_end_arrives_through_a_pipe(self, rt):
+        send, recv = pipe(1)
+        sender, chan = send.open(), recv.open()
+        t = rt.spawn(abs, -3, ends=sender)
+        assert chan.recv(timeout=5.0) == TaskEnd(t, 3, None, False)
+        sender.close()
+
+    def test_an_unpicklable_end_arrives_through_a_pipe_as_a_runtime_error(self, rt):
+        send, recv = pipe(1)
+        sender, chan = send.open(), recv.open()
+        t = rt.spawn(threading.Lock, ends=sender)  # returns a lock
+        end = chan.recv(timeout=5.0)
+        assert (end.task_id, end.result, end.stopped) == (t, None, False)
+        assert isinstance(end.exception, RuntimeError)
+        assert "pickle" in str(end.exception)
+        sender.close()
+
+    def test_an_end_that_cannot_be_unpickled_arrives_as_a_runtime_error(self, rt):
+        """It pickles, but the receiving side could not unpickle it, and would
+        skip it: the end must still arrive, once per task."""
+        send, recv = pipe(1)
+        sender, chan = send.open(), recv.open()
+        t = rt.spawn(_raises_undecodable, ends=sender)
+        end = chan.recv(timeout=5.0)  # the timeout is the failure path
+        assert (end.task_id, end.result, end.stopped) == (t, None, False)
+        assert isinstance(end.exception, RuntimeError)
+        assert "_Undecodable" in str(end.exception)
+        sender.close()
+
+    def test_stop_sends_the_end_of_each_task_it_ends(self):
+        parked, waits = Parked(), WaitsForStop()
+        ends = Chan[TaskEnd](2)
+        with Runtime(MagicMock()) as rt:
+            on_loop = rt.spawn(parked.run, ends=ends)
+            on_thread = rt.spawn(waits, ends=ends)
+            assert parked.entered.wait(5.0)
+            assert waits.entered.wait(5.0)
+        received = {end.task_id: end for end in (ends.recv(0), ends.recv(0))}
+        assert received[on_loop] == TaskEnd(on_loop, None, None, True)
+        assert received[on_thread].result.is_set()
+        with pytest.raises(TimeoutError):  # one end each
+            ends.recv(0)
+
+    def test_a_refused_spawn_sends_no_end(self):
+        ends = Chan[TaskEnd](1)
+        with pytest.raises(RuntimeError, match="not running"):
+            Runtime(MagicMock()).spawn(lambda: None, ends=ends)
+        with pytest.raises(TimeoutError):
+            ends.recv(0)
 
 
 class TestStop:

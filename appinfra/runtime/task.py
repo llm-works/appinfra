@@ -11,6 +11,7 @@ import contextvars
 import threading
 from abc import ABC, abstractmethod
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any
 
 from .errors import StoppedError
@@ -56,6 +57,18 @@ def task_id() -> int:
 def current_task() -> Task | None:
     """The task the caller runs in, or None outside a task."""
     return _current.get(None)
+
+
+@dataclass(frozen=True)
+class TaskEnd:
+    """How a task ended, as spawn() sends it on *ends*: what its call returned,
+    or the exception it raised, or *stopped*: its stop ended it, without a
+    result (as wait() raises StoppedError for)."""
+
+    task_id: int
+    result: Any
+    exception: BaseException | None
+    stopped: bool
 
 
 def _name(task_id: int) -> str:
@@ -110,6 +123,10 @@ class Task(ABC):
         # Set by the runtime, under its lock
         self.ended = False  # the call has ended
         self.detached = False  # nobody waits: reaped as soon as it ends
+        # spawn()'s ends, set before the launch; the task is detached then. A
+        # Chan or a pipe's Sender: typed in Runtime.spawn(), as chan imports
+        # this module
+        self.ends: Any = None
 
     @abstractmethod
     def _launch(self) -> None:

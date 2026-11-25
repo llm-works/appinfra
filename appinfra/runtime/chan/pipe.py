@@ -15,6 +15,7 @@ from multiprocessing import connection
 from multiprocessing.connection import Connection
 from typing import Any, Generic, TypeVar
 
+from ..stop import _report
 from .chan import Chan
 from .errors import ClosedError
 
@@ -223,7 +224,7 @@ class Receiver(Chan[T]):
         the sending side sees as a close."""
         try:
             while wake not in connection.wait([data, wake]):
-                self.send(pickle.loads(data.recv_bytes()))
+                self._deliver(data.recv_bytes())
                 # OSError: the sending side is gone, and EOF follows its values
                 with contextlib.suppress(OSError):
                     acks.send_bytes(b"")
@@ -237,6 +238,18 @@ class Receiver(Chan[T]):
                     self._wake = None
             for conn in (data, acks, wake):
                 conn.close()
+
+    def _deliver(self, payload: bytes) -> None:
+        """Send the value *payload* pickles to a receiver. One that cannot be
+        unpickled here (its class missing, its args not fitting its __init__)
+        is skipped and its error reported through threading.excepthook, as one
+        no caller can catch: one bad value does not end the channel."""
+        try:
+            value = pickle.loads(payload)
+        except Exception as e:
+            _report(e)
+            return
+        self.send(value)
 
 
 def _start(target: Callable[..., None], *args: Any) -> threading.Thread:

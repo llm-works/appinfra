@@ -98,7 +98,7 @@ class TestOnStop:
     def test_stop_calls_it_once(self):
         token = StopToken()
         calls = []
-        token.on_stop(lambda: calls.append(1))
+        token._on_stop(lambda: calls.append(1))
         assert calls == []
         token.stop()
         token.stop()
@@ -108,21 +108,21 @@ class TestOnStop:
         token = StopToken()
         token.stop()
         calls = []
-        remove = token.on_stop(lambda: calls.append(1))
+        remove = token._on_stop(lambda: calls.append(1))
         assert calls == [1]
         remove()  # harmless
 
     def test_stopping_a_parent_calls_its_descendants_callbacks(self):
         root = StopToken()
         calls = []
-        root.child().child().on_stop(lambda: calls.append("grandchild"))
+        root.child().child()._on_stop(lambda: calls.append("grandchild"))
         root.stop()
         assert calls == ["grandchild"]
 
     def test_an_unregistered_callback_is_not_called(self):
         token = StopToken()
         calls = []
-        remove = token.on_stop(lambda: calls.append(1))
+        remove = token._on_stop(lambda: calls.append(1))
         remove()
         remove()  # harmless
         assert not token._callbacks[1]  # Private: nothing kept for a done waiter
@@ -137,8 +137,8 @@ class TestOnStop:
         def fn():
             calls.append(1)
 
-        token.on_stop(fn)
-        remove = token.on_stop(fn)
+        token._on_stop(fn)
+        remove = token._on_stop(fn)
         remove()
         token.stop()
         assert calls == [1]
@@ -146,7 +146,7 @@ class TestOnStop:
     def test_stop_drops_the_callbacks_it_called(self):
         """A stopped token holds no references to what its waiters captured."""
         token = StopToken()
-        token.on_stop(lambda: None)
+        token._on_stop(lambda: None)
         token.stop()
         assert token._callbacks is None  # Private: released
 
@@ -155,8 +155,8 @@ class TestOnStop:
         or derives a token does not deadlock."""
         token = StopToken()
         calls = []
-        token.on_stop(
-            lambda: token.on_stop(lambda: calls.append(token.child().is_set()))
+        token._on_stop(
+            lambda: token._on_stop(lambda: calls.append(token.child().is_set()))
         )
         token.stop()
         assert calls == [True]
@@ -176,9 +176,9 @@ class TestOnStop:
         def fail():
             raise error
 
-        root.on_stop(fail)
-        root.on_stop(lambda: calls.append("root"))
-        child.on_stop(lambda: calls.append("child"))
+        root._on_stop(fail)
+        root._on_stop(lambda: calls.append("root"))
+        child._on_stop(lambda: calls.append("child"))
         root.stop()
         assert child.is_set()
         assert sorted(calls) == ["child", "root"]
@@ -195,8 +195,8 @@ class TestOnStop:
             raise KeyboardInterrupt
 
         calls = []
-        root.on_stop(interrupt)
-        child.on_stop(lambda: calls.append("child"))  # runs after root's
+        root._on_stop(interrupt)
+        child._on_stop(lambda: calls.append("child"))  # runs after root's
         with pytest.raises(KeyboardInterrupt):
             root.stop()
         assert root.is_set()
@@ -217,7 +217,7 @@ class TestOnStop:
         def interrupt():
             raise KeyboardInterrupt
 
-        token.on_stop(interrupt)
+        token._on_stop(interrupt)
         escaped = []
 
         def stop():
@@ -252,15 +252,15 @@ class TestOnStop:
         def fail():
             raise ValueError("callback failed")
 
-        root.on_stop(fail)
-        child.on_stop(lambda: calls.append("child"))
+        root._on_stop(fail)
+        child._on_stop(lambda: calls.append("child"))
         root.stop()
         assert child.is_set()
         assert calls == ["child"]
         assert fallback == [hook_error]
 
     def test_on_a_stopped_token_a_failing_callback_raises_to_its_registrant(self):
-        """Called at once, the callback runs for the caller of on_stop(),
+        """Called at once, the callback runs for the caller of _on_stop(),
         who can handle its error."""
         token = StopToken()
         token.stop()
@@ -269,9 +269,9 @@ class TestOnStop:
             raise ValueError("callback failed")
 
         with pytest.raises(ValueError, match="callback failed"):
-            token.on_stop(fail)
+            token._on_stop(fail)
 
     def test_a_pickled_token_carries_no_callbacks(self):
         token = StopToken()
-        token.on_stop(lambda: None)
+        token._on_stop(lambda: None)
         assert pickle.loads(pickle.dumps(token))._callbacks is None

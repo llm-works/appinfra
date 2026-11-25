@@ -12,7 +12,7 @@ from .chan import Send as ChanSend
 from .errors import StoppedError
 from .runtime import Runtime
 from .stop import StopToken
-from .task import stopping, task_id
+from .task import TaskEnd, stopping, task_id
 
 __all__ = [
     "Chan",
@@ -22,6 +22,7 @@ __all__ = [
     "Runtime",
     "StopToken",
     "StoppedError",
+    "TaskEnd",
     "aselect",
     "select",
     "stopping",
