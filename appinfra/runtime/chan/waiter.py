@@ -42,6 +42,13 @@ class Waiter(ABC):
         self.seq = 0
         self.outcome = Outcome.PENDING
 
+    def claim(self) -> bool:
+        """Whether the channel that popped this waiter may settle it; under
+        the channel's lock. A waiter waits on one channel, which removes it
+        when it leaves: always. A select's case is claimed by the first of its
+        channels only."""
+        return True
+
     def settle(self, outcome: Outcome) -> None:
         """Decide how the wait ended and wake the waiting side; under the
         channel's lock, on a pending waiter."""

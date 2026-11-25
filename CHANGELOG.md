@@ -42,6 +42,8 @@ For API stability guarantees and deprecation policy, see
 - `appinfra.runtime.Chan`: a one-way FIFO channel like Go's, with a capacity (0: hand-over),
   `close()` and iteration, for thread tasks (`send`/`recv`) and loop tasks (`asend`/`arecv`)
   alike. A wait ends with `StoppedError` when the task's token stops.
+- `appinfra.runtime.select()` / `aselect()`: wait on several channel cases (`ChanRecv`,
+  `ChanSend`) and complete exactly one, chosen at random among those ready, like Go's `select`.
 
 ### Changed
 - **Breaking:** `submit_stream()` is renamed `stream()` on `AsyncChannel`, `AsyncBufferedChannel`
