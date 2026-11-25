@@ -48,7 +48,8 @@ class Runtime:
     - AsyncService: a task on the runtime's event loop (a LoopHost), shared by
       every async service, so one waiting on an await holds no thread
     - any other Service: a thread of its own
-    - isolate=True: a process of its own (not yet for an AsyncService)
+    - isolate=True: a process of its own; refused for an AsyncService, which
+      runs on the loop
 
     A service whose ``depends_on`` are all RUNNING starts at once; any other
     waits (its runner stays CREATED) and starts as soon as the last of them
