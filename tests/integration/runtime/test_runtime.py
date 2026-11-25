@@ -7,6 +7,7 @@ import asyncio
 import contextvars
 import threading
 import time
+import traceback
 from collections.abc import Callable, Iterator
 from unittest.mock import MagicMock
 
@@ -144,6 +145,27 @@ class _UndecodableError(Exception):
 
 def _raises_undecodable() -> None:
     raise _UndecodableError(1, 2)
+
+
+class _UnformattableName(str):
+    """A name that raises where it is formatted."""
+
+    def __format__(self, spec: str) -> str:
+        raise ValueError("cannot format")
+
+
+class _PicklesOnce:
+    """Pickles the first time only, as a result another thread is changing
+    can: pickled again, it raises."""
+
+    def __init__(self) -> None:
+        self._pickled = 0
+
+    def __reduce__(self) -> tuple[type, tuple[()]]:
+        self._pickled += 1
+        if self._pickled > 1:
+            raise RuntimeError("changed while pickled")
+        return _PicklesOnce, ()
 
 
 def _raises_stopped_error() -> None:
@@ -437,6 +459,26 @@ class TestThreadTask:
         with pytest.raises(RuntimeError, match="itself"):
             me[0].wait(timeout=5.0)
 
+    @pytest.mark.parametrize("on_loop", [True, False], ids=["loop", "thread"])
+    def test_a_worker_in_the_tasks_context_waiting_for_it_is_refused(self, rt, on_loop):
+        """asyncio.to_thread() copies the task's context to a thread that is
+        neither the loop's nor the task's own: the task would wait for the
+        worker waiting for it."""
+        me: list[Task] = []
+        spawned = threading.Event()
+
+        async def awaits_a_worker() -> None:
+            assert spawned.wait(5.0)
+            await asyncio.to_thread(me[0].wait, 5.0)  # the timeout is the failure path
+
+        def runs_a_loop() -> None:
+            asyncio.run(awaits_a_worker())
+
+        me.append(rt.spawn(awaits_a_worker if on_loop else runs_a_loop))
+        spawned.set()
+        with pytest.raises(RuntimeError, match="itself"):
+            me[0].wait(timeout=10.0)
+
 
 class TestTaskIds:
     def test_task_ids_count_up_and_are_never_reused(self, rt):
@@ -525,6 +567,18 @@ class TestNames:
             assert _wait_until(lambda: lg.warning.called)
         assert lg.warning.call_args.kwargs["extra"]["task_name"] == "db"
 
+    def test_a_name_of_a_str_subclass_is_taken_as_a_plain_str(self, rt):
+        """Formatted on the loop for the asyncio task's name, a subclass that
+        raised there would leave a task that never ends."""
+
+        async def returns() -> int:
+            return 42
+
+        t = rt.spawn(returns, name=_UnformattableName("db"))
+        assert type(t.name) is str
+        assert t.name == "db"
+        assert t.wait(timeout=5.0) == 42  # the timeout is the failure path
+
     def test_a_name_that_is_not_a_string_is_refused(self, rt):
         """It travels to whoever receives the end, also through a pipe."""
         with pytest.raises(TypeError, match="name"):
@@ -579,6 +633,43 @@ class TestOutcomes:
         with pytest.raises(ValueError) as second:
             t.wait(timeout=0)
         assert second.value is first.value
+
+    def test_every_wait_raises_it_from_the_tasks_own_traceback(self, rt):
+        """Raised again as is, the stored exception would collect every
+        wait's frames, and keep their locals alive."""
+        t = rt.spawn(_boom)
+        depths = []
+        for _ in range(3):
+            with pytest.raises(ValueError) as caught:
+                t.wait(timeout=5.0)
+            depths.append(len(traceback.extract_tb(caught.value.__traceback__)))
+        assert depths[0] == depths[1] == depths[2]
+
+    @pytest.mark.parametrize("on_loop", [True, False], ids=["loop", "thread"])
+    def test_a_stop_iteration_is_one_runtime_error_however_waited_for(
+        self, rt, on_loop
+    ):
+        """A coroutine turns StopIteration into RuntimeError (PEP 479), and
+        asyncio refuses it in a Future: from either kind of task, wait() and
+        await raise the same RuntimeError, caused by it."""
+
+        async def async_raises() -> None:
+            raise StopIteration
+
+        def raises() -> None:
+            raise StopIteration
+
+        t = rt.spawn(async_raises if on_loop else raises)
+        with pytest.raises(RuntimeError, match="StopIteration") as waited:
+            t.wait(timeout=5.0)
+
+        async def awaits() -> None:
+            await asyncio.wait_for(t, 5.0)
+
+        with pytest.raises(RuntimeError, match="StopIteration") as awaited:
+            asyncio.run(awaits())
+        assert awaited.value is waited.value
+        assert isinstance(waited.value.__cause__, StopIteration)
 
     def test_detaching_an_ended_task_logs_its_failure_once(self):
         lg = MagicMock()
@@ -1109,6 +1200,48 @@ class TestSpawnHooks:
         assert "_Undecodable" in str(end.error)
         sender.close()
 
+    @pytest.mark.parametrize("full", [False, True], ids=["at-once", "once-room"])
+    def test_an_end_is_sent_as_the_bytes_that_were_checked(self, rt, full):
+        """Pickled again, a result another thread changes meanwhile can fail
+        where the check passed, and the end would be lost. A full pipe sends
+        it from the loop, later."""
+        send, recv = pipe(1)
+        sender, chan = send.open(), recv.open()
+        # The reader holds the first, the writer the second, the buffer the third
+        sent = list(range(3)) if full else []
+        for value in sent:
+            sender.send(value, timeout=5.0)
+        t = rt.spawn(_PicklesOnce, done=sender)
+        assert [chan.recv(timeout=5.0) for _ in sent] == sent
+        end = chan.recv(timeout=5.0)  # the timeout is the failure path
+        assert (end.task_id, end.error) == (t.id, None)
+        assert isinstance(end.result, _PicklesOnce)
+        sender.close()
+
+    def test_an_end_waiting_for_room_is_refused_once_the_loop_is_stopping(
+        self, monkeypatch
+    ):
+        """Scheduled past the host's gate, its send would start after the loop
+        took the tasks to cancel, and outlive the loop. The loop is held, so
+        stop() is under way when the task ends; the send is never scheduled."""
+        sends: list[tuple] = []
+        monkeypatch.setattr(Runtime, "_send_later", lambda _, *a: sends.append(a))
+        rt, done, finish = Runtime(MagicMock()), Chan[TaskDone](1), threading.Event()
+        rt.start()
+        done.send(TaskDone(0, None, None, None))  # full
+        t = rt.spawn(finish.wait, 10.0, done=done)  # ends when told, not on stop
+        release = _hold_loop(rt)
+        stopper = threading.Thread(target=rt.stop)
+        stopper.start()
+        try:
+            assert _wait_until(lambda: rt._host._closing)  # Private: stop() begun
+            finish.set()
+            assert _wait_until(lambda: not t._t.is_running())  # Private: its end sent
+        finally:
+            release.set()
+            stopper.join(10.0)
+        assert sends == []
+
     def test_stop_sends_the_end_of_each_task_it_ends(self):
         parked, waits = Parked(), WaitsForStop()
         done = Chan[TaskDone](2)
@@ -1168,7 +1301,11 @@ class TestAwait:
     async def test_a_cancelled_await_leaves_the_task_and_no_wake(self, rt):
         """A timeout on the await, from asyncio.wait_for() or asyncio.timeout(),
         is such a cancel."""
-        t = rt.spawn(_waits_for_stop)
+        fn = WaitsForStop()
+        t = rt.spawn(fn)
+        # Entered: a cancel before would skip the call, and wait() would
+        # raise StoppedError rather than return the token
+        assert fn.entered.wait(5.0)
         awaiting = asyncio.ensure_future(t)
         for _ in range(3):
             await asyncio.sleep(0)  # the await is waiting by now
@@ -1184,8 +1321,14 @@ class TestAwait:
     async def test_two_awaits_both_get_the_result(self, rt):
         release = threading.Event()
         t = rt.spawn(release.wait, 5.0)
-        both = asyncio.gather(t, t)
+
+        async def awaits() -> bool:
+            return await t
+
+        # Two coroutines: gather() awaits a repeated argument only once
+        both = asyncio.gather(awaits(), awaits())
         await asyncio.sleep(0)  # both are waiting by now
+        assert len(t._t.wakes or ()) == 2  # Private: one wake per await
         release.set()
         assert await asyncio.wait_for(both, 5.0) == [True, True]
 

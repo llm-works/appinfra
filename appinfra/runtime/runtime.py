@@ -9,6 +9,7 @@ import asyncio
 import atexit
 import contextlib
 import contextvars
+import functools
 import inspect
 import pickle
 import threading
@@ -215,8 +216,15 @@ class Runtime:
             TypeError: If *name* is not a string.
             RuntimeError: If the runtime is not running.
         """
-        if name is not None and not isinstance(name, str):
-            raise TypeError(f"task name must be a string, not {type(name).__name__}")
+        if name is not None:
+            if not isinstance(name, str):
+                raise TypeError(
+                    f"task name must be a string, not {type(name).__name__}"
+                )
+            # A plain str, bypassing a subclass's own __str__: one whose
+            # formatting or pickling raises would fail on the loop or the pipe,
+            # where the caller never sees it. A StrEnum becomes its value
+            name = str.__str__(name)
         if token is None:
             parent = _current_task()
             token = self._root if parent is None else parent.token
@@ -262,7 +270,11 @@ class Runtime:
     # -- a task's waits: Task.wait(), await task, Task.detach() --------------
 
     def _wait(self, t: _Task, timeout: float | None) -> Any:
-        """Task.wait(): block until *t* has ended, then its outcome."""
+        """Task.wait(): block until *t* has ended, then its outcome. Refused in
+        *t*'s own context: its own thread, or a worker it handed its context
+        to (asyncio.to_thread()), which *t* waits for in turn."""
+        if _current_task() is t:
+            raise RuntimeError(f"task {t.id} cannot wait for itself")
         with self._lock:
             if t.detached:
                 raise RuntimeError(f"task {t.id} is detached")
@@ -340,26 +352,34 @@ class Runtime:
     ) -> None:
         """Send *end* without waiting, on the ending task's thread or the
         loop's: neither may block on a receiver. A full channel gets it from
-        the loop, once it has room."""
+        the loop, once it has room. A pipe gets the bytes its check pickled,
+        on the Sender's own channel: pickled again, a result another thread
+        is changing could fail where the check passed, and the end be lost."""
+        chan: Chan[Any]
+        value: Any  # a TaskDone, or a pipe's pickled bytes
         if isinstance(done, Sender):
-            end = _portable(end)
+            chan, value = done._chan, _portable(end)
+        else:
+            chan, value = done, end
         try:
-            done.send(end, timeout=0)
+            chan.send(value, timeout=0)
         except TimeoutError:
-            # An empty context: the ending task's, copied by default, has its
-            # stopped token, which would end the wait at once
-            with contextlib.suppress(RuntimeError):  # the loop has stopped
-                self._host.loop.call_soon_threadsafe(
-                    self._send_later, done, end, context=contextvars.Context()
+            # Through the host's gate: once it is stopping, the send would
+            # start after the loop took the tasks to cancel, and outlive the
+            # loop; the end is dropped instead. An empty context: the ending
+            # task's has its stopped token, which would end the wait at once
+            with contextlib.suppress(RuntimeError):  # the loop is stopping
+                self._host._schedule(
+                    functools.partial(
+                        contextvars.Context().run, self._send_later, chan, value
+                    )
                 )
         except ClosedError:
             pass  # nobody receives any more
 
-    def _send_later(
-        self, done: Chan[TaskDone] | Sender[TaskDone], end: TaskDone
-    ) -> None:
-        """On the loop: await room for *end* in an asyncio task of its own."""
-        sending = asyncio.get_running_loop().create_task(_asend(done, end))
+    def _send_later(self, chan: Chan[Any], value: Any) -> None:
+        """On the loop: await room for *value* in an asyncio task of its own."""
+        sending = asyncio.get_running_loop().create_task(_asend(chan, value))
         self._sending.add(sending)
         sending.add_done_callback(self._sending.discard)
 
@@ -449,7 +469,11 @@ def _resolve(future: asyncio.Future[None]) -> None:
 
 
 def _outcome(t: _Task) -> Any:
-    """What *t*, ended, returned; or raise its error."""
+    """What *t*, ended, returned; or raise its error. What its call raised is
+    raised from the task's own traceback each time, as asyncio.Future does:
+    raised again as is, it would collect every wait's frames."""
+    if t.exception is not None:
+        raise t.exception.with_traceback(t.exception_tb)
     error = _error(t)
     if error is not None:
         raise error
@@ -466,20 +490,21 @@ def _error(t: _Task) -> BaseException | None:
     return None
 
 
-def _portable(end: TaskDone) -> TaskDone:
-    """*end*, if it survives a pickle round trip here; else one with a
-    RuntimeError naming why, in place of its result and error. The
+def _portable(end: TaskDone) -> bytes:
+    """*end* pickled, once the bytes unpickle here; else a TaskDone with a
+    RuntimeError naming why, in place of its result and error, pickled. The
     receiving side skips a value it cannot unpickle, and an end skipped
-    there would never arrive. Costs a second pickle, once per task."""
+    there would never arrive. Costs an unpickle, once per task."""
     try:
-        pickle.loads(pickle.dumps(end))
+        payload = pickle.dumps(end)
+        pickle.loads(payload)
     except Exception as e:
         error = RuntimeError(f"task {end.task_id} ended unpicklable: {e!r}")
-        return TaskDone(end.task_id, end.name, None, error)
-    return end
+        return pickle.dumps(TaskDone(end.task_id, end.name, None, error))
+    return payload
 
 
-async def _asend(done: Chan[TaskDone] | Sender[TaskDone], end: TaskDone) -> None:
-    """Send *end* once *done* has room; dropped if it is closed meanwhile."""
+async def _asend(chan: Chan[Any], value: Any) -> None:
+    """Send *value* once *chan* has room; dropped if it is closed meanwhile."""
     with contextlib.suppress(ClosedError):
-        await done.asend(end)
+        await chan.asend(value)

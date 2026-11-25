@@ -262,6 +262,7 @@ class Receiver(Generic[T]):
         """Start the reader, on the *data* and *acks* connections."""
         self._chan = Chan[T](0)  # the reader acks a value once a receiver took it
         self._lock = threading.Lock()
+        self._woken = False  # a close() wrote to _wake; under _lock
         # A thread that cannot start leaves no connection open, as in Sender
         opened = [data, acks]
         try:
@@ -285,18 +286,26 @@ class Receiver(Generic[T]):
         return await self._chan.arecv(timeout)
 
     def __iter__(self) -> Iterator[T]:
-        """Iterate with recv() until the channel is closed and drained."""
-        return iter(self._chan)
+        """Iterate with recv() until the channel is closed and drained. A
+        generator: a Chan's own iterator is the Chan, which sends."""
+        yield from self._chan
 
-    def __aiter__(self) -> AsyncIterator[T]:
-        """Iterate with arecv() until the channel is closed and drained."""
-        return aiter(self._chan)
+    async def __aiter__(self) -> AsyncIterator[T]:
+        """Iterate with arecv() until the channel is closed and drained; an
+        async generator, as __iter__."""
+        async for value in self._chan:
+            yield value
 
     def close(self) -> None:
-        """Close the channel, here and for the sending side."""
+        """Close the channel, here and for the sending side; idempotent. The
+        reader is woken once: nothing reads its wake pipe, which a message
+        per call could fill, blocking close() under the lock the reader's
+        cleanup takes."""
         self._chan.close()
         with self._lock:
-            if self._wake is not None:  # else the reader is gone already
+            # None once the reader is gone; woken already after a close()
+            if self._wake is not None and not self._woken:
+                self._woken = True
                 self._wake.send_bytes(b"")
 
     def _read(self, data: Connection, acks: Connection, wake: Connection) -> None:

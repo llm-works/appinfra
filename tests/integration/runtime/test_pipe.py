@@ -7,6 +7,7 @@ import asyncio
 import contextlib
 import multiprocessing as mp
 import threading
+from multiprocessing import connection
 from unittest import mock
 
 import pytest
@@ -199,6 +200,9 @@ class TestInOneProcess:
         assert not isinstance(chan, Chan)
         assert not hasattr(chan, "send")
         assert not hasattr(chan, "asend")
+        # Its iterators neither: a Chan's is the Chan itself
+        assert not isinstance(iter(chan), Chan)
+        assert not isinstance(aiter(chan), Chan)
         sender.close()
 
     def test_a_select_case_keeps_the_end_and_value_it_was_given(self):
@@ -276,6 +280,45 @@ class TestInOneProcess:
             ends[end].open()
         assert [name for name in closed if not conns[name].closed] == []
         ends["recv" if end == "send" else "send"].release()
+
+    def test_a_receiver_closed_again_wakes_its_reader_once(self):
+        """Nothing reads the wake pipe: a message per close() could fill it,
+        and a close() blocked writing holds the lock the reader's cleanup
+        takes. The reader is held once woken, so every close() lands first."""
+        send, recv = pipe(1)
+        real_wait, real_pipe = connection.wait, mp.Pipe
+        woken, release, wake_pipe = threading.Event(), threading.Event(), []
+
+        def recording_pipe(duplex: bool) -> tuple:
+            wake_pipe[:] = real_pipe(duplex)
+            return tuple(wake_pipe)
+
+        def held_wait(conns: list, *args: object) -> list:
+            ready = real_wait(conns, *args)
+            if wake_pipe[0] in ready:  # woken: held before its cleanup
+                woken.set()
+                release.wait(10.0)
+            return ready
+
+        try:
+            with (
+                mock.patch.object(mp, "Pipe", recording_pipe),
+                mock.patch.object(connection, "wait", held_wait),
+            ):
+                chan = recv.open()
+                for _ in range(3):
+                    chan.close()
+                assert woken.wait(5.0)
+            # The reader stays held in held_wait; poll() waits with the real
+            # connection.wait, which the patch would hold as well
+            wakes = 0
+            while wake_pipe[0].poll(0):
+                wake_pipe[0].recv_bytes()
+                wakes += 1
+        finally:
+            release.set()
+        assert wakes == 1
+        send.release()
 
     def test_close_on_a_loop_does_not_wait_for_the_writer(self):
         """Nobody receives, so the writer is stuck on a full OS pipe with the

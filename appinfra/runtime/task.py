@@ -14,6 +14,7 @@ import threading
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass
+from types import TracebackType
 from typing import Any
 
 from .errors import StoppedError
@@ -137,6 +138,8 @@ class _Task(ABC):
         # The outcome
         self.result: Any = None
         self.exception: BaseException | None = None
+        # The exception's own traceback: each wait raises it from there
+        self.exception_tb: TracebackType | None = None
         self.stopped = False
         # The runtime's
         self.ended = False  # the call has ended
@@ -170,11 +173,18 @@ class _Task(ABC):
 
     def _raised(self, e: BaseException) -> None:
         """Record how the call ended on *e*: a stop if it is the stop's own
-        signal and the token is stopped, a failure otherwise."""
+        signal and the token is stopped, a failure otherwise. StopIteration
+        becomes a RuntimeError caused by it, as a coroutine's does (PEP 479):
+        wait() and await raise the same, from either kind of task."""
         if isinstance(e, self.stop_signals) and self.token.is_set():
             self.stopped = True
+        elif isinstance(e, StopIteration):
+            error = RuntimeError(f"task {self.id} raised StopIteration")
+            error.__cause__ = e
+            self.exception = error
         else:
             self.exception = e
+            self.exception_tb = e.__traceback__
 
     def _end(self) -> None:
         """Once the call has ended: stop the token, so work derived from it is
