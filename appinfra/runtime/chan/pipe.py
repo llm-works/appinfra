@@ -51,7 +51,8 @@ class PipeEnd:
     def __init__(self, capacity: int, data: Connection, acks: Connection) -> None:
         """The end on the *data* and *acks* connections of a pipe."""
         self._capacity = capacity
-        self._conns: tuple[Connection, Connection] | None = (data, acks)
+        # Popped once, by open() or release()
+        self._conns: list[tuple[Connection, Connection]] = [(data, acks)]
 
     def release(self) -> None:
         """Close this process's copy of the end, leaving the channel open for
@@ -64,11 +65,12 @@ class PipeEnd:
             conn.close()
 
     def _claim(self) -> tuple[Connection, Connection]:
-        """The connections, once: an end is opened or released, not both."""
-        if self._conns is None:
-            raise RuntimeError("pipe end already opened or released")
-        conns, self._conns = self._conns, None
-        return conns
+        """The connections, once: an end is opened or released, not both. A
+        list's pop() is atomic, so two threads cannot both get them."""
+        try:
+            return self._conns.pop()
+        except IndexError:
+            raise RuntimeError("pipe end already opened or released") from None
 
 
 class PipeSendEnd(PipeEnd, Generic[T]):
@@ -110,7 +112,11 @@ class Sender(Generic[T]):
         for _ in range(capacity):
             self._room.send(None, timeout=0)  # fits; and open() may run on a loop
         self._writer = _start(self._write, data)
-        _start(self._count, acks)
+        try:
+            _start(self._count, acks)
+        except BaseException:
+            self._shut()  # the writer ends, and closes the data pipe
+            raise
 
     def send(self, value: T, timeout: float | None = None) -> None:
         """Send *value*, waiting up to *timeout* seconds for room. Raises as

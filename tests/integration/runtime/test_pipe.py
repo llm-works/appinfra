@@ -5,6 +5,7 @@
 
 import multiprocessing as mp
 import threading
+from unittest import mock
 
 import pytest
 
@@ -127,6 +128,26 @@ class TestInOneProcess:
         recv.open().close()
         with pytest.raises(RuntimeError, match="already"):
             recv.release()
+
+    def test_a_sender_whose_second_thread_cannot_start_closes_the_channel(self):
+        """open() raises, and the writer it started ends: the receiving side
+        sees the close, not a writer nobody can reach holding the pipe open."""
+        send, recv = pipe(1)
+        start, started = threading.Thread.start, []
+
+        def start_one(thread: threading.Thread) -> None:
+            started.append(thread)
+            if len(started) > 1:
+                raise RuntimeError("can't start new thread")
+            start(thread)
+
+        with (
+            mock.patch.object(threading.Thread, "start", start_one),
+            pytest.raises(RuntimeError, match="start new thread"),
+        ):
+            send.open()
+        with pytest.raises(ChanClosedError):
+            recv.open().recv(timeout=10.0)  # the timeout is the failure path
 
     @pytest.mark.asyncio
     async def test_asend_and_arecv_on_the_loop(self):
