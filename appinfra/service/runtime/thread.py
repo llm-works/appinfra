@@ -9,6 +9,7 @@ import threading
 
 from ..base import ScheduledService, Service
 from ..state import RestartPolicy, State
+from ..stop import StopToken
 from .drive import check_drivable, drive
 from .runner import Runner
 
@@ -28,17 +29,24 @@ class ThreadRunner(Runner):
         runner.stop()
     """
 
-    def __init__(self, service: Service, policy: RestartPolicy | None = None) -> None:
+    def __init__(
+        self,
+        service: Service,
+        policy: RestartPolicy | None = None,
+        *,
+        parent: StopToken | None = None,
+    ) -> None:
         """Initialize thread runner.
 
         Args:
             service: The service to run.
             policy: Restart policy.
+            parent: The token the service's stopping token derives from.
 
         Raises:
             TypeError: If *service* is an AsyncService.
         """
-        super().__init__(service, policy)
+        super().__init__(service, policy, parent=parent)
         check_drivable(self.service)
         self._thread: threading.Thread | None = None
         self._exception: BaseException | None = None
@@ -50,6 +58,9 @@ class ThreadRunner(Runner):
         # A thread, not a flag: an older thread ending after a newer run was
         # launched names itself, not the newer run.
         self._ended: threading.Thread | None = None
+        # The thread whose run has been torn down: once per run, by whichever
+        # comes first of the run's end and a stop()
+        self._torn_down: threading.Thread | None = None
 
     def _launch(self) -> None:
         """Start the service's thread."""
@@ -63,18 +74,28 @@ class ThreadRunner(Runner):
 
     @property
     def _loops_here(self) -> bool:
-        """True if the runner loops the service (scheduled) and so tears it down
-        on this thread once the loop ends; a service with its own run() is torn
-        down by stop(), which is how run() learns to return."""
+        """True if the runner loops the service (scheduled): stop() leaves its
+        teardown to the service thread, so it never overlaps tick(). A service
+        with its own run() is also torn down by stop(), which can release a
+        run() blocked on something other than the token."""
         return isinstance(self.service, ScheduledService)
+
+    def _teardown_once(self, run: threading.Thread) -> None:
+        """Tear down the service for *run*, the thread of the run, unless that
+        run was torn down already."""
+        with self._lock:
+            if self._torn_down is run:
+                return
+            self._torn_down = run
+        self._teardown()
 
     def _run(self) -> None:
         """Thread target.
 
         Records how the service's work ended, stops the run's token so work
-        derived from it is told to stop, tears down a service the runner
-        loops, then settles the state. Transitions are guarded to handle races
-        with stop() or wait_healthy().
+        derived from it is told to stop, tears the service down however its
+        work ended (unless a stop() did already), then settles the state.
+        Transitions are guarded to handle races with stop() or wait_healthy().
         """
         try:
             try:
@@ -82,8 +103,7 @@ class ThreadRunner(Runner):
             except BaseException as e:
                 self._exception = e
             self.service.stopping.stop()
-            if self._loops_here:
-                self._teardown()
+            self._teardown_once(threading.current_thread())
             self._settle_exit_state(self._exception)
         finally:
             # Last, so _exception, teardown and the state are settled before
@@ -114,8 +134,8 @@ class ThreadRunner(Runner):
 
         self._transition(State.STOPPING)
         self.service.stopping.stop()
-        if not self._loops_here:
-            self._teardown()
+        if not self._loops_here and self._thread is not None:
+            self._teardown_once(self._thread)
 
         if self._thread is not None:
             self._thread.join(timeout=timeout)

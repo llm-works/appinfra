@@ -39,19 +39,28 @@ class Runner(ABC):
     - TaskRunner: Runs an AsyncService as a task on a LoopHost's event loop
     """
 
-    def __init__(self, service: object, policy: RestartPolicy | None = None) -> None:
+    def __init__(
+        self,
+        service: object,
+        policy: RestartPolicy | None = None,
+        *,
+        parent: StopToken | None = None,
+    ) -> None:
         """Initialize runner.
 
         Args:
             service: The service to run.
             policy: Restart policy. Defaults to RestartPolicy().
+            parent: The token each run's stopping token derives from, so
+                stopping it stops the service; None for a token of its own.
 
         Raises:
             TypeError: If *service* is not a Service (see check_service()).
         """
         self.service: Service = check_service(service)
+        self._parent = parent
         # Before setup(), which may already derive from it
-        self.service.stopping = StopToken()
+        self.service.stopping = self._new_token()
         self.policy = policy or _DEFAULT_POLICY
         self._state = State.CREATED
         # Created by the first on_state_change(): most runners have no hooks
@@ -161,7 +170,12 @@ class Runner(ABC):
         """Exception from execution, if any."""
 
     def wait_healthy(self, timeout: float = 30.0, interval: float = 0.1) -> None:
-        """Block until healthy or timeout.
+        """Block until healthy or timeout. Several threads may wait at once:
+        the first to see the service healthy moves it to RUNNING.
+
+        A start() in progress on another thread is waited for first, within
+        *timeout*: between setup() and the launch of its work a runner is
+        STARTING but not alive, which is no exit.
 
         Args:
             timeout: Max seconds to wait.
@@ -172,14 +186,21 @@ class Runner(ABC):
             HealthTimeoutError: If timeout reached before healthy.
         """
         start = time.monotonic()
+        on_start_thread = self._start_thread == threading.get_ident()
+        if not on_start_thread and not self._await_start(timeout):
+            raise HealthTimeoutError(self.name, timeout)
 
         while time.monotonic() - start < timeout:
             if not self.is_alive():
                 self._handle_execution_exit()
 
             if self.is_healthy():
-                self._transition(State.RUNNING)
-                self._retries = 0
+                # Only from STARTING: another waiter may have moved it already,
+                # which is success; a stop() that ended the start is not
+                if self._transition_from(State.STARTING, State.RUNNING):
+                    self._retries = 0
+                elif self._state not in (State.RUNNING, State.IDLE):
+                    raise RunError(self.name, "stopped during startup")
                 return
 
             time.sleep(interval)
@@ -229,26 +250,49 @@ class Runner(ABC):
         """Clean up the failed execution before a restart."""
         self.stop()
 
-    def _maybe_restart(self) -> bool:
-        """Attempt restart based on policy.
+    @property
+    def restart_delay(self) -> float:
+        """Seconds the restart policy waits before the next restart attempt."""
+        return self._calculate_backoff()
 
-        Cleans up via _stop_for_restart() before restarting to ensure no
-        residual state from the failed execution.
+    def restart(self) -> bool:
+        """Make one restart attempt now, counted against the restart policy:
+        stop the failed run, start again and wait until healthy. The caller
+        waits restart_delay first, as check() does on its own thread.
+
+        Returns:
+            True if the service runs again; False if the policy allows no
+            further attempt, or this one failed (logged).
         """
-        if not self.policy.restart_on_failure:
+        if not self.can_restart:
             return False
+        # Before counting it, so restart_pending holds without a gap
+        self._restarting = True
+        self._retries += 1
+        try:
+            return self._attempt_restart()
+        finally:
+            self._restarting = False
 
-        if self._retries >= self.policy.max_retries:
+    def _maybe_restart(self) -> bool:
+        """Wait the policy's backoff, then attempt a restart, as check() does."""
+        if not self.can_restart:
             return False
-
         backoff = self._calculate_backoff()
         # Before counting it, so restart_pending holds without a gap
         self._restarting = True
         self._retries += 1
-
         try:
             time.sleep(backoff)
-            # Ensure cleanup before restart (handles residual state)
+            return self._attempt_restart()
+        finally:
+            self._restarting = False
+
+    def _attempt_restart(self) -> bool:
+        """Stop the failed run, start again and wait until healthy; a failure is
+        logged. Cleans up via _stop_for_restart() first, so no residual state of
+        the failed run remains."""
+        try:
             self._stop_for_restart()
             self.start()
             self.wait_healthy()
@@ -259,8 +303,6 @@ class Runner(ABC):
                 extra={"exception": e, "service": self.name, "attempt": self._retries},
             )
             return False
-        finally:
-            self._restarting = False
 
     def _calculate_backoff(self) -> float:
         """Calculate backoff delay for current retry."""
@@ -357,7 +399,11 @@ class Runner(ABC):
         token = self.service.stopping
         if token.is_set():
             token.detach()
-            self.service.stopping = StopToken()
+            self.service.stopping = self._new_token()
+
+    def _new_token(self) -> StopToken:
+        """A stopping token for a run: derived from the parent, if there is one."""
+        return self._parent.child() if self._parent is not None else StopToken()
 
     def _run_setup(self) -> None:
         """Run service setup, transition to FAILED on error."""

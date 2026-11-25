@@ -32,7 +32,8 @@ TRANSITIONS: dict[State, set[State]] = {
     State.RUNNING: {State.IDLE, State.STOPPING, State.FAILED, State.DONE},
     State.IDLE: {State.RUNNING, State.STOPPING, State.FAILED},
     State.STOPPING: {State.STOPPED, State.FAILED, State.DONE},
-    State.STOPPED: {State.INITD, State.STARTING, State.DONE},
+    # FAILED: a start whose setup() fails, as from CREATED
+    State.STOPPED: {State.INITD, State.STARTING, State.FAILED, State.DONE},
     State.FAILED: {
         State.INITD,
         State.STARTING,

@@ -1,86 +1,50 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright 2026 The appinfra Authors
 
-"""Service execution with dependency ordering.
+"""Services, and the runtime that runs them.
 
-This module provides a framework for managing service execution with:
-- Dependency ordering: services start after their dependencies
-- Parallel execution: independent services start/stop in parallel
-- State machine: explicit states with hooks
-- Restart policies: automatic restart with configurable backoff
-- Multiple execution modes: threads, processes, scheduled, tasks on an event loop
-
-Three-layer architecture:
 - Service: WHAT to run (definition, config, behavior)
-- Runner: HOW to run it (execution + state management)
-- Manager: Orchestration (dependency ordering, parallel start/stop)
+- Runner: HOW to run it (a thread, a process, or a task on an event loop),
+  with its state machine, hooks and restart policy
+- Runtime: the entry point. spawn() takes services in any order and from any
+  thread, picks the runner from the service's kind, starts each once its
+  ``depends_on`` run, restarts a failed one per its policy, and stops them in
+  reverse start order
 
-A Service implements run(), which holds its thread until stopped. Two
+A Service implements run(), which returns once ``self.stopping`` is set. Two
 subclasses work differently:
 - ScheduledService: the runner calls tick() every interval seconds
-- AsyncService: run() is a coroutine; a LoopHost runs many as tasks on one loop
+- AsyncService: run() is a coroutine; it runs as a task on the runtime's event
+  loop, shared by every async service
 
-Basic usage with ThreadRunner:
-    from appinfra.service import Manager, Service, ThreadRunner
+Usage:
+    from appinfra.service import RestartPolicy, Runtime, Service
 
     class MyService(Service):
-        name = "myservice"
-        depends_on = ["database"]
+        def __init__(self, lg: Logger) -> None:
+            self._lg = lg
+
+        @property
+        def name(self) -> str:
+            return "myservice"
+
+        @property
+        def depends_on(self) -> list[str]:
+            return ["database"]
 
         def run(self) -> None:
-            # Main work - blocks until teardown
-            self._stop.wait()
+            self.stopping.wait()  # Block until stopped
 
-        def teardown(self) -> None:
-            self._stop.set()
-
-    mgr = Manager(lg)
-    mgr.add_service(db_service)
-    mgr.add_service(MyService())
-
-    with mgr:
+    with Runtime(lg) as rt:
+        svc = rt.spawn(MyService(lg))   # starts once "database" runs
+        rt.spawn(Database(lg, cfg), policy=RestartPolicy(max_retries=5))
+        rt.spawn(Indexer(lg), isolate=True)  # a process of its own
+        rt.ready(svc)
         run_application()
 
-With ProcessRunner for subprocess isolation:
-    from appinfra.service import ProcessRunner
-
-    # Service runs in a separate process
-    runner = ProcessRunner(my_service)
-    runner.start()
-    runner.wait_healthy(timeout=30.0)
-
-With restart policy:
-    from appinfra.service import ThreadRunner, RestartPolicy
-
-    runner = ThreadRunner(
-        my_service,
-        policy=RestartPolicy(max_retries=5, backoff=2.0),
-    )
-    mgr.add(runner)
-
-State change hooks:
-    def on_change(name: str, old: State, new: State) -> None:
-        print(f"{name}: {old.value} -> {new.value}")
-
-    mgr.add(runner)
-    mgr.on_state_change("myservice", on_change)
-
-Scheduled services:
-    class MetricsCollector(ScheduledService):
-        name = "metrics"
-        interval = 60.0
-
-        def tick(self) -> None:
-            collect_and_send_metrics()
-
-    mgr.add_service(MetricsCollector())
-
-Async services, many on one event loop thread:
-    with LoopHost() as host:
-        for agent in agents:
-            mgr.add(host.runner(agent))
-        with mgr:
-            run_application()
+spawn() returns the service's runner; ``runner.on_state_change(hook)``
+observes its transitions. A runner can also be used on its own, without a
+runtime: ThreadRunner, ProcessRunner, or a LoopHost's TaskRunner.
 """
 
 from .base import AsyncService, ScheduledService, Service
@@ -105,6 +69,7 @@ from .errors import (
     ChannelTimeoutError,
     CycleError,
     DependencyFailedError,
+    DependencyNotRunningError,
     Error,
     HealthTimeoutError,
     InvalidTransitionError,
@@ -126,8 +91,14 @@ from .factory import (
     ServiceFactory,
     ServiceRegistration,
 )
-from .manager import Manager
-from .runtime import LoopHost, ProcessRunner, Runner, TaskRunner, ThreadRunner
+from .runtime import (
+    LoopHost,
+    ProcessRunner,
+    Runner,
+    Runtime,
+    TaskRunner,
+    ThreadRunner,
+)
 from .state import RestartPolicy, State, StateHook
 from .stop import StopToken
 
@@ -141,7 +112,7 @@ __all__ = [
     "ProcessRunner",
     "LoopHost",
     "TaskRunner",
-    "Manager",
+    "Runtime",
     # Transport (wire level)
     "Transport",
     "QueueTransport",
@@ -187,5 +158,6 @@ __all__ = [
     "RunError",
     "HealthTimeoutError",
     "DependencyFailedError",
+    "DependencyNotRunningError",
     "InvalidTransitionError",
 ]

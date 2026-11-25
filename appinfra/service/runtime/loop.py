@@ -12,6 +12,7 @@ from types import TracebackType
 
 from ..base import AsyncService
 from ..state import RestartPolicy, State
+from ..stop import StopToken
 from .runner import Runner
 
 
@@ -76,10 +77,14 @@ class LoopHost:
             self.loop.call_soon_threadsafe(callback)
 
     def runner(
-        self, service: AsyncService, policy: RestartPolicy | None = None
+        self,
+        service: AsyncService,
+        policy: RestartPolicy | None = None,
+        *,
+        parent: StopToken | None = None,
     ) -> TaskRunner:
         """A TaskRunner for *service* on this host's loop."""
-        return TaskRunner(self, service, policy)
+        return TaskRunner(self, service, policy, parent=parent)
 
     def start(self) -> None:
         """Start the loop on its own thread.
@@ -169,6 +174,8 @@ class TaskRunner(Runner):
         host: LoopHost,
         service: AsyncService,
         policy: RestartPolicy | None = None,
+        *,
+        parent: StopToken | None = None,
     ) -> None:
         """Initialize task runner.
 
@@ -176,11 +183,12 @@ class TaskRunner(Runner):
             host: The LoopHost whose loop runs the service.
             service: The async service to run.
             policy: Restart policy.
+            parent: The token the service's stopping token derives from.
 
         Raises:
             TypeError: If *service* is not an AsyncService.
         """
-        super().__init__(service, policy)
+        super().__init__(service, policy, parent=parent)
         if not isinstance(service, AsyncService):
             raise TypeError(
                 f"TaskRunner runs an AsyncService; '{self.name}' takes a "

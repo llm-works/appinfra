@@ -1,61 +1,79 @@
 # Service Module
 
-Service execution framework for managing service lifecycles with dependency ordering.
+Services, and the runtime that runs them.
 
 ## Overview
 
-The service module provides a framework for managing long-running services with:
-- **Dependency ordering**: Services start after their dependencies
-- **Parallel execution**: Independent services start/stop in parallel
-- **State machine**: Explicit states with hooks for observability
-- **Restart policies**: Automatic restart with configurable backoff
-- **Multiple execution modes**: Threads, processes, scheduled
+The service module runs long-lived services with:
+- **One entry point**: `Runtime.spawn()` takes services in any order, from any thread, and picks
+  how to run each from its kind
+- **Dependency ordering**: a service starts as soon as the services it depends on run
+- **One stop signal**: every service gets a hierarchical `StopToken` as `self.stopping`
+- **State machine**: explicit states with hooks for observability
+- **Restart policies**: automatic restart with configurable backoff
+- **Execution kinds**: tasks on a shared event loop, threads, processes, scheduled ticks
 
 ## Architecture
-
-Three-layer architecture separates concerns:
 
 | Layer | Responsibility | Examples |
 |-------|---------------|----------|
 | **Service** | WHAT to run (definition, config, behavior) | `Service`, `ScheduledService`, `AsyncService` |
-| **Runner** | HOW to run it (execution + state management) | `ThreadRunner`, `ProcessRunner`, `TaskRunner` |
-| **Manager** | Orchestration (dependency ordering, parallel start/stop) | `Manager` |
+| **Runner** | HOW to run one service (execution + state management) | `ThreadRunner`, `ProcessRunner`, `TaskRunner` |
+| **Runtime** | Running many: runner choice, dependency ordering, restarts, ordered stop | `Runtime` |
+
+A runner can be used on its own, without a runtime; see [Runners](#runners).
 
 ## Quick Start
 
 ```python
 from appinfra.log import Logger
-from appinfra.service import Service, ThreadRunner
+from appinfra.service import Runtime, Service
 
 
-class MyService(Service):
+class Database(Service):
     def __init__(self, lg: Logger):
         self._lg = lg
 
     @property
     def name(self) -> str:
-        return "myservice"
+        return "database"
 
     def run(self) -> None:
         self._lg.info("service started")
         self.stopping.wait()  # Block until stopped
 
 
-# Run with ThreadRunner
+class Api(Service):
+    def __init__(self, lg: Logger):
+        self._lg = lg
+
+    @property
+    def name(self) -> str:
+        return "api"
+
+    @property
+    def depends_on(self) -> list[str]:
+        return ["database"]
+
+    def run(self) -> None:
+        self.stopping.wait()
+
+
 lg = Logger(name="app")
-runner = ThreadRunner(MyService(lg))
-runner.start()
-runner.wait_healthy(timeout=30.0)
-# ... service is running ...
-runner.stop()
+with Runtime(lg) as rt:
+    api = rt.spawn(Api(lg))  # waits: "database" is not running yet
+    rt.spawn(Database(lg))  # starts; api starts once it is RUNNING
+    rt.ready(api)
+    # ... services are running ...
+# Leaving the block stops api, then database
 ```
 
 ## Services
 
 Services define WHAT to run. A `Service` implements `run()`, which holds its thread until the
 service is stopped. A `ScheduledService` hands its loop to the runner, which calls `tick()`. An
-`AsyncService`'s `run()` is a coroutine: a `LoopHost` runs many of them as tasks on one event loop
-thread.
+`AsyncService`'s `run()` is a coroutine: it runs as a task on an event loop shared with other async
+services, the runtime's or a `LoopHost`'s.
 
 ```python
 class Service(ABC):
@@ -91,9 +109,9 @@ class Service(ABC):
 
 | Class | Implement | Runs on |
 |-------|-----------|---------|
-| `Service` | `run()` | a thread or process of its own, held until stopped |
-| `ScheduledService` | `tick()`, `interval` | a thread or process; `tick()` runs `interval` seconds after the last one returned |
-| `AsyncService` | `async def run()` | a task on a `LoopHost`'s event loop, shared with other async services |
+| `Service` | `run()` | a thread of its own, or a process with `isolate=True`; held until stopped |
+| `ScheduledService` | `tick()`, `interval` | as `Service`; `tick()` runs `interval` seconds after the last one returned |
+| `AsyncService` | `async def run()` | a task on an event loop shared with other async services |
 
 For a scheduled service, the runner owns the loop and calls `teardown()` once it has ended (stop or
 failure), on the thread or in the process that ran it: `teardown()` never overlaps `tick()`, so
@@ -129,17 +147,17 @@ with LoopHost() as host:
     runner.stop()
 ```
 
-`host.runner(service)` returns a `TaskRunner`. It has the usual runner interface (`start()`,
-`stop()`, `wait_healthy()`, restart policy), so `Manager.add()` takes it like any other runner.
-Every service on a host shares one thread: a service waiting on an `await` costs its task, not a
-thread.
+`host.runner(service)` returns a `TaskRunner`, with the usual runner interface (`start()`,
+`stop()`, `wait_healthy()`, restart policy). Under a `Runtime`, `spawn()` does this on the
+runtime's own loop. Every service on a loop shares one thread: a service waiting on an `await`
+costs its task, not a thread.
 
 - `setup()` runs on the thread that calls `start()`; `run()` and then `teardown()` run on the
   loop. Open clients bound to the loop inside `run()` and close them in its `finally`.
 - `stop()` cancels the task: `CancelledError` is raised at the `await` `run()` is parked on.
 - An exception from `run()` fails that service only; the loop and its other services run on.
-- A service stays on the loop it started on. `LoopHost.stop()` cancels the tasks still running
-  and lets them finish.
+- A service stays on the loop it started on. `LoopHost.stop()` stops the tokens of the services
+  still running, then cancels their tasks and lets them finish.
 - `run()` must not call anything that blocks without awaiting: that stalls every service on the
   loop. Run blocking code through `asyncio.to_thread()`.
 - One loop uses one core. `ThreadRunner` and `ProcessRunner` refuse an `AsyncService`.
@@ -161,7 +179,9 @@ class Database(Service):
 ```
 
 Every runner gives the service a `StopToken` as `self.stopping`, set when the service is to stop.
-`self.stopping.child()` derives a token that is stopped with it, for work the service starts. The
+Under a `Runtime`, each service's token derives from the runtime's, so stopping the runtime reaches
+every service. `self.stopping.child()` derives a token that is stopped with it, for work the
+service starts. The
 runner also stops the token once `run()` has ended, however it ended, before it calls
 `teardown()`: work derived from the token is told to stop first. Stopping a token does not wait for
 that work; a service that must not release resources while its workers still use them waits for
@@ -209,7 +229,68 @@ def on_change(name: str, old: State, new: State) -> None:
 runner.on_state_change(on_change)
 ```
 
+## Runtime
+
+`Runtime` is the entry point for running services. `spawn()` takes a service, picks its runner,
+and starts it once its dependencies run:
+
+| Service | Runner |
+|---------|--------|
+| `AsyncService` | a `TaskRunner` on the runtime's event loop, shared by every async service |
+| `Service`, `ScheduledService` | a `ThreadRunner`: a thread of its own |
+| `Service`, `ScheduledService` with `isolate=True` | a `ProcessRunner`: a process of its own |
+
+```python
+from appinfra.service import RestartPolicy, Runtime
+
+with Runtime(lg) as rt:
+    api = rt.spawn(Api(lg))
+    rt.spawn(Database(lg, cfg), policy=RestartPolicy(max_retries=5))
+    rt.spawn(Indexer(lg), isolate=True)
+    rt.ready(api, timeout=30.0)
+    run_application()
+```
+
+`Runtime(lg)` is started by `start()` or by entering the `with` block, once; `stop()` or leaving
+the block stops it. `spawn()` returns the service's runner, for `on_state_change()`, `state` and
+the like; `rt.services` maps the names of the services in the runtime to their runners.
+
+### Dependencies
+
+A service names the services it needs in `depends_on`:
+
+```python
+class Api(Service):
+    @property
+    def depends_on(self) -> list[str]:
+        return ["database", "cache"]
+```
+
+- **Any order.** `spawn()` takes services in any order, from any thread, before or after others
+  start. A service whose dependencies are all `RUNNING` starts at once; any other waits, its
+  runner `CREATED`, and starts as soon as the last of them reaches `RUNNING`. The runtime waits
+  for the health of a service others wait on, so a chain moves on without `ready()`.
+- **`ready(*runners, timeout=30.0)`** waits until each has started and is healthy, *timeout* in
+  all. A service still waiting for a dependency then raises `DependencyNotRunningError`, which
+  names the dependency.
+- **Cycles.** A `spawn()` whose dependencies would lead back to the service raises `CycleError`.
+- **A dependency that leaves.** A service waiting on one that leaves the runtime (it failed with
+  no restart left, ended or was stopped) fails with `DependencyFailedError`, and so does what
+  waits on it in turn.
+
+### Restarts and stop
+
+- A service that fails while running is restarted per its `RestartPolicy`, after the policy's
+  backoff. A process service is restarted by its runner's own monitor. A service that ends, is
+  stopped, or fails with no restart left leaves the runtime.
+- `stop(timeout=5.0)` waits for restarts under way, then stops the started services in reverse
+  start order, each within *timeout*: dependents before what they depend on. A failure to stop
+  one is logged and the rest stop regardless. A service still waiting for its dependencies never
+  starts; `ready()` on it raises `RunError`.
+
 ## Runners
+
+A runner runs one service. The runtime picks and drives them; each can also be used on its own.
 
 ### ThreadRunner
 
@@ -303,61 +384,24 @@ policy = RestartPolicy(
 )
 
 runner = ThreadRunner(service, policy=policy)
+rt.spawn(service, policy=policy)  # the same, under a runtime
 ```
 
-Call `runner.check()` periodically to detect failures and trigger restarts.
-
-## Manager
-
-Orchestrate multiple services with dependency ordering:
-
-```python
-from appinfra.service import Manager, ThreadRunner
-
-lg = Logger(name="app")
-mgr = Manager(lg)
-
-# Add services (dependencies are resolved automatically)
-mgr.add_service(database_service)
-mgr.add_service(cache_service)
-mgr.add_service(api_service)  # Depends on database and cache
-
-# Context manager starts all services and stops on exit
-with mgr:
-    run_application()
-```
-
-### Dependency Declaration
-
-Services declare dependencies via `depends_on`:
-
-```python
-class APIService(Service):
-    @property
-    def name(self) -> str:
-        return "api"
-
-    @property
-    def depends_on(self) -> list[str]:
-        return ["database", "cache"]
-```
-
-Or specify when adding:
-
-```python
-mgr.add(runner, depends_on=["database", "cache"])
-```
+Under a `Runtime`, restarts are automatic. A runner used on its own restarts when
+`runner.check()` is called after a failure; `ProcessRunner.start_monitor()` calls it on a thread
+of its own.
 
 ## Error Handling
 
 | Error | When Raised |
 |-------|-------------|
 | `SetupError` | Service setup fails |
-| `RunError` | Execution fails to start |
+| `RunError` | Execution fails to start, or the runtime stopped before the service started |
 | `HealthTimeoutError` | Service doesn't become healthy |
 | `InvalidTransitionError` | Invalid state transition attempted |
-| `CycleError` | Circular dependency detected |
-| `DependencyFailedError` | Dependency failed to start |
+| `CycleError` | A `spawn()` whose dependencies lead back to the service |
+| `DependencyFailedError` | A dependency left the runtime before the waiting service started |
+| `DependencyNotRunningError` | `ready()` timed out on a service still waiting for a dependency; also a `TimeoutError` |
 
 ## Channels
 
@@ -559,7 +603,8 @@ worker = svc_factory.create("worker")
 - `ProcessRunner` - Subprocess-based execution
 - `LoopHost` - An event loop on its own thread, running many AsyncServices as tasks
 - `TaskRunner` - Runner for one AsyncService on a LoopHost (from `LoopHost.runner()`)
-- `Manager` - Service orchestration
+- `Runtime` - The entry point: spawns services on the runner their kind needs, in dependency order
+- `StopToken` - Hierarchical, one-way stop signal; every service's `self.stopping`
 - `RestartPolicy` - Restart configuration
 - `State` - State enum
 
@@ -599,8 +644,3 @@ worker = svc_factory.create("worker")
 - `AsyncProcessChannelPair` - Mixed async parent + sync child pair
 - `RunnerFactory` - Creates runners with optional channels
 - `ServiceFactory` - Registry-based service creation
-
-### Functions
-
-- `validate_dependencies()` - Check for missing deps and cycles
-- `dependency_levels()` - Get parallel execution groups

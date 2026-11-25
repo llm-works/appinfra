@@ -3,7 +3,6 @@
 
 """A service for the runner tests."""
 
-import threading
 import time
 from unittest.mock import MagicMock
 
@@ -17,7 +16,6 @@ class SimpleService(Service):
         self._name = name
         self._lg = MagicMock()
         self._health_delay = health_delay
-        self._stop_event = threading.Event()
         self._running = False
         self._healthy = False
 
@@ -30,12 +28,9 @@ class SimpleService(Service):
         if self._health_delay:
             time.sleep(self._health_delay)
         self._healthy = True
-        self._stop_event.wait()
+        self.stopping.wait()  # each run has its own token; teardown() ends none
         self._running = False
         self._healthy = False
-
-    def teardown(self) -> None:
-        self._stop_event.set()
 
     def is_healthy(self) -> bool:
         return self._healthy

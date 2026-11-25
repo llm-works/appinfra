@@ -25,6 +25,10 @@ For API stability guarantees and deprecation policy, see
   one shared event loop thread, so a service waiting on an `await` holds no thread of its own.
 - `BufferedChannel.stream()`: the sync counterpart of `AsyncBufferedChannel.stream()`, yielding
   the response chunks of a request until the one with `is_final=True`.
+- `Runtime`: `spawn()` takes services in any order, from any thread, and starts each on the runner
+  its kind needs (a task on a shared event loop, a thread, or a process with `isolate=True`) once
+  its `depends_on` run. `stop()` goes in reverse start order; a service that fails while running
+  is restarted per its policy.
 - `Service.stopping`: a `StopToken` every runner sets before `setup()` and stops when the service
   is to stop; `run()` returns on it under any runner. `stopping.child()` derives a token stopped
   with it.
@@ -65,6 +69,10 @@ For API stability guarantees and deprecation policy, see
   expressions with it.
 
 ### Removed
+- **Breaking:** `appinfra.service.Manager`: `Runtime` replaces it. `rt.spawn(service)` takes the
+  place of `add_service()`/`add()`: a service whose dependency is not running yet waits for it
+  instead of being refused. `rt.services[name].state` replaces `is_running(name)`; a stopped
+  `Runtime` is not started again.
 - **Breaking:** the MkDocs build: the `docs.serve`, `docs.build`, `docs.check` and `docs.deploy`
   Make targets, their `APPINFRA_DOCS_CONFIG_FILE` and `APPINFRA_DOCS_OUTPUT_DIR` settings (set in
   a makefile, either now stops make as unknown) and the `docs` extra.

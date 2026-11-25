@@ -55,6 +55,15 @@ class DependencyFailedError(Error):
         super().__init__(f"{name}: dependency '{dependency}' failed to start")
 
 
+class DependencyNotRunningError(Error, TimeoutError):
+    """A service still waited for a dependency to run when the wait for it ended."""
+
+    def __init__(self, name: str, dependency: str) -> None:
+        self.name = name
+        self.dependency = dependency
+        super().__init__(f"{name}: dependency '{dependency}' is not running")
+
+
 class InvalidTransitionError(Error):
     """Invalid state transition attempted."""
 
