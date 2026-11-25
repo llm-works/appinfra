@@ -13,6 +13,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable
 from typing import Any
 
+from .errors import StoppedError
 from .loop import LoopHost
 from .stop import StopToken
 
@@ -167,12 +168,15 @@ class ThreadTask(Task):
 
     def _run(self) -> None:
         """Thread target: call the function with the task current, unless its
-        token was stopped before the thread got here, as on the loop."""
+        token was stopped before the thread got here, as on the loop. A
+        channel wait ended by the stop ends it cleanly."""
         try:
             _current.set(self)
             try:
                 if not self.token.is_set():
                     self._result = self._fn(*self._args)
+            except StoppedError:
+                pass
             except BaseException as e:
                 self._exception = e
             self._end()
@@ -249,12 +253,13 @@ class LoopTask(Task):
 
     async def _call(self) -> None:
         """The call, unless a cancel came first. A cancel, from cancel() or the
-        host shutting down, ends it cleanly; any other exception is kept."""
+        host shutting down, ends it cleanly, as does a channel wait ended by
+        the stop; any other exception is kept."""
         if self.token.is_set():
             return
         try:
             self._result = await self._fn(*self._args)
-        except asyncio.CancelledError:
+        except (asyncio.CancelledError, StoppedError):
             pass
         except BaseException as e:
             self._exception = e

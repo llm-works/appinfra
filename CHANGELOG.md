@@ -35,9 +35,13 @@ For API stability guarantees and deprecation policy, see
 - `appinfra.runtime`: `Runtime.spawn(fn, *args)` calls a function once as a task (an async one on
   a shared event loop, any other on a thread of its own) and returns its task id, for `wait()`,
   `cancel()`, `alive()` and `detach()`. Inside a task, `stopping()` and `task_id()` return its
-  token and id. `StopToken` lives here; `appinfra.service` re-exports it.
-- `StopToken.on_stop(fn)`: calls `fn` once the token is stopped, and returns a function that
-  unregisters it.
+  token and id.
+- `StopToken` (`appinfra.runtime`, also exported by `appinfra.service`): a one-way stop signal
+  that derives tokens stopped with it (`child()`), and is checked (`is_set()`), waited on
+  (`wait()`) or calls back (`on_stop()`).
+- `appinfra.runtime.Chan`: a one-way FIFO channel like Go's, with a capacity (0: hand-over),
+  `close()` and iteration, for thread tasks (`send`/`recv`) and loop tasks (`asend`/`arecv`)
+  alike. A wait ends with `StoppedError` when the task's token stops, a clean end for the task.
 
 ### Changed
 - **Breaking:** `submit_stream()` is renamed `stream()` on `AsyncChannel`, `AsyncBufferedChannel`

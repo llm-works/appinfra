@@ -5,13 +5,19 @@
 runtime's event loop, any other function on a thread of its own. Imports
 nothing from appinfra.service."""
 
+from .chan import Chan
+from .chan import ClosedError as ChanClosedError
+from .errors import StoppedError
 from .runtime import Runtime
 from .stop import StopToken
 from .task import stopping, task_id
 
 __all__ = [
+    "Chan",
+    "ChanClosedError",
     "Runtime",
     "StopToken",
+    "StoppedError",
     "stopping",
     "task_id",
 ]
