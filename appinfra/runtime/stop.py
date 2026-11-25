@@ -85,9 +85,10 @@ class StopToken:
 
         Walks the tree with a worklist, not recursion, so no depth stops it
         partway: the part already stopped would ignore a second stop(). For the
-        same reason a callback that raises does not end the walk: the first
-        error is raised once the whole tree is stopped."""
-        error: BaseException | None = None
+        same reason a callback that raises does not end the walk, nor reach the
+        caller, who cannot act on one listener's failure: the error goes to
+        threading.excepthook, as one nothing can catch. KeyboardInterrupt and
+        other non-Exception errors still propagate."""
         pending = [self]
         while pending:
             token = pending.pop()
@@ -103,9 +104,7 @@ class StopToken:
             if children:
                 pending.extend(children)
             if callbacks:
-                error = _run(callbacks, error)
-        if error is not None:
-            raise error
+                _run(callbacks)
 
     def wait(self, timeout: float | None = None) -> bool:
         """Block until the token is stopped or *timeout* seconds pass.
@@ -127,8 +126,10 @@ class StopToken:
         """Call *fn* once when the token is stopped; at once if it is already.
 
         *fn* runs on the thread that calls stop(), and it must be short and
-        not block: stop() calls each token's callbacks in turn. Its error
-        reaches that caller; on a stopped token, the caller of on_stop().
+        not block: stop() calls each token's callbacks in turn. An Exception
+        it raises there goes to threading.excepthook, and the stop goes on; on
+        a token already stopped, *fn* runs at once and its error reaches the
+        caller of on_stop().
 
         Returns:
             A function that unregisters *fn*. A caller done waiting calls it,
@@ -181,18 +182,19 @@ class StopToken:
                 parent._children.discard(self)
 
 
-def _run(
-    callbacks: Iterable[Callable[[], None]], error: BaseException | None
-) -> BaseException | None:
-    """Call each of *callbacks*; returns *error*, or the first one raised if
-    *error* is None."""
+def _run(callbacks: Iterable[Callable[[], None]]) -> None:
+    """Call each of *callbacks*. One that raises an Exception is reported
+    through threading.excepthook, as an error no caller can catch; the rest
+    still run."""
     for fn in callbacks:
         try:
             fn()
-        except BaseException as e:
-            if error is None:
-                error = e
-    return error
+        except Exception as e:
+            threading.excepthook(
+                threading.ExceptHookArgs(
+                    [type(e), e, e.__traceback__, threading.current_thread()]
+                )
+            )
 
 
 def _noop() -> None:

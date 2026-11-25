@@ -5,6 +5,7 @@
 
 import pickle
 import sys
+import threading
 
 import pytest
 
@@ -160,23 +161,53 @@ class TestOnStop:
         token.stop()
         assert calls == [True]
 
-    def test_a_failing_callback_does_not_end_the_walk(self):
-        """The rest of the tree is stopped and its callbacks called; the first
-        error is raised once the walk is done."""
+    def test_a_failing_callback_is_reported_not_raised(self, monkeypatch):
+        """A stop is a broadcast: its caller cannot act on one listener's
+        failure, and must not be cut off by it. The error goes to
+        threading.excepthook; the rest of the tree is stopped and its
+        callbacks called."""
+        reported = []
+        monkeypatch.setattr(threading, "excepthook", reported.append)
         root = StopToken()
         child = root.child()
         calls = []
+        error = ValueError("callback failed")
 
         def fail():
-            raise ValueError("first")
+            raise error
 
         root.on_stop(fail)
         root.on_stop(lambda: calls.append("root"))
         child.on_stop(lambda: calls.append("child"))
-        with pytest.raises(ValueError, match="first"):
-            root.stop()
+        root.stop()
         assert child.is_set()
         assert sorted(calls) == ["child", "root"]
+        assert [args.exc_value for args in reported] == [error]
+
+    def test_an_interrupt_in_a_callback_propagates(self):
+        """KeyboardInterrupt is not a callback's failure to report: it ends
+        the stop, as an interrupt ends anything."""
+        token = StopToken()
+
+        def interrupt():
+            raise KeyboardInterrupt
+
+        token.on_stop(interrupt)
+        with pytest.raises(KeyboardInterrupt):
+            token.stop()
+        assert token.is_set()
+
+    def test_on_a_stopped_token_a_failing_callback_raises_to_its_registrant(self):
+        """Called at once, the callback runs for the caller of on_stop(),
+        who can handle its error."""
+        token = StopToken()
+        token.stop()
+
+        def fail():
+            raise ValueError("callback failed")
+
+        with pytest.raises(ValueError, match="callback failed"):
+            token.on_stop(fail)
 
     def test_a_pickled_token_carries_no_callbacks(self):
         token = StopToken()

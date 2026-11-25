@@ -59,10 +59,6 @@ def _stop(token: StopToken) -> None:
     assert token.is_set()
 
 
-def _fail() -> None:
-    raise RuntimeError("a parent's callback ran in the child")
-
-
 @pytest.mark.skipif(
     "fork" not in mp.get_all_start_methods(), reason="needs the fork start method"
 )
@@ -70,10 +66,11 @@ def test_a_forked_child_does_not_run_the_parents_callbacks():
     """A fork copies the parent's callbacks with its tokens. They refer to the
     parent's waiters, which do not exist in the child: a condition there may be
     held for good. The child stops its copy without running them."""
+    ctx = mp.get_context("fork")
+    ran = ctx.Event()  # shared across the fork: set in either process, seen in both
     token = StopToken()
-    calls = []
-    token.on_stop(_fail)
-    process = mp.get_context("fork").Process(target=_stop, args=(token,), daemon=True)
+    token.on_stop(ran.set)
+    process = ctx.Process(target=_stop, args=(token,), daemon=True)
     try:
         process.start()
         process.join(timeout=10.0)  # the deadline is the failure path
@@ -82,8 +79,7 @@ def test_a_forked_child_does_not_run_the_parents_callbacks():
         if process.is_alive():
             process.kill()
             process.join(5.0)
-    # The parent's own callbacks still run in the parent
-    token.on_stop(lambda: calls.append(1))
-    with pytest.raises(RuntimeError, match="ran in the child"):
-        token.stop()
-    assert calls == [1]
+    assert not ran.is_set()
+    # The parent's own callback still runs in the parent
+    token.stop()
+    assert ran.is_set()
