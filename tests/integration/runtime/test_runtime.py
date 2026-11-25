@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright 2026 The appinfra Authors
 
-"""Tests for the Runtime and its tasks: on the loop, on threads, and stop."""
+"""Tests for the Runtime and its tasks: on the loop, on threads, tids, and stop."""
 
 import asyncio
 import threading
@@ -11,16 +11,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from appinfra.runtime import (
-    LoopTask,
-    Runtime,
-    StopToken,
-    Task,
-    ThreadTask,
-    stopping,
-)
+from appinfra.runtime import Runtime, StopToken, stopping, tid
 
-LOOP_THREAD = "test-rt"
+LOOP_THREAD = "runtime-loop"
 
 
 class Parked:
@@ -29,8 +22,10 @@ class Parked:
     def __init__(self) -> None:
         self.entered = threading.Event()
         self.cancelled = False
+        self.token: StopToken | None = None
 
     async def run(self) -> None:
+        self.token = stopping()
         self.entered.set()
         try:
             await asyncio.Event().wait()
@@ -87,13 +82,23 @@ class WaitsOnAThread:
         await asyncio.to_thread(self.work.wait)
 
 
-def _waits_for_stop() -> None:
-    stopping().wait()
+def _waits_for_stop() -> StopToken:
+    token = stopping()
+    token.wait()
+    return token
+
+
+def _boom() -> None:
+    raise ValueError("boom")
+
+
+async def _async_boom() -> None:
+    raise ValueError("boom")
 
 
 @pytest.fixture
 def rt() -> Iterator[Runtime]:
-    runtime = Runtime(MagicMock(), name=LOOP_THREAD)
+    runtime = Runtime(MagicMock())
     runtime.start()
     yield runtime
     runtime.stop()
@@ -110,6 +115,16 @@ def _wait_until(condition: Callable[[], bool], timeout: float = 5.0) -> bool:
     return True
 
 
+def _known(rt: Runtime, t: int) -> bool:
+    """True if the runtime still knows task *t*: running, or ended and not
+    reaped."""
+    try:
+        rt.alive(t)
+    except LookupError:
+        return False
+    return True
+
+
 def _hold_loop(rt: Runtime) -> threading.Event:
     """Block the runtime's loop until the returned event is set. Returns once
     the loop is blocked, so what is scheduled next runs in a later iteration,
@@ -120,7 +135,7 @@ def _hold_loop(rt: Runtime) -> threading.Event:
         held.set()
         release.wait(5.0)  # blocks the loop on purpose
 
-    rt.spawn(hold)
+    rt.detach(rt.spawn(hold))
     assert held.wait(5.0)
     return release
 
@@ -132,47 +147,39 @@ class TestLoopTask:
         # A set, not a count: a thread an earlier test left may end meanwhile
         threads_before = set(threading.enumerate())
         fns = [Parked() for _ in range(50)]
-        tasks = [rt.spawn(fn.run) for fn in fns]
+        tids = [rt.spawn(fn.run) for fn in fns]
 
-        assert all(isinstance(task, LoopTask) for task in tasks)
         assert all(fn.entered.wait(timeout=5.0) for fn in fns)
         assert set(threading.enumerate()) <= threads_before
-        for task in tasks:
-            assert task.stop()
+        for t in tids:
+            rt.cancel(t)
+            rt.wait(t, timeout=5.0)
 
     def test_it_runs_on_the_loop_thread_with_its_args(self, rt):
         async def where(x: int) -> tuple[str, int]:
             return threading.current_thread().name, x
 
-        task = rt.spawn(where, 21)
-        assert _wait_until(lambda: not task.is_alive())
-        assert task.result == (LOOP_THREAD, 21)
+        assert rt.wait(rt.spawn(where, 21), timeout=5.0) == (LOOP_THREAD, 21)
 
-    def test_stop_cancels_it_and_stops_its_token(self, rt):
+    def test_cancel_cancels_it_and_stops_its_token(self, rt):
         fn = Parked()
-        task = rt.spawn(fn.run)
+        t = rt.spawn(fn.run)
         assert fn.entered.wait(timeout=5.0)
 
-        assert task.stop()
+        rt.cancel(t)
 
+        assert rt.wait(t, timeout=5.0) is None
         assert fn.cancelled
-        assert task.token.is_set()
-        assert not task.is_alive()
-        assert task.exception is None
+        assert fn.token is not None and fn.token.is_set()
 
     def test_a_failure_fails_that_task_only(self, rt):
-        async def boom() -> None:
-            raise RuntimeError("run failed")
-
         other = Parked()
-        other_task = rt.spawn(other.run)
+        other_tid = rt.spawn(other.run)
         assert other.entered.wait(timeout=5.0)
 
-        task = rt.spawn(boom)
-
-        assert _wait_until(lambda: not task.is_alive())
-        assert "run failed" in str(task.exception)
-        assert other_task.is_alive()
+        with pytest.raises(ValueError, match="boom"):
+            rt.wait(rt.spawn(_async_boom), timeout=5.0)
+        assert rt.alive(other_tid)
 
     @pytest.mark.parametrize("exc_type", [SystemExit, KeyboardInterrupt])
     def test_an_exit_fails_that_task_only(self, rt, exc_type):
@@ -183,52 +190,57 @@ class TestLoopTask:
             raise exc_type()
 
         other = Parked()
-        other_task = rt.spawn(other.run)
+        other_tid = rt.spawn(other.run)
         assert other.entered.wait(timeout=5.0)
 
-        task = rt.spawn(exits)
-
-        assert _wait_until(lambda: not task.is_alive())
-        assert isinstance(task.exception, exc_type)
-        assert other_task.is_alive()
+        with pytest.raises(exc_type):
+            rt.wait(rt.spawn(exits), timeout=5.0)
+        assert rt.alive(other_tid)
         # The loop runs on: a task spawned after it still runs
         later = Parked()
         rt.spawn(later.run)
         assert later.entered.wait(timeout=5.0)
 
-    def test_stop_right_after_spawn_ends_it(self, rt):
-        """Whether or not the task has begun when stop() lands, it ends."""
+    def test_cancel_right_after_spawn_ends_it(self, rt):
+        """Whether or not the task has begun when the cancel lands, it ends."""
         for _ in range(20):
-            task = rt.spawn(Parked().run)
-            assert task.stop()
-            assert not task.is_alive()
+            t = rt.spawn(Parked().run)
+            rt.cancel(t)
+            rt.wait(t, timeout=5.0)
 
-    def test_stop_on_the_loop_raises_without_waiting(self, rt):
+    def test_a_task_cancelled_before_its_first_step_never_runs(self, rt):
+        release = _hold_loop(rt)
+        fn = Parked()
+        try:
+            t = rt.spawn(fn.run)  # its creation is queued behind the hold
+            rt.cancel(t)
+        finally:
+            release.set()
+        rt.wait(t, timeout=5.0)
+        assert not fn.entered.is_set()
+
+    def test_wait_on_the_loop_is_refused(self, rt):
         """Waiting on the loop thread would block every task on it."""
         target = rt.spawn(Parked().run)
-        outcome: list[BaseException | None] = []
 
-        async def stops() -> None:
-            try:
-                target.stop(timeout=2.0)
-                outcome.append(None)
-            except BaseException as e:
-                outcome.append(e)
+        async def waits() -> None:
+            rt.wait(target, timeout=2.0)
 
-        stopper = rt.spawn(stops)
-        assert _wait_until(lambda: not stopper.is_alive())
-        assert isinstance(outcome[0], RuntimeError)
+        with pytest.raises(RuntimeError, match="block"):
+            rt.wait(rt.spawn(waits), timeout=5.0)
 
-    def test_a_task_ending_after_stop_gave_up_ends_on_its_own(self, rt):
+    def test_a_task_ending_after_a_wait_gave_up_ends_on_its_own(self, rt):
         fn = HoldsCancel()
-        task = rt.spawn(fn.run)
+        t = rt.spawn(fn.run)
         assert fn.entered.wait(5.0)
-        assert not task.stop(timeout=0)
-        assert task.is_alive()
+        rt.cancel(t)
+        with pytest.raises(TimeoutError):
+            rt.wait(t, timeout=0)
+        assert _known(rt, t)  # a wait that timed out does not reap
 
         fn.release.set()
 
-        assert _wait_until(lambda: not task.is_alive())
+        rt.wait(t, timeout=5.0)
 
 
 class TestThreadTask:
@@ -238,54 +250,135 @@ class TestThreadTask:
         def where(x: int) -> tuple[str, int]:
             return threading.current_thread().name, x
 
-        task = rt.spawn(where, 21)
-        assert isinstance(task, ThreadTask)
-        assert _wait_until(lambda: not task.is_alive())
-        assert task.result == ("task-where", 21)
+        t = rt.spawn(where, 21)
+        assert rt.wait(t, timeout=5.0) == (f"task-{t}", 21)
 
-    def test_stop_stops_its_token_and_waits_for_it(self, rt):
-        task = rt.spawn(_waits_for_stop)
-        assert task.stop(timeout=5.0)
-        assert task.token.is_set()
-        assert not task.is_alive()
+    def test_cancel_stops_its_token(self, rt):
+        t = rt.spawn(_waits_for_stop)
+        rt.cancel(t)
+        assert rt.wait(t, timeout=5.0).is_set()
 
-    def test_a_failure_is_kept(self, rt):
-        def boom() -> None:
-            raise ValueError("boom")
+    def test_a_failure_comes_back_from_wait(self, rt):
+        with pytest.raises(ValueError, match="boom"):
+            rt.wait(rt.spawn(_boom), timeout=5.0)
 
-        task = rt.spawn(boom)
-        assert _wait_until(lambda: not task.is_alive())
-        assert isinstance(task.exception, ValueError)
-        assert task.result is None
-
-    def test_stop_gives_up_on_a_task_that_ignores_its_token(self, rt):
+    def test_wait_gives_up_on_a_task_that_ignores_its_token(self, rt):
         release = threading.Event()
-        task = rt.spawn(release.wait, 10.0)
+        t = rt.spawn(release.wait, 10.0)
+        rt.cancel(t)
         try:
-            assert not task.stop(timeout=0)
-            assert task.is_alive()
+            with pytest.raises(TimeoutError):
+                rt.wait(t, timeout=0)
+            assert rt.alive(t)
         finally:
             release.set()
-        assert _wait_until(lambda: not task.is_alive())
+        assert rt.wait(t, timeout=5.0) is True
+
+    def test_a_task_waiting_for_itself_is_refused(self, rt):
+        def waits_for_itself() -> None:
+            rt.wait(tid(), timeout=1.0)
+
+        with pytest.raises(RuntimeError, match="itself"):
+            rt.wait(rt.spawn(waits_for_itself), timeout=5.0)
 
 
-class TestTokens:
-    def test_stopping_outside_a_task_is_refused(self):
+class TestTids:
+    def test_tids_count_up_and_are_never_reused(self, rt):
+        first = rt.spawn(lambda: None)
+        rt.wait(first, timeout=5.0)
+        second = rt.spawn(lambda: None)
+        assert second > first
+        rt.wait(second, timeout=5.0)
+
+    @pytest.mark.parametrize("on_loop", [True, False], ids=["loop", "thread"])
+    def test_a_task_knows_its_own_tid(self, rt, on_loop):
+        async def mine_async() -> int:
+            return tid()
+
+        def mine() -> int:
+            return tid()
+
+        t = rt.spawn(mine_async if on_loop else mine)
+        assert rt.wait(t, timeout=5.0) == t
+
+    def test_tid_and_stopping_outside_a_task_are_refused(self):
+        with pytest.raises(RuntimeError, match="outside a task"):
+            tid()
         with pytest.raises(RuntimeError, match="outside a task"):
             stopping()
 
-    def test_each_task_sees_its_own_token(self, rt):
-        async def on_loop() -> StopToken:
-            return stopping()
+    @pytest.mark.parametrize("op", ["wait", "cancel", "alive", "detach"])
+    def test_an_unknown_tid_is_refused(self, rt, op):
+        with pytest.raises(LookupError, match="no task 999"):
+            getattr(rt, op)(999)
 
-        tasks = [rt.spawn(on_loop), rt.spawn(stopping)]
-        assert _wait_until(lambda: not any(t.is_alive() for t in tasks))
-        assert [t.result for t in tasks] == [t.token for t in tasks]
 
+class TestZombies:
+    def test_an_ended_task_stays_until_waited_for(self, rt):
+        t = rt.spawn(lambda: 42)
+        assert _wait_until(lambda: not rt.alive(t))
+        assert _known(rt, t)
+        assert rt.wait(t, timeout=5.0) == 42
+        assert not _known(rt, t)
+
+    def test_a_reaped_task_is_gone(self, rt):
+        t = rt.spawn(lambda: 42)
+        rt.wait(t, timeout=5.0)
+        with pytest.raises(LookupError):
+            rt.wait(t, timeout=5.0)
+
+    def test_a_detached_task_is_reaped_when_it_ends(self, rt):
+        release = threading.Event()
+        t = rt.spawn(release.wait, 5.0)
+        rt.detach(t)
+        assert _known(rt, t)
+        release.set()
+        assert _wait_until(lambda: not _known(rt, t))
+
+    def test_detaching_an_ended_task_reaps_it(self, rt):
+        t = rt.spawn(lambda: None)
+        assert _wait_until(lambda: not rt.alive(t))
+        rt.detach(t)
+        assert not _known(rt, t)
+
+    def test_wait_on_a_detached_task_is_refused(self, rt):
+        t = rt.spawn(_waits_for_stop)
+        rt.detach(t)
+        with pytest.raises(RuntimeError, match="detached"):
+            rt.wait(t)
+        rt.cancel(t)
+
+    def test_a_detached_failure_is_logged(self):
+        lg = MagicMock()
+        with Runtime(lg) as rt:
+            t = rt.spawn(_boom)
+            rt.detach(t)
+            assert _wait_until(lambda: not _known(rt, t))
+        lg.warning.assert_called_once()
+        args, kwargs = lg.warning.call_args
+        assert args[0] == "task failed"
+        assert isinstance(kwargs["extra"]["exception"], ValueError)
+
+    def test_a_failure_collected_by_wait_is_not_logged(self):
+        lg = MagicMock()
+        with Runtime(lg) as rt, pytest.raises(ValueError):
+            rt.wait(rt.spawn(_boom), timeout=5.0)
+        lg.warning.assert_not_called()
+
+    def test_outcomes_stay_to_be_waited_for_after_stop(self):
+        with Runtime(MagicMock()) as rt:
+            done = rt.spawn(lambda: 42)
+            stopped = rt.spawn(_waits_for_stop)
+            assert _wait_until(lambda: not rt.alive(done))
+        assert rt.wait(done, timeout=0) == 42
+        assert rt.wait(stopped, timeout=0).is_set()
+
+
+class TestTokens:
     @pytest.mark.parametrize("on_loop", [True, False], ids=["loop", "thread"])
     def test_a_task_spawned_by_a_task_derives_from_its_token(self, rt, on_loop):
-        """Stopping a task stops every task it spawned."""
-        children: list[Task] = []
+        """Cancelling a task stops every task it spawned."""
+        children: list[int] = []
 
         async def async_parent() -> None:
             children.append(rt.spawn(_waits_for_stop))
@@ -295,13 +388,12 @@ class TestTokens:
             children.append(rt.spawn(_waits_for_stop))
             stopping().wait()
 
-        task = rt.spawn(async_parent if on_loop else parent)
+        t = rt.spawn(async_parent if on_loop else parent)
         assert _wait_until(lambda: bool(children))
 
-        assert task.stop()
+        rt.cancel(t)
 
-        assert _wait_until(lambda: not children[0].is_alive())
-        assert children[0].token.is_set()
+        assert rt.wait(children[0], timeout=5.0).is_set()
 
     def test_an_ended_task_leaves_the_token_tree(self, rt):
         """A runtime running many short tasks keeps no token for each one."""
@@ -309,29 +401,11 @@ class TestTokens:
         async def on_loop() -> None:
             pass
 
-        tasks = [rt.spawn(on_loop) for _ in range(10)]
-        tasks += [rt.spawn(lambda: None) for _ in range(10)]
-        assert _wait_until(lambda: not any(t.is_alive() for t in tasks))
+        tids = [rt.spawn(on_loop) for _ in range(10)]
+        tids += [rt.spawn(lambda: None) for _ in range(10)]
+        for t in tids:
+            rt.wait(t, timeout=5.0)
         assert not rt._root._children  # Private: the root's set of children
-
-    def test_an_ended_task_leaves_the_runtime(self, rt):
-        task = rt.spawn(lambda: None)
-        assert _wait_until(lambda: not task.is_alive())
-        assert _wait_until(lambda: task not in rt.tasks)
-
-    def test_a_failure_is_logged(self):
-        lg = MagicMock()
-
-        def boom() -> None:
-            raise ValueError("boom")
-
-        with Runtime(lg, name=LOOP_THREAD) as rt:
-            task = rt.spawn(boom)
-            assert _wait_until(lambda: not task.is_alive())
-        lg.warning.assert_called_once()
-        args, kwargs = lg.warning.call_args
-        assert args[0] == "task failed"
-        assert kwargs["extra"]["exception"] is task.exception
 
 
 class TestSpawn:
@@ -346,7 +420,7 @@ class TestSpawn:
 
     def test_a_runtime_starts_once(self):
         """Single use: not started again while running nor after stop()."""
-        rt = Runtime(MagicMock(), name="once")
+        rt = Runtime(MagicMock())
         rt.start()
         with pytest.raises(RuntimeError, match="started already"):
             rt.start()
@@ -364,28 +438,27 @@ class TestSpawn:
 class TestStop:
     def test_stop_ends_the_tasks_still_running(self):
         fn = Parked()
-        with Runtime(MagicMock(), name=LOOP_THREAD) as rt:
+        with Runtime(MagicMock()) as rt:
             on_loop = rt.spawn(fn.run)
             on_thread = rt.spawn(_waits_for_stop)
             assert fn.entered.wait(timeout=5.0)
 
         assert fn.cancelled
-        assert not on_loop.is_alive()
-        assert not on_thread.is_alive()
-        assert rt.tasks == set()
+        assert not rt.alive(on_loop)
+        assert not rt.alive(on_thread)
 
     def test_stop_signals_the_token_before_cancelling(self):
         """The runtime stops each task's token before it cancels the task: a
         task that waits for its worker on cancel would otherwise wait for a
         token that only its end stops."""
-        rt = Runtime(MagicMock(), name=LOOP_THREAD)
+        rt = Runtime(MagicMock())
         rt.start()
         fn = JoinsItsWorkerOnCancel()
-        task = rt.spawn(fn.run)
+        t = rt.spawn(fn.run)
         assert fn.entered.wait(timeout=5.0)
         try:
             rt.stop(timeout=5.0)  # the deadline is the failure path
-            assert not task.is_alive()
+            assert not rt.alive(t)
         finally:
             if fn.work is not None:
                 fn.work.stop()  # release the worker if the test failed
@@ -394,15 +467,15 @@ class TestStop:
     def test_stop_releases_work_derived_from_the_token(self):
         """The thread waiting on a child of the task's token holds the loop's
         default executor; unless that token stops, the loop never ends."""
-        rt = Runtime(MagicMock(), name=LOOP_THREAD)
+        rt = Runtime(MagicMock())
         rt.start()
         fn = WaitsOnAThread()
-        task = rt.spawn(fn.run)
+        t = rt.spawn(fn.run)
         assert fn.entered.wait(timeout=5.0)
         try:
             rt.stop(timeout=5.0)  # the deadline is the failure path
             assert fn.work is not None and fn.work.is_set()
-            assert not task.is_alive()
+            assert not rt.alive(t)
         finally:
             if fn.work is not None:
                 fn.work.stop()  # release the thread if the test failed
@@ -410,11 +483,11 @@ class TestStop:
     def test_a_task_not_begun_when_stop_comes_never_runs(self):
         """The runtime stopping between a task's spawn and its first step still
         ends it, without calling it."""
-        rt = Runtime(MagicMock(), name=LOOP_THREAD)
+        rt = Runtime(MagicMock())
         rt.start()
         release = _hold_loop(rt)
         fn = Parked()
-        task = rt.spawn(fn.run)  # its creation is queued behind the hold
+        t = rt.spawn(fn.run)  # its creation is queued behind the hold
         stopper = threading.Thread(target=rt.stop)
         stopper.start()
         assert _wait_until(lambda: rt._closing)  # Private: stop() has begun
@@ -424,10 +497,10 @@ class TestStop:
 
         assert not stopper.is_alive()
         assert not fn.entered.is_set()
-        assert not task.is_alive()
+        assert not rt.alive(t)
 
     def test_spawn_while_the_runtime_stops_is_refused(self):
-        rt = Runtime(MagicMock(), name=LOOP_THREAD)
+        rt = Runtime(MagicMock())
         rt.start()
         release = _hold_loop(rt)
         stopper = threading.Thread(target=rt.stop)
@@ -446,26 +519,27 @@ class TestStop:
         """A thread cannot be killed: stop() reports it and returns."""
         lg = MagicMock()
         release = threading.Event()
-        rt = Runtime(lg, name=LOOP_THREAD)
+        rt = Runtime(lg)
         rt.start()
-        task = rt.spawn(release.wait, 10.0)
+        t = rt.spawn(release.wait, 10.0)
         try:
             rt.stop(timeout=0)
             lg.warning.assert_called_once()
             assert lg.warning.call_args.args[0] == "task did not end in time"
         finally:
             release.set()
-        assert _wait_until(lambda: not task.is_alive())
+        assert rt.wait(t, timeout=5.0) is True
 
     def test_stop_on_the_loop_thread_is_refused(self, rt):
-        outcome: list[BaseException] = []
-
         async def stops() -> None:
-            try:
-                rt.stop()
-            except RuntimeError as e:
-                outcome.append(e)
+            rt.stop()
 
-        task = rt.spawn(stops)
-        assert _wait_until(lambda: not task.is_alive())
-        assert "loop thread" in str(outcome[0])
+        with pytest.raises(RuntimeError, match="loop thread"):
+            rt.wait(rt.spawn(stops), timeout=5.0)
+
+    def test_a_task_stopping_the_runtime_does_not_wait_for_itself(self):
+        rt = Runtime(MagicMock())
+        rt.start()
+        t = rt.spawn(rt.stop, 5.0)
+        assert rt.wait(t, timeout=10.0) is None
+        assert rt._closing  # Private: the runtime stopped

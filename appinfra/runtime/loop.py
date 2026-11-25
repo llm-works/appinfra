@@ -1,43 +1,32 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright 2026 The appinfra Authors
 
-"""LoopHost - an event loop on a thread of its own, shared by many tasks."""
+"""LoopHost - the runtime's event loop, on a thread of its own."""
 
 from __future__ import annotations
 
 import asyncio
 import threading
 from collections.abc import Callable
-from types import TracebackType
 
-from .stop import StopToken
+THREAD_NAME = "runtime-loop"
 
 
 class LoopHost:
-    """An event loop on a thread of its own, shared by many tasks.
-
-    The tasks share the loop, so one waiting on an await holds no thread. Once
-    stop() begins, the host takes no new tasks; it stops the tokens of the tasks
-    still running, then cancels them and lets them finish before the loop
-    closes.
+    """The runtime's event loop, on a thread of its own, shared by every async
+    task, so one waiting on an await holds no thread. Once stop() begins, the
+    host takes no new tasks; it cancels the tasks still running and lets them
+    finish before the loop closes. The runtime stops every task's token first.
     """
 
-    def __init__(self, name: str = "loop-host") -> None:
-        """Initialize host.
-
-        Args:
-            name: Name of the loop's thread.
-        """
-        self.name = name
+    def __init__(self) -> None:
+        """A host not yet started."""
         self._loop: asyncio.AbstractEventLoop | None = None
         self._thread: threading.Thread | None = None
         # Orders _schedule() against stop(): what is scheduled before stop()
         # begins runs before the loop stops, so its shutdown sees the task
         self._lock = threading.Lock()
         self._closing = False
-        # Tokens of the tasks alive on the loop; loop thread only. The shutdown
-        # stops them before it cancels the tasks, as a task's stop() does
-        self._tokens: set[StopToken] = set()
 
     @property
     def loop(self) -> asyncio.AbstractEventLoop:
@@ -47,7 +36,7 @@ class LoopHost:
             RuntimeError: Before start() or after stop().
         """
         if self._loop is None or self._thread is None or not self._thread.is_alive():
-            raise RuntimeError(f"loop host '{self.name}' is not running")
+            raise RuntimeError("runtime loop is not running")
         return self._loop
 
     def on_loop_thread(self) -> bool:
@@ -62,30 +51,22 @@ class LoopHost:
         """
         with self._lock:
             if self._closing:
-                raise RuntimeError(f"loop host '{self.name}' is stopping")
+                raise RuntimeError("runtime loop is stopping")
             self.loop.call_soon_threadsafe(callback)
 
     def start(self) -> None:
-        """Start the loop on its own thread.
-
-        Raises:
-            RuntimeError: If the host is already started.
-        """
-        if self._thread is not None:
-            raise RuntimeError(f"loop host '{self.name}' is already started")
-        self._closing = False
+        """Start the loop on its own thread; once."""
         self._loop = asyncio.new_event_loop()
         self._thread = threading.Thread(
-            target=self._serve, args=(self._loop,), name=self.name, daemon=True
+            target=self._serve, args=(self._loop,), name=THREAD_NAME, daemon=True
         )
-        self._tokens = set()
         self._thread.start()
 
     def stop(self, timeout: float = 5.0) -> None:
         """Stop the loop: cancel the tasks still running, let them finish, and
         wait up to *timeout* seconds for the thread to end. If it is still
-        ending then, the host stays running, closed to new tasks, and a later
-        stop() waits for it again.
+        ending then, the host stays closed to new tasks, and a later stop()
+        waits for it again.
 
         Raises:
             RuntimeError: If called from the loop's own thread.
@@ -93,7 +74,9 @@ class LoopHost:
         if self._thread is None or self._loop is None:
             return
         if self.on_loop_thread():
-            raise RuntimeError("LoopHost.stop() on the loop thread would block it")
+            raise RuntimeError(
+                "stopping the runtime loop on its own thread would block it"
+            )
         with self._lock:
             if not self._closing:
                 self._closing = True
@@ -106,14 +89,10 @@ class LoopHost:
 
     def _serve(self, loop: asyncio.AbstractEventLoop) -> None:
         """Thread target: run *loop* until stop(), then end its tasks, as
-        asyncio.run() does, and close it. The tasks' tokens stop before the
-        tasks are cancelled: a task that waits for its own work while it is
-        cancelled needs that work told to stop first."""
+        asyncio.run() does, and close it."""
         asyncio.set_event_loop(loop)
         try:
             loop.run_forever()
-            for token in list(self._tokens):
-                token.stop()
             tasks = asyncio.all_tasks(loop)
             for task in tasks:
                 task.cancel()
@@ -122,17 +101,3 @@ class LoopHost:
             loop.run_until_complete(loop.shutdown_default_executor())
         finally:
             loop.close()
-
-    def __enter__(self) -> LoopHost:
-        """Start the host."""
-        self.start()
-        return self
-
-    def __exit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc: BaseException | None,
-        tb: TracebackType | None,
-    ) -> None:
-        """Stop the host."""
-        self.stop()

@@ -15,43 +15,45 @@ from typing import Any
 from ..log import Logger
 from .loop import LoopHost
 from .stop import StopToken
-from .task import LoopTask, Task, ThreadTask, current_token
+from .task import LoopTask, Task, ThreadTask, current_task
 
 
 class Runtime:
-    """Runs tasks: spawn() takes a function and calls it once, from any thread.
+    """Runs tasks: spawn() takes a function, calls it once, from any thread,
+    and returns the task's id (tid), assigned by the runtime and never reused.
 
     - an async function: a task on the runtime's event loop (a LoopHost), shared
       by every async task, so one waiting on an await holds no thread
     - any other function: a thread of its own
 
+    As with processes, a task that has ended stays known until wait() collects
+    its outcome; detach() gives up waiting, and the task is dropped as soon as
+    it ends. A detached task's failure is logged, as nobody else sees it.
+
     Every task's token derives from the token of the task that spawned it, or
-    from the runtime's; ``stopping()`` returns it inside the task. A task that
-    ends leaves the runtime. stop() stops every task's token, cancels the tasks
-    on the loop, and waits for the ones on threads.
+    from the runtime's; ``stopping()`` returns it inside the task, ``tid()`` its
+    id. stop() stops every task's token, cancels the tasks on the loop, and
+    waits for the ones on threads; their outcomes stay to be waited for.
 
     Example:
         with Runtime(lg) as rt:
-            rt.spawn(serve, port)        # async def serve(port): ...
-            rt.spawn(consume, queue)     # def consume(queue): ...
+            server = rt.spawn(serve, port)   # async def serve(port): ...
+            rt.detach(rt.spawn(consume, q))  # def consume(q): ...
+            rt.cancel(server)
+            rt.wait(server, timeout=5.0)
     """
 
-    def __init__(self, lg: Logger, name: str = "runtime") -> None:
-        """A runtime not yet started; *name* names its event loop's thread."""
+    def __init__(self, lg: Logger) -> None:
+        """A runtime not yet started."""
         self._lg = lg
-        self.name = name
-        self._host = LoopHost(name=name)
+        self._host = LoopHost()
         self._root = StopToken()
         self._lock = threading.Lock()  # guards everything below
-        self._tasks: set[Task] = set()  # tasks launched and not ended
+        # Tasks not reaped: running, and ended ones not waited for yet
+        self._tasks: dict[int, Task] = {}
+        self._next_tid = 1
         self._started_runtime = False
         self._closing = False
-
-    @property
-    def tasks(self) -> set[Task]:
-        """The tasks launched and not ended yet."""
-        with self._lock:
-            return set(self._tasks)
 
     def start(self) -> None:
         """Start the runtime's event loop.
@@ -60,7 +62,7 @@ class Runtime:
             RuntimeError: If the runtime was started already.
         """
         if self._started_runtime:
-            raise RuntimeError(f"runtime '{self.name}' was started already")
+            raise RuntimeError("runtime was started already")
         self._host.start()
         self._started_runtime = True
         # Its threads are daemons, ended unwound at exit: a runtime left running
@@ -74,28 +76,36 @@ class Runtime:
         except Exception as e:
             self._lg.warning("runtime stop at exit failed", extra={"exception": e})
 
-    def spawn(self, fn: Callable[..., Any], *args: Any) -> Task:
+    # -- spawn --------------------------------------------------------------
+
+    def spawn(self, fn: Callable[..., Any], *args: Any) -> int:
         """Call *fn*(*args*) as a task: on the loop if it is an async function,
-        else on a thread of its own. Returns the task.
+        else on a thread of its own. Returns the task's id.
 
         Raises:
             RuntimeError: If the runtime is not running.
         """
-        parent = current_token()
-        token = (self._root if parent is None else parent).child()
-        task: Task
-        if inspect.iscoroutinefunction(fn):
-            task = LoopTask(self._host, fn, args, token, self._forget)
-        else:
-            task = ThreadTask(fn, args, token, self._forget)
+        parent = current_task()
+        token = (self._root if parent is None else parent.token).child()
         with self._lock:
             if not self._started_runtime or self._closing:
                 token.detach()
-                raise RuntimeError(f"runtime '{self.name}' is not running")
-            self._tasks.add(task)
+                raise RuntimeError("runtime is not running")
+            tid = self._next_tid
+            self._next_tid += 1
+            task = self._task_for(tid, fn, args, token)
+            self._tasks[tid] = task
             # Under the lock, so stop() never finds a task here not launched
             self._launch(task)
-        return task
+        return tid
+
+    def _task_for(
+        self, tid: int, fn: Callable[..., Any], args: tuple[Any, ...], token: StopToken
+    ) -> Task:
+        """The task that calls *fn*: on the loop if it is an async function."""
+        if inspect.iscoroutinefunction(fn):
+            return LoopTask(self._host, tid, fn, args, token, self._on_end)
+        return ThreadTask(tid, fn, args, token, self._on_end)
 
     def _launch(self, task: Task) -> None:
         """Launch *task*; under the lock. A task the loop refuses leaves the
@@ -103,25 +113,112 @@ class Runtime:
         try:
             task._launch()
         except BaseException:
-            self._tasks.discard(task)
+            del self._tasks[task.tid]
             task.token.stop()
             task.token.detach()
             raise
 
-    def _forget(self, task: Task) -> None:
-        """Once *task* has ended: take it out of the runtime; log its failure."""
+    # -- tasks by tid -------------------------------------------------------
+
+    def _get(self, tid: int) -> Task:
+        """The task *tid*; under the lock.
+
+        Raises:
+            LookupError: If no task has that id, or it was reaped.
+        """
+        task = self._tasks.get(tid)
+        if task is None:
+            raise LookupError(f"no task {tid}")
+        return task
+
+    def wait(self, tid: int, timeout: float | None = None) -> Any:
+        """Wait up to *timeout* seconds for task *tid* to end, then reap it.
+
+        Returns:
+            What the task's function returned.
+
+        Raises:
+            LookupError: If no task has that id, or it was reaped.
+            RuntimeError: If the task is detached, or the wait would block the
+                loop or the task's own thread.
+            TimeoutError: If the task is still running after *timeout*; it is
+                not reaped.
+            BaseException: Whatever the task's function raised.
+        """
         with self._lock:
-            self._tasks.discard(task)
+            task = self._get(tid)
+            if task.detached:
+                raise RuntimeError(f"task {tid} is detached")
+        if not task.wait(timeout):
+            raise TimeoutError(f"task {tid} is still running")
+        with self._lock:
+            if self._tasks.get(tid) is not task:
+                raise LookupError(f"no task {tid}")
+            del self._tasks[tid]
+        if task.exception is not None:
+            raise task.exception
+        return task.result
+
+    def cancel(self, tid: int) -> None:
+        """Stop task *tid*'s token and, on the loop, cancel it; returns at once.
+        A task on a thread sees its token and returns.
+
+        Raises:
+            LookupError: If no task has that id, or it was reaped.
+        """
+        with self._lock:
+            task = self._get(tid)
+        task.cancel()
+
+    def alive(self, tid: int) -> bool:
+        """True while task *tid* has not ended.
+
+        Raises:
+            LookupError: If no task has that id, or it was reaped.
+        """
+        with self._lock:
+            return not self._get(tid).ended
+
+    def detach(self, tid: int) -> None:
+        """Give up waiting for task *tid*: it is reaped as soon as it ends, now
+        if it has ended already.
+
+        Raises:
+            LookupError: If no task has that id, or it was reaped.
+        """
+        with self._lock:
+            task = self._get(tid)
+            task.detached = True
+            reap = task.ended
+            if reap:
+                del self._tasks[tid]
+        if reap:
+            self._log_failure(task)
+
+    def _on_end(self, task: Task) -> None:
+        """Once *task*'s call has ended: reap it if it is detached."""
+        with self._lock:
+            task.ended = True
+            reap = task.detached
+            if reap:
+                self._tasks.pop(task.tid, None)
+        if reap:
+            self._log_failure(task)
+
+    def _log_failure(self, task: Task) -> None:
+        """Log the failure of a task nobody waits for."""
         if task.exception is not None:
             self._lg.warning(
-                "task failed", extra={"task": task.name, "exception": task.exception}
+                "task failed", extra={"tid": task.tid, "exception": task.exception}
             )
+
+    # -- stop ---------------------------------------------------------------
 
     def stop(self, timeout: float = 5.0) -> None:
         """Stop every task's token, then the loop, which cancels the tasks on
         it; then wait for the tasks on threads. The loop and each thread task
         get up to *timeout* seconds; a task still running then is logged and
-        left, as a thread cannot be killed.
+        left, as a thread cannot be killed. Ended tasks stay to be waited for.
 
         Raises:
             RuntimeError: If called on the runtime's loop thread.
@@ -132,15 +229,16 @@ class Runtime:
             if not self._started_runtime or self._closing:
                 return
             self._closing = True
-            tasks = list(self._tasks)
+            running = [t for t in self._tasks.values() if not t.ended]
         atexit.unregister(self._atexit_stop)
         self._root.stop()
         self._host.stop(timeout)
-        for task in tasks:
-            if not task.stop(timeout):
+        caller = current_task()  # a task stopping the runtime does not wait for itself
+        for task in running:
+            if task is not caller and not task.wait(timeout):
                 self._lg.warning(
                     "task did not end in time",
-                    extra={"task": task.name, "timeout": timeout},
+                    extra={"tid": task.tid, "timeout": timeout},
                 )
 
     def __enter__(self) -> Runtime:

@@ -5,17 +5,13 @@
 runtime's event loop, any other function on a thread of its own. Imports
 nothing from appinfra.service."""
 
-from .loop import LoopHost
 from .runtime import Runtime
 from .stop import StopToken
-from .task import LoopTask, Task, ThreadTask, stopping
+from .task import stopping, tid
 
 __all__ = [
     "Runtime",
-    "Task",
-    "LoopTask",
-    "ThreadTask",
-    "LoopHost",
     "StopToken",
     "stopping",
+    "tid",
 ]
