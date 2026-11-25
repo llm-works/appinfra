@@ -3,6 +3,7 @@
 
 """pipe(): a channel between processes, its ends in one process or two."""
 
+import asyncio
 import multiprocessing as mp
 import threading
 from unittest import mock
@@ -21,6 +22,9 @@ METHODS = [
     ),
     "spawn",
 ]
+
+# Larger than any OS pipe buffer: the writer blocks until the reader reads
+_BIG = b"x" * 1_000_000
 
 # The test process runs threads; a child forked from it uses only the pipe
 pytestmark = pytest.mark.filterwarnings(
@@ -42,9 +46,9 @@ def _send(
         sender.close()
 
 
-def _run_child(method: str, count: int) -> list[int]:
+def _run_child(method: str, count: int, after_exit: bool = False) -> list[int]:
     """What this process receives from a child sending *count* values, until
-    the channel closes."""
+    the channel closes; with *after_exit*, starting once the child is gone."""
     send, recv = pipe(5)
     inherited = recv if method == "fork" else None
     child = mp.get_context(method).Process(
@@ -53,6 +57,9 @@ def _run_child(method: str, count: int) -> list[int]:
     child.start()
     try:
         send.release()
+        if after_exit:
+            child.join(10.0)
+            assert child.exitcode == 0
         chan, received = recv.open(), []
         with pytest.raises(ChanClosedError):
             while True:  # the timeout is the failure path
@@ -70,6 +77,12 @@ class TestAcrossProcesses:
         assert _run_child(method, 5) == [0, 1, 2, 3, 4]
 
     @pytest.mark.parametrize("method", METHODS)
+    def test_values_sent_before_the_sender_exited_are_all_received(self, method: str):
+        """Every ack finds the sending side gone, so each ack write fails; the
+        values still on the pipe are received all the same, until EOF."""
+        assert _run_child(method, 3, after_exit=True) == [0, 1, 2]
+
+    @pytest.mark.parametrize("method", METHODS)
     def test_the_sending_process_exiting_closes_the_channel(self, method: str):
         """No close(): EOF, once the child is gone, ends the channel."""
         assert _run_child(method, 0) == []
@@ -82,26 +95,41 @@ class TestInOneProcess:
         with pytest.raises(ValueError, match="capacity"):
             pipe(0)
 
-    def test_at_most_capacity_values_are_sent_and_not_received(self):
+    def test_sends_wait_once_capacity_values_are_buffered_here(self):
+        """With nobody receiving: capacity values on their way, one with the
+        writer, capacity in the buffer; the next send finds no room."""
         send, recv = pipe(2)
         sender, chan = send.open(), recv.open()
-        sender.send(1)
-        sender.send(2)
-        with pytest.raises(TimeoutError):  # no room until a value is received
-            sender.send(3, timeout=0)
-        assert chan.recv(timeout=10.0) == 1
-        sender.send(3, timeout=10.0)
+        for i in range(5):
+            sender.send(i, timeout=10.0)
+        with pytest.raises(TimeoutError):
+            sender.send(5, timeout=0)
+        assert chan.recv(timeout=10.0) == 0
+        sender.send(5, timeout=10.0)  # room again: one value was received
+        assert [chan.recv(timeout=10.0) for _ in range(5)] == [1, 2, 3, 4, 5]
         sender.close()
-        assert list(chan) == [2, 3]
+        with pytest.raises(ChanClosedError):
+            chan.recv(timeout=10.0)
+
+    def test_sends_without_waiting_find_room_whatever_the_writer_does(self):
+        """capacity sends in a row, the sending thread never yielding to the
+        writer: each finds room in this process's buffer."""
+        send, recv = pipe(3)
+        sender, chan = send.open(), recv.open()
+        for i in range(3):
+            sender.send(i, timeout=0)
+        assert [chan.recv(timeout=10.0) for _ in range(3)] == [0, 1, 2]
+        sender.close()
 
     def test_a_close_on_the_receiving_side_reaches_the_sender(self):
         """A send either finds room left from before the close, or the
-        close: no ack comes back once the receiving side closed."""
+        close: no ack comes back once the receiving side closed. Room for
+        at most 2 * capacity + 1 values: buffered, with the writer, on the pipe."""
         send, recv = pipe(2)
         sender, chan = send.open(), recv.open()
         chan.close()
         with pytest.raises(ChanClosedError):
-            for _ in range(3):
+            for _ in range(6):
                 sender.send(0, timeout=10.0)
 
     def test_a_value_that_cannot_be_pickled_raises_in_the_send(self):
@@ -148,6 +176,44 @@ class TestInOneProcess:
             send.open()
         with pytest.raises(ChanClosedError):
             recv.open().recv(timeout=10.0)  # the timeout is the failure path
+
+    def test_close_on_a_loop_does_not_wait_for_the_writer(self):
+        """Nobody receives, so the writer is stuck on a full OS pipe with the
+        second value; a close() waiting for it would block the loop for good."""
+        send, recv = pipe(5)
+        sender, chan = send.open(), recv.open()
+
+        async def send_and_close() -> None:
+            for _ in range(2):
+                await sender.asend(_BIG, timeout=10.0)
+            sender.close()
+
+        runner = threading.Thread(target=asyncio.run, args=(send_and_close(),))
+        runner.start()
+        runner.join(10.0)  # the deadline is the failure path
+        blocked = runner.is_alive()
+        # Draining lets the writer finish, which also frees a blocked close()
+        assert [len(chan.recv(timeout=10.0)) for _ in range(2)] == [len(_BIG)] * 2
+        with pytest.raises(ChanClosedError):
+            chan.recv(timeout=10.0)
+        runner.join(10.0)
+        assert not blocked
+
+    @pytest.mark.asyncio
+    async def test_aclose_waits_while_the_loop_receives(self):
+        """Both ends on one loop: aclose() waits for the writer off the loop,
+        so the receiving task drains the pipe meanwhile."""
+        send, recv = pipe(5)
+        sender, chan = send.open(), recv.open()
+
+        async def receive() -> list[bytes]:
+            return [value async for value in chan]
+
+        receiving = asyncio.create_task(receive())
+        for _ in range(3):
+            await sender.asend(_BIG, timeout=10.0)
+        await asyncio.wait_for(sender.aclose(), 10.0)
+        assert len(await asyncio.wait_for(receiving, 10.0)) == 3
 
     @pytest.mark.asyncio
     async def test_asend_and_arecv_on_the_loop(self):

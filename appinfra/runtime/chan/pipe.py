@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import multiprocessing as mp
 import pickle
@@ -24,8 +25,10 @@ def pipe(capacity: int) -> tuple[PipeSendEnd[Any], PipeRecvEnd[Any]]:
     """A channel from one process to another: ``send, recv = pipe(capacity)``.
 
     Each end goes to the process that uses it, which open()s it there; any
-    number of tasks in that process can then send, or receive. At most
-    *capacity* values are sent and not yet received. Values are pickled.
+    number of tasks in that process can then send, or receive. A send waits
+    while *capacity* values are buffered in the sending process, as Chan's
+    buffer; at most *capacity* + 1 more are on their way, on the pipe or with
+    its writer. Values are pickled.
 
     The ends see each other's process end as a close, at EOF of the pipes
     underneath; EOF comes once every copy of an end is closed. A process that
@@ -102,12 +105,13 @@ class Sender(Generic[T]):
     room and raise as Chan's; a select sends with ``Send(sender, value)``. The
     value is pickled in the call, so one that cannot be raises there.
 
-    A writer thread puts each value on the pipe, once the receiving side has
-    room for it; a second one counts the values received there."""
+    The values wait in a buffer here, as in a Chan's; a writer thread puts
+    each on the pipe, once the receiving side has room for it, and a second
+    one counts the values received there."""
 
     def __init__(self, capacity: int, data: Connection, acks: Connection) -> None:
         """Start the threads, on the *data* and *acks* connections."""
-        self._chan = Chan[bytes](0)  # to the writer, as it takes the next value
+        self._chan = Chan[bytes](capacity)  # the values sent, for the writer
         self._room = Chan[None](capacity)  # values the receiving side has room for
         for _ in range(capacity):
             self._room.send(None, timeout=0)  # fits; and open() may run on a loop
@@ -131,24 +135,39 @@ class Sender(Generic[T]):
     def close(self) -> None:
         """Close the channel: the values sent so far are received first, then
         the receiving side sees it closed. Returns once they are all on the
-        pipe; a process that exits without close() may lose the last ones."""
-        self._shut()
-        if threading.current_thread() is not self._writer:
+        pipe, which waits for room on the receiving side for those still
+        buffered; except on an event loop's thread: waiting there could block
+        the loop for good, its tasks the only receivers. A coroutine awaits
+        aclose(). A process that exits before its values are on the pipe may
+        lose the last ones."""
+        self._chan.close()  # the writer drains the buffer, then ends
+        # _get_running_loop(): see chan._check_off_loop()
+        on_loop = asyncio._get_running_loop() is not None
+        if not on_loop and threading.current_thread() is not self._writer:
             self._writer.join()
 
+    async def aclose(self) -> None:
+        """Close the channel, awaiting until the values sent so far are on
+        the pipe; the loop runs meanwhile."""
+        self._chan.close()
+        await asyncio.to_thread(self._writer.join)
+
     def _shut(self) -> None:
-        """Close the channel here and stop the writer, without waiting."""
+        """Close the channel here and stop the writer at once, dropping the
+        values it has not put on the pipe: the receiving side is gone."""
         self._chan.close()
         self._room.close()
 
     def _write(self, data: Connection) -> None:
-        """Writer thread: the next value onto the pipe, for each room."""
+        """Writer thread: each value onto the pipe, once there is room. The
+        value is taken first, so a close with none left ends it at once."""
         try:
             while True:
+                value = self._chan.recv()
                 self._room.recv()
-                data.send_bytes(self._chan.recv())
+                data.send_bytes(value)
         except ClosedError:
-            pass  # closed here, or by _count
+            pass  # closed and drained, or shut
         except OSError:
             self._shut()  # the receiving side is gone
         finally:
@@ -196,7 +215,9 @@ class Receiver(Chan[T]):
         try:
             while wake not in connection.wait([data, wake]):
                 self.send(pickle.loads(data.recv_bytes()))
-                acks.send_bytes(b"")
+                # OSError: the sending side is gone, and EOF follows its values
+                with contextlib.suppress(OSError):
+                    acks.send_bytes(b"")
         except (ClosedError, EOFError, OSError):
             pass
         finally:
