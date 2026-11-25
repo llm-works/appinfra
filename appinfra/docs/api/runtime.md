@@ -268,4 +268,5 @@ proc.join()
 
 ## See Also
 
+- [Runtime examples](../../examples/13_runtime/) - Tasks, channels and pipes, run as scripts
 - [Service](service.md) - Long-lived services with dependency ordering, restarts and state

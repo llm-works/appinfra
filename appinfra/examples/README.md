@@ -95,6 +95,12 @@ Version and commit tracking:
 - `version_tracking_demo.py` - Version info in applications
 - `standalone_tracker.py` - Using VersionTracker independently
 
+### 13. Runtime → [13_runtime/](13_runtime/)
+Concurrency patterns on tasks, channels and pipes:
+- `tasks.py` - Spawn and join, error group, cancellation tree, deadline, heartbeat
+- `channels.py` - Pipeline, fan-out/fan-in, worker pool, semaphore, timeout, rate limiting
+- `pipe.py` - A channel from one process to another
+
 ## Running Examples
 
 All examples use the virtual environment at `~/.venv`.
@@ -186,6 +192,7 @@ Each topic folder contains a README with detailed explanations:
 - [10_plugins/README.md](10_plugins/README.md) - Plugin system
 - [11_docs/README.md](11_docs/README.md) - Documentation generation
 - [12_version_tracking/README.md](12_version_tracking/README.md) - Version tracking
+- [13_runtime/README.md](13_runtime/README.md) - Runtime patterns
 
 ## Related Documentation
 
