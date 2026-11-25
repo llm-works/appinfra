@@ -259,17 +259,22 @@ class Runtime:
             self._closing = True
             running = [t for t in self._tasks.values() if not t.ended]
         atexit.unregister(self._atexit_stop)
-        self._root.stop()
-        # A task spawned by another runtime's task derives from that task's
-        # token, outside this root's tree: its own token is stopped as well
-        for task in running:
-            task.token.stop()
-        self._host.stop(max(0.0, deadline - time.monotonic()))
-        for task in self._still_running(running, deadline):
-            self._lg.warning(
-                "task did not end in time",
-                extra={"task_id": task.task_id, "timeout": timeout},
-            )
+        try:
+            self._root.stop()
+            # A task spawned by another runtime's task derives from that
+            # task's token, outside this root's tree: its own token is stopped
+            # as well
+            for task in running:
+                task.token.stop()
+        finally:
+            # Ctrl-C during the stops reaches the caller once the shutdown is
+            # done: a second stop() returns at once
+            self._host.stop(max(0.0, deadline - time.monotonic()))
+            for task in self._still_running(running, deadline):
+                self._lg.warning(
+                    "task did not end in time",
+                    extra={"task_id": task.task_id, "timeout": timeout},
+                )
 
     def _still_running(self, tasks: list[Task], deadline: float) -> list[Task]:
         """The *tasks* still running once the loop has stopped. A thread task

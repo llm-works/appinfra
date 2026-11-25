@@ -298,11 +298,14 @@ class LoopTask(Task):
 
     def cancel(self) -> None:
         """Stop the task's token and cancel it on the loop. A task not begun
-        yet sees the token and skips the call."""
-        self.token.stop()
-        # RuntimeError: the host stopped, and its shutdown ended the task
-        with contextlib.suppress(RuntimeError):
-            self._host.loop.call_soon_threadsafe(self._cancel)
+        yet sees the token and skips the call. Ctrl-C during the stop reaches
+        the caller once the cancel is scheduled."""
+        try:
+            self.token.stop()
+        finally:
+            # RuntimeError: the host stopped, and its shutdown ended the task
+            with contextlib.suppress(RuntimeError):
+                self._host.loop.call_soon_threadsafe(self._cancel)
 
     def _cancel(self) -> None:
         """On the loop: cancel the asyncio task, if it is still running."""

@@ -90,8 +90,9 @@ class StopToken:
         a callback does can leave a token running. A callback that raises does
         not reach the caller either, who cannot act on one listener's failure:
         the error goes to threading.excepthook, as one nothing can catch, and
-        the other callbacks still run. KeyboardInterrupt and other
-        non-Exception errors propagate."""
+        the other callbacks still run. On the main thread, a KeyboardInterrupt
+        or other non-Exception error is raised once all callbacks have run:
+        it is Ctrl-C, or an exit."""
         callbacks: list[Callable[[], None]] = []
         pending = [self]
         while pending:
@@ -129,10 +130,11 @@ class StopToken:
         """Call *fn* once when the token is stopped; at once if it is already.
 
         *fn* runs on the thread that calls stop(), and it must be short and
-        not block: stop() calls each token's callbacks in turn. An Exception
-        it raises there goes to threading.excepthook, and the stop goes on; on
-        a token already stopped, *fn* runs at once and its error reaches the
-        caller of on_stop().
+        not block: stop() calls each token's callbacks in turn. An error it
+        raises there goes to threading.excepthook, and the stop goes on; on
+        the main thread a KeyboardInterrupt or exit reaches stop()'s caller.
+        On a token already stopped, *fn* runs at once and its error reaches
+        the caller of on_stop().
 
         Returns:
             A function that unregisters *fn*. A caller done waiting calls it,
@@ -186,17 +188,28 @@ class StopToken:
 
 
 def _run(callbacks: Iterable[Callable[[], None]]) -> None:
-    """Call each of *callbacks*. One that raises an Exception is reported
-    through threading.excepthook, as an error no caller can catch; the rest
-    still run."""
+    """Call each of *callbacks*; one that raises does not keep the rest from
+    running. Its error is reported through threading.excepthook, as one no
+    caller can catch, except on the main thread a KeyboardInterrupt or other
+    non-Exception error, which is raised once all have run: Ctrl-C reaches
+    the main thread alone, and must reach the caller. Elsewhere such an error
+    can only be a callback's bug, which must not end a task's thread or the
+    loop thread."""
+    on_main = threading.current_thread() is threading.main_thread()
+    interrupt: BaseException | None = None
     for fn in callbacks:
         try:
             fn()
-        except Exception as e:
-            _report(e)
+        except BaseException as e:
+            if on_main and not isinstance(e, Exception):
+                interrupt = interrupt or e
+            else:
+                _report(e)
+    if interrupt is not None:
+        raise interrupt
 
 
-def _report(error: Exception) -> None:
+def _report(error: BaseException) -> None:
     """Report a callback's *error* through threading.excepthook. A hook that
     raises falls back to sys.excepthook with its own error, as threading does
     for a failing hook, so the stop's other callbacks still run."""

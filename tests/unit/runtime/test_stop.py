@@ -194,11 +194,44 @@ class TestOnStop:
         def interrupt():
             raise KeyboardInterrupt
 
+        calls = []
         root.on_stop(interrupt)
+        child.on_stop(lambda: calls.append("child"))  # runs after root's
         with pytest.raises(KeyboardInterrupt):
             root.stop()
         assert root.is_set()
         assert child.is_set()
+        assert calls == ["child"]  # it wakes its waiter despite the interrupt
+
+    @pytest.mark.integration  # starts a thread; kept with the other on_stop tests
+    def test_off_the_main_thread_an_interrupt_in_a_callback_is_reported(
+        self, monkeypatch
+    ):
+        """Ctrl-C reaches the main thread alone: elsewhere a KeyboardInterrupt
+        is a callback's bug, reported like any error, so it cannot end a
+        task's thread or the loop thread that stops a token."""
+        reported = []
+        monkeypatch.setattr(threading, "excepthook", reported.append)
+        token = StopToken()
+
+        def interrupt():
+            raise KeyboardInterrupt
+
+        token.on_stop(interrupt)
+        escaped = []
+
+        def stop():
+            try:
+                token.stop()
+            except BaseException as e:
+                escaped.append(e)
+
+        thread = threading.Thread(target=stop)
+        thread.start()
+        thread.join(5.0)
+        assert token.is_set()
+        assert escaped == []
+        assert [type(args.exc_value) for args in reported] == [KeyboardInterrupt]
 
     def test_a_failing_hook_falls_back_and_the_stop_goes_on(self, monkeypatch):
         """The hook reporting a callback's error raises too: as in threading,

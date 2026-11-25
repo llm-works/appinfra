@@ -131,6 +131,10 @@ def _failing_callback() -> None:
     raise ValueError("callback failed")
 
 
+def _interrupting_callback() -> None:
+    raise KeyboardInterrupt
+
+
 @pytest.fixture
 def reported(monkeypatch: pytest.MonkeyPatch) -> list[BaseException]:
     """Errors reported through threading.excepthook, kept instead of printed."""
@@ -693,6 +697,60 @@ class TestFailingStopCallback:
         assert not rt.alive(loop_task)
         assert not rt.alive(thread_task)  # waited for
         assert len(reported) == 1
+
+    @pytest.mark.parametrize("on_loop", [True, False], ids=["loop", "thread"])
+    def test_an_interrupt_at_a_tasks_end_is_reported(self, rt, reported, on_loop):
+        """A task ends on its own thread or the loop's, never the main one: an
+        interrupt there is a callback's bug. The task ends in full, and the
+        loop, which asyncio would end with it, runs on."""
+
+        async def async_returns() -> str:
+            stopping().on_stop(_interrupting_callback)
+            return "done"
+
+        def returns() -> str:
+            stopping().on_stop(_interrupting_callback)
+            return "done"
+
+        t = rt.spawn(async_returns if on_loop else returns)
+        assert rt.wait(t, timeout=5.0) == "done"
+        assert not rt._root._children  # Private: its end ran in full
+        assert [type(e) for e in reported] == [KeyboardInterrupt]
+
+        async def later() -> str:
+            return "loop runs"
+
+        assert rt.wait(rt.spawn(later), timeout=5.0) == "loop runs"
+
+    def test_ctrl_c_in_cancel_or_stop_reaches_the_caller_after_the_work(self):
+        """On the main thread the interrupt is Ctrl-C: it reaches the caller,
+        once the cancel is scheduled and the shutdown done."""
+        rt = Runtime(MagicMock())
+        rt.start()
+        entered = threading.Event()
+
+        async def parks() -> None:
+            stopping().on_stop(_interrupting_callback)
+            entered.set()
+            await asyncio.Event().wait()
+
+        t = rt.spawn(parks)
+        assert entered.wait(5.0)
+        with pytest.raises(KeyboardInterrupt):
+            rt.cancel(t)
+        with pytest.raises(StoppedError):
+            rt.wait(t, timeout=5.0)  # cancelled all the same
+
+        parked = Parked()
+        loop_task = rt.spawn(parked.run)
+        assert parked.entered.wait(5.0)
+        entered.clear()
+        rt.spawn(parks)
+        assert entered.wait(5.0)
+        with pytest.raises(KeyboardInterrupt):
+            rt.stop()
+        assert parked.cancelled  # the loop's stop ran all the same
+        assert not rt.alive(loop_task)
 
 
 class TestSpawn:
