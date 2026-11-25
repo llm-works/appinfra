@@ -21,6 +21,7 @@ The Infra framework is organized into several major modules, each providing spec
 | [Time & Scheduling](time.md) | Periodic execution, scheduling, and time utilities |
 | [Version Tracking](version.md) | Git commit tracking for installed packages |
 | [Observability](observability.md) | Callback-based hooks for monitoring and instrumentation |
+| [Runtime](runtime.md) | Tasks on threads and an event loop, channels, select, and pipes |
 | [Service](service.md) | Service execution with dependency ordering and state management |
 | [Subprocess](subprocess.md) | Context manager for subprocess lifecycle management |
 | [Utilities](utilities.md) | Core utilities (DotDict, rate limiting, EWMA, etc.) |
@@ -56,6 +57,7 @@ appinfra/
 │   └── builder/     # Logging builders
 ├── net/              # TCP/HTTP server components
 ├── observability/    # Monitoring hooks
+├── runtime/          # Tasks, channels, select and pipes
 ├── service/          # Service execution and orchestration
 ├── subprocess/       # Subprocess lifecycle management
 ├── time/             # Time and scheduling
@@ -150,6 +152,7 @@ def get(self, path: str, default: Any = None) -> Any:
 - [AppBuilder](app-builder.md) - Fluent builder API
 - [FastAPI Integration](fastapi.md) - HTTP server with subprocess isolation
 - [CLI Framework](cli.md) - Output abstractions and CLI tools
+- [Runtime](runtime.md) - Tasks, channels, select and pipes
 - [Service](service.md) - Service execution and orchestration
 - [Subprocess](subprocess.md) - Subprocess lifecycle management
 
