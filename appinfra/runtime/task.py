@@ -166,11 +166,13 @@ class ThreadTask(Task):
         self._thread.start()
 
     def _run(self) -> None:
-        """Thread target: call the function with the task current."""
+        """Thread target: call the function with the task current, unless its
+        token was stopped before the thread got here, as on the loop."""
         try:
             _current.set(self)
             try:
-                self._result = self._fn(*self._args)
+                if not self.token.is_set():
+                    self._result = self._fn(*self._args)
             except BaseException as e:
                 self._exception = e
             self._end()
@@ -299,7 +301,12 @@ class LoopTask(Task):
             self._host.loop.call_soon_threadsafe(self._watch, ended)
         except RuntimeError:
             return True  # Host stopped: its shutdown ended the task
-        return ended.wait(timeout)
+        if ended.wait(timeout):
+            return True
+        # Timed out: drop the registration, or every poll would leave one
+        with contextlib.suppress(RuntimeError):  # Host stopped: nothing to drop
+            self._host.loop.call_soon_threadsafe(self._unwatch, ended)
+        return False
 
     def _watch(self, ended: threading.Event) -> None:
         """On the loop: set *ended* once the task has ended."""
@@ -309,6 +316,12 @@ class LoopTask(Task):
         if self._waiters is None:
             self._waiters = []
         self._waiters.append(ended)
+
+    def _unwatch(self, ended: threading.Event) -> None:
+        """On the loop: forget *ended*, whose wait timed out; once the task has
+        ended, _finish() has cleared the list already."""
+        if self._waiters is not None and ended in self._waiters:
+            self._waiters.remove(ended)
 
     def is_alive(self) -> bool:
         """True until the asyncio task has ended."""

@@ -8,6 +8,7 @@ from __future__ import annotations
 import atexit
 import inspect
 import threading
+import time
 from collections.abc import Callable
 from types import TracebackType
 from typing import Any
@@ -153,6 +154,12 @@ class Runtime:
             task = self._get(task_id)
             if task.detached:
                 raise RuntimeError(f"task {task_id} is detached")
+            # For both kinds: joining a thread blocks the loop as much as an
+            # Event.wait() on it does. An ended task can still be collected
+            if not task.ended and self._host.on_loop_thread():
+                raise RuntimeError(
+                    f"waiting for task {task_id} on the loop would block it"
+                )
         if not task.wait(timeout):
             raise TimeoutError(f"task {task_id} is still running")
         with self._lock:
@@ -221,15 +228,17 @@ class Runtime:
 
     def stop(self, timeout: float = 5.0) -> None:
         """Stop every task's token, then the loop, which cancels the tasks on
-        it; then wait for the tasks on threads. The loop and each thread task
-        get up to *timeout* seconds; a task still running then is logged and
-        left, as a thread cannot be killed. Ended tasks stay to be waited for.
+        it; then wait for the tasks on threads. All of it takes at most
+        *timeout* seconds: the loop and the thread tasks share the one budget.
+        A task still running then is logged and left, as a thread cannot be
+        killed. Ended tasks stay to be waited for.
 
         Raises:
             RuntimeError: If called on the runtime's loop thread.
         """
         if self._host.on_loop_thread():
             raise RuntimeError("Runtime.stop() on the loop thread would block it")
+        deadline = time.monotonic() + timeout
         with self._lock:
             if not self._started_runtime or self._closing:
                 return
@@ -237,14 +246,34 @@ class Runtime:
             running = [t for t in self._tasks.values() if not t.ended]
         atexit.unregister(self._atexit_stop)
         self._root.stop()
-        self._host.stop(timeout)
-        caller = current_task()  # a task stopping the runtime does not wait for itself
+        # A task spawned by another runtime's task derives from that task's
+        # token, outside this root's tree: its own token is stopped as well
         for task in running:
-            if task is not caller and not task.wait(timeout):
-                self._lg.warning(
-                    "task did not end in time",
-                    extra={"task_id": task.task_id, "timeout": timeout},
-                )
+            task.token.stop()
+        self._host.stop(timeout)
+        for task in self._still_running(running, deadline):
+            self._lg.warning(
+                "task did not end in time",
+                extra={"task_id": task.task_id, "timeout": timeout},
+            )
+
+    def _still_running(self, tasks: list[Task], deadline: float) -> list[Task]:
+        """The *tasks* still running once the loop has stopped. A thread task
+        is waited for until *deadline*; a loop task only checked, as the loop's
+        stop had its time already. A task stopping the runtime does not wait
+        for itself."""
+        caller = current_task()
+        late = []
+        for task in tasks:
+            if task is caller:
+                continue
+            if isinstance(task, LoopTask):
+                ended = not task.is_alive()
+            else:
+                ended = task.wait(max(0.0, deadline - time.monotonic()))
+            if not ended:
+                late.append(task)
+        return late
 
     def __enter__(self) -> Runtime:
         """Start the runtime."""

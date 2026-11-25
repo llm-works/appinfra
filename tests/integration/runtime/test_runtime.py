@@ -12,6 +12,8 @@ from unittest.mock import MagicMock
 import pytest
 
 from appinfra.runtime import Runtime, StopToken, stopping, task_id
+from appinfra.runtime.task import LoopTask, ThreadTask
+from appinfra.testing import FakeClock
 
 
 class Parked:
@@ -80,10 +82,27 @@ class WaitsOnAThread:
         await asyncio.to_thread(self.work.wait)
 
 
+async def _park() -> None:
+    await asyncio.Event().wait()
+
+
 def _waits_for_stop() -> StopToken:
     token = stopping()
     token.wait()
     return token
+
+
+class WaitsForStop:
+    """_waits_for_stop() that notes it has begun: a task whose token stops
+    before its call begins skips the call, so a test that reads the returned
+    token waits for *entered* before it cancels or stops."""
+
+    def __init__(self) -> None:
+        self.entered = threading.Event()
+
+    def __call__(self) -> StopToken:
+        self.entered.set()
+        return _waits_for_stop()
 
 
 def _boom() -> None:
@@ -233,6 +252,41 @@ class TestLoopTask:
         with pytest.raises(RuntimeError, match="block"):
             rt.wait(rt.spawn(waits), timeout=5.0)
 
+    def test_waiting_on_a_running_thread_task_on_the_loop_is_refused(self, rt):
+        """Joining the thread would block every task on the loop."""
+        release = threading.Event()
+        target = rt.spawn(release.wait, 10.0)
+
+        async def waits() -> None:
+            rt.wait(target, timeout=1.0)  # unrefused, it blocks the loop for 1 s
+
+        try:
+            with pytest.raises(RuntimeError, match="block"):
+                rt.wait(rt.spawn(waits), timeout=5.0)
+        finally:
+            release.set()
+        assert rt.wait(target, timeout=5.0) is True
+
+    def test_an_ended_thread_task_is_collected_on_the_loop(self, rt):
+        target = rt.spawn(lambda: 42)
+        assert _wait_until(lambda: not rt.alive(target))
+
+        async def collects() -> int:
+            return rt.wait(target, timeout=0)
+
+        assert rt.wait(rt.spawn(collects), timeout=5.0) == 42
+
+    def test_waits_that_time_out_leave_nothing_behind(self, rt):
+        """Polling a long-running task must not grow it by one waiter per poll."""
+        fn = Parked()
+        t = rt.spawn(fn.run)
+        assert fn.entered.wait(5.0)
+        for _ in range(100):
+            with pytest.raises(TimeoutError):
+                rt.wait(t, timeout=0)
+        task = rt._tasks[t]  # Private: the task behind the id
+        assert _wait_until(lambda: not task._waiters)  # Private: registered waits
+
     def test_a_task_ending_after_a_wait_gave_up_ends_on_its_own(self, rt):
         fn = HoldsCancel()
         t = rt.spawn(fn.run)
@@ -270,7 +324,9 @@ class TestThreadTask:
         assert rt.wait(t, timeout=5.0) == f"appinfra-task-{t}"
 
     def test_cancel_stops_its_token(self, rt):
-        t = rt.spawn(_waits_for_stop)
+        fn = WaitsForStop()
+        t = rt.spawn(fn)
+        assert fn.entered.wait(5.0)
         rt.cancel(t)
         assert rt.wait(t, timeout=5.0).is_set()
 
@@ -369,7 +425,9 @@ class TestZombies:
         with Runtime(lg) as rt:
             t = rt.spawn(_boom)
             rt.detach(t)
-            assert _wait_until(lambda: not _known(rt, t))
+            # The log call, not the reaping before it: it comes after the pop
+            assert _wait_until(lambda: lg.warning.called)
+            assert not _known(rt, t)
         lg.warning.assert_called_once()
         args, kwargs = lg.warning.call_args
         assert args[0] == "task failed"
@@ -382,9 +440,11 @@ class TestZombies:
         lg.warning.assert_not_called()
 
     def test_outcomes_stay_to_be_waited_for_after_stop(self):
+        fn = WaitsForStop()
         with Runtime(MagicMock()) as rt:
             done = rt.spawn(lambda: 42)
-            stopped = rt.spawn(_waits_for_stop)
+            stopped = rt.spawn(fn)
+            assert fn.entered.wait(5.0)
             assert _wait_until(lambda: not rt.alive(done))
         assert rt.wait(done, timeout=0) == 42
         assert rt.wait(stopped, timeout=0).is_set()
@@ -395,17 +455,18 @@ class TestTokens:
     def test_a_task_spawned_by_a_task_derives_from_its_token(self, rt, on_loop):
         """Cancelling a task stops every task it spawned."""
         children: list[int] = []
+        child = WaitsForStop()
 
         async def async_parent() -> None:
-            children.append(rt.spawn(_waits_for_stop))
+            children.append(rt.spawn(child))
             await asyncio.Event().wait()
 
         def parent() -> None:
-            children.append(rt.spawn(_waits_for_stop))
+            children.append(rt.spawn(child))
             stopping().wait()
 
         t = rt.spawn(async_parent if on_loop else parent)
-        assert _wait_until(lambda: bool(children))
+        assert child.entered.wait(5.0)
 
         rt.cancel(t)
 
@@ -422,6 +483,41 @@ class TestTokens:
         for t in task_ids:
             rt.wait(t, timeout=5.0)
         assert not rt._root._children  # Private: the root's set of children
+
+    @pytest.mark.parametrize("on_loop", [True, False], ids=["loop", "thread"])
+    def test_a_task_that_ends_on_its_own_stops_its_token(self, rt, on_loop):
+        """Work the task derived from its token is told to stop once it ends."""
+
+        async def async_returns() -> StopToken:
+            return stopping().child()
+
+        def returns() -> StopToken:
+            return stopping().child()
+
+        derived = rt.wait(rt.spawn(async_returns if on_loop else returns), timeout=5.0)
+        assert derived.is_set()
+
+    @pytest.mark.parametrize("on_loop", [True, False], ids=["loop", "thread"])
+    def test_a_task_whose_token_is_stopped_before_it_starts_never_runs(
+        self, rt, on_loop
+    ):
+        """A child of a stopped token is born stopped; the call is skipped on
+        either kind, as a cancel before the first step skips it on the loop."""
+        entered = threading.Event()
+
+        async def async_marks() -> None:
+            entered.set()
+
+        def marks() -> None:
+            entered.set()
+
+        def parent() -> int:
+            stopping().stop()  # the parent's token: the child derives from it
+            return rt.spawn(async_marks if on_loop else marks)
+
+        child = rt.wait(rt.spawn(parent), timeout=5.0)
+        rt.wait(child, timeout=5.0)
+        assert not entered.is_set()
 
 
 class TestSpawn:
@@ -449,6 +545,62 @@ class TestSpawn:
         with pytest.raises(RuntimeError):
             rt.spawn(_waits_for_stop)
         assert not rt._root._children  # Private: the root's set of children
+
+    def test_concurrent_spawns_get_distinct_ids_and_run_once_each(self, rt):
+        """Spawns from many threads at once: one id per spawn, one call each."""
+        calls: list[int] = []
+        lock = threading.Lock()
+        start = threading.Barrier(8)
+        ids: list[list[int]] = [[] for _ in range(8)]
+
+        def called(n: int) -> None:
+            with lock:
+                calls.append(n)
+
+        def spawner(i: int) -> None:
+            start.wait(5.0)
+            for j in range(50):
+                ids[i].append(rt.spawn(called, i * 50 + j))
+
+        threads = [threading.Thread(target=spawner, args=(i,)) for i in range(8)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(10.0)
+        all_ids = [t for chunk in ids for t in chunk]
+        for t in all_ids:
+            rt.wait(t, timeout=5.0)
+        assert len(set(all_ids)) == 400
+        assert sorted(calls) == list(range(400))
+
+    @pytest.mark.parametrize("on_loop", [True, False], ids=["loop", "thread"])
+    def test_spawns_racing_stop_are_refused_or_ended(self, on_loop):
+        """Every spawn either raises, or its task has ended once stop() returns:
+        none slips past stop() and runs on."""
+        rt = Runtime(MagicMock())
+        rt.start()
+        start = threading.Barrier(5)
+        spawned: list[int] = []
+        lock = threading.Lock()
+
+        def spawner() -> None:
+            start.wait(5.0)
+            for _ in range(100):
+                try:
+                    t = rt.spawn(_park if on_loop else _waits_for_stop)
+                except RuntimeError:
+                    return  # refused: the runtime is stopping
+                with lock:
+                    spawned.append(t)
+
+        threads = [threading.Thread(target=spawner) for _ in range(4)]
+        for thread in threads:
+            thread.start()
+        start.wait(5.0)
+        rt.stop(timeout=5.0)
+        for thread in threads:
+            thread.join(10.0)
+        assert all(not rt.alive(t) for t in spawned)
 
 
 class TestStop:
@@ -545,6 +697,66 @@ class TestStop:
         finally:
             release.set()
         assert rt.wait(t, timeout=5.0) is True
+
+    def test_stop_shares_one_timeout_across_the_tasks_it_waits_for(self, monkeypatch):
+        """Thread tasks that ignore their tokens get what is left of one budget,
+        not the full timeout each; a loop task is not waited for again once the
+        loop has stopped."""
+        release = threading.Event()
+        rt = Runtime(MagicMock())
+        rt.start()
+        hung = [rt.spawn(release.wait, 10.0) for _ in range(3)]
+        rt.spawn(Parked().run)
+        thread_waits: list[float | None] = []
+        loop_waits: list[float | None] = []
+        with FakeClock(modules=["appinfra.runtime.runtime"]) as clock:
+
+            def thread_wait(task: ThreadTask, timeout: float | None = None) -> bool:
+                thread_waits.append(timeout)
+                clock.sleep(timeout or 0.0)
+                return False  # still running: the budget is used up
+
+            def loop_wait(task: LoopTask, timeout: float | None = None) -> bool:
+                loop_waits.append(timeout)
+                return True
+
+            monkeypatch.setattr(ThreadTask, "wait", thread_wait)
+            monkeypatch.setattr(LoopTask, "wait", loop_wait)
+            try:
+                rt.stop(timeout=1.0)
+            finally:
+                monkeypatch.undo()
+                release.set()
+        assert thread_waits == [1.0, 0.0, 0.0]
+        assert loop_waits == []
+        for t in hung:
+            rt.wait(t, timeout=5.0)
+
+    def test_stop_reaches_a_task_spawned_from_another_runtime(self):
+        """A task spawned by another runtime's task derives its token from that
+        task, not from this runtime's root; stop() still stops it."""
+        lg = MagicMock()
+        rt_a, rt_b = Runtime(MagicMock()), Runtime(lg)
+        rt_a.start()
+        rt_b.start()
+        onto_b: list[int] = []
+        child = WaitsForStop()
+        release = threading.Event()
+
+        def spawns_onto_b() -> None:
+            onto_b.append(rt_b.spawn(child))
+            release.wait(10.0)  # stays alive, so its token is not stopped
+
+        try:
+            rt_a.spawn(spawns_onto_b)
+            assert child.entered.wait(5.0)
+            rt_b.stop(timeout=5.0)  # the deadline is the failure path
+            lg.warning.assert_not_called()
+            assert rt_b.wait(onto_b[0], timeout=0).is_set()
+        finally:
+            release.set()
+            rt_a.stop()
+            rt_b.stop()
 
     def test_stop_on_the_loop_thread_is_refused(self, rt):
         async def stops() -> None:
