@@ -199,10 +199,26 @@ def end_plain(tasks: Tasks, plain: list[asyncio.Task[None]]) -> None:
     tasks.spawn(end).wait(timeout=60.0)
 
 
+def _check_idle(runners: list[Runner]) -> None:
+    """Refuse a measurement of services that ended: what a failed one holds
+    (its error and traceback) is not what an idle one costs.
+
+    Raises:
+        RuntimeError: If one of *runners* has failed.
+    """
+    failed = [r for r in runners if r.exception is not None]
+    if failed:
+        raise RuntimeError(
+            f"{len(failed):,} of {len(runners):,} measured services failed, "
+            f"first: {failed[0].exception!r}"
+        )
+
+
 def service_cost(tasks: Tasks, rt: Runtime, lg: Logger, count: int) -> Cost:
     """The net cost of an idle service, over *count* Minimal services run once as
     plain asyncio tasks on the loop of *tasks* and once spawned into *rt*, each
-    measured warmed (bytes_per_warmed())."""
+    measured warmed (bytes_per_warmed()). Each run has a maker of its own: the
+    event its services share binds to the loop that first waits on it."""
     make = minimal_maker(lg)
     plain, aio = bytes_per_warmed(
         lambda: start_plain(tasks, make, count),
@@ -211,11 +227,13 @@ def service_cost(tasks: Tasks, rt: Runtime, lg: Logger, count: int) -> Cost:
     )
     end_plain(tasks, aio)
     del aio
+    make = minimal_maker(lg)
     net, (runners, _) = bytes_per_warmed(
         lambda: spawn_services(rt, make, count),
         lambda started: stop_services(rt, started[0]),
         count,
     )
+    _check_idle(runners)
     stop_services(rt, runners)
     return Cost(asyncio=plain, framework=net - plain)
 

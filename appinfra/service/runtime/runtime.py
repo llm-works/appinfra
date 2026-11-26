@@ -138,8 +138,9 @@ class Runtime:
 
     def _init_owned(self) -> None:
         """The state only the runtime's own task reads and writes."""
-        self._runners: dict[str, Runner] = {}  # every service, by name
-        self._order: dict[str, None] = {}  # started, in start order
+        # Every service, by name: the waiting in spawn order, then the started
+        # in start order (_begin() moves each to the end as it first starts)
+        self._runners: dict[str, Runner] = {}
         self._pending: set[str] = set()  # waiting for dependencies
         self._waiters: dict[str, set[str]] = {}  # dependency -> pending on it
         self._isolated: set[Runner] = set()
@@ -403,7 +404,7 @@ class Runtime:
                 self._refuse(self._runners[name])
         for task in self._backoffs.values():
             task.cancel()
-        queue = [self._runners[n] for n in reversed(self._order) if n in self._runners]
+        queue = list(reversed(self._runners.values()))  # only the started are left
         self._shutdown = _Shutdown(queue, m.timeout, m.reply)
         self._walk_shutdown()
 
@@ -441,7 +442,8 @@ class Runtime:
     def _begin(self, runner: Runner) -> None:
         """Start *runner*: its setup step, or its launch if it has no setup()
         here (none of its own, or isolated: it sets up in its child)."""
-        self._order[runner.name] = None
+        if runner.name not in self._restarting:  # a restart keeps its place
+            self._runners[runner.name] = self._runners.pop(runner.name)
         if runner in self._isolated or not _overrides(runner.service, "setup"):
             self._launch(runner)
         else:
@@ -491,15 +493,15 @@ class Runtime:
             runner._task = self._launch_child(runner)
             runner._teardown = OWED  # the parent's part: its log forwarding
         else:
-            fn, args = (
-                (service.run, ())
-                if isinstance(service, AsyncService)
-                else (
-                    drive,
-                    (service, service.stopping),
+            # Under the root token, not service.stopping: a child would give
+            # that token a set of children to hold. A stop reaches the run
+            # anyway: _end_run() stops the token and cancels the task.
+            if isinstance(service, AsyncService):
+                runner._task = self._step(runner, "run", service.run)
+            else:
+                runner._task = self._step(
+                    runner, "run", drive, service, service.stopping
                 )
-            )
-            runner._task = self._step(runner, "run", fn, *args, token=service.stopping)
             runner._teardown = OWED if _overrides(service, "teardown") else TORN
         awaited = runner in self._ready or self._waiters.get(runner.name)
         if awaited or runner.name in self._restarting:
@@ -525,8 +527,7 @@ class Runtime:
             clone,
             child.healthy,
             config,
-            token=service.stopping,
-            process=True,
+            process=True,  # under the root token, as _launch() says
         )
 
     def _on_run(self, runner: Runner, m: TaskDone) -> None:
@@ -852,7 +853,6 @@ class Runtime:
             self._runners[w] for w in self._waiters.pop(name, ()) if w in self._pending
         ]
         del self._runners[name]
-        self._order.pop(name, None)
         self._restarting.discard(name)
         self._isolated.discard(runner)
         if runner in self._ready:

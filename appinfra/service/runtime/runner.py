@@ -29,6 +29,7 @@ class Runner:
 
     __slots__ = (
         "service",
+        "name",
         "policy",
         "_state",
         "_hooks",
@@ -46,6 +47,8 @@ class Runner:
             TypeError: If *service* is not a Service (see check_service()).
         """
         self.service: Service = check_service(service)
+        # Read once: the Runtime keys the service by it for its lifetime
+        self.name: str = self.service.name
         self.policy = policy or _DEFAULT_POLICY
         self._state = State.CREATED
         # Created by the first on_state_change(): most runners have no hooks
@@ -54,11 +57,6 @@ class Runner:
         self._task: Task | None = None  # the current step: setup, run or teardown
         self._error: BaseException | None = None
         self._teardown = TORN
-
-    @property
-    def name(self) -> str:
-        """Service name."""
-        return self.service.name
 
     @property
     def state(self) -> State:
