@@ -44,9 +44,9 @@ For API stability guarantees and deprecation policy, see
   that derives tokens stopped with it (`child()`), and is checked (`is_set()`) or waited on
   (`wait()`).
 - `appinfra.runtime.Chan`: a one-way FIFO channel like Go's, with a capacity (0: hand-over;
-  None: unbounded, a send never waits, also from the event loop), `close()` and iteration, for
-  thread tasks (`send`/`recv`) and loop tasks (`asend`/`arecv`) alike. A wait ends with
-  `StoppedError` when the task's token stops.
+  None: unbounded, a send never waits, also from the event loop), `close()`, iteration and
+  `len()`, for thread tasks (`send`/`recv`) and loop tasks (`asend`/`arecv`) alike. A wait ends
+  with `StoppedError` when the task's token stops.
 - `appinfra.runtime.select()` / `aselect()`: wait on several channel cases (`ChanRecv`,
   `ChanSend`) and complete exactly one, chosen at random among those ready, like Go's `select`.
 - `appinfra.runtime.pipe()`: a channel between two processes, `send, recv = pipe(capacity)`;

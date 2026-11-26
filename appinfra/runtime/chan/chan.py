@@ -171,6 +171,14 @@ class Chan(Generic[T]):
                 if waiter.claim():
                     waiter.settle(Outcome.CLOSED)
 
+    def __len__(self) -> int:
+        """The values waiting to be received, as Go's len(ch): what the buffer
+        holds, not the values of senders still waiting. Information for the
+        owner, which decides what a depth means; nothing is enforced, and the
+        number may change as soon as it is read."""
+        with self._lock:
+            return len(self._buffer) + len(self._given_back)
+
     def __iter__(self) -> Chan[T]:
         """Iterate with recv() until the channel is closed and drained."""
         return self

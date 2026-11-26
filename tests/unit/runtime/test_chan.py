@@ -15,6 +15,16 @@ class TestChan:
         with pytest.raises(ValueError, match="capacity"):
             Chan[int](-1)
 
+    def test_len_counts_buffered_values_not_waiting_senders(self):
+        """As Go's len(ch): what the buffer holds. A channel without a buffer
+        holds nothing; its values pass from sender to receiver directly."""
+        ch = Chan[int](2)
+        ch.send(1)
+        assert len(ch) == 1
+        ch.send(2)
+        assert len(ch) == 2
+        assert len(Chan[int](0)) == 0
+
     def test_values_come_out_in_the_order_sent(self):
         ch = Chan[int](3)
         for i in range(3):
@@ -112,6 +122,21 @@ class TestUnbounded:
         ch.close()
         with pytest.raises(ChanClosedError):
             ch.send(1, timeout=0)
+
+    def test_len_is_the_values_waiting_to_be_received(self):
+        """The depth of the buffer, for the owner to watch: an unbounded
+        channel enforces nothing, its receiver decides what a depth means."""
+        ch = Chan[int](None)
+        assert len(ch) == 0
+        for i in range(5):
+            ch.send(i)
+        assert len(ch) == 5
+        ch.recv(timeout=0)
+        assert len(ch) == 4
+        ch.close()
+        assert len(ch) == 4  # still to be drained
+        assert list(ch) == [1, 2, 3, 4]
+        assert len(ch) == 0
 
     def test_a_select_send_is_always_ready(self):
         ch = Chan[int](None)
