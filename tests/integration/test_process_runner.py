@@ -4,11 +4,16 @@
 """Integration tests for ProcessRunner with real subprocesses."""
 
 import multiprocessing as mp
+import queue
+import signal
 import threading
 import time
+from collections.abc import Iterator
+from unittest.mock import MagicMock, patch
 
 import pytest
 
+from appinfra.app.fastapi.runtime import process
 from appinfra.app.fastapi.runtime.process import ProcessRunner
 from appinfra.log import Logger
 from appinfra.service import (
@@ -220,3 +225,64 @@ class TestProcessRunnerIntegration:
             )
         finally:
             lg.removeHandler(handler)
+
+
+_ON_MAIN_THREAD = pytest.mark.skipif(
+    threading.current_thread() is not threading.main_thread(),
+    reason="only the main thread receives KeyboardInterrupt and installs handlers",
+)
+
+
+@_ON_MAIN_THREAD
+class TestInterruptDuringLaunch:
+    """A SIGINT while Process.start() forks; real signals, mocked processes."""
+
+    @pytest.fixture(autouse=True)
+    def default_sigint(self) -> Iterator[None]:
+        """Python's own SIGINT handler, the one that raises KeyboardInterrupt,
+        whatever another test in this worker left installed."""
+        previous = signal.signal(signal.SIGINT, signal.default_int_handler)
+        try:
+            yield
+        finally:
+            signal.signal(signal.SIGINT, previous)
+
+    def test_an_interrupt_during_the_fork_reaches_the_child_it_forked(self):
+        """SIGINT arrives while Process.start() forks, before the child's
+        handle is published: it is held until the handle is, so the
+        interrupt's cleanup ends the child; the interrupt reaches the caller,
+        and the previous handler is back."""
+        before = signal.getsignal(signal.SIGINT)
+        with (
+            patch.object(process.mp, "get_context") as get_context,
+            patch.object(process, "LogQueueListener"),
+        ):
+            ctx = get_context.return_value
+            ctx.Pipe.side_effect = lambda duplex=True: (MagicMock(), MagicMock())
+            ctx.Queue.return_value.get_nowait.side_effect = queue.Empty
+            child = ctx.Process.return_value
+            child.is_alive.return_value = False  # not published yet
+
+            def forked() -> None:
+                signal.raise_signal(signal.SIGINT)  # mid-fork
+                child.is_alive.return_value = True  # published
+
+            child.start.side_effect = forked
+            child.terminate.side_effect = lambda: setattr(
+                child.is_alive, "return_value", False
+            )
+            runner = ProcessRunner(SimpleProcessService(Logger(name="test")))
+            with pytest.raises(KeyboardInterrupt):
+                runner.start()
+
+        child.terminate.assert_called_once()
+        assert signal.getsignal(signal.SIGINT) is before
+
+    def test_a_forked_child_gets_back_the_handler_held_at_the_fork(self):
+        """A forked child inherits the handler that holds SIGINT back at the
+        fork; its entry point puts back the one it replaced."""
+        before = signal.getsignal(signal.SIGINT)
+        with process._interrupt_held():
+            assert signal.getsignal(signal.SIGINT) is not before
+            process._restore_interrupt()  # as _process_entry() does first
+            assert signal.getsignal(signal.SIGINT) is before

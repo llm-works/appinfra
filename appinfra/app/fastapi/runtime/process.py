@@ -15,16 +15,18 @@ from __future__ import annotations
 import contextlib
 import functools
 import multiprocessing as mp
+import signal
 import sys
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from multiprocessing.connection import Connection
 from multiprocessing.context import BaseContext
 from multiprocessing.process import BaseProcess
 from multiprocessing.synchronize import Event as MPEvent
 from queue import Empty
+from types import FrameType
 from typing import Any
 
 from ....log import Logger
@@ -47,11 +49,60 @@ _DEFAULT_POLICY = RestartPolicy()
 
 
 @dataclass(frozen=True, slots=True)
-class _ErrorSource:
-    """A run's error queue, and the first exception published from it so far."""
+class _Monitor:
+    """A monitor thread and the event that stops it: its own, so stopping one
+    monitor never reaches another started since."""
 
-    errors: mp.Queue[BaseException] | None
-    first: BaseException | None
+    thread: threading.Thread
+    stopped: threading.Event
+
+
+class _RunErrors:
+    """One run's errors: the queue its child reports on, and the first
+    exception read from it (the root cause). Each run has its own, so one
+    run's error is never reported as another's, and a waiter holding a run's
+    record still reads that run's cause once a later run has replaced it.
+
+    Reads and the close are serialized: the close drains the queue into the
+    record first, so a cause queued before cleanup is kept.
+    """
+
+    __slots__ = ("queue", "first", "_lock")
+
+    def __init__(self) -> None:
+        self.queue: mp.Queue[BaseException] | None = None  # once launched
+        self.first: BaseException | None = None
+        self._lock = threading.Lock()
+
+    def drain(self) -> BaseException | None:
+        """Read what the child reported so far; the first exception, if any."""
+        with self._lock:
+            self._drain_locked()
+            return self.first
+
+    def close(self) -> None:
+        """Keep what the child reported, then close the queue."""
+        with self._lock:
+            self._drain_locked()
+            errors, self.queue = self.queue, None
+        if errors is not None:
+            with contextlib.suppress(Exception):
+                errors.cancel_join_thread()
+                errors.close()
+
+    def _drain_locked(self) -> None:
+        errors = self.queue
+        if errors is None:
+            return
+        # Drained until empty: Queue.empty() is unreliable
+        with contextlib.suppress(Exception):
+            while True:
+                try:
+                    exc = errors.get_nowait()
+                except Empty:
+                    break
+                if self.first is None:
+                    self.first = exc
 
 
 class ProcessRunner:
@@ -113,8 +164,7 @@ class ProcessRunner:
         self._stopper: int | None = None
         self._init_handles()
         # Monitor thread for auto-restart
-        self._monitor_thread: threading.Thread | None = None
-        self._stop_monitor_event: threading.Event = threading.Event()
+        self._monitor: _Monitor | None = None  # under _lock
 
     def _init_handles(self) -> None:
         """The process and the IPC and logging handles of a run: none yet."""
@@ -129,8 +179,7 @@ class ProcessRunner:
         self._stop_reader: Connection | None = None
         self._stop_writer: Connection | None = None
         self._healthy_event: MPEvent | None = None
-        self._error_queue: mp.Queue[BaseException] | None = None
-        self._exception: BaseException | None = None
+        self._errors = _RunErrors()  # the current run's; replaced per claim
         # Logging infrastructure for subprocess
         self._log_queue: mp.Queue[Any] | None = None
         self._log_listener: LogQueueListener | None = None
@@ -269,12 +318,11 @@ class ProcessRunner:
 
     def _create_ipc_primitives(self, ctx: BaseContext) -> None:
         """Create IPC primitives for subprocess communication: the run's own,
-        its exception read from its error queue alone."""
+        its error queue in the record its claim made."""
         self._shutdown_event = ctx.Event()
         self._stop_reader, self._stop_writer = ctx.Pipe(duplex=False)
         self._healthy_event = ctx.Event()
-        self._error_queue = ctx.Queue()
-        self._exception = None
+        self._errors.queue = ctx.Queue()
 
     def _inherited_writer(self, ctx: BaseContext) -> Connection | None:
         """The stop pipe's writer as the child inherits it: a forked child holds
@@ -300,13 +348,16 @@ class ProcessRunner:
                     self._stop_reader,
                     self._inherited_writer(ctx),
                     self._healthy_event,
-                    self._error_queue,
+                    self._errors.queue,
                     log_config,
                 ),
                 name=f"svc-{self.name}",
                 daemon=True,
             )
-            self._process.start()
+            # A SIGINT between the fork and Process.start() storing the child's
+            # handle would leave a child no cleanup can reach: held until then
+            with _interrupt_held():
+                self._process.start()
         finally:
             # Restore logger in parent process
             if saved_lg is not None:
@@ -371,6 +422,11 @@ class ProcessRunner:
         self._start_thread = threading.get_ident()
         self._run += 1
         self._reset_stop()
+        # A record of its own before setup() can fail: the previous run's
+        # child is gone (the check above), so its queue is closed, its cause
+        # kept for the waiters holding it
+        self._errors.close()
+        self._errors = _RunErrors()
         return self._run
 
     def _await_start(self, timeout: float) -> bool:
@@ -405,8 +461,10 @@ class ProcessRunner:
             if not own and self._start_thread is not None:
                 if self._start_done is None:
                     self._start_done = threading.Condition(self._lock)
+                # Done once the start returned, or once a stop() ended the run:
+                # a start claimed since is not this wait's to wait for
                 if not self._start_done.wait_for(
-                    lambda: self._start_thread is None, timeout
+                    lambda: self._start_thread is None or self._run != run, timeout
                 ):
                     raise HealthTimeoutError(self.name, timeout)
             return run
@@ -494,10 +552,10 @@ class ProcessRunner:
         Raises:
             RunError: Always: the run exited, or a stop() ended it first.
         """
-        source = self._fail_run(run)
-        if source is None:
+        errors = self._fail_run(run)
+        if errors is None:
             raise RunError(self.name, "stopped during startup")
-        exc = self._first_exception(source)  # this run's, not a later one's
+        exc = errors.drain()  # this run's, not a later one's
         if exc:
             raise RunError(self.name, f"exited during startup: {exc}") from exc
         raise RunError(self.name, "exited during startup")
@@ -509,7 +567,8 @@ class ProcessRunner:
             True if a restart was initiated.
         """
         with self._lock:
-            state, run = self._state, self._run  # the run this check observes
+            # The run this check observes, and its process
+            state, run, process = self._state, self._run, self._process
         if state == State.FAILED:
             # The restart stops what is left of the failed run first, and waits
             # for it: nothing starts on top of it
@@ -518,6 +577,10 @@ class ProcessRunner:
             return False
 
         if self.is_alive() and self.is_healthy():
+            return False
+        # Exit code 0 is a clean shutdown, whenever it is seen: never restarted
+        if process is not None and not self.is_alive() and process.exitcode == 0:
+            self._end_clean(run, process)
             return False
 
         # Only the observed run: one started since is not this check's to fail
@@ -583,23 +646,24 @@ class ProcessRunner:
         Args:
             interval: Seconds between health checks (default: 1.0)
         """
-        if self._monitor_thread is not None and self._monitor_thread.is_alive():
-            return  # Already monitoring
-
-        self._stop_monitor_event.clear()
-        self._monitor_thread = threading.Thread(
-            target=self._monitor_loop,
-            args=(interval,),
-            daemon=True,
-            name=f"monitor-{self.name}",
-        )
-        self._monitor_thread.start()
+        with self._lock:
+            if self._monitor is not None and self._monitor.thread.is_alive():
+                return  # Already monitoring
+            stopped = threading.Event()  # this monitor's own
+            thread = threading.Thread(
+                target=self._monitor_loop,
+                args=(interval, stopped),
+                daemon=True,
+                name=f"monitor-{self.name}",
+            )
+            self._monitor = _Monitor(thread, stopped)
+        thread.start()
 
     @property
     def monitoring(self) -> bool:
         """True while the start_monitor() thread is running."""
-        thread = self._monitor_thread
-        return thread is not None and thread.is_alive()
+        monitor = self._monitor
+        return monitor is not None and monitor.thread.is_alive()
 
     def stop_monitor(self, timeout: float = 2.0) -> None:
         """Stop the monitor thread.
@@ -607,15 +671,26 @@ class ProcessRunner:
         Args:
             timeout: Seconds to wait for thread to stop.
         """
-        self._stop_monitor_event.set()
-        thread = self._monitor_thread
-        if thread is not None and thread.is_alive():
-            thread.join(timeout=timeout)
-        self._monitor_thread = None
+        with self._lock:
+            monitor = self._monitor
+        self._end_monitor(monitor, timeout)
 
-    def _monitor_loop(self, interval: float) -> None:
-        """Monitor loop that checks health and triggers restarts."""
-        while not self._stop_monitor_event.is_set():
+    def _end_monitor(self, monitor: _Monitor | None, timeout: float = 2.0) -> None:
+        """Stop *monitor* and wait for it, up to *timeout* seconds; a monitor
+        started since is left running."""
+        if monitor is None:
+            return
+        monitor.stopped.set()
+        if monitor.thread.is_alive():
+            monitor.thread.join(timeout=timeout)
+        with self._lock:
+            if self._monitor is monitor:
+                self._monitor = None
+
+    def _monitor_loop(self, interval: float, stopped: threading.Event) -> None:
+        """Monitor loop that checks health and triggers restarts, until
+        *stopped*, its own event, is set."""
+        while not stopped.is_set():
             if self._state in (State.STOPPED, State.DONE):
                 break
 
@@ -644,7 +719,7 @@ class ProcessRunner:
                 break
 
             # Wait for interval or stop signal
-            self._stop_monitor_event.wait(timeout=interval)
+            stopped.wait(timeout=interval)
 
     def _end_clean(self, run: int, process: BaseProcess) -> bool:
         """Move *run*, whose *process* exited cleanly, to DONE. DONE is final,
@@ -686,6 +761,9 @@ class ProcessRunner:
         with self._lock:
             self._run += 1
             run = self._run  # this stop's: a stop or start after it moves it on
+            monitor = self._monitor  # this run's: one started later is not ended
+            if self._start_done is not None:
+                self._start_done.notify_all()  # their run ended: waiters learn it
             if self._start_thread == threading.get_ident():
                 return  # from setup(): its start() stops the child it spawns
         budget = self.stop_timeout if timeout is None else timeout
@@ -702,7 +780,7 @@ class ProcessRunner:
             return
 
         # Stop monitor thread first
-        self.stop_monitor()
+        self._end_monitor(monitor)
         self._stop_run(run, max(0.0, budget - (time.monotonic() - began)))
 
     def _stop_run(self, run: int, timeout: float) -> None:
@@ -823,13 +901,7 @@ class ProcessRunner:
                     end.close()
         self._stop_reader = self._stop_writer = None
         self._healthy_event = None
-        if self._error_queue is not None:
-            try:
-                self._error_queue.cancel_join_thread()
-                self._error_queue.close()
-            except Exception:
-                pass
-            self._error_queue = None
+        self._errors.close()  # what the child reported stays readable
         # Stop log listener
         if self._log_listener is not None:
             with contextlib.suppress(Exception):
@@ -859,14 +931,14 @@ class ProcessRunner:
             self._state = to
         return True
 
-    def _fail_run(self, run: int) -> _ErrorSource | None:
+    def _fail_run(self, run: int) -> _RunErrors | None:
         """A wait_healthy() for *run* timed out, or saw it exit: fail its start,
         checked under the lock, if the run is still starting. One another
         waiter saw healthy (RUNNING) is not this wait's to fail, and one that
         has settled already is left as it is.
 
         Returns:
-            *run*'s error source, read under the same lock: a run started
+            *run*'s error record, read under the same lock: a run started
             later has its own. None if *run* is no longer the current run,
             which is left as it is.
         """
@@ -875,7 +947,7 @@ class ProcessRunner:
                 return None
             if self._state in (State.INITD, State.STARTING):
                 self._state = State.FAILED
-            return _ErrorSource(self._error_queue, self._exception)
+            return self._errors
 
     def _transition(self, to: State) -> None:
         """Transition to a new state."""
@@ -901,42 +973,9 @@ class ProcessRunner:
         """Exception from subprocess, if any.
 
         Returns the first exception encountered (root cause), the current
-        run's: a run started while the queue is read has its own.
+        run's: each run reports into a record of its own.
         """
-        self._drain(self._error_queue)
-        return self._exception
-
-    def _first_exception(self, source: _ErrorSource) -> BaseException | None:
-        """The first exception of the run *source* belongs to, even once a
-        later run has replaced it."""
-        drained = self._drain(source.errors)
-        with self._lock:
-            if self._error_queue is source.errors:
-                return self._exception  # another reader may have published first
-        return source.first or drained
-
-    def _drain(self, errors: mp.Queue[BaseException] | None) -> BaseException | None:
-        """Drain *errors*, publishing the first exception while the queue is
-        still the current run's: a run started meanwhile has a queue, and a
-        first exception, of its own.
-
-        Returns:
-            The first exception drained here, if any.
-        """
-        first: BaseException | None = None
-        if errors is not None:
-            # Drained until empty: Queue.empty() is unreliable
-            with contextlib.suppress(Exception):
-                while True:
-                    try:
-                        exc = errors.get_nowait()
-                    except Empty:
-                        break
-                    first = first or exc
-                    with self._lock:
-                        if self._error_queue is errors and self._exception is None:
-                            self._exception = exc
-        return first
+        return self._errors.drain()
 
     @property
     def pid(self) -> int | None:
@@ -1016,6 +1055,7 @@ def _process_entry(
     The process exits non-zero when the service failed, so the parent's monitor
     restarts it; exit code 0 means a clean shutdown.
     """
+    _restore_interrupt()
     exit_code = 0
     try:
         lg = Logger.from_queue_config(log_config, name=f"svc/{service.name}")
@@ -1037,6 +1077,52 @@ def _process_entry(
             service.teardown()
     if exit_code:
         sys.exit(exit_code)
+
+
+class _HeldInterrupt:
+    """A SIGINT handler that holds the signal back, keeping the handler it
+    replaced: the one a held signal goes to, and the one a forked child, which
+    inherits this handler, puts back (_restore_interrupt())."""
+
+    def __init__(self, previous: Callable[[int, FrameType | None], Any]) -> None:
+        self.previous = previous
+        self.held: tuple[int, FrameType | None] | None = None
+
+    def __call__(self, signum: int, frame: FrameType | None) -> None:
+        if self.held is None:
+            self.held = (signum, frame)
+
+
+@contextlib.contextmanager
+def _interrupt_held() -> Iterator[None]:
+    """Hold a SIGINT back for the block, then deliver it to the handler it
+    went to before: a KeyboardInterrupt comes after the block, not inside it.
+
+    Only the main thread receives KeyboardInterrupt and may change handlers;
+    elsewhere, and with no Python handler installed, there is nothing to hold.
+    """
+    previous = signal.getsignal(signal.SIGINT)
+    if threading.current_thread() is not threading.main_thread() or not callable(
+        previous
+    ):
+        yield
+        return
+    holder = _HeldInterrupt(previous)
+    signal.signal(signal.SIGINT, holder)
+    try:
+        yield
+    finally:
+        signal.signal(signal.SIGINT, previous)
+        if holder.held is not None:
+            previous(*holder.held)
+
+
+def _restore_interrupt() -> None:
+    """In a forked child: put back the SIGINT handler that _interrupt_held()
+    replaced in the parent at the fork. A spawned child starts with its own."""
+    handler = signal.getsignal(signal.SIGINT)
+    if isinstance(handler, _HeldInterrupt):
+        signal.signal(signal.SIGINT, handler.previous)
 
 
 def _exit_code(exc: BaseException) -> int:
