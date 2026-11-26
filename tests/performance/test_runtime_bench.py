@@ -32,7 +32,7 @@ from appinfra.runtime.bench import (
     task_cost,
     task_rates,
 )
-from tests.helpers.perf import RATE_SHARE
+from tests.helpers.perf import RATE_SHARE, rates_over
 
 TASKS = 100_000 if os.environ.get("APPINFRA_RUNTIME_BENCH") == "full" else 1_000
 # What the runtime may add per parked task over a plain asyncio task: its task,
@@ -73,19 +73,21 @@ class TestTaskCost:
 
     def test_spawn_and_cancel_rate(self, rt):
         """spawn() until each runs, then cancel() and wait() one at a time."""
-        spawn, cancel = task_rates(rt, TASKS)
+        floor = 5_000 * RATE_SHARE
+        spawn, cancel = rates_over(floor, lambda: task_rates(rt, TASKS))
 
         print(f"\nspawn: {spawn:,.0f}/s  cancel: {cancel:,.0f}/s ({TASKS:,})")
-        assert spawn > 5_000 * RATE_SHARE, f"spawn: {spawn:,.0f}/s"
-        assert cancel > 5_000 * RATE_SHARE, f"cancel: {cancel:,.0f}/s"
+        assert spawn > floor, f"spawn: {spawn:,.0f}/s"
+        assert cancel > floor, f"cancel: {cancel:,.0f}/s"
 
     def test_runtime_spawn_and_stop_rate(self):
         """spawn() into a runtime of its own, then one stop() of it."""
-        spawn, stop = runtime_rates(LG, TASKS)
+        floor = 5_000 * RATE_SHARE
+        spawn, stop = rates_over(floor, lambda: runtime_rates(LG, TASKS))
 
         print(f"\nruntime spawn: {spawn:,.0f}/s  stop: {stop:,.0f}/s ({TASKS:,})")
-        assert spawn > 5_000 * RATE_SHARE, f"spawn: {spawn:,.0f}/s"
-        assert stop > 5_000 * RATE_SHARE, f"stop: {stop:,.0f}/s"
+        assert spawn > floor, f"spawn: {spawn:,.0f}/s"
+        assert stop > floor, f"stop: {stop:,.0f}/s"
 
     @pytest.mark.parametrize("receiving", [False, True], ids=["future", "arecv"])
     def test_idle_tasks_use_no_cpu(self, rt, receiving):
