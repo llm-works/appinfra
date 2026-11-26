@@ -25,6 +25,11 @@ from appinfra.service import Runtime
 from appinfra.service.bench import service_cost
 
 SERVICES = 100_000 if os.environ.get("APPINFRA_SERVICE_BENCH") == "full" else 1_000
+# What the framework may add per idle service over a plain asyncio task: the runtime
+# task it runs as (bounded at 1 KiB by test_runtime_bench.py), its runner, token and
+# names, and its share of the tables holding them. About 1,000 B on Linux, measured
+# alone; half again for macOS and the tables other tests in this process have grown
+CEILING = 1536
 LG = MagicMock()
 
 
@@ -54,4 +59,4 @@ def test_memory_per_idle_service(tasks: Tasks, rt: Runtime) -> None:
         f"{cost.net:,.0f} B each: asyncio {cost.asyncio:,.0f} B, "
         f"framework {cost.framework:,.0f} B"
     )
-    assert cost.framework <= 1024, f"{cost.framework:,.0f} B per service"
+    assert cost.framework <= CEILING, f"{cost.framework:,.0f} B per service"

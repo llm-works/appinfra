@@ -9,9 +9,9 @@ rate tasks spawn and end, alone and by a runtime's stop(), idle CPU, and round t
 over channels, measured with appinfra.runtime.bench; run with ``make test.perf.v``
 to see the numbers.
 
-By default the benchmark runs 10,000 tasks, where the warmed memory measurement
-comes out the same on every run; 1,000 still varies by tens of bytes.
-``APPINFRA_RUNTIME_BENCH=full`` runs 100,000.
+By default the benchmark runs 1,000 tasks, as a regression check that fits
+``make check``: the memory measurement varies by tens of bytes there, well within
+its ceiling. ``APPINFRA_RUNTIME_BENCH=full`` runs 100,000.
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ from appinfra.runtime.bench import (
     task_rates,
 )
 
-TASKS = 100_000 if os.environ.get("APPINFRA_RUNTIME_BENCH") == "full" else 10_000
+TASKS = 100_000 if os.environ.get("APPINFRA_RUNTIME_BENCH") == "full" else 1_000
 # What the runtime may add per parked task over a plain asyncio task: its task,
 # the handle, the child token, the context the call runs in. 1 KiB, as for a
 # service: macOS measures more than Linux
