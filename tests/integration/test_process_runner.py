@@ -160,7 +160,7 @@ class TestProcessRunnerIntegration:
 
         def held_launch() -> None:
             starting.set()
-            release.wait(5.0)  # holds start() STARTING, before it spawns
+            release.wait()  # holds start() STARTING until the driver's finally
             launch()
 
         def start() -> None:
