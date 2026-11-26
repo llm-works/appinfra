@@ -51,15 +51,54 @@ with Runtime(lg) as rt:
 ### Spawning
 
 ```python
-t = rt.spawn(fn, *args, name=None, token=None, done=None)
+t = rt.spawn(fn, *args, name=None, token=None, done=None, process=False)
 ```
 
 | Function | Runs as |
 |----------|---------|
 | `async def` | a task on the runtime's event loop, shared by every async task |
 | any other callable | a daemon thread of its own |
+| any other callable, `process=True` | a child process of its own |
 
-`spawn()` raises `RuntimeError` once the runtime is not running.
+`spawn()` raises `RuntimeError` once the runtime is not running, and `TypeError` for an `async def`
+with `process=True`: a child has no event loop.
+
+### Processes
+
+`process=True` calls the function in a child process, started with the `spawn` method; the
+returned `Task` is waited for and cancelled like any other.
+
+```python
+from appinfra.runtime import Runtime, stopping
+
+
+def index(path: str) -> int:  # module level: the child imports it
+    count = 0
+    for _ in walk(path):
+        if stopping().is_set():
+            break
+        count += 1
+    return count
+
+
+if __name__ == "__main__":
+    with Runtime(lg) as rt:
+        t = rt.spawn(index, "/data", process=True)
+        print(t.wait(timeout=60.0))
+```
+
+- the function and its arguments are pickled: the function is defined at module level, and
+  process creation goes under `if __name__ == "__main__":`; the child does not see the parent's
+  `contextvars`
+- inside the child, `stopping()` and `task_id()` work as in any task, with the parent's task id
+- the result comes back pickled; an exception is raised with the child's traceback as a note
+  (`__notes__`), so it survives a `done=` pipe too; an outcome that does not survive a pickle
+  round trip, here or in the child, arrives as a `RuntimeError` naming why
+- `cancel()` and the runtime's stop stop the child's token; so does the parent going away
+- a child that exits without an outcome (killed, crashed, `os._exit()`) fails the task with
+  `ProcessExitError`, whose `exitcode` is negative for the signal that ended it; a task stopped
+  that way raises `StoppedError` instead
+- `Runtime.stop()` terminates, then kills, a child still running after its timeout
 
 ### The Task handle
 
@@ -115,8 +154,9 @@ def worker(jobs: Chan[int]) -> None:
         handle(job, task_id())
 ```
 
-A task runs in a copy of its spawner's `contextvars`, as `asyncio.create_task()` and
-`asyncio.to_thread()` do: it sees the spawner's values, and what it sets stays its own.
+A task on a thread or the loop runs in a copy of its spawner's `contextvars`, as
+`asyncio.create_task()` and `asyncio.to_thread()` do: it sees the spawner's values, and what it
+sets stays its own. A process task's child starts with a fresh context (see Processes).
 
 ### StopToken
 
@@ -162,9 +202,12 @@ lost. Through a pipe, an end that does not survive a pickle round trip arrives w
 ### Stopping
 
 `Runtime.stop(timeout=5.0)` stops every task's token, cancels the loop tasks and waits for the
-thread tasks, all within `timeout`. A thread task still running then is logged and left: a
-thread cannot be killed. Leaving a `with Runtime(lg) as rt:` block calls it, and a runtime left
-running is stopped at interpreter exit.
+thread and process tasks, all within `timeout`. A thread task still running then is logged and
+left: a thread cannot be killed. Process tasks still running then are ended by force, on top of
+`timeout`: every such child is sent SIGTERM and given 2 seconds, then every survivor SIGKILL and
+2 seconds more, so a stop with late children takes up to `timeout` plus 4 seconds. Leaving a
+`with Runtime(lg) as rt:` block calls it, and a runtime left running is stopped at interpreter
+exit.
 
 ## Channels
 
@@ -274,6 +317,7 @@ if __name__ == "__main__":
 | `TaskDone` | `(task_id, name, result, error)`, sent on `done` |
 | `stopping()`, `task_id()` | the current task's token and id |
 | `StopToken`, `StoppedError` | the stop signal, and the error a stop ends a wait with |
+| `ProcessExitError` | a process task's child exited without an outcome; `exitcode` |
 | `Chan`, `ChanClosedError` | a channel, and the error a closed one raises |
 | `select`, `aselect`, `ChanRecv`, `ChanSend` | select and its cases |
 | `pipe`, `PipeSendEnd`, `PipeRecvEnd`, `PipeSender`, `PipeReceiver` | a channel between processes |

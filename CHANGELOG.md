@@ -36,10 +36,14 @@ For API stability guarantees and deprecation policy, see
   a shared event loop, any other on a thread of its own) and returns its `Task`: `wait()`, or
   `await task` on any event loop, as often as wanted; `cancel()`, `alive()`, `detach()`. Inside a
   task, `stopping()` and `task_id()` return its token and id; a task its stop ended without a
-  result raises `StoppedError`. A task runs in a copy of the spawner's `contextvars`.
+  result raises `StoppedError`. A task on a thread or the loop runs in a copy of the spawner's
+  `contextvars`.
 - `Runtime.spawn(..., name=, token=, done=)`: the task's name, on its thread and log records; its
   token derives from the given one; its end (`TaskDone`: its name, result, or error as `wait()`
   would raise it) is sent on a channel or pipe.
+- `Runtime.spawn(fn, *args, process=True)`: the call runs in a child process, with the same `Task`;
+  the child's token stops with the task's. A child that exits without an outcome fails the task
+  with `ProcessExitError`.
 - `StopToken` (`appinfra.runtime`, also exported by `appinfra.service`): a one-way stop signal
   that derives tokens stopped with it (`child()`), and is checked (`is_set()`) or waited on
   (`wait()`).
