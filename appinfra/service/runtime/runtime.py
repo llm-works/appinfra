@@ -131,6 +131,10 @@ class Runtime:
         """Wait until every one of *runners* is healthy, *timeout* seconds in
         all; one not healthy in time fails.
 
+        Once *timeout* has passed, giving up takes the runtime's own task, which
+        answers at once unless a state hook blocks it: then the wait overruns
+        *timeout* by GIVE_UP_GRACE seconds at most.
+
         Raises:
             DependencyNotRunningError: If one still waits for a dependency.
             DependencyFailedError: If a dependency of one left the runtime first.
