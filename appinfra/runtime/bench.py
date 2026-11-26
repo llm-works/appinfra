@@ -31,7 +31,8 @@ from typing import TypeVar
 from ..log import Logger
 from .chan import Chan
 from .errors import StoppedError
-from .runtime import Runtime, Task
+from .runtime import Runtime
+from .task import Task
 
 T = TypeVar("T")
 

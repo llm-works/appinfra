@@ -16,9 +16,9 @@ from .chan import Recv as ChanRecv
 from .chan import Send as ChanSend
 from .chan import Sender as PipeSender
 from .errors import StoppedError
-from .runtime import Runtime, Task
+from .runtime import Runtime
 from .stop import StopToken
-from .task import TaskDone, stopping, task_id
+from .task import Task, TaskDone, stopping, task_id
 
 __all__ = [
     "Chan",

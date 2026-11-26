@@ -12,10 +12,10 @@ import contextlib
 import contextvars
 import threading
 from abc import ABC, abstractmethod
-from collections.abc import Callable
+from collections.abc import Callable, Coroutine, Generator
 from dataclasses import dataclass
 from types import TracebackType
-from typing import Any
+from typing import Any, Protocol, final
 
 from .errors import StoppedError
 from .loop import LoopHost
@@ -74,6 +74,101 @@ class TaskDone:
     name: str | None
     result: Any
     error: BaseException | None
+
+
+class _Waits(Protocol):
+    """What a Task needs of the runtime that runs it: its waits, which take
+    the runtime's lock and table of tasks. A protocol, so this module need
+    not import the runtime, which imports it."""
+
+    def _wait(self, t: _Task, timeout: float | None) -> Any: ...
+
+    def _await(self, t: _Task) -> Coroutine[Any, Any, Any]: ...
+
+    def _detach(self, t: _Task) -> None: ...
+
+
+@final
+class Task:
+    """A task, as spawn() returns it: what its caller waits on and cancels it
+    with. The task itself is the runtime's, which may run it anywhere; this
+    handle is all of it the caller sees. Waited for with ``wait()`` in
+    blocking code and ``await task`` in a coroutine, as often as wanted; it
+    keeps the outcome as long as it is held. Not to be subclassed."""
+
+    __slots__ = ("_rt", "_t")
+    _rt: _Waits
+    _t: _Task
+
+    def __init__(self) -> None:
+        """Refused: a Task comes from Runtime.spawn(), as re.Match from a
+        pattern.
+
+        Raises:
+            TypeError: Always.
+        """
+        raise TypeError("a Task comes from Runtime.spawn()")
+
+    @classmethod
+    def _of(cls, rt: _Waits, t: _Task) -> Task:
+        """The handle to *t*, run by *rt*; for Runtime.spawn()."""
+        task = object.__new__(cls)
+        task._rt = rt
+        task._t = t
+        return task
+
+    @property
+    def id(self) -> int:
+        """The id the runtime assigned, never reused; a TaskDone carries it."""
+        return self._t.id
+
+    @property
+    def name(self) -> str | None:
+        """spawn()'s name, if one was given; a TaskDone carries it."""
+        return self._t.name
+
+    def wait(self, timeout: float | None = None) -> Any:
+        """Wait up to *timeout* seconds for the task to end.
+
+        Returns:
+            What the task's function returned.
+
+        Raises:
+            RuntimeError: If the task is detached, or the wait would block the
+                runtime's loop or the task's own thread.
+            TimeoutError: If the task is still running after *timeout*.
+            StoppedError: If the task was stopped before it returned: its call
+                was skipped, cancelled, or ended by a wait the stop ended. A
+                function that sees the stop and returns gives its result.
+            BaseException: Whatever the task's function raised.
+        """
+        return self._rt._wait(self._t, timeout)
+
+    def __await__(self) -> Generator[Any, None, Any]:
+        """``await task``: wait(), on any event loop, which runs meanwhile.
+        Bounded with ``asyncio.wait_for(task, timeout)``; cancelled, it
+        leaves nothing behind. Raises as wait(), except RuntimeError for
+        blocking: the loop runs on."""
+        return self._rt._await(self._t).__await__()
+
+    def cancel(self) -> None:
+        """Stop the task's token and, on the loop, cancel it; returns at once.
+        A task on a thread sees its token and returns."""
+        self._t.cancel()
+
+    def alive(self) -> bool:
+        """True while the task has not ended."""
+        return not self._t.ended
+
+    def detach(self) -> None:
+        """Give up waiting for the task: its failure is logged, as nobody
+        else sees it; now, if it has ended already."""
+        self._rt._detach(self._t)
+
+    def __repr__(self) -> str:
+        """``<Task 7 running>``, or ``<Task 7 db running>`` with its name."""
+        who = self.id if self.name is None else f"{self.id} {self.name}"
+        return f"<Task {who} {'running' if self.alive() else 'ended'}>"
 
 
 def _label(task_id: int, name: str | None) -> str:
