@@ -508,24 +508,17 @@ Pipe capacity varies by system and can be as small as one page, so code must not
   empty redelivery buffer. Queues and events passed to a child must come from the same start
   method: multiprocessing refuses them in the child otherwise.
 
-## Factories
+### Channel Pairs
 
-Centralized creation of service components:
+A channel factory creates connected pairs with one configuration; a service takes its end of a
+pair, and the code that calls it keeps the other:
 
 ```python
-from appinfra.service import ChannelConfig, QueueChannelFactory, ServiceFactory
+from appinfra.service import ChannelConfig, QueueChannelFactory
 
-# Channel factory
-ch_factory = QueueChannelFactory(ChannelConfig(response_timeout=60.0))
-pair = ch_factory.create_pair()
-
-# Service factory with registry; a service registered with_channel gets its end of a pair
-svc_factory = ServiceFactory(lg)
-svc_factory.register(
-    "worker", WorkerService, policy=RestartPolicy(max_retries=3), with_channel=True
-)
-worker = svc_factory.create("worker", channel=pair.child)
-rt.spawn(worker, policy=svc_factory.get_policy("worker"))
+pair = QueueChannelFactory(ChannelConfig(response_timeout=60.0)).create_pair()
+rt.spawn(WorkerService(lg, channel=pair.child))
+reply = pair.parent.submit(Message(payload="work"))
 ```
 
 ## API Reference
@@ -564,7 +557,7 @@ rt.spawn(worker, policy=svc_factory.get_policy("worker"))
 - `AsyncBufferedChannel` - Wraps an `AsyncTransport` with correlation, streaming, and redelivery
 - `Message` - Generic message with id for correlation
 
-### Factories
+### Channel Pairs and Factories
 
 - `ChannelPairFactory` - Protocol for pluggable channel pair creation (`create_pair()`)
 - `QueueChannelFactory` - Creates sync `Channel` pairs over `QueueTransport`
@@ -575,4 +568,3 @@ rt.spawn(worker, policy=svc_factory.get_policy("worker"))
 - `ChannelPair` - Sync channel pair (parent, child)
 - `AsyncChannelPair` - Async channel pair (parent, child)
 - `AsyncProcessChannelPair` - Mixed async parent + sync child pair
-- `ServiceFactory` - Registry-based service creation

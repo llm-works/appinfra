@@ -51,13 +51,22 @@ from .base import AsyncService, ScheduledService, Service
 from .channel import (
     AsyncBufferedChannel,
     AsyncChannel,
+    AsyncChannelPair,
+    AsyncProcessChannelPair,
+    AsyncProcessQueueChannelFactory,
     AsyncProcessQueueTransport,
+    AsyncQueueChannelFactory,
     AsyncQueueTransport,
     AsyncTransport,
     BufferedChannel,
     Channel,
+    ChannelConfig,
+    ChannelPair,
+    ChannelPairFactory,
     Message,
+    ProcessQueueChannelFactory,
     ProcessQueueTransport,
+    QueueChannelFactory,
     QueueTransport,
     Transport,
 )
@@ -75,19 +84,6 @@ from .errors import (
     InvalidTransitionError,
     RunError,
     SetupError,
-)
-from .factory import (
-    AsyncChannelPair,
-    AsyncProcessChannelPair,
-    AsyncProcessQueueChannelFactory,
-    AsyncQueueChannelFactory,
-    ChannelConfig,
-    ChannelPair,
-    ChannelPairFactory,
-    ProcessQueueChannelFactory,
-    QueueChannelFactory,
-    ServiceFactory,
-    ServiceRegistration,
 )
 from .runtime import Runner, Runtime
 from .state import RestartPolicy, State, StateHook
@@ -118,7 +114,7 @@ __all__ = [
     "ChannelClosedError",
     "ChannelFullError",
     "ChannelResponseError",
-    # Factories
+    # Channel pairs and their factories
     "ChannelConfig",
     "ChannelPair",
     "ChannelPairFactory",
@@ -128,8 +124,6 @@ __all__ = [
     "AsyncProcessChannelPair",
     "AsyncQueueChannelFactory",
     "AsyncProcessQueueChannelFactory",
-    "ServiceFactory",
-    "ServiceRegistration",
     # State management
     "State",
     "RestartPolicy",

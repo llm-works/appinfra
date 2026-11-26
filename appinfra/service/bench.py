@@ -30,8 +30,7 @@ from ..log import Logger
 from ..runtime import Runtime as Tasks
 from ..runtime.bench import Arrivals, bytes_per_warmed, check_count
 from .base import AsyncService
-from .channel import AsyncChannel, Message
-from .factory import AsyncQueueChannelFactory
+from .channel import AsyncChannel, AsyncQueueChannelFactory, Message
 from .runtime import Runner, Runtime
 
 ServiceMaker = Callable[[int, Arrivals], AsyncService]

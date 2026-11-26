@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright 2026 The appinfra Authors
 
-"""Factory for creating channel pairs with consistent configuration."""
+"""Channel pairs, connected ends for two parties, and the factories that create
+them with one configuration."""
 
 from __future__ import annotations
 
@@ -12,13 +13,13 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
 
-from ..channel.async_ import (
+from .async_ import (
     AsyncBufferedChannel,
     AsyncChannel,
     AsyncProcessQueueTransport,
     AsyncQueueTransport,
 )
-from ..channel.sync import (
+from .sync import (
     BufferedChannel,
     Channel,
     ProcessQueueTransport,

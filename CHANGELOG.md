@@ -97,6 +97,9 @@ For API stability guarantees and deprecation policy, see
 ### Removed
 - **Breaking:** `ThreadRunner`, `ProcessRunner`, `RunnerFactory` and `RunnerWithChannel` from
   `appinfra.service`: `Runtime.spawn()` runs every service, `isolate=True` in a process of its own.
+- **Breaking:** `ServiceFactory` and `ServiceRegistration`: construct the service and pass
+  `spawn()` its policy. The channel pair factories move to `appinfra.service.channel`; their
+  imports from `appinfra.service` are unchanged.
 - **Breaking:** `appinfra.service.Manager`: `Runtime` replaces it. `rt.spawn(service)` takes the
   place of `add_service()`/`add()`: a service whose dependency is not running yet waits for it
   instead of being refused. `rt.services[name].state` replaces `is_running(name)`; a stopped
