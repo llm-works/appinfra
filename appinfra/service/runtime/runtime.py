@@ -18,10 +18,15 @@ from ...runtime import Chan, ChanClosedError, StoppedError, StopToken, Task
 from ...runtime import Runtime as Tasks
 from ...runtime import task_id as current_task_id
 from ..base import AsyncService, Service
-from ..errors import HealthTimeoutError, RunError
+from ..errors import DependencyNotRunningError, HealthTimeoutError, RunError
 from ..state import RestartPolicy
 from .owner import UP, Owner, Ready, Services, Spawn, Stop, StopService
 from .runner import Runner
+
+# Seconds a ready() that timed out waits for the runtime to take its giving
+# up, and to name a dependency still missing. The runtime's task answers at
+# once unless a state hook blocks it; the giving up is queued either way.
+GIVE_UP_GRACE = 1.0
 
 
 class Runtime:
@@ -114,7 +119,6 @@ class Runtime:
         runner = Runner(service, policy)
         if isolate:
             _check_isolable(runner.service)
-        runner.service.stopping = self._root.child()
         try:
             self._ask(functools.partial(Spawn, runner, isolate))
         except ChanClosedError:
@@ -200,9 +204,14 @@ class Runtime:
                 raise RunError(runner.name, "the runtime stopped") from None
         except TimeoutError:
             # Raises DependencyNotRunningError for a service still waiting; a
-            # runtime stopped meanwhile has nothing more to say than the timeout
-            with contextlib.suppress(ChanClosedError):
-                self._ask(functools.partial(Ready, runner, True))
+            # runtime stopped meanwhile, or too busy to answer within the
+            # grace, has nothing more to say than the timeout
+            try:
+                self._ask(functools.partial(Ready, runner, True), GIVE_UP_GRACE)
+            except DependencyNotRunningError:  # a TimeoutError too: the answer
+                raise
+            except (ChanClosedError, TimeoutError):
+                pass
             raise HealthTimeoutError(runner.name, timeout) from None
 
     def _ask(

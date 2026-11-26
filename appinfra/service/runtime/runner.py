@@ -54,6 +54,7 @@ class Runner:
         "_task",
         "_error",
         "_teardown",
+        "_owner",
         "__weakref__",
     )
 
@@ -74,6 +75,8 @@ class Runner:
         self._task: Task | None = None  # the current step: setup, run or teardown
         self._error: BaseException | None = None
         self._teardown = TORN
+        # The runtime task that admitted it, which alone moves it; set there
+        self._owner: object = None
 
     @property
     def state(self) -> State:

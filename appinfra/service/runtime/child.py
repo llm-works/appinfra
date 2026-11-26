@@ -38,16 +38,18 @@ def main(service: Service, healthy: Any, log_config: dict[str, Any]) -> None:
     except Exception as e:
         raise SetupError.of(service.name, e)  # noqa: B904  # of() sets the cause
     failed: list[Exception] = []  # what is_healthy() raised, if it did
+    ending = threading.Lock()  # the run ending, and health published, one at a time
     threading.Thread(
         target=_report_health,
-        args=(lg, service, healthy, failed),
+        args=(lg, service, healthy, failed, ending),
         name="health",
         daemon=True,
     ).start()
     try:
         service.run()
     finally:
-        token.stop()
+        with ending:
+            token.stop()
         try:
             service.teardown()
         except Exception as e:
@@ -72,17 +74,25 @@ def wait_healthy(healthy: Any) -> bool:
 
 
 def _report_health(
-    lg: Logger, service: Service, healthy: Any, failed: list[Exception]
+    lg: Logger,
+    service: Service,
+    healthy: Any,
+    failed: list[Exception],
+    ending: threading.Lock,
 ) -> None:
     """In the child: set *healthy* once the service reports it, unless the
-    run ends first. An is_healthy() that raises ends the run, as it does for a
-    service in the parent's process: its error goes to *failed*, for main() to
-    raise, and the service's token stops."""
+    run ends first. A check that returns once run() has returned publishes
+    nothing: health is set under *ending*, under which main() stops the token
+    as the run ends. An is_healthy() that raises ends the run, as it does for
+    a service in the parent's process: its error goes to *failed*, for main()
+    to raise, and the service's token stops."""
     token = service.stopping
     try:
         while not token.is_set():
             if service.is_healthy():
-                healthy.set()
+                with ending:
+                    if not token.is_set():
+                        healthy.set()
                 return
             token.wait(HEALTH_INTERVAL)
     except Exception as e:

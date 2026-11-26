@@ -179,6 +179,10 @@ class Owner:
         if refusal is not None:
             _reply(m.reply, refusal)
             return
+        runner._owner = self
+        # Only once accepted: a refused spawn of a running instance leaves the
+        # token its run waits on in place
+        runner.service.stopping = self._root.child()
         self._runners[runner.name] = runner
         if m.isolate:
             self._isolated.add(runner)
@@ -191,6 +195,14 @@ class Owner:
 
     def _on_ready(self, m: Ready) -> None:
         runner = m.runner
+        if runner._owner is not self:  # another runtime's, or refused at spawn
+            _reply(
+                m.reply,
+                ValueError(
+                    f"{runner.name!r} is not a service of runtime {self._name!r}"
+                ),
+            )
+            return
         if m.give_up:
             self._give_up(runner, m.reply)
             return
@@ -285,41 +297,70 @@ class Owner:
         if not _current(runner, m):
             return
         runner._task = None
-        gone = self._deps.gone(runner.service)
+        # The start rule again, once set up: a dependency may have stopped,
+        # left or failed during setup()
+        down = self._deps.down(runner.service)
         if m.error is not None:
             self._setup_failed(runner, _setup_error(runner, m.error))
         elif runner in self._stop_asked or self._closing:
             # Set up, but stopped first: it never runs, and is torn down
             for state in (State.INITD, State.STARTING, State.STOPPING):
                 runner._move(state)
+            _end_token(runner)
             self._tear(runner)
-        elif gone is not None:
+        elif down is not None:
             # Torn down first: it fails once settled (_ended())
-            runner._error = DependencyFailedError(runner.name, gone)
+            runner._error = DependencyFailedError(runner.name, down)
+            _end_token(runner)
             self._tear(runner)
         else:
             self._launch(runner)
 
     def _setup_failed(self, runner: Runner, error: BaseException) -> None:
-        """Setup failed: a restart attempt tries again or ends; a start fails."""
+        """Setup failed: a restart attempt tries again or ends; a start fails.
+        A stop asked during the setup ends it either way, and is answered."""
         self._lg.warning(
             "service failed to start",
             extra={"service": runner.name, "exception": error},
         )
         runner._error = error
-        if runner.name in self._restarting:
+        stopped = runner in self._stop_asked
+        self._stop_asked.discard(runner)
+        if runner.name in self._restarting and not stopped:
             self._retry(runner)
             return
         if runner.state != State.FAILED:
             runner._move(State.FAILED)
         self._fail(runner, error)
+        self._let_go(runner)
+
+    def _let_go(self, runner: Runner) -> None:
+        """*runner* will not run again: answer its stops, take it out of the
+        runtime, and let stop() go on if it was stopping it."""
+        for reply in self._stops.pop(runner, ()):
+            _reply(reply, None)
         self._forget(runner)
+        self._shutdown_settled(runner)
 
     def _launch(self, runner: Runner) -> None:
         """Spawn *runner*'s run as a task: STARTING until healthy."""
         runner._move(State.INITD)
         runner._move(State.STARTING)
         runner._error = None
+        try:
+            self._start_run(runner)
+        except Exception as e:  # the run never began: its start fails with e
+            runner._error = e
+            runner._teardown = TORN
+            _end_token(runner)
+            self._settle(runner)
+            return
+        awaited = runner in self._ready or self._deps.awaited(runner.name)
+        if awaited or runner.name in self._restarting:
+            self._watch(runner)
+
+    def _start_run(self, runner: Runner) -> None:
+        """Spawn *runner*'s run task."""
         service = runner.service
         if runner in self._isolated:
             runner._task = self._launch_child(runner)
@@ -331,19 +372,27 @@ class Owner:
             # stops the token and cancels the task.
             runner._task = self._step(runner, "run", service.run)
             runner._teardown = OWED if _overrides(service, "teardown") else TORN
-        awaited = runner in self._ready or self._deps.awaited(runner.name)
-        if awaited or runner.name in self._restarting:
-            self._watch(runner)
 
     def _launch_child(self, runner: Runner) -> Task:
         """Spawn an isolated service's run in a child process, its log records
-        forwarded to the service's logger here."""
+        forwarded to the service's logger here. What it set up is undone if
+        the spawn fails."""
         service = runner.service
         ctx = mp.get_context("spawn")
         queue = ctx.Queue()
         child = _Child(ctx.Event(), LogQueueListener(queue, service.lg))
         child.listener.start()
         self._children[runner] = child
+        try:
+            return self._spawn_child(runner, child, queue)
+        except BaseException:
+            del self._children[runner]
+            child.listener.stop()
+            raise
+
+    def _spawn_child(self, runner: Runner, child: _Child, queue: Any) -> Task:
+        """The run task of an isolated service, given its log queue."""
+        service = runner.service
         clone = copy.copy(service)  # a logger does not pickle; the child makes its own
         if hasattr(clone, "_lg"):
             clone._lg = None  # type: ignore[assignment]
@@ -366,9 +415,7 @@ class Owner:
         runner._task = None
         if m.error is not None and not isinstance(m.error, StoppedError):
             runner._error = m.error
-        token = runner.service.stopping
-        token.stop()
-        token.detach()
+        _end_token(runner)
         if runner._teardown == OWED:
             self._tear(runner)
         elif runner._teardown == TORN:
@@ -441,15 +488,17 @@ class Owner:
             self._backoffs[runner.name] = task
             return
         self._fail(runner, _startup_error(runner))
-        self._forget(runner)
+        self._let_go(runner)
 
     def _on_backoff(self, runner: Runner, m: TaskDone) -> None:
-        """The backoff ended: make the restart attempt, unless stop() ended it."""
+        """The backoff ended: make the restart attempt, unless a stop ended it.
+        A stop_service() handled after the backoff finished, its end still
+        queued, cancelled nothing: its recorded stop ends the restart too."""
         task = self._backoffs.get(runner.name)
         if task is None or task.id != m.task_id:
             return
         del self._backoffs[runner.name]
-        if m.error is not None or self._closing:
+        if m.error is not None or self._closing or runner in self._stops:
             self._restarting.discard(runner.name)
             if runner in self._stops:
                 self._halt(runner)
@@ -519,25 +568,27 @@ class Owner:
         elif runner.state in (State.STARTING, State.RUNNING, State.IDLE):
             runner._move(State.STOPPING)
             self._end_run(runner)
-            tears = runner not in self._isolated and not isinstance(
-                runner.service, (ScheduledService, AsyncService)
-            )
-            # A run() of its own may block elsewhere: its teardown can release it
-            if tears and runner._teardown == OWED:
-                self._tear(runner)
         elif runner.name in self._backoffs:
             self._backoffs[runner.name].cancel()
         elif runner.state != State.STOPPING:
-            for reply in self._stops.pop(runner, ()):
-                _reply(reply, None)
-            self._forget(runner)
-            self._shutdown_settled(runner)
+            self._let_go(runner)
 
     def _end_run(self, runner: Runner) -> None:
-        """Stop *runner*'s run: its token, and its task."""
+        """Stop *runner*'s run: its token, and its task; on a stop, a failed
+        health check and a ready() given up on alike.
+
+        A plain service's run() on a thread may block elsewhere than on its
+        token, and its teardown can release it: that teardown runs now. An
+        async run is cancelled, a scheduled one ticks on its token, and an
+        isolated one ends with its process: theirs follows the run."""
         runner.service.stopping.stop()
         if runner._task is not None:
             runner._task.cancel()
+        tears = runner not in self._isolated and not isinstance(
+            runner.service, (ScheduledService, AsyncService)
+        )
+        if tears and runner._teardown == OWED:
+            self._tear(runner)
 
     def _walk_shutdown(self) -> None:
         """Stop the next service of stop()'s queue, until one has to be waited
@@ -616,10 +667,26 @@ class Owner:
 
     def _forget(self, runner: Runner) -> None:
         """Take *runner* out of the runtime; the services still waiting on it
-        fail, as it will not run for them."""
+        fail, as it will not run for them, and leave in turn.
+
+        A worklist, not recursion: a chain of waiters is as long as it is. A
+        waiter can be reached twice, through two of its dependencies; once
+        gone, it is skipped."""
+        work = [runner]
+        while work:
+            left = work.pop()
+            if self._runners.get(left.name) is not left:
+                continue
+            for waiter in self._drop(left):
+                if self._runners.get(waiter.name) is waiter and waiter not in work:
+                    self._fail(waiter, DependencyFailedError(waiter.name, left.name))
+                    waiter._move(State.FAILED)  # never started: CREATED -> FAILED
+                    work.append(waiter)
+
+    def _drop(self, runner: Runner) -> list[Runner]:
+        """Take *runner* out of the runtime and answer its ready() calls;
+        return the services that were waiting on it."""
         name = runner.name
-        if self._runners.get(name) is not runner:
-            return
         waiting = [self._runners[w] for w in self._deps.drop(name)]
         del self._runners[name]
         self._restarting.discard(name)
@@ -628,10 +695,7 @@ class Owner:
             outcome = None if runner.state in UP else _startup_error(runner)
             for reply in self._ready.pop(runner):
                 _reply(reply, outcome)
-        for waiter in waiting:
-            self._fail(waiter, DependencyFailedError(waiter.name, name))
-            waiter._move(State.FAILED)  # never started: CREATED -> FAILED
-            self._forget(waiter)
+        return waiting
 
 
 _HANDLERS: dict[type, Callable[[Owner, Any], None]] = {
@@ -656,6 +720,14 @@ _STEPS: dict[str, Callable[[Owner, Runner, TaskDone], None]] = {
 def _current(runner: Runner, m: TaskDone) -> bool:
     """True if *m* ends *runner*'s current setup or run, not an older one."""
     return runner._task is not None and runner._task.id == m.task_id
+
+
+def _end_token(runner: Runner) -> None:
+    """The service will not run on: stop its token, so work started on it
+    ends before teardown() waits for it, and detach it from the root's."""
+    token = runner.service.stopping
+    token.stop()
+    token.detach()
 
 
 def _overrides(service: Service, method: str) -> bool:

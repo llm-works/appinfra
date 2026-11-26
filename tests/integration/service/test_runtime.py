@@ -7,10 +7,12 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import functools
 import multiprocessing as mp
 import random
 import threading
-from unittest.mock import MagicMock
+from collections.abc import Iterator
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -29,6 +31,7 @@ from appinfra.service import (
     SetupError,
     State,
 )
+from appinfra.service.runtime.owner import Ready
 from tests.helpers.service.runner import wait_until as _wait_until
 
 
@@ -258,6 +261,20 @@ class TestSpawn:
         assert all(isinstance(r, Runner) for r in runners)
         assert {r.state for r in runners} == {State.RUNNING}
 
+    def test_an_isolated_launch_that_fails_fails_the_start(self, rt):
+        """The service cannot be copied for its process: its start fails with
+        the cause, and nothing of the launch is left behind."""
+
+        class Uncopyable(Blocking):
+            def __copy__(self) -> Uncopyable:
+                raise RuntimeError("no copy")
+
+        runner = rt.spawn(Uncopyable("uncopyable", []), isolate=True)
+        with pytest.raises(RunError, match="no copy"):
+            rt.ready(runner, timeout=10.0)
+        assert runner.state == State.FAILED
+        assert rt._owner._children == {}
+
     def test_an_async_service_cannot_be_isolated(self, rt):
         with pytest.raises(ValueError, match="cannot run isolated"):
             rt.spawn(Parked("async"), isolate=True)
@@ -267,6 +284,18 @@ class TestSpawn:
         rt.spawn(Parked("same"))
         with pytest.raises(ValueError, match="already"):
             rt.spawn(Parked("same"))
+
+    def test_a_refused_spawn_leaves_the_running_instance_stoppable(self, rt):
+        """The same instance spawned again is refused, and its run keeps the
+        token a stop reaches."""
+        svc = Blocking("twice", [])
+        runner = rt.spawn(svc)
+        rt.ready(runner, timeout=5.0)
+        with pytest.raises(ValueError, match="already"):
+            rt.spawn(svc)
+
+        rt.stop_service(runner, timeout=5.0)
+        assert runner.state == State.STOPPED
 
     def test_spawn_needs_a_running_runtime(self):
         runtime = Runtime(MagicMock())
@@ -310,6 +339,48 @@ class TestSpawn:
         with pytest.raises(RunError, match="no health"):
             rt.ready(runner, timeout=15.0)
         assert runner.state == State.FAILED
+
+    def test_ready_returns_while_a_hook_blocks_the_runtime(self, rt):
+        """A state hook blocks the runtime's task: ready() still returns once
+        its timeout and the short grace for giving up have passed."""
+
+        class NeverHealthy(Parked):
+            def is_healthy(self) -> bool:
+                return False
+
+        sick = rt.spawn(NeverHealthy("sick"))
+        other = rt.spawn(Parked("other"))
+        rt.ready(other, timeout=5.0)
+        blocked, release = threading.Event(), threading.Event()
+
+        def hook(name: str, old: State, new: State) -> None:
+            if new == State.STOPPING:
+                blocked.set()
+                release.wait(10.0)
+
+        other.on_state_change(hook)
+        stopper = threading.Thread(target=rt.stop_service, args=(other, 10.0))
+        stopper.start()
+        errors: list[BaseException] = []
+
+        def wait_ready() -> None:
+            try:
+                rt.ready(sick, timeout=0.2)
+            except BaseException as e:
+                errors.append(e)
+
+        waiter = threading.Thread(target=wait_ready)
+        try:
+            assert blocked.wait(5.0)
+            with patch("appinfra.service.runtime.runtime.GIVE_UP_GRACE", 0.05):
+                waiter.start()
+                waiter.join(5.0)  # the deadline is the failure path
+                assert not waiter.is_alive()
+            assert [type(e) for e in errors] == [HealthTimeoutError]
+        finally:
+            release.set()
+            stopper.join(10.0)
+            waiter.join(10.0)
 
     def test_independent_services_run_at_once(self, rt):
         """spawn() starts a service without waiting for its health, so services
@@ -592,6 +663,240 @@ class TestRefusedAtStop:
         with pytest.raises(RunError, match="stopped first"):
             rt.ready(waiter, timeout=5.0)
         stopper.join(10.0)
+
+
+class SetsUpWork(Service):
+    """setup() starts a worker on a child of its token, then is held until
+    released; teardown() joins the worker and notes whether it ended."""
+
+    def __init__(self, name: str, depends: tuple[str, ...] = ()) -> None:
+        self._lg = MagicMock()
+        self._name = name
+        self._depends = list(depends)
+        self.in_setup, self.release = threading.Event(), threading.Event()
+        self.worker_ended: bool | None = None
+        self.ran = False
+
+    @property
+    def name(self) -> str:
+        return self._name
+
+    @property
+    def depends_on(self) -> list[str]:
+        return self._depends
+
+    def setup(self) -> None:
+        self._worker = threading.Thread(target=self.stopping.child().wait)
+        self._worker.start()
+        self.in_setup.set()
+        self.release.wait(10.0)
+
+    def run(self) -> None:
+        self.ran = True
+        self.stopping.wait()
+
+    def teardown(self) -> None:
+        self._worker.join(5.0)  # the deadline is the failure path
+        self.worker_ended = not self._worker.is_alive()
+
+
+class TestTeardownWithoutRun:
+    """A service set up but never run is torn down with its token stopped, as
+    after a run: work setup() started on it ends before teardown() waits."""
+
+    def test_a_service_stopped_during_setup(self, rt):
+        svc = SetsUpWork("stopped-in-setup")
+        runner = rt.spawn(svc)
+        assert svc.in_setup.wait(5.0)
+        stopper = threading.Thread(target=rt.stop_service, args=(runner, 10.0))
+        stopper.start()
+        assert _wait_until(lambda: runner in rt._owner._stop_asked, 5.0)
+
+        svc.release.set()
+        stopper.join(10.0)
+        assert svc.worker_ended is True
+
+    def test_a_service_whose_dependency_left_during_setup(self, rt):
+        dep = rt.spawn(Parked("dep"))
+        rt.ready(dep, timeout=5.0)
+        svc = SetsUpWork("needs-dep", depends=("dep",))
+        runner = rt.spawn(svc)
+        assert svc.in_setup.wait(5.0)
+        rt.stop_service(dep, timeout=5.0)
+
+        svc.release.set()
+        with pytest.raises(DependencyFailedError):
+            rt.ready(runner, timeout=10.0)
+        assert svc.worker_ended is True
+
+    def test_a_service_whose_dependency_is_stopping_once_set_up(self, rt):
+        """Its dependency is still in the runtime but no longer RUNNING when
+        setup() returns: the service never runs, and fails."""
+
+        class SlowToStop(Service):
+            """Its run() ends only when released, not on its token."""
+
+            def __init__(self) -> None:
+                self._lg = MagicMock()
+                self.release = threading.Event()
+
+            @property
+            def name(self) -> str:
+                return "dep"
+
+            def run(self) -> None:
+                self.release.wait(10.0)
+
+        dep_svc = SlowToStop()
+        dep = rt.spawn(dep_svc)
+        rt.ready(dep, timeout=5.0)
+        svc = SetsUpWork("needs-dep", depends=("dep",))
+        runner = rt.spawn(svc)
+        assert svc.in_setup.wait(5.0)
+        stopper = threading.Thread(target=rt.stop_service, args=(dep, 10.0))
+        stopper.start()
+        try:
+            assert _wait_until(lambda: dep.state == State.STOPPING, 5.0)
+            svc.release.set()
+            with pytest.raises(DependencyFailedError):
+                rt.ready(runner, timeout=10.0)
+            assert not svc.ran
+            assert svc.worker_ended is True
+        finally:
+            dep_svc.release.set()
+            stopper.join(10.0)
+
+
+class FailsThenFailsSetup(Service):
+    """Its first run fails once told to; every later setup() is held until
+    released, then raises. Counts its setups."""
+
+    def __init__(self) -> None:
+        self._lg = MagicMock()
+        self.setups = 0
+        self.fail, self.in_setup, self.release = (threading.Event() for _ in range(3))
+
+    @property
+    def name(self) -> str:
+        return "fails-then-fails-setup"
+
+    def setup(self) -> None:
+        self.setups += 1
+        if self.setups > 1:
+            self.in_setup.set()
+            self.release.wait(10.0)
+            raise RuntimeError("no setup")
+
+    def run(self) -> None:
+        self.fail.wait(10.0)
+        raise RuntimeError("run fails")
+
+
+class HeldUntilTornDown(Service):
+    """A plain service whose run() blocks on what teardown() releases, not on
+    its token, as on a socket teardown() closes; never healthy, or its check
+    raises."""
+
+    def __init__(self, name: str, check_raises: bool) -> None:
+        self._lg = MagicMock()
+        self._name = name
+        self._check_raises = check_raises
+        self.released = threading.Event()
+
+    @property
+    def name(self) -> str:
+        return self._name
+
+    def run(self) -> None:
+        self.released.wait(10.0)  # the deadline is the failure path
+
+    def teardown(self) -> None:
+        self.released.set()
+
+    def is_healthy(self) -> bool:
+        if self._check_raises:
+            raise RuntimeError("no health")
+        return False
+
+
+class TestFailedStartReleasesTheRun:
+    """A start that fails ends a plain run the way a stop does: its teardown
+    runs at once, which may be what releases the run."""
+
+    def test_a_health_check_that_raises(self, rt):
+        runner = rt.spawn(HeldUntilTornDown("raises", check_raises=True))
+        with pytest.raises(RunError, match="no health"):
+            rt.ready(runner, timeout=5.0)
+
+    def test_a_ready_that_times_out(self, rt):
+        svc = HeldUntilTornDown("never-healthy", check_raises=False)
+        runner = rt.spawn(svc)
+        with pytest.raises(HealthTimeoutError):
+            rt.ready(runner, timeout=0.2)
+        assert _wait_until(lambda: "never-healthy" not in rt.services, 5.0)
+        assert runner.state == State.FAILED
+
+
+class TestStopDuringRestart:
+    def test_a_stop_during_a_restart_setup_that_fails_is_answered(self, rt):
+        """stop_service() lands while a restart is in setup(), which then
+        raises: the stop returns, and no further restart follows."""
+        svc = FailsThenFailsSetup()
+        runner = rt.spawn(svc, RestartPolicy(max_retries=3, backoff=0.0))
+        rt.ready(runner, timeout=5.0)
+        svc.fail.set()
+        assert svc.in_setup.wait(5.0)  # the restart's setup()
+        errors: list[BaseException] = []
+
+        def stop() -> None:
+            try:
+                rt.stop_service(runner, timeout=5.0)
+            except BaseException as e:
+                errors.append(e)
+
+        stopper = threading.Thread(target=stop)
+        stopper.start()
+        assert _wait_until(lambda: runner in rt._owner._stop_asked, 5.0)
+        svc.release.set()
+        stopper.join(10.0)
+
+        assert errors == []
+        assert svc.setups == 2
+        assert "fails-then-fails-setup" not in rt.services
+
+
+class TestForeignRunners:
+    """A runner one runtime spawned, passed to another: the other refuses it
+    and leaves it as it is. Only its own runtime moves its state."""
+
+    @pytest.fixture
+    def other(self) -> Iterator[Runtime]:
+        other = Runtime(MagicMock(), name="other")
+        other.start()
+        yield other
+        other.stop(timeout=10.0)
+
+    def test_ready_refuses_a_runner_of_another_runtime(self, rt, other):
+        runner = other.spawn(Parked("theirs"))
+        other.ready(runner, timeout=5.0)
+
+        with pytest.raises(ValueError, match="not a service of runtime"):
+            rt.ready(runner, timeout=5.0)
+
+    def test_giving_up_leaves_a_runner_of_another_runtime_starting(self, rt, other):
+        """A ready() that timed out gives up on its runner; on a runner of
+        another runtime it ends nothing."""
+
+        class NeverHealthy(Parked):
+            def is_healthy(self) -> bool:
+                return False
+
+        runner = other.spawn(NeverHealthy("theirs"))
+        assert _wait_until(lambda: runner.state == State.STARTING, 5.0)
+
+        with pytest.raises(ValueError, match="not a service of runtime"):
+            rt._ask(functools.partial(Ready, runner, True))
+        assert runner.state == State.STARTING
 
 
 class TestStopAndStart:

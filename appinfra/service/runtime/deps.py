@@ -46,9 +46,10 @@ class Dependencies:
         """True if every dependency of *service* runs."""
         return all(self._runs(dep) for dep in service.depends_on)
 
-    def gone(self, service: Service) -> str | None:
-        """A dependency of *service* that is not in the runtime, or None."""
-        return next((d for d in service.depends_on if d not in self._runners), None)
+    def down(self, service: Service) -> str | None:
+        """A dependency of *service* that does not run, whether it left the
+        runtime or is in it but not RUNNING; None if every one runs."""
+        return next((d for d in service.depends_on if not self._runs(d)), None)
 
     def missing(self, service: Service) -> str:
         """The first dependency of *service* that does not run; all of them if

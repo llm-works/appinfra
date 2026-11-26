@@ -72,13 +72,15 @@ class TestState:
         cache._state = State.RUNNING  # Private: the Runtime moves it
         assert deps.all_run(api)
 
-    def test_gone_names_a_dependency_not_in_the_runtime(self):
+    def test_down_names_a_dependency_gone_or_not_running(self):
         runners: dict[str, Runner] = {}
-        _add(runners, "db")
+        _add(runners, "db", running=True)
+        _add(runners, "cache")  # in the runtime, not RUNNING
         deps = Dependencies(runners)
 
-        assert deps.gone(Named("api", "db", "queue")) == "queue"
-        assert deps.gone(Named("api", "db")) is None
+        assert deps.down(Named("api", "db", "queue")) == "queue"
+        assert deps.down(Named("api", "db", "cache")) == "cache"
+        assert deps.down(Named("api", "db")) is None
 
 
 class TestWaiting:
