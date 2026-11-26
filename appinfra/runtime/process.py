@@ -21,6 +21,9 @@ from .stop import StopToken
 from .task import _label, _Task
 from .thread import _ThreadTask
 
+# What terminate() and kill() ask of a child, the stronger one winning
+_TERMINATE, _KILL = 1, 2
+
 
 class _ProcessTask(_ThreadTask):
     """Calls a function in a child process, started with the ``spawn`` method:
@@ -38,7 +41,7 @@ class _ProcessTask(_ThreadTask):
     ProcessExitError, unless the task was stopped.
     """
 
-    __slots__ = ("_process",)
+    __slots__ = ("_process", "_lock", "_forced")
 
     killable = True
 
@@ -53,7 +56,12 @@ class _ProcessTask(_ThreadTask):
     ) -> None:
         """Initialize task; see _Task."""
         super().__init__(on_end, task_id, name, fn, args, token)
+        # The child, once started; terminate() and kill() read it, and record
+        # what they were asked in _forced, under _lock, so a force between the
+        # child's start and its publication is not lost
         self._process: BaseProcess | None = None
+        self._lock = threading.Lock()
+        self._forced = 0  # _TERMINATE or _KILL once forced
 
     def _call(self, fn: Callable[..., Any], args: tuple[Any, ...]) -> Any:
         """Run *fn*(*args*) in a child and return or raise its outcome."""
@@ -69,7 +77,7 @@ class _ProcessTask(_ThreadTask):
                 name=_label(self.id, self.name),
             )
             process.start()
-            self._process = process
+            self._publish(process)
             # The child has its copies: EOF on either side means the other end
             # is gone
             stop_recv.close()
@@ -122,21 +130,43 @@ class _ProcessTask(_ThreadTask):
         return report
 
     def terminate(self) -> None:
-        """Send the child SIGTERM, if it is running."""
-        self._send(lambda process: process.terminate())
+        """Send the child SIGTERM, if it is running, or once it is published."""
+        self._force(_TERMINATE)
 
     def kill(self) -> None:
-        """Send the child SIGKILL, if it is running."""
-        self._send(lambda process: process.kill())
+        """Send the child SIGKILL, if it is running, or once it is published."""
+        self._force(_KILL)
 
-    def _send(self, signal: Callable[[BaseProcess], None]) -> None:
-        """*signal* the child, if it is running. One reaped and closed while
-        this ran (_outcome()) raises ValueError: nothing is left to signal."""
-        process = self._process
-        if process is not None:
-            with contextlib.suppress(ValueError):
-                if process.is_alive():
-                    signal(process)
+    def _force(self, level: int) -> None:
+        """Record *level*, so a child not yet published gets it as it is
+        (_publish()), and send it to one that is."""
+        with self._lock:
+            self._forced = max(self._forced, level)
+            process = self._process
+        _send(process, level)
+
+    def _publish(self, process: BaseProcess) -> None:
+        """Make the started *process* the one terminate() and kill() reach,
+        and send it what they were asked before: the stop that forced this
+        task may have come between its start and here."""
+        with self._lock:
+            self._process = process
+            forced = self._forced
+        _send(process, forced)
+
+
+def _send(process: BaseProcess | None, level: int) -> None:
+    """Send *process* SIGKILL for _KILL, SIGTERM for _TERMINATE, if it is
+    running; nothing for no process or no level. One reaped and closed
+    meanwhile (_outcome()) raises ValueError: nothing is left to signal."""
+    if process is None or not level:
+        return
+    with contextlib.suppress(ValueError):
+        if process.is_alive():
+            if level >= _KILL:
+                process.kill()
+            else:
+                process.terminate()
 
 
 def _opened(

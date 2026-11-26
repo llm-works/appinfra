@@ -13,6 +13,7 @@ import sys
 import threading
 import types
 from collections.abc import Iterator
+from multiprocessing.context import SpawnProcess
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -95,6 +96,21 @@ def holds_its_argument(_: Any) -> None:
     """Takes an argument, then ignores its stop and SIGTERM as
     ignores_everything() does."""
     ignores_everything()
+
+
+class HeldAfterStart(SpawnProcess):
+    """A child process whose start() returns only once released: it holds the
+    parent thread between the child's start and its publication. At module
+    level, as the child unpickles it; the events are the class's, so they are
+    not pickled with it."""
+
+    held = threading.Event()
+    release = threading.Event()
+
+    def start(self) -> None:
+        super().start()
+        HeldAfterStart.held.set()
+        HeldAfterStart.release.wait(30.0)
 
 
 class SlowToPickle:
@@ -314,6 +330,42 @@ class TestStop:
         assert not t.alive()
         with pytest.raises(StoppedError):
             t.wait(timeout=0)
+
+    def test_a_stop_forced_before_the_child_is_published_still_kills_it(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The child is running its call, ignoring its stop, but the parent
+        thread has not published it yet when the runtime's stop forces the
+        task: the force is recorded, and applied as the child is published."""
+        monkeypatch.setattr(runtime_module, "_GRACE", 0.1)
+        real = mp.get_context("spawn")
+        held, release = HeldAfterStart.held, HeldAfterStart.release
+        held.clear()
+        release.clear()
+
+        class SpawnsHeld:
+            def __getattr__(self, name: str) -> Any:
+                return getattr(real, name)
+
+            def Process(self, *args: Any, **kwargs: Any) -> Any:  # noqa: N802
+                return HeldAfterStart(*args, **kwargs)
+
+        monkeypatch.setattr(process_module.mp, "get_context", lambda _: SpawnsHeld())
+        started = real.Event()
+        rt = Runtime(MagicMock())
+        rt.start()
+        try:
+            t = rt.spawn(ignores_everything, started, process=True)
+            assert held.wait(30.0)  # the timeouts are the failure path
+            assert started.wait(30.0)  # in its call, ignoring stop and SIGTERM
+            rt.stop(timeout=0.1)  # forces the task before it is published
+            release.set()
+            with pytest.raises(StoppedError):
+                t.wait(timeout=10.0)
+        finally:
+            release.set()
+            for child in mp.active_children():  # a failing run leaves it running
+                child.kill()
 
     def test_a_child_still_starting_when_the_stop_gives_up_is_killed_once_started(
         self, monkeypatch: pytest.MonkeyPatch
