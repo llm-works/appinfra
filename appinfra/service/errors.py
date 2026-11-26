@@ -3,6 +3,8 @@
 
 """Service errors."""
 
+from __future__ import annotations
+
 from typing import Any
 
 from appinfra.errors import InfraError
@@ -27,6 +29,16 @@ class SetupError(Error):
     def __init__(self, name: str, message: str) -> None:
         self.service_name = name
         super().__init__(f"{name}: setup failed: {message}")
+
+    @classmethod
+    def of(cls, name: str, error: Exception) -> SetupError:
+        """*error*, which service *name*'s setup() raised, as a SetupError:
+        itself if it is one, else a new one caused by it."""
+        if isinstance(error, SetupError):
+            return error
+        wrapped = cls(name, str(error))
+        wrapped.__cause__ = error
+        return wrapped
 
 
 class RunError(Error):

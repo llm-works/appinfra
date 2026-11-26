@@ -24,8 +24,7 @@ from typing import Any
 from ....log import Logger
 from ....log.mp import LogQueueListener
 from ....runtime import StopToken
-from ....service.base import Service
-from ....service.runtime.drive import check_drivable, drive
+from ....service.base import AsyncService, Service
 from ....service.state import RestartPolicy, State
 from .process_base import ProcessBase
 
@@ -96,7 +95,11 @@ class ProcessRunner(ProcessBase):
             TypeError: If *service* is an AsyncService.
         """
         super().__init__(service, policy, parent=parent)
-        check_drivable(self.service)
+        if isinstance(self.service, AsyncService):
+            raise TypeError(
+                f"async service '{self.service.name}' runs on an event loop, not in "
+                "a process of its own"
+            )
         self.stop_timeout = stop_timeout
         self._start_method = start_method
         self._process: BaseProcess | None = None
@@ -491,7 +494,7 @@ def _process_entry(
         _bridge_stop(service.stopping, stop_reader, inherited_writer)
 
         _start_health_poller(service, shutdown_event, healthy_event)
-        drive(service, service.stopping)
+        service.run()
     except BaseException as e:
         exit_code = _exit_code(e)
         with contextlib.suppress(Exception):

@@ -7,8 +7,71 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from appinfra.service import InvalidTransitionError, RestartPolicy, Runner, State
+from appinfra.service import (
+    AsyncService,
+    InvalidTransitionError,
+    RestartPolicy,
+    Runner,
+    ScheduledService,
+    State,
+)
 from tests.helpers.service.runner import SimpleService
+
+
+class Ticker(ScheduledService):
+    def __init__(self) -> None:
+        self._lg = MagicMock()
+
+    @property
+    def name(self) -> str:
+        return "ticker"
+
+    def tick(self) -> None:
+        raise AssertionError("never run by these tests")
+
+
+class Idle(AsyncService):
+    def __init__(self) -> None:
+        self._lg = MagicMock()
+
+    @property
+    def name(self) -> str:
+        return "idle"
+
+    async def run(self) -> None:
+        raise AssertionError("never run by these tests")
+
+
+class TickAndAwait(ScheduledService, AsyncService):
+    """A scheduled service that is also an async one."""
+
+    def __init__(self) -> None:
+        self._lg = MagicMock()
+
+    @property
+    def name(self) -> str:
+        return "both"
+
+    def tick(self) -> None:
+        raise AssertionError("never run by these tests")
+
+
+class TestRunnerAccepts:
+    """Which services a Runner accepts."""
+
+    def test_what_is_not_a_service_is_refused(self):
+        with pytest.raises(TypeError, match="must be a Service"):
+            Runner(object())
+
+    def test_scheduled_and_async_at_once_is_refused(self):
+        with pytest.raises(
+            TypeError, match="both a ScheduledService and an AsyncService"
+        ):
+            Runner(TickAndAwait())
+
+    @pytest.mark.parametrize("service_cls", [SimpleService, Ticker, Idle])
+    def test_every_kind_is_taken(self, service_cls: type):
+        assert Runner(service_cls()).service is not None
 
 
 class TestRunner:
@@ -40,10 +103,6 @@ class TestRunner:
 
         assert seen == [(State.CREATED, State.INITD)]
         svc._lg.warning.assert_called_once()
-
-    def test_what_is_not_a_service_is_refused(self):
-        with pytest.raises(TypeError, match="must be a Service"):
-            Runner(object())
 
     def test_restart_delay_grows_with_retries_up_to_its_cap(self):
         policy = RestartPolicy(backoff=1.0, backoff_multiplier=2.0, max_backoff=5.0)

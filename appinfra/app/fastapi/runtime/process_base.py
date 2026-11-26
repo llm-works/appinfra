@@ -25,7 +25,7 @@ from ....service.errors import (
     RunError,
     SetupError,
 )
-from ....service.runtime.drive import check_service
+from ....service.runtime.runner import _check_service as check_service
 from ....service.state import TRANSITIONS, RestartPolicy, State, StateHook
 
 # The runners whose state hooks the current thread is running (_notify())

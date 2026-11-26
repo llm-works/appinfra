@@ -183,7 +183,7 @@ class AsyncService(Service):
 class ScheduledService(Service):
     """Service that runs on a schedule.
 
-    The runner calls tick(), then waits ``interval`` seconds, until the service
+    Its run() calls tick(), then waits ``interval`` seconds, until the service
     is stopped: ticks start interval plus tick() time apart. An exception from
     tick() fails the service.
 
@@ -215,7 +215,8 @@ class ScheduledService(Service):
         ...
 
     def run(self) -> None:
-        """Not used: the runner drives a scheduled service through tick()."""
-        raise TypeError(
-            f"scheduled service '{self.name}' is driven through tick(), not run()"
-        )
+        """tick(), then wait ``interval`` seconds, until ``stopping`` is set; an
+        exception from tick() ends the run with it."""
+        while not self.stopping.is_set():
+            self.tick()
+            self.stopping.wait(self.interval)

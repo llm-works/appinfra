@@ -19,7 +19,15 @@ from typing import Any
 
 from ...log import Logger
 from ...log.mp import LogQueueListener
-from ...runtime import Chan, ChanClosedError, StoppedError, StopToken, Task, TaskDone
+from ...runtime import (
+    Chan,
+    ChanClosedError,
+    StoppedError,
+    StopToken,
+    Task,
+    TaskDone,
+    stopping,
+)
 from ...runtime import Runtime as Tasks
 from ...runtime import task_id as current_task_id
 from ..base import AsyncService, ScheduledService, Service
@@ -32,12 +40,14 @@ from ..errors import (
     SetupError,
 )
 from ..state import RestartPolicy, State
-from . import steps
-from .drive import check_drivable, drive
+from . import child as child_process
 from .runner import OWED, TEARING, TORN, Runner
 
 # States in which a service has started and is, or was, healthy
 _UP = (State.RUNNING, State.IDLE, State.DONE)
+
+# Seconds between two health checks of a service starting
+_HEALTH_INTERVAL = 0.1
 
 
 @dataclass(frozen=True, slots=True)
@@ -447,7 +457,7 @@ class Runtime:
         if runner in self._isolated or not _overrides(runner.service, "setup"):
             self._launch(runner)
         else:
-            runner._task = self._step(runner, "setup", steps.set_up, runner.service)
+            runner._task = self._step(runner, "setup", runner.service.setup)
 
     def _on_setup(self, runner: Runner, m: TaskDone) -> None:
         if not _current(runner, m):
@@ -455,7 +465,7 @@ class Runtime:
         runner._task = None
         gone = self._gone_dependency(runner.service)
         if m.error is not None:
-            self._setup_failed(runner, m.error)
+            self._setup_failed(runner, _setup_error(runner, m.error))
         elif runner in self._stop_asked or self._closing:
             # Set up, but stopped first: it never runs, and is torn down
             for state in (State.INITD, State.STARTING, State.STOPPING):
@@ -493,15 +503,11 @@ class Runtime:
             runner._task = self._launch_child(runner)
             runner._teardown = OWED  # the parent's part: its log forwarding
         else:
-            # Under the root token, not service.stopping: a child would give
-            # that token a set of children to hold. A stop reaches the run
-            # anyway: _end_run() stops the token and cancels the task.
-            if isinstance(service, AsyncService):
-                runner._task = self._step(runner, "run", service.run)
-            else:
-                runner._task = self._step(
-                    runner, "run", drive, service, service.stopping
-                )
+            # On the loop for an AsyncService, else on a thread. Under the root
+            # token, not service.stopping: a child would give that token a set
+            # of children to hold. A stop reaches the run anyway: _end_run()
+            # stops the token and cancels the task.
+            runner._task = self._step(runner, "run", service.run)
             runner._teardown = OWED if _overrides(service, "teardown") else TORN
         awaited = runner in self._ready or self._waiters.get(runner.name)
         if awaited or runner.name in self._restarting:
@@ -523,7 +529,7 @@ class Runtime:
         return self._step(
             runner,
             "run",
-            steps.isolated,
+            child_process.main,
             clone,
             child.healthy,
             config,
@@ -553,7 +559,7 @@ class Runtime:
         if child is not None:
             task = self._step(runner, "teardown", child.listener.stop)
         elif _overrides(runner.service, "teardown"):
-            task = self._step(runner, "teardown", steps.tear_down, runner.service)
+            task = self._step(runner, "teardown", runner.service.teardown)
         else:
             runner._teardown = TORN
             self._settle(runner)
@@ -609,7 +615,7 @@ class Runtime:
         failed service go."""
         if runner.can_restart and not self._closing:
             self._restarting.add(runner.name)
-            task = self._step(runner, "backoff", steps.back_off, runner.restart_delay)
+            task = self._step(runner, "backoff", _back_off, runner.restart_delay)
             self._backoffs[runner.name] = task
             return
         self._fail(runner, _startup_error(runner))
@@ -638,16 +644,10 @@ class Runtime:
         child = self._children.get(runner)
         token = runner.service.stopping
         if child is not None:
-            healthy = child.healthy
-            task = self._step(
-                runner, "health", steps.check_child_health, healthy, token=token
-            )
+            check = functools.partial(child_process.wait_healthy, child.healthy)
         else:
-            service = runner.service
-            task = self._step(
-                runner, "health", steps.check_health, service, token=token
-            )
-        self._health[runner.name] = task.id
+            check = functools.partial(_poll_health, runner.service)
+        self._health[runner.name] = self._step(runner, "health", check, token=token).id
 
     def _on_health(self, runner: Runner, m: TaskDone) -> None:
         """A health check ended: a healthy service STARTING runs, and starts
@@ -732,7 +732,7 @@ class Runtime:
             self._stops.setdefault(runner, [])
             self._halt(runner)
             if sd.current is runner:
-                sd.deadline = self._step(runner, "deadline", steps.back_off, sd.timeout)
+                sd.deadline = self._step(runner, "deadline", _back_off, sd.timeout)
         sd.walking = False
         if sd.current is None and not sd.queue:
             self._shutdown = None
@@ -901,13 +901,45 @@ def _check_isolable(service: Service) -> None:
     Raises:
         ValueError: If *service* is an AsyncService.
     """
-    try:
-        check_drivable(service)
-    except TypeError:
+    if isinstance(service, AsyncService):
         raise ValueError(
             f"async service '{service.name}' cannot run isolated: an async "
             "service runs on the runtime's event loop"
-        ) from None
+        )
+
+
+def _setup_error(runner: Runner, error: BaseException) -> BaseException:
+    """What *runner*'s setup task ended with, as a SetupError: a stop or a
+    non-Exception stays as it is."""
+    if isinstance(error, StoppedError) or not isinstance(error, Exception):
+        return error
+    return SetupError.of(runner.name, error)
+
+
+def _poll_health(service: Service) -> bool:
+    """Health task: ask is_healthy() every _HEALTH_INTERVAL seconds, waiting on
+    this task's token, which the run's ends.
+
+    Returns:
+        True once healthy; False if the run ended first.
+    """
+    token = stopping()
+    while not token.is_set():
+        if service.is_healthy():
+            return True
+        token.wait(_HEALTH_INTERVAL)
+    return False
+
+
+def _back_off(delay: float) -> None:
+    """Backoff and deadline task: wait out *delay* seconds, unless this task's
+    token stops first.
+
+    Raises:
+        StoppedError: If stopped first, as a stopped task ends.
+    """
+    if stopping().wait(delay):
+        raise StoppedError()
 
 
 def _startup_error(runner: Runner) -> BaseException:

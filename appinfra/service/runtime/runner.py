@@ -6,16 +6,33 @@
 from __future__ import annotations
 
 from ...runtime import Task
-from ..base import Service
+from ..base import AsyncService, ScheduledService, Service
 from ..errors import InvalidTransitionError
 from ..state import TRANSITIONS, RestartPolicy, State, StateHook
-from .drive import check_service
 
 # The policy of every runner given none; RestartPolicy is frozen, so one serves all
 _DEFAULT_POLICY = RestartPolicy()
 
 # Where a run's teardown() stands; none is owed before the first run
 OWED, TEARING, TORN = 0, 1, 2
+
+
+def _check_service(service: object) -> Service:
+    """Check that *service* is a Service, and not both scheduled and async.
+
+    Returns:
+        *service*, typed as a Service.
+
+    Raises:
+        TypeError: If it is not, or is both a ScheduledService and an AsyncService.
+    """
+    if not isinstance(service, Service):
+        raise TypeError(f"service must be a Service, got {type(service)}")
+    if isinstance(service, ScheduledService) and isinstance(service, AsyncService):
+        raise TypeError(
+            f"service '{service.name}' is both a ScheduledService and an AsyncService"
+        )
+    return service
 
 
 class Runner:
@@ -44,9 +61,9 @@ class Runner:
         """A runner of *service*, CREATED.
 
         Raises:
-            TypeError: If *service* is not a Service (see check_service()).
+            TypeError: If *service* is not a Service (see _check_service()).
         """
-        self.service: Service = check_service(service)
+        self.service: Service = _check_service(service)
         # Read once: the Runtime keys the service by it for its lifetime
         self.name: str = self.service.name
         self.policy = policy or _DEFAULT_POLICY
