@@ -348,7 +348,15 @@ class TestStopWithTimeout:
         assert task.process.detail().exitcode == -signal.SIGKILL
 
     def test_a_thread_task_is_stopped_as_cancel_stops_it(self, rt: Runtime) -> None:
-        task = rt.spawn(lambda: stopping().wait())
+        """Stopped once its call runs: stopped before, the call is skipped."""
+        started = threading.Event()
+
+        def waits_on_its_stop() -> None:
+            started.set()
+            stopping().wait()
+
+        task = rt.spawn(waits_on_its_stop)
+        assert started.wait(30.0)
         task.stop(timeout=0.1)
         task.wait(timeout=30.0)
         assert task.process is None

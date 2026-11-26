@@ -622,7 +622,11 @@ class Owner:
             # A setup that ended expired or with a dependency down, being torn
             # down: stopped once its teardown settles
             self._stop_asked.add(runner)
-        elif runner.state != State.STOPPING:
+        elif runner.state == State.STOPPING:
+            # Stopping already, maybe under a longer timeout: this stop forces
+            # it within its own. Ending the run again is harmless otherwise
+            self._end_run(runner, timeout)
+        else:
             self._let_go(runner)
 
     def _end_run(self, runner: Runner, timeout: float) -> None:

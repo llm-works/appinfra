@@ -16,8 +16,8 @@ For API stability guarantees and deprecation policy, see
   `terminate()`/`kill()`; `Runtime.process_context` is the context its children start in.
 - `Task.stop(timeout)`: a process task still running *timeout* seconds on is terminated, then
   killed. The service `Runtime` stops an isolated service this way, waiting through it;
-  `RestartPolicy.stop_timeout` applies when it stops one on its own. `Runner.task` is the run's
-  task.
+  `RestartPolicy.stop_timeout` applies when it stops one on its own. `Runner.task` is the task of
+  its current step, setup or run.
 - `pgserver.bind` sets the host address the port of the local dev server (`make pg.server.up`,
   `appinfra pg up`) listens on. `pgserver.pass`, set through `INFRA_PGSERVER_PASS`, makes the
   server require that password on its port; it takes effect on the next start, existing volumes

@@ -188,7 +188,10 @@ class _ProcessTask(_ThreadTask):
             process = self._process
             if process is None:
                 return ProcessDetail(pid=None, exitcode=None, alive=False)
-            return ProcessDetail(process.pid, process.exitcode, process.is_alive())
+            # One poll of the child: a second could see it end after the first
+            # did not. Published only once started, so no exit code means alive
+            exitcode = process.exitcode
+            return ProcessDetail(process.pid, exitcode, alive=exitcode is None)
 
 
 def _send(process: BaseProcess | None, level: int) -> None:

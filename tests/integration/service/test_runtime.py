@@ -296,6 +296,24 @@ class TestStopEscalation:
         assert task.process.detail().exitcode == -signal.SIGTERM
         assert runner.task is None
 
+    def test_a_second_stop_forces_within_its_own_timeout(self, rt):
+        """A service already stopping under a long timeout: a second
+        stop_service() with a short one forces it within that one."""
+        runner = rt.spawn(IgnoresItsStop(), isolate=True)
+        rt.ready(runner, timeout=30.0)
+        task = runner.task
+        stopping = threading.Event()
+        runner.on_state_change(
+            lambda _name, _old, new: new == State.STOPPING and stopping.set()
+        )
+        first = threading.Thread(target=rt.stop_service, args=(runner, 60.0))
+        first.start()
+        assert stopping.wait(30.0)
+
+        rt.stop_service(runner, timeout=0.2)
+        first.join(30.0)
+        assert task.process.detail().exitcode == -signal.SIGTERM
+
     @pytest.mark.parametrize("stop", ["stop_service", "stop"])
     def test_a_negative_timeout_is_refused(self, rt, stop):
         runner = rt.spawn(Parked("async"))
