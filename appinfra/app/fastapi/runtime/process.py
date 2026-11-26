@@ -19,6 +19,7 @@ import sys
 import threading
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
 from multiprocessing.connection import Connection
 from multiprocessing.context import BaseContext
 from multiprocessing.process import BaseProcess
@@ -43,6 +44,14 @@ from ....service.state import TRANSITIONS
 
 # The policy of every runner given none; RestartPolicy is frozen, so one serves all
 _DEFAULT_POLICY = RestartPolicy()
+
+
+@dataclass(frozen=True, slots=True)
+class _ErrorSource:
+    """A run's error queue, and the first exception published from it so far."""
+
+    errors: mp.Queue[BaseException] | None
+    first: BaseException | None
 
 
 class ProcessRunner:
@@ -209,6 +218,9 @@ class ProcessRunner:
     def _launch(self) -> None:
         """Spawn the service's subprocess.
 
+        An interrupt (KeyboardInterrupt, SystemExit) gets the cleanup a failure
+        gets, and reaches the caller unchanged.
+
         Raises:
             RunError: If the launch fails, caused by what failed.
         """
@@ -222,7 +234,7 @@ class ProcessRunner:
             # After the fork, so its thread is not running while the child is
             # forked; the queue holds any records the child sends before then
             listener.start()
-        except Exception as e:
+        except BaseException as e:
             self._reap_spawned()
             # As in stop(): keep the handles of a child that survived, so a
             # later stop() can retry
@@ -231,6 +243,8 @@ class ProcessRunner:
             # Work setup() started on the token ends, as after a failed setup()
             self.service.stopping.stop()
             self._transition(State.FAILED)
+            if not isinstance(e, Exception):
+                raise
             raise RunError(self.name, f"failed to start: {e}") from e
 
     def _reap_spawned(self) -> None:
@@ -376,14 +390,17 @@ class ProcessRunner:
             )
 
     def _await_run(self, timeout: float) -> int:
-        """The run a wait_healthy() waits for: once a start() in progress on
-        another thread has returned, within *timeout*, the current run, read
-        under the same lock that saw the start return.
+        """The run a wait_healthy() waits for: the current run, read under the
+        lock; with a start() in progress on another thread, that start's run,
+        once it has returned within *timeout*. A run that a stop() ended
+        meanwhile stays the waiter's, even when another has started since:
+        the wait learns it was stopped.
 
         Raises:
             HealthTimeoutError: If a start() is still in progress after *timeout*.
         """
         with self._lock:
+            run = self._run  # a start in progress has claimed it already
             own = self._start_thread == threading.get_ident()
             if not own and self._start_thread is not None:
                 if self._start_done is None:
@@ -392,7 +409,7 @@ class ProcessRunner:
                     lambda: self._start_thread is None, timeout
                 ):
                     raise HealthTimeoutError(self.name, timeout)
-            return self._run
+            return run
 
     def _reset_stop(self) -> None:
         """Give the service a token for the coming run; called under the lock.
@@ -449,7 +466,7 @@ class ProcessRunner:
 
             time.sleep(interval)
 
-        if not self._fail_run(run):
+        if self._fail_run(run) is None:
             raise RunError(self.name, "stopped during startup")
         raise HealthTimeoutError(self.name, timeout)
 
@@ -477,9 +494,10 @@ class ProcessRunner:
         Raises:
             RunError: Always: the run exited, or a stop() ended it first.
         """
-        if not self._fail_run(run):
+        source = self._fail_run(run)
+        if source is None:
             raise RunError(self.name, "stopped during startup")
-        exc = self.exception
+        exc = self._first_exception(source)  # this run's, not a later one's
         if exc:
             raise RunError(self.name, f"exited during startup: {exc}") from exc
         raise RunError(self.name, "exited during startup")
@@ -490,32 +508,38 @@ class ProcessRunner:
         Returns:
             True if a restart was initiated.
         """
-        if self._state == State.FAILED:
+        with self._lock:
+            state, run = self._state, self._run  # the run this check observes
+        if state == State.FAILED:
             # The restart stops what is left of the failed run first, and waits
             # for it: nothing starts on top of it
-            return self._maybe_restart()
-
-        if self._state != State.RUNNING:
+            return self._maybe_restart(run)
+        if state != State.RUNNING:
             return False
 
         if self.is_alive() and self.is_healthy():
             return False
 
-        self._transition(State.FAILED)
+        # Only the observed run: one started since is not this check's to fail
+        if not self._transition_from(run, State.RUNNING, State.FAILED):
+            return False
         # Only restart if not alive
         if not self.is_alive():
-            return self._maybe_restart()
+            return self._maybe_restart(run)
         return False
 
-    def _maybe_restart(self) -> bool:
-        """Wait the policy's backoff, then attempt a restart. The retry is
-        checked and counted under the lock: two callers finding one retry
-        left (the monitor, and check() on another thread) spend it once."""
+    def _maybe_restart(self, run: int) -> bool:
+        """Wait the policy's backoff, then attempt a restart of the failed
+        *run*. The run and the retry are checked, and the retry counted, under
+        the lock: two callers finding one retry left (the monitor, and check()
+        on another thread) spend it once, and a caller that saw a run another
+        caller has since restarted reserves nothing."""
         with self._lock:
+            if self._run != run or self._state != State.FAILED:
+                return False
             # One restart at a time: one under way is the failed run's
             if self._restarting or not self._retry_left():
                 return False
-            run = self._run  # the failed run: a stop() from now on ends it
             backoff = min(
                 self.policy.backoff * (self.policy.backoff_multiplier**self._retries),
                 self.policy.max_backoff,
@@ -596,12 +620,16 @@ class ProcessRunner:
                 break
 
             # Check for clean exit (exit_code == 0) - don't restart
-            if not self.is_alive() and self._process is not None:
-                exit_code = self._process.exitcode
-                if exit_code == 0:
-                    # Clean shutdown (e.g., SIGINT/SIGTERM)
-                    self._end_clean()
-                    break
+            with self._lock:
+                run, process = self._run, self._process
+            # A clean shutdown (e.g., SIGINT/SIGTERM) of the run observed
+            if (
+                process is not None
+                and not self.is_alive()
+                and process.exitcode == 0
+                and self._end_clean(run, process)
+            ):
+                break
 
             # check() handles failure detection and restart
             restarted = self.check()
@@ -618,14 +646,31 @@ class ProcessRunner:
             # Wait for interval or stop signal
             self._stop_monitor_event.wait(timeout=interval)
 
-    def _end_clean(self) -> None:
-        """Move a process that exited cleanly to DONE. DONE is final, so no
-        stop() follows to release the log listener and queues: release them
-        here, keeping the process handle for exit_code."""
-        process = self._process
+    def _end_clean(self, run: int, process: BaseProcess) -> bool:
+        """Move *run*, whose *process* exited cleanly, to DONE. DONE is final,
+        so no stop() follows to release the log listener and queues: release
+        them here, keeping the process handle for exit_code.
+
+        Claimed under the lock: an exit observed for a run a stop() has ended
+        since, or for a process replaced since, changes nothing.
+
+        Returns:
+            True if the run ended here.
+        """
+        with self._lock:
+            if self._run != run or self._process is not process:
+                return False
+            if self._stopper is not None:
+                return False  # a stop in progress ends it
+            if State.DONE not in TRANSITIONS.get(self._state, set()):
+                return False
+            self._state = State.DONE
+        # Work setup() started on the token ends, as on every other end of a
+        # run; from DONE no other run replaces the token
+        self.service.stopping.stop()
         self._cleanup_ipc()
         self._process = process
-        self._transition(State.DONE)
+        return True
 
     # -- stop -------------------------------------------------------------------------
 
@@ -640,6 +685,7 @@ class ProcessRunner:
         stops the child it spawns and raises RunError."""
         with self._lock:
             self._run += 1
+            run = self._run  # this stop's: a stop or start after it moves it on
             if self._start_thread == threading.get_ident():
                 return  # from setup(): its start() stops the child it spawns
         budget = self.stop_timeout if timeout is None else timeout
@@ -651,13 +697,23 @@ class ProcessRunner:
             )
             return
         # STOPPING goes on: a stop the child outlived is finished here, and
-        # one in progress on another thread is left to it (_stop_process())
+        # one in progress on another thread is left to it (_stop_run())
         if self._state in (State.CREATED, State.STOPPED, State.DONE):
             return
 
         # Stop monitor thread first
         self.stop_monitor()
-        self._stop_process(max(0.0, budget - (time.monotonic() - began)))
+        self._stop_run(run, max(0.0, budget - (time.monotonic() - began)))
+
+    def _stop_run(self, run: int, timeout: float) -> None:
+        """stop()'s _stop_process(), for the *run* it ended: once another stop
+        or a start has moved the run on, what runs now is not this stop's."""
+        with self._lock:
+            if self._run != run or self._state == State.DONE:
+                return
+            claimed = self._claim_stop_locked()
+        if claimed:
+            self._end_claimed(timeout)
 
     def _stop_for_restart(self, run: int) -> None:
         """Stop the failed *run*'s process only: a restart runs on the monitor
@@ -677,18 +733,33 @@ class ProcessRunner:
     def _stop_process(self, timeout: float | None) -> None:
         """Signal the subprocess to stop, escalating to terminate and kill. One
         stop runs at a time: another one in progress is left to finish. From
-        STOPPING, which a child that outlived kill() leaves, it tries again."""
+        STOPPING, which a child that outlived kill() leaves, it tries again.
+        A run the monitor ended DONE meanwhile, its child having exited
+        cleanly, has nothing left to stop."""
         with self._lock:
+            if self._state == State.DONE:
+                return
             claimed = self._claim_stop_locked()
         if claimed:
             self._end_claimed(timeout)
 
     def _end_claimed(self, timeout: float | None) -> None:
-        """End the process of a stop claimed, then release the claim."""
+        """End the process of a stop claimed, then release the claim. STOPPED
+        is published under the same lock hold that releases it: a start()
+        that sees STOPPED, and the stop() of that run, find no claim held."""
+        stopped = False
         try:
-            self._end_process(self.stop_timeout if timeout is None else timeout)
+            stopped = self._end_process(
+                self.stop_timeout if timeout is None else timeout
+            )
         finally:
             with self._lock:
+                if stopped:
+                    if State.STOPPED not in TRANSITIONS.get(self._state, set()):
+                        raise InvalidTransitionError(
+                            self.name, self._state, State.STOPPED
+                        )
+                    self._state = State.STOPPED
                 self._stopper = None
 
     def _claim_stop_locked(self) -> bool:
@@ -707,9 +778,13 @@ class ProcessRunner:
         self._stopper = threading.get_ident()
         return True
 
-    def _end_process(self, timeout: float) -> None:
+    def _end_process(self, timeout: float) -> bool:
         """Signal the subprocess to stop and wait for it, escalating to
-        terminate and kill; STOPPED once it is gone."""
+        terminate and kill; its handles are released once it is gone.
+
+        Returns:
+            True if the process is gone: the caller publishes STOPPED.
+        """
         # Signal shutdown: the parent's token, and through the pipe the
         # subprocess's own. A write never waits for the reader, so a subprocess
         # that has died cannot block it.
@@ -734,9 +809,9 @@ class ProcessRunner:
 
         if process_stopped:
             self._cleanup_ipc()
-            self._transition(State.STOPPED)
         # A process still alive after kill() leaves the runner STOPPING with its
         # handles: a later stop() tries again and cleans up once it is gone
+        return process_stopped
 
     def _cleanup_ipc(self) -> None:
         """Clean up IPC resources."""
@@ -784,21 +859,23 @@ class ProcessRunner:
             self._state = to
         return True
 
-    def _fail_run(self, run: int) -> bool:
+    def _fail_run(self, run: int) -> _ErrorSource | None:
         """A wait_healthy() for *run* timed out, or saw it exit: fail its start,
         checked under the lock, if the run is still starting. One another
         waiter saw healthy (RUNNING) is not this wait's to fail, and one that
         has settled already is left as it is.
 
         Returns:
-            False if *run* is no longer the current run, which is left as it is.
+            *run*'s error source, read under the same lock: a run started
+            later has its own. None if *run* is no longer the current run,
+            which is left as it is.
         """
         with self._lock:
             if self._run != run:
-                return False
+                return None
             if self._state in (State.INITD, State.STARTING):
                 self._state = State.FAILED
-        return True
+            return _ErrorSource(self._error_queue, self._exception)
 
     def _transition(self, to: State) -> None:
         """Transition to a new state."""
@@ -823,11 +900,30 @@ class ProcessRunner:
     def exception(self) -> BaseException | None:
         """Exception from subprocess, if any.
 
-        Returns the first exception encountered (root cause). What a reader
-        drains is published only while its queue is still the current run's:
-        a run started meanwhile has a queue, and a first exception, of its own.
+        Returns the first exception encountered (root cause), the current
+        run's: a run started while the queue is read has its own.
         """
-        errors = self._error_queue
+        self._drain(self._error_queue)
+        return self._exception
+
+    def _first_exception(self, source: _ErrorSource) -> BaseException | None:
+        """The first exception of the run *source* belongs to, even once a
+        later run has replaced it."""
+        drained = self._drain(source.errors)
+        with self._lock:
+            if self._error_queue is source.errors:
+                return self._exception  # another reader may have published first
+        return source.first or drained
+
+    def _drain(self, errors: mp.Queue[BaseException] | None) -> BaseException | None:
+        """Drain *errors*, publishing the first exception while the queue is
+        still the current run's: a run started meanwhile has a queue, and a
+        first exception, of its own.
+
+        Returns:
+            The first exception drained here, if any.
+        """
+        first: BaseException | None = None
         if errors is not None:
             # Drained until empty: Queue.empty() is unreliable
             with contextlib.suppress(Exception):
@@ -836,10 +932,11 @@ class ProcessRunner:
                         exc = errors.get_nowait()
                     except Empty:
                         break
+                    first = first or exc
                     with self._lock:
                         if self._error_queue is errors and self._exception is None:
                             self._exception = exc
-        return self._exception
+        return first
 
     @property
     def pid(self) -> int | None:

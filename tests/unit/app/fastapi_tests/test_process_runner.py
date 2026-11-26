@@ -229,6 +229,36 @@ class TestProcessRunner:
             assert runner.state == State.FAILED
             assert runner.process is None  # ended, so the handles are released
 
+    def test_an_interrupted_launch_ends_the_child_and_raises_unchanged(self, lg):
+        """A KeyboardInterrupt after the fork gets the cleanup a failure gets:
+        the child ended, the work setup() started stopped, the run FAILED; the
+        interrupt itself reaches the caller as it is, not as a RunError."""
+        derived: list[StopToken] = []
+
+        class DerivesInSetup(MPSimpleService):
+            def setup(self) -> None:
+                derived.append(self.stopping.child())
+
+        with (
+            _mock_mp_context() as (mock_process, _, _),
+            patch(f"{_PROCESS}.LogQueueListener") as mock_listener,
+        ):
+            child = mock_process.return_value
+            child.is_alive.return_value = True  # alive until terminated
+            child.terminate.side_effect = lambda: setattr(
+                child.is_alive, "return_value", False
+            )
+            mock_listener.return_value.start.side_effect = KeyboardInterrupt
+
+            runner = ProcessRunner(DerivesInSetup(lg))
+            with pytest.raises(KeyboardInterrupt):
+                runner.start()
+
+            child.terminate.assert_called_once()
+            assert derived[0].is_set()
+            assert runner.state == State.FAILED
+            assert runner.process is None
+
     def test_start_failure_kills_a_child_that_ignores_terminate(self, lg):
         """A child still alive after terminate() is killed."""
         with (
@@ -634,6 +664,67 @@ class TestProcessRunner:
         ):
             runner.wait_healthy(timeout=5.0)
 
+    def test_a_waiter_blocked_on_a_start_does_not_take_the_next_run(self, lg):
+        """The waiter blocks on another thread's start of run 1. Before it
+        wakes, that start returns, a stop() ends run 1, and a start of run 3
+        completes, healthy: the waiter learns its run was stopped instead of
+        reporting run 3 ready."""
+        runner = ProcessRunner(MPSimpleService(lg))
+        runner._state = State.STARTING
+        runner._run = 1
+        runner._start_thread = -1  # another thread's start, in progress
+
+        class Replaced:
+            def wait_for(self, predicate: Callable[[], bool], timeout: float) -> bool:
+                runner._start_thread = None  # run 1's start returned
+                runner._run = 3  # a stop() ended it, a start() claimed run 3
+                return predicate()
+
+        runner._start_done = Replaced()  # type: ignore[assignment]
+        with (
+            patch.object(runner, "is_alive", return_value=True),
+            patch.object(runner, "is_healthy", return_value=True),
+            pytest.raises(RunError, match="stopped during startup"),
+        ):
+            runner.wait_healthy(timeout=5.0)
+
+        assert runner.state == State.STARTING  # run 3 is not this waiter's
+
+    def test_a_waiter_reports_its_own_run_s_exception(self, lg):
+        """The waiter fails run 1, which exited; before it reads the cause, run
+        1 is stopped and run 2 starts, with an error of its own queued: run 1's
+        RunError is caused by run 1's exception."""
+        runner = ProcessRunner(MPSimpleService(lg))
+        runner._state = State.FAILED
+        runner._run = 1
+        a_error, b_error = RuntimeError("a"), RuntimeError("b")
+        a_queue: queue.Queue[BaseException] = queue.Queue()
+        a_queue.put(a_error)
+        runner._error_queue = a_queue  # type: ignore[assignment]
+
+        def b_started() -> None:
+            b_queue: queue.Queue[BaseException] = queue.Queue()
+            b_queue.put(b_error)
+            runner._run = 2
+            runner._state = State.STARTING
+            runner._error_queue = b_queue  # type: ignore[assignment]
+            runner._exception = None
+
+        hook = HookedLock(runner, b_started, on_release=True)
+        fail = runner._fail_run
+
+        def fail_then_arm(run: int) -> Any:
+            hook.arm()  # fires as _fail_run() releases the lock
+            return fail(run)
+
+        with (
+            patch.object(runner, "_fail_run", side_effect=fail_then_arm),
+            pytest.raises(RunError, match="exited during startup") as e,
+        ):
+            runner.wait_healthy(timeout=5.0)
+
+        assert e.value.__cause__ is a_error
+
     def test_a_waiter_timing_out_does_not_fail_a_run_another_saw_healthy(self, lg):
         """Two waiters on one run: the one with the shorter timeout sees it
         unhealthy, and before its deadline expires the other marks it RUNNING.
@@ -693,7 +784,7 @@ class TestProcessRunner:
             patch.object(runner, "_stop_for_restart", cleaned_up_then_stopped),
             patch.object(runner, "_launch") as launch,
         ):
-            assert runner._maybe_restart() is False
+            assert runner._maybe_restart(runner._run) is False
         launch.assert_not_called()
         assert runner.state == State.STOPPED
 
@@ -709,7 +800,7 @@ class TestProcessRunner:
             patch.object(runner, "_launch") as launch,
             patch.object(runner, "wait_healthy"),
         ):
-            assert runner._maybe_restart() is True
+            assert runner._maybe_restart(runner._run) is True
         launch.assert_called_once()
 
     def test_exit_code_not_started(self, lg):
@@ -738,6 +829,117 @@ class TestProcessRunner:
             runner._monitor_loop(interval=0)
 
         assert runner.state == state
+
+    def test_a_clean_exit_observed_for_a_replaced_run_cleans_nothing(self, lg):
+        """The monitor sees run 1's process exit 0; before it ends the run, run
+        2 is RUNNING with process B: B's IPC stays, and the runner stays
+        RUNNING."""
+        runner = ProcessRunner(MPSimpleService(lg))
+        runner._state = State.RUNNING
+        runner._run = 1
+        b, b_listener = MagicMock(), MagicMock()
+
+        def replaced() -> int:
+            runner._run, runner._process = 2, b
+            runner._log_listener = b_listener
+            return 0  # run 1's exit code, read as run 2 starts
+
+        a = MagicMock()
+        type(a).exitcode = property(lambda _: replaced())
+        runner._process = a
+
+        def check_once() -> bool:
+            runner._stop_monitor_event.set()
+            return False
+
+        with (
+            patch.object(runner, "is_alive", return_value=False),
+            patch.object(runner, "check", side_effect=check_once),
+        ):
+            runner._monitor_loop(interval=0)
+
+        assert runner.state == State.RUNNING
+        assert runner.process is b
+        b_listener.stop.assert_not_called()
+
+    def test_a_clean_exit_the_monitor_records_during_stop_ends_it(self, lg):
+        """stop() finds the run RUNNING; while it joins the monitor, the
+        monitor records the child's clean exit: stop() returns, the runner
+        DONE, instead of refusing the stop of a run that ended."""
+        runner = ProcessRunner(MPSimpleService(lg))
+        runner._state = State.RUNNING
+        runner._process = MagicMock(exitcode=0)
+
+        def monitor_finishes(timeout: float = 2.0) -> None:
+            runner._monitor_loop(interval=0)  # already past its stop check
+
+        with (
+            patch.object(runner, "is_alive", return_value=False),
+            patch.object(runner, "stop_monitor", side_effect=monitor_finishes),
+        ):
+            runner.stop()
+
+        assert runner.state == State.DONE
+
+    def test_a_stop_releases_its_claim_as_it_publishes_stopped(self, lg):
+        """Once another thread can see STOPPED, it can start a run and stop it:
+        that stop's claim is not refused by the stop that just finished."""
+        runner = ProcessRunner(MPSimpleService(lg))
+        runner._state = State.RUNNING
+        runner._process = MagicMock(exitcode=-15)
+        runner._process.is_alive.return_value = False
+        claims: list[bool] = []
+
+        def started_and_stopped() -> None:
+            assert runner.state == State.STOPPED
+            runner._state = State.RUNNING  # a start() on another thread
+            runner._run += 1
+            with runner._lock:
+                claims.append(runner._claim_stop_locked())  # and its stop()
+
+        hook = HookedLock(runner, started_and_stopped, on_release=True)
+        cleanup = runner._cleanup_ipc
+
+        def cleanup_then_arm() -> None:
+            cleanup()
+            hook.arm()  # the next release publishes STOPPED
+
+        with patch.object(runner, "_cleanup_ipc", side_effect=cleanup_then_arm):
+            runner.stop()
+
+        assert claims == [True]
+
+    def test_a_stop_does_not_stop_a_run_started_after_it(self, lg):
+        """stop() is joining the monitor when another stop() ends the run and a
+        start() begins the next: the first stop leaves the new run alone."""
+        runner = ProcessRunner(MPSimpleService(lg))
+        runner._state = State.RUNNING
+
+        def stopped_and_started(timeout: float = 2.0) -> None:
+            runner._run += 2  # another stop()'s, then the start()'s
+            runner._state = State.RUNNING
+
+        with (
+            patch.object(runner, "stop_monitor", side_effect=stopped_and_started),
+            patch.object(runner, "_end_process") as end_process,
+        ):
+            runner.stop()
+
+        end_process.assert_not_called()
+        assert runner.state == State.RUNNING
+
+    def test_a_clean_exit_stops_the_work_setup_started(self, lg):
+        """setup() derived a token for its work; the child then exits cleanly:
+        that work is told to stop, as on every other end of a run."""
+        runner = ProcessRunner(MPSimpleService(lg))
+        runner._state = State.RUNNING
+        runner._process = MagicMock(exitcode=0)
+        work = runner.service.stopping.child()  # as setup() derives it
+        with patch.object(runner, "is_alive", return_value=False):
+            runner._monitor_loop(interval=0)
+
+        assert runner.state == State.DONE
+        assert work.is_set()
 
     def test_a_clean_exit_releases_the_log_listener_and_queues(self, lg):
         """A process that exits cleanly under the monitor leaves no log listener
@@ -778,6 +980,52 @@ class TestProcessRunner:
         end_process.assert_not_called()
         assert runner.state == State.STARTING
 
+    def test_a_failed_health_check_does_not_fail_a_run_started_since(self, lg):
+        """check() finds run 1 unhealthy; before it fails the run, a restart on
+        another thread ends run 1 and run 2 is RUNNING: run 2 stays RUNNING and
+        no restart is attempted for it."""
+        runner = ProcessRunner(MPSimpleService(lg))
+        runner._state = State.RUNNING
+        runner._run = 1
+
+        def unhealthy_then_replaced() -> bool:
+            runner._run = 2  # run 2 started and healthy, state RUNNING again
+            return False
+
+        with (
+            patch.object(runner, "is_alive", return_value=True),
+            patch.object(runner, "is_healthy", side_effect=unhealthy_then_replaced),
+            patch.object(runner, "_maybe_restart") as restart,
+        ):
+            assert runner.check() is False
+
+        assert runner.state == State.RUNNING
+        restart.assert_not_called()
+
+    def test_a_restart_reserves_only_the_failed_run_check_saw(self, lg):
+        """check() finds run 1 FAILED; before it reserves the restart, another
+        caller's restart has run 2 RUNNING: nothing is reserved for run 2, and
+        no retry is spent."""
+        runner = ProcessRunner(MPSimpleService(lg), RestartPolicy(backoff=0.0))
+        runner._state = State.FAILED
+        runner._run = 1
+        reserve = runner._maybe_restart
+
+        def replaced_then_reserve(*args: int) -> bool:
+            runner._run = 2  # restarted and healthy meanwhile
+            runner._state = State.RUNNING
+            return reserve(*args)
+
+        with (
+            patch.object(runner, "_maybe_restart", replaced_then_reserve),
+            patch.object(runner, "_attempt_restart") as attempt,
+        ):
+            assert runner.check() is False
+
+        attempt.assert_not_called()
+        assert runner._retries == 0
+        assert not runner._restarting
+
     @pytest.mark.parametrize("retries", [1, 2], ids=["last-retry", "two-left"])
     def test_one_restart_runs_at_a_time(self, retries):
         """A second caller (check() on another thread) finding the run FAILED
@@ -786,14 +1034,15 @@ class TestProcessRunner:
         runner = ProcessRunner(
             MPSimpleService(MagicMock()), RestartPolicy(max_retries=retries, backoff=0)
         )
+        runner._state = State.FAILED
         second: list[bool] = []
 
         def attempt(run: int) -> bool:
-            second.append(runner._maybe_restart())  # the other caller, meanwhile
+            second.append(runner._maybe_restart(run))  # the other caller, meanwhile
             return True
 
         with patch.object(runner, "_attempt_restart", side_effect=attempt) as attempts:
-            assert runner._maybe_restart() is True
+            assert runner._maybe_restart(runner._run) is True
 
         assert second == [False]  # it reached the reservation, and was refused
         assert attempts.call_count == 1
@@ -809,6 +1058,7 @@ class TestProcessRunner:
         runner = ProcessRunner(
             MPSimpleService(MagicMock()), RestartPolicy(max_retries=1, backoff=0)
         )
+        runner._state = State.FAILED
         during: list[bool] = []
         with (
             patch.object(
@@ -819,7 +1069,7 @@ class TestProcessRunner:
             patch.object(runner, "_start"),  # a restart's start
             patch.object(runner, "wait_healthy"),
         ):
-            assert runner._maybe_restart()
+            assert runner._maybe_restart(runner._run)
 
         assert during == [True]
         assert not runner.restart_pending  # attempt over, no retries left
