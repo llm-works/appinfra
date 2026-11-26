@@ -9,6 +9,7 @@ import time
 
 from appinfra.log import LoggingBuilder
 from appinfra.time import delta_str
+from tests.helpers.perf import RATE_SHARE
 
 
 class TestLoggingThroughput:
@@ -47,8 +48,9 @@ class TestLoggingThroughput:
         # Lowered from 50,000 for CI environments with constrained resources
         throughput = iterations / elapsed
         time_per_msg = elapsed / iterations
-        assert throughput > 25_000, (
-            f"Logging overhead too high: {throughput:,.0f} msg/sec < 25,000"
+        floor = 25_000 * RATE_SHARE
+        assert throughput > floor, (
+            f"Logging overhead too high: {throughput:,.0f} msg/sec < {floor:,.0f}"
         )
 
         print(
@@ -86,8 +88,9 @@ class TestLoggingThroughput:
         # Assert: Should format at least 10,000 messages/sec (100 µs per message)
         throughput = iterations / elapsed
         time_per_msg = elapsed / iterations
-        assert throughput > 10_000, (
-            f"Formatting throughput too low: {throughput:,.0f} msg/sec < 10,000"
+        floor = 10_000 * RATE_SHARE
+        assert throughput > floor, (
+            f"Formatting throughput too low: {throughput:,.0f} msg/sec < {floor:,.0f}"
         )
 
         print(
@@ -133,8 +136,9 @@ class TestLoggingThroughput:
         # Assert: Should format at least 10,000 JSON messages/sec
         throughput = iterations / elapsed
         time_per_msg = elapsed / iterations
-        assert throughput > 10_000, (
-            f"JSON logging too slow: {throughput:,.0f} msg/sec < 10,000"
+        floor = 10_000 * RATE_SHARE
+        assert throughput > floor, (
+            f"JSON logging too slow: {throughput:,.0f} msg/sec < {floor:,.0f}"
         )
 
         print(

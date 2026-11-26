@@ -32,6 +32,7 @@ from appinfra.runtime.bench import (
     task_cost,
     task_rates,
 )
+from tests.helpers.perf import RATE_SHARE
 
 TASKS = 100_000 if os.environ.get("APPINFRA_RUNTIME_BENCH") == "full" else 1_000
 # What the runtime may add per parked task over a plain asyncio task: its task,
@@ -41,9 +42,6 @@ CEILING = 1024
 # Seconds of wall time over which idle CPU is measured: long enough to catch two
 # wakeups of a receive that polled every 0.1 s
 IDLE_WINDOW = 0.2
-# Share of the rate floors enforced on macOS: its CI runners measure spawn and stop
-# rates just under the Linux floor; the full floor applies on Linux
-RATE_SHARE = 0.5 if sys.platform == "darwin" else 1.0
 LG = MagicMock()
 
 
