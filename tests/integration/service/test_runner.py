@@ -292,7 +292,10 @@ class TestLifecycle:
         rt.ready(runner, timeout=5.0)
         rt.stop_service(runner)
 
-        assert refused == [State.RUNNING, State.STOPPING, State.STOPPED]
+        # Registered after spawn() returned, the hook may also see INITD and
+        # STARTING, as the service starts at once: those are not under test
+        later = (State.RUNNING, State.STOPPING, State.STOPPED)
+        assert [s for s in refused if s in later] == list(later)
         assert runner.state == State.STOPPED
 
     def test_a_stop_refused_in_a_hook_leaves_the_runtime_running(

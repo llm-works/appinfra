@@ -138,6 +138,7 @@ class Owner:
         self._ready: dict[Runner, list[Chan[Any]]] = {}  # ready() waiting
         self._stops: dict[Runner, list[Chan[Any]]] = {}  # stops waiting
         self._stop_asked: set[Runner] = set()  # stopped during setup
+        self._expired: set[Runner] = set()  # a ready() gave up during setup
         # Why a service did not start, for a ready() not waiting yet. Weak: a
         # runner no one holds is never ready()'d
         self._failures: weakref.WeakKeyDictionary[Runner, BaseException] = (
@@ -220,8 +221,8 @@ class Owner:
 
     def _on_give_up(self, m: GiveUp) -> None:
         """A ready() timed out: its wait is taken back, then name the missing
-        dependency of a service still waiting, or end the run of one still
-        starting, which fails it."""
+        dependency of a service still waiting, or end the start of one still
+        in setup() or starting, which fails it."""
         runner, reply = m.runner, m.reply
         if self._refused_foreign(runner, reply):
             return
@@ -237,6 +238,8 @@ class Owner:
             return
         if runner.state == State.STARTING:
             self._end_run(runner)
+        elif _in_setup(runner):
+            self._expired.add(runner)  # once set up, it fails (_on_setup())
         _reply(reply, None)
 
     def _refused_foreign(self, runner: Runner, reply: Chan[Any]) -> bool:
@@ -320,6 +323,8 @@ class Owner:
         if not _current(runner, m):
             return
         runner._task = None
+        expired = runner in self._expired
+        self._expired.discard(runner)
         # The start rule again, once set up: a dependency may have stopped,
         # left or failed during setup()
         down = self._deps.down(runner.service)
@@ -331,9 +336,13 @@ class Owner:
                 runner._move(state)
             _end_token(runner)
             self._tear(runner)
-        elif down is not None:
+        elif down is not None or expired:
             # Torn down first: it fails once settled (_ended())
-            runner._error = DependencyFailedError(runner.name, down)
+            runner._error = (
+                DependencyFailedError(runner.name, down)
+                if down is not None
+                else RunError(runner.name, "not ready in time")
+            )
             _end_token(runner)
             self._tear(runner)
         else:
@@ -350,6 +359,7 @@ class Owner:
         stopped = runner in self._stop_asked
         self._stop_asked.discard(runner)
         if runner.name in self._restarting and not stopped:
+            _end_token(runner)  # this attempt's; the next one gets its own
             self._retry(runner)
             return
         if runner.state != State.FAILED:
@@ -530,6 +540,13 @@ class Owner:
                 self._halt(runner)
             return
         runner._retries += 1
+        down = self._deps.down(runner.service)
+        if down is not None:
+            # The start rule holds for a restart too: with a dependency down the
+            # attempt fails, and the next, if any, follows after its backoff
+            runner._error = DependencyFailedError(runner.name, down)
+            self._retry(runner)
+            return
         runner.service.stopping = self._root.child()
         self._begin(runner)
 
@@ -548,11 +565,12 @@ class Owner:
 
     def _on_health(self, runner: Runner, m: TaskDone) -> None:
         """A health check ended: a healthy service STARTING runs, and starts
-        what waited on it; a check that raised fails the start."""
+        what waited on it; a check that raised fails the start. A run already
+        ended (its token stopped) is not promoted: its own end settles it."""
         if self._health.get(runner.name) != m.task_id:
             return
         del self._health[runner.name]
-        if runner.state != State.STARTING:
+        if runner.state != State.STARTING or runner.service.stopping.is_set():
             return
         if m.error is not None and not isinstance(m.error, StoppedError):
             self._lg.warning(
@@ -586,10 +604,9 @@ class Owner:
 
     def _halt(self, runner: Runner) -> None:
         """Begin to stop *runner*; its stops are answered once it has settled."""
-        task = runner._task
         if self._deps.is_waiting(runner.name):
             self._refuse(runner)
-        elif task is not None and (task.name or "").endswith("/setup"):
+        elif _in_setup(runner):
             self._stop_asked.add(runner)  # stopped once its setup ends
         elif runner.state in (State.STARTING, State.RUNNING, State.IDLE):
             runner._move(State.STOPPING)
@@ -719,6 +736,7 @@ class Owner:
         _end_token(runner)
         del self._runners[name]
         self._restarting.discard(name)
+        self._expired.discard(runner)
         self._isolated.discard(runner)
         if runner in self._ready:
             outcome = None if runner.state in UP else _startup_error(runner)
@@ -750,6 +768,12 @@ _STEPS: dict[str, Callable[[Owner, Runner, TaskDone], None]] = {
 def _current(runner: Runner, m: TaskDone) -> bool:
     """True if *m* ends *runner*'s current setup or run, not an older one."""
     return runner._task is not None and runner._task.id == m.task_id
+
+
+def _in_setup(runner: Runner) -> bool:
+    """True while *runner*'s current step is its setup()."""
+    task = runner._task
+    return task is not None and (task.name or "").endswith("/setup")
 
 
 def _end_token(runner: Runner) -> None:

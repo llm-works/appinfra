@@ -65,6 +65,21 @@ def test_a_health_check_outliving_its_run_does_not_pass_the_next_one() -> None:
     assert runner.state == State.STARTING
 
 
+def test_a_health_result_after_its_run_was_ended_promotes_nothing() -> None:
+    """A ready() gave up and ended the run, whose thread has not returned yet;
+    the health check reports healthy meanwhile. The run is ending: the start
+    is not promoted, and the run's end settles it."""
+    owner = Runtime(MagicMock())._owner
+    runner = _admit(owner, SimpleService("ending"), State.RUNNING)
+    runner._state = State.STARTING  # Private: the owner moves it
+    owner._health[runner.name] = 5
+    runner.service.stopping.stop()  # as _end_run() leaves it
+
+    owner._on_health(runner, TaskDone(5, "ending/health", True, None))
+
+    assert runner.state == State.STARTING
+
+
 def test_services_that_leave_without_running_leave_no_token_behind() -> None:
     """A waiter failed as its dependency leaves never reaches a run, which is
     what detaches a token otherwise: leaving does, so the root holds none."""

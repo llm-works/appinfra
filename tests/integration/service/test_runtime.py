@@ -875,6 +875,92 @@ class TestFailedStartReleasesTheRun:
         assert runner.state == State.FAILED
 
 
+class RestartSetupStartsWork(Service):
+    """Its first run fails once told to; each restart's setup() starts a
+    worker on a child of its token, then raises."""
+
+    def __init__(self) -> None:
+        self._lg = MagicMock()
+        self.fail = threading.Event()
+        self.setups = 0
+        self.workers: list[threading.Thread] = []
+
+    @property
+    def name(self) -> str:
+        return "restart-setup-starts-work"
+
+    def setup(self) -> None:
+        self.setups += 1
+        if self.setups == 1:
+            return
+        worker = threading.Thread(target=self.stopping.child().wait, daemon=True)
+        worker.start()
+        self.workers.append(worker)
+        raise RuntimeError("no setup")
+
+    def run(self) -> None:
+        self.fail.wait(10.0)
+        raise RuntimeError("run fails")
+
+
+class TestFailedRestartSetup:
+    def test_each_failed_restart_setup_stops_the_work_it_started(self, rt):
+        """Every restart attempt whose setup() fails has its token ended,
+        the ones followed by another attempt too."""
+        svc = RestartSetupStartsWork()
+        runner = rt.spawn(svc, RestartPolicy(max_retries=2, backoff=0.0))
+        rt.ready(runner, timeout=5.0)
+        svc.fail.set()
+        assert _wait_until(lambda: svc.name not in rt.services, 5.0)
+
+        assert len(svc.workers) == 2
+        for worker in svc.workers:
+            worker.join(5.0)  # the deadline is the failure path
+        assert [w.is_alive() for w in svc.workers] == [False, False]
+
+
+class FailsOnceToldTo(Service):
+    """No setup() of its own; its run fails once told to. Counts its runs."""
+
+    def __init__(self, name: str, depends: tuple[str, ...]) -> None:
+        self._lg = MagicMock()
+        self._name = name
+        self._depends = list(depends)
+        self.fail = threading.Event()
+        self.runs = 0
+
+    @property
+    def name(self) -> str:
+        return self._name
+
+    @property
+    def depends_on(self) -> list[str]:
+        return self._depends
+
+    def run(self) -> None:
+        self.runs += 1
+        self.fail.wait(10.0)
+        raise RuntimeError("run fails")
+
+
+class TestRestartNeedsItsDependencies:
+    def test_a_restart_with_a_dependency_down_does_not_run(self, rt):
+        """Its dependency left while it ran; when it fails, its restart finds
+        the dependency down: the attempt fails instead of running, and with no
+        attempt left the service leaves."""
+        db = rt.spawn(Parked("db"))
+        api_svc = FailsOnceToldTo("api", depends=("db",))
+        api = rt.spawn(api_svc, RestartPolicy(max_retries=1, backoff=0.0))
+        rt.ready(api, timeout=5.0)
+        rt.stop_service(db, timeout=5.0)
+
+        api_svc.fail.set()
+        assert _wait_until(lambda: "api" not in rt.services, 5.0)
+        assert api_svc.runs == 1
+        assert api.state == State.FAILED
+        assert isinstance(api.exception, DependencyFailedError)
+
+
 class TestStopDuringRestart:
     def test_a_stop_during_a_restart_setup_that_fails_is_answered(self, rt):
         """stop_service() lands while a restart is in setup(), which then
@@ -901,6 +987,24 @@ class TestStopDuringRestart:
         assert errors == []
         assert svc.setups == 2
         assert "fails-then-fails-setup" not in rt.services
+
+
+class TestReadyExpiresASetup:
+    def test_a_service_given_up_on_during_setup_never_runs(self, rt):
+        """ready() times out while setup() runs: the start has failed for its
+        caller, so once set up the service is torn down and fails instead of
+        running unobserved."""
+        svc = SetsUpWork("slow-setup")
+        runner = rt.spawn(svc)
+        assert svc.in_setup.wait(5.0)
+        with pytest.raises(HealthTimeoutError):
+            rt.ready(runner, timeout=0.2)
+
+        svc.release.set()
+        assert _wait_until(lambda: "slow-setup" not in rt.services, 5.0)
+        assert not svc.ran
+        assert svc.worker_ended is True
+        assert runner.state == State.FAILED
 
 
 class TestForeignRunners:
