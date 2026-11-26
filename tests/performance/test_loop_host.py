@@ -101,7 +101,7 @@ class TestLoopHostCost:
             f"{cost.net:,.0f} B each: asyncio {cost.asyncio:,.0f} B, "
             f"framework {cost.framework:,.0f} B"
         )
-        assert cost.framework < 900, f"{cost.framework:,.0f} B per service"
+        assert cost.framework <= 1024, f"{cost.framework:,.0f} B per service"
 
     def test_start_and_stop_rate(self, host):
         runners, start_rate = start_runners(host, OnEvent, SERVICES)

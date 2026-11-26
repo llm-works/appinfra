@@ -93,12 +93,41 @@ class LoopHost:
         asyncio.run() does, and close it."""
         asyncio.set_event_loop(loop)
         try:
-            loop.run_forever()
+            _resumed(loop.run_forever, lambda: self._after_exit(loop))
             tasks = asyncio.all_tasks(loop)
             for task in tasks:
                 task.cancel()
-            loop.run_until_complete(asyncio.gather(*tasks, return_exceptions=True))
+            gathered = asyncio.gather(*tasks, return_exceptions=True)
+            # Ends once everything gathered has: resumed until then
+            _resumed(lambda: loop.run_until_complete(gathered), lambda: None)
             loop.run_until_complete(loop.shutdown_asyncgens())
             loop.run_until_complete(loop.shutdown_default_executor())
         finally:
             loop.close()
+
+    def _after_exit(self, loop: asyncio.AbstractEventLoop) -> None:
+        """Before the run of *loop* until stop() resumes after an exit. An exit
+        leaves an iteration partway: run_forever() forgets a stop run in it,
+        and a stop queued behind it has not run. Once stop() has begun, the
+        loop is stopped again, so the resumed run ends after one iteration,
+        which runs a stop still queued: one left for the run that waits for
+        the cancelled tasks would end it before they finish. Read under the
+        lock, which stop() queues its stop under."""
+        with self._lock:
+            closing = self._closing
+        if closing:
+            loop.stop()
+
+
+def _resumed(run: Callable[[], object], before_resume: Callable[[], None]) -> None:
+    """*run*, a run of the loop, resumed when a task's SystemExit or
+    KeyboardInterrupt comes out of it, after *before_resume*(). asyncio
+    records the exit as that task's outcome, then re-raises it from the
+    loop, which would end every other task with it; the task's own end is
+    already scheduled on the loop."""
+    while True:
+        try:
+            run()
+            return
+        except (SystemExit, KeyboardInterrupt):
+            before_resume()
