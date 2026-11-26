@@ -4,12 +4,12 @@
 """Services, and the runtime that runs them.
 
 - Service: WHAT to run (definition, config, behavior)
-- Runner: HOW to run it (a thread, a process, or a task on an event loop),
-  with its state machine, hooks and restart policy
 - Runtime: the entry point. spawn() takes services in any order and from any
-  thread, picks the runner from the service's kind, starts each once its
+  thread, runs each as appinfra.runtime tasks (a thread, the event loop, or a
+  process of its own, from the service's kind), starts each once its
   ``depends_on`` run, restarts a failed one per its policy, and stops them in
   reverse start order
+- Runner: a service's state in the Runtime, its restart policy and hooks
 
 A Service implements run(), which returns once ``self.stopping`` is set. Two
 subclasses work differently:
@@ -43,9 +43,8 @@ Usage:
         run_application()
 
 spawn() returns the service's runner; ``runner.on_state_change(hook)``
-observes its transitions. A runner can also be used on its own, without a
-service Runtime: a TaskRunner on an appinfra.runtime Runtime, or a
-ProcessRunner.
+observes its transitions. ProcessRunner runs a service in a process of its own
+on its own, without a Runtime.
 """
 
 from ..runtime import StopToken
@@ -88,12 +87,10 @@ from .factory import (
     ChannelPairFactory,
     ProcessQueueChannelFactory,
     QueueChannelFactory,
-    RunnerFactory,
-    RunnerWithChannel,
     ServiceFactory,
     ServiceRegistration,
 )
-from .runtime import ProcessRunner, Runner, Runtime, TaskRunner
+from .runtime import ProcessRunner, Runner, Runtime
 from .state import RestartPolicy, State, StateHook
 
 __all__ = [
@@ -102,7 +99,6 @@ __all__ = [
     "ScheduledService",
     "AsyncService",
     "Runner",
-    "TaskRunner",
     "ProcessRunner",
     "Runtime",
     # Transport (wire level)
@@ -134,8 +130,6 @@ __all__ = [
     "AsyncProcessChannelPair",
     "AsyncQueueChannelFactory",
     "AsyncProcessQueueChannelFactory",
-    "RunnerFactory",
-    "RunnerWithChannel",
     "ServiceFactory",
     "ServiceRegistration",
     # State management

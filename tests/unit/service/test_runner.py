@@ -15,10 +15,10 @@ from appinfra.service import (
     InvalidTransitionError,
     ProcessRunner,
     RestartPolicy,
+    Runner,
     Service,
     SetupError,
     State,
-    TaskRunner,
 )
 from tests.helpers.service.runner import SimpleService
 
@@ -69,98 +69,48 @@ class MPSetupFailService(Service):
         pass
 
 
-class SetupFailService(Service):
-    """Service that fails during setup()."""
+class TestRunner:
+    """The Runner record: its state machine, hooks and restart policy."""
 
-    def __init__(self) -> None:
-        self._lg = MagicMock()
+    def test_a_move_transitions_allow_is_made(self):
+        runner = Runner(SimpleService())
+        assert runner._move(State.INITD) == State.CREATED  # Private: the Runtime's
+        assert runner.state == State.INITD
 
-    @property
-    def name(self) -> str:
-        return "setup-fail"
-
-    def setup(self) -> None:
-        raise SetupError(self.name, "config invalid")
-
-    def run(self) -> None:
-        pass
-
-
-class TestTaskRunner:
-    """Test TaskRunner class."""
-
-    def test_setup_error_transitions_to_failed(self):
-        """SetupError transitions to FAILED."""
-        svc = SetupFailService()
-        runner = TaskRunner(MagicMock(), svc)
-
-        with pytest.raises(SetupError, match="config invalid"):
-            runner.start()
-
-        assert runner.state == State.FAILED
-
-    def test_invalid_transition_raises(self):
-        """Invalid state transition raises error."""
-        svc = SimpleService()
-        runner = TaskRunner(MagicMock(), svc)
-
+    def test_a_move_transitions_forbid_raises(self):
+        runner = Runner(SimpleService())
         with pytest.raises(InvalidTransitionError):
-            runner._transition(State.RUNNING)
+            runner._move(State.RUNNING)
+        assert runner.state == State.CREATED
 
-    def test_check_not_running(self):
-        """check() returns False when not running."""
+    def test_hooks_see_each_move_and_a_failing_one_is_logged(self):
         svc = SimpleService()
-        runner = TaskRunner(MagicMock(), svc)
+        svc._lg = MagicMock()
+        runner = Runner(svc)
+        seen: list[tuple[State, State]] = []
 
-        # Not started yet
-        result = runner.check()
-        assert result is False
+        def fails(_name: str, _old: State, _new: State) -> None:
+            raise RuntimeError("hook fails")
 
-    def test_settling_the_exit_state_leaves_no_window_for_a_stop(self):
-        """The end state is chosen and set in one step: a stop() that moves
-        the runner to STOPPING after the first lock release cannot strand it
-        there once the work has ended."""
-        runner = TaskRunner(MagicMock(), SimpleService())
-        runner._state = State.RUNNING  # Private: a running runner
-        real = runner._lock
+        runner.on_state_change(fails)
+        runner.on_state_change(lambda _n, old, new: seen.append((old, new)))
+        runner._move(State.INITD)
 
-        class StopsAfterFirstRelease:
-            """The runner's lock; its first release, if the runner is still
-            RUNNING, lets a stop(timeout=0) on another thread move it on."""
+        assert seen == [(State.CREATED, State.INITD)]
+        svc._lg.warning.assert_called_once()
 
-            released = 0
+    def test_what_is_not_a_service_is_refused(self):
+        with pytest.raises(TypeError, match="must be a Service"):
+            Runner(object())
 
-            def __enter__(self) -> None:
-                real.acquire()
-
-            def __exit__(self, *exc: object) -> None:
-                real.release()
-                self.released += 1
-                if self.released == 1 and runner._state == State.RUNNING:
-                    runner._state = State.STOPPING
-
-        runner._lock = StopsAfterFirstRelease()  # type: ignore[assignment]
-
-        runner._settle_exit_state(None)
-
-        assert runner.state != State.STOPPING
-
-    def test_stop_waits_for_what_is_left_after_waiting_for_start(self):
-        """The time stop() spends waiting for a start() in progress comes off
-        the time it then waits for the service's task."""
-        runner = TaskRunner(MagicMock(), SimpleService())
-        runner._state = State.RUNNING  # Private: a started runner
-        task = runner._task = MagicMock()  # Private: its task
-        clock = "appinfra.service.runtime.runner.time.monotonic"
-
-        # The wait for start() takes 4 of the 5 seconds
-        with (
-            patch.object(runner, "_await_start", return_value=True),
-            patch(clock, side_effect=[100.0, 104.0]),
-        ):
-            runner.stop(timeout=5.0)
-
-        task.wait.assert_called_once_with(1.0)
+    def test_restart_delay_grows_with_retries_up_to_its_cap(self):
+        policy = RestartPolicy(backoff=1.0, backoff_multiplier=2.0, max_backoff=5.0)
+        runner = Runner(SimpleService(), policy)
+        delays = []
+        for retries in range(4):
+            runner._retries = retries  # Private: the Runtime counts them
+            delays.append(runner.restart_delay)
+        assert delays == [1.0, 2.0, 4.0, 5.0]
 
 
 class TestProcessRunner:
@@ -477,22 +427,23 @@ class TestRunnerRestart:
 
     def test_can_restart(self):
         """can_restart holds until max_retries is reached, and never when disabled."""
-        runner = TaskRunner(MagicMock(), SimpleService(), RestartPolicy(max_retries=2))
+        runner = Runner(SimpleService(), RestartPolicy(max_retries=2))
         assert runner.can_restart
         runner._retries = 2
         assert not runner.can_restart
 
         disabled = RestartPolicy(restart_on_failure=False)
-        assert not TaskRunner(MagicMock(), SimpleService(), disabled).can_restart
+        assert not Runner(SimpleService(), disabled).can_restart
 
     def test_restart_pending_through_the_last_attempt(self):
-        """The last allowed restart counts as pending while it runs.
+        """The last allowed restart of a ProcessRunner counts as pending while
+        it runs.
 
         _maybe_restart() counts the attempt before making it, so can_restart is
         already False during it; a waiter must not give up on that attempt.
         """
-        runner = TaskRunner(
-            MagicMock(), SimpleService(), RestartPolicy(max_retries=1, backoff=0)
+        runner = ProcessRunner(
+            MPSimpleService(MagicMock()), RestartPolicy(max_retries=1, backoff=0)
         )
         during: list[bool] = []
         with (

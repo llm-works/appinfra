@@ -108,7 +108,7 @@ class ChannelPairFactory(Protocol):
                 child = ZMQChannel(ctx, child_endpoint)
                 return ChannelPair(parent=parent, child=child)
 
-        factory = RunnerFactory(lg, channel_factory=ZMQChannelFactory())
+        pair = ZMQChannelFactory().create_pair()
     """
 
     def create_pair(self) -> ChannelPair:

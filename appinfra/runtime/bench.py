@@ -3,8 +3,9 @@
 
 """
 Measure what a task on a runtime's event loop costs: bytes per parked task, the
-part asyncio takes and the part the runtime adds, the rate tasks spawn and end, and
-the round-trip rate over channels between two tasks.
+part asyncio takes and the part the runtime adds, the rate tasks spawn and end, the
+round-trip rate over channels between two tasks, and tasks parked for an idle
+measurement (parked()).
 
 The same coroutines run once as plain asyncio tasks on the runtime's loop and once
 spawned as runtime tasks; the difference is the runtime's: its task, the handle, the
@@ -24,7 +25,7 @@ import gc
 import threading
 import time
 import tracemalloc
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from typing import TypeVar
 
@@ -221,21 +222,55 @@ def _spawn_parked(tasks: Runtime, count: int) -> tuple[list[Task], float]:
     return spawned, count / (time.perf_counter() - began)
 
 
+async def _receiving(arrivals: Arrivals, inbox: Chan[int]) -> None:
+    """Arrive, then park in arecv() on *inbox*, which nothing sends to."""
+    arrivals.arrive()
+    await inbox.arecv()
+
+
+def _cancel_all(spawned: list[Task]) -> None:
+    """Cancel *spawned* and wait until each has ended."""
+    for task in spawned:
+        task.cancel()
+        with contextlib.suppress(StoppedError):  # Its stop ended it: no result
+            task.wait(timeout=60.0)
+
+
+@contextlib.contextmanager
+def parked(tasks: Runtime, count: int, *, receiving: bool = False) -> Iterator[None]:
+    """*count* tasks parked on the loop of *tasks* while the block runs, each on
+    a future of its own, or with *receiving*, in arecv() on a channel of its
+    own that nothing sends to; they are cancelled and ended after it.
+
+    Raises:
+        ValueError: If *count* is less than 1.
+    """
+    arrivals = Arrivals(count)
+    if receiving:
+        spawned = [
+            tasks.spawn(_receiving, arrivals, Chan[int](1)) for _ in range(count)
+        ]
+    else:
+        spawned = [tasks.spawn(_parked_alone, arrivals) for _ in range(count)]
+    try:
+        if not arrivals.all.wait(timeout=60.0):
+            raise TimeoutError(f"{count:,} runtime tasks did not all start in 60 s")
+        yield
+    finally:
+        _cancel_all(spawned)
+
+
 def task_rates(tasks: Runtime, count: int) -> tuple[float, float]:
     """Tasks per second spawned and running, over *count* parked tasks on the
     loop of *tasks*, and tasks per second that cancel() and wait() then end,
-    one task after the other, as a service runner's start() and stop() are
-    counted.
+    one task after the other.
 
     Raises:
         ValueError: If *count* is less than 1.
     """
     spawned, spawn = _spawn_parked(tasks, count)
     began = time.perf_counter()
-    for task in spawned:
-        task.cancel()
-        with contextlib.suppress(StoppedError):  # Its stop ended it: no result
-            task.wait(timeout=60.0)
+    _cancel_all(spawned)
     return spawn, count / (time.perf_counter() - began)
 
 

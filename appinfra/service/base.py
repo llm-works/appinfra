@@ -96,10 +96,10 @@ class Service(ABC):
     def run(self) -> None:
         """Do the service's work, blocking until it is stopped.
 
-        The runner calls it once, and it returns once ``self.stopping`` is set.
-        Under TaskRunner, stop() also calls teardown() while run() still runs,
-        so a run() blocked elsewhere can be released there; under ProcessRunner,
-        teardown() runs in the subprocess after run() returns.
+        The runtime calls it once, and it returns once ``self.stopping`` is set.
+        In the runtime's process, a stop also calls teardown() while run()
+        still runs, so a run() blocked elsewhere can be released there; in a
+        process of its own, teardown() runs there after run() returns.
         """
         ...
 
@@ -117,15 +117,15 @@ class Service(ABC):
     def teardown(self) -> None:
         """Cleanup the service, once the run is told to stop.
 
-        run() returns on ``self.stopping``, under every runner; teardown()
-        releases resources. For a scheduled service, the runner calls it once
-        the loop has ended (stopped or failed), on the thread or in the process
-        that ran the loop, so it never overlaps tick(). For an async service, it
-        runs on the event loop's thread after run() has ended, so it must not
-        block. For a service with its own run(), ProcessRunner calls it in the
-        subprocess after run() has returned; TaskRunner's stop() calls it once
-        the token is set, while run() may still be running, so there it can also
-        release a run() blocked on something other than the token. Default does
+        run() returns on ``self.stopping``; teardown() releases resources. It
+        runs on a thread of its own, or in the service's process when it has
+        one. For a scheduled service, it runs once the loop has ended (stopped
+        or failed), so it never overlaps tick(). For an async service, it runs
+        after run() has ended, off the event loop: it must not touch objects
+        bound to the loop. For a service with its own run(), a stop calls it
+        once the token is set, while run() may still be running, so it can also
+        release a run() blocked on something other than the token; in a process
+        of its own, it runs there after run() has returned. Default does
         nothing.
         """
 
@@ -144,16 +144,16 @@ class Service(ABC):
 class AsyncService(Service):
     """Service whose run() is a coroutine.
 
-    A TaskRunner runs it as a task on its runtime's event loop, alongside many
-    others: while run() waits on an await, the service holds no thread. It
-    stays on that loop for its lifetime. Stopping it cancels the task, raising
-    CancelledError at the await it is parked on. ProcessRunner refuses an
-    AsyncService.
+    The runtime runs it as a task on its event loop, alongside many others:
+    while run() waits on an await, the service holds no thread. It stays on
+    that loop for its lifetime. Stopping it cancels the task, raising
+    CancelledError at the await it is parked on. A process of its own is
+    refused for an AsyncService.
 
     run() must not call anything that blocks without awaiting: that stalls
     every service on the loop. Run blocking code through asyncio.to_thread().
     Open clients bound to the loop in run() and close them in its finally:
-    setup() runs on the caller's thread, before the task starts.
+    setup() and teardown() run on threads, off the loop.
 
     Example:
         class Doubler(AsyncService):
@@ -171,8 +171,8 @@ class AsyncService(Service):
                     await self._inbox.send(Message(id=msg.id, payload=msg.payload * 2))
     """
 
-    # A coroutine, unlike Service.run(): a TaskRunner runs it on an event loop,
-    # and ProcessRunner refuses an AsyncService
+    # A coroutine, unlike Service.run(): the runtime runs it on its event loop,
+    # and never in a process of its own
     @abstractmethod
     async def run(self) -> None:  # type: ignore[override]
         """Do the service's work until it returns or is cancelled."""

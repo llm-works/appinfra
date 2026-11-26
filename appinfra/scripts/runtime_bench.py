@@ -34,13 +34,14 @@ from appinfra.runtime import Runtime  # noqa: E402
 from appinfra.runtime.bench import round_trip_rate as task_round_trip_rate  # noqa: E402
 from appinfra.runtime.bench import runtime_rates as task_runtime_rates  # noqa: E402
 from appinfra.runtime.bench import task_cost, task_rates  # noqa: E402
+from appinfra.service import Runtime as ServiceRuntime  # noqa: E402
 from appinfra.service.bench import (  # noqa: E402
     parked_maker,
     round_trip_rate,
     runtime_rates,
     service_cost,
-    start_runners,
-    stop_runners,
+    spawn_services,
+    stop_services,
 )
 
 app = (
@@ -70,8 +71,8 @@ class _Column:
 
 # What each rate row times, printed under the table
 _NOTES = [
-    ("start", "spawn() of a task, a runner's start() of a service, until each runs"),
-    ("stop", "cancel() and wait() of a task, a runner's stop()"),
+    ("start", "spawn() of a task or a service, until each runs"),
+    ("stop", "cancel() and wait() of a task, stop_service() of a service"),
     ("Runtime spawn", "spawn() into a runtime of its own, until each runs"),
     ("Runtime stop", "one stop() of that runtime"),
     ("submit/reply", "round trips over channels between two tasks, or to a service"),
@@ -117,15 +118,15 @@ def _measure_tasks(lg: Logger, count: int) -> _Column:
 
 
 def _measure_services(lg: Logger, count: int) -> _Column:
-    """A service's numbers, over *count* services, run on a runtime's loop."""
-    with Runtime(lg) as tasks:
+    """A service's numbers, over *count* services, run on a service runtime's loop."""
+    with Runtime(lg) as tasks, ServiceRuntime(lg) as rt:
         lg.info("measuring memory per service...", extra={"services": count})
-        cost = service_cost(tasks, lg, count)
-        lg.info("measuring runner start and stop...", extra={"services": count})
-        runners, start = start_runners(tasks, parked_maker(lg), count)
-        stop = stop_runners(runners)
-        lg.info("measuring submit/reply rate...", extra={"round_trips": count})
-        trips = round_trip_rate(tasks, lg, count)
+        cost = service_cost(tasks, rt, lg, count)
+        lg.info("measuring spawn and stop_service...", extra={"services": count})
+        runners, start = spawn_services(rt, parked_maker(lg), count)
+        stop = stop_services(rt, runners)
+    lg.info("measuring submit/reply rate...", extra={"round_trips": count})
+    trips = round_trip_rate(lg, count)
     lg.info("measuring service runtime spawn and stop...", extra={"services": count})
     rt_spawn, rt_stop = runtime_rates(lg, parked_maker(lg), count)
     return _Column(

@@ -8,13 +8,13 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from appinfra.runtime import Runtime as Tasks
+from appinfra.service import Runtime
 
 
 @pytest.fixture
-def tasks() -> Iterator[Tasks]:
-    """A running appinfra.runtime Runtime for TaskRunners to run services on."""
-    tasks = Tasks(MagicMock())
-    tasks.start()
-    yield tasks
-    tasks.stop()
+def rt() -> Iterator[Runtime]:
+    """A running service Runtime, stopped after the test."""
+    runtime = Runtime(MagicMock(), name="test-runtime")
+    runtime.start()
+    yield runtime
+    runtime.stop()

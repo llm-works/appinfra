@@ -6,7 +6,6 @@
 import threading
 import time
 from typing import Any
-from unittest.mock import MagicMock
 
 import pytest
 
@@ -22,12 +21,9 @@ from appinfra.service import (
     ProcessQueueChannelFactory,
     QueueChannelFactory,
     RestartPolicy,
-    RunnerFactory,
-    RunnerWithChannel,
     Service,
     ServiceFactory,
     ServiceRegistration,
-    TaskRunner,
 )
 from tests.helpers.service.factory import SimpleService
 
@@ -148,75 +144,6 @@ class TestProcessQueueChannelFactory:
         assert pair.parent is not None
         assert pair.child is not None
         pair.close()
-
-
-# RunnerFactory tests
-
-
-class TestRunnerFactory:
-    """Tests for RunnerFactory."""
-
-    def test_create_task_runner(self, lg: Logger) -> None:
-        """Creates TaskRunner for service."""
-        factory = RunnerFactory(lg)
-        service = SimpleService(lg)
-
-        runner = factory.create_task_runner(MagicMock(), service)
-
-        assert isinstance(runner, TaskRunner)
-        assert runner.service is service
-
-    def test_create_task_runner_with_policy(self, lg: Logger) -> None:
-        """Applies restart policy to runner."""
-        policy = RestartPolicy(max_retries=5)
-        factory = RunnerFactory(lg, default_policy=policy)
-        service = SimpleService(lg)
-
-        runner = factory.create_task_runner(MagicMock(), service)
-
-        assert runner.policy is policy
-
-    def test_create_task_runner_override_policy(self, lg: Logger) -> None:
-        """Per-runner policy overrides default."""
-        default_policy = RestartPolicy(max_retries=3)
-        override_policy = RestartPolicy(max_retries=10)
-        factory = RunnerFactory(lg, default_policy=default_policy)
-        service = SimpleService(lg)
-
-        runner = factory.create_task_runner(
-            MagicMock(), service, policy=override_policy
-        )
-
-        assert runner.policy is override_policy
-
-    def test_create_task_runner_with_channel(self, lg: Logger) -> None:
-        """Creates runner with channel pair."""
-        factory = RunnerFactory(lg)
-        service = SimpleService(lg)
-
-        result = factory.create_task_runner_with_channel(MagicMock(), service)
-
-        assert isinstance(result, RunnerWithChannel)
-        assert isinstance(result.runner, TaskRunner)
-        assert isinstance(result.channel, Channel)
-        assert isinstance(result.service_channel, Channel)
-
-        # Verify channels are connected
-        result.channel.send(Message(payload="ping"))
-        msg = result.service_channel.recv(timeout=0.1)
-        assert msg.payload == "ping"
-
-    def test_create_process_runner(self, lg: Logger) -> None:
-        """Creates ProcessRunner for service."""
-        from appinfra.service import ProcessRunner
-
-        factory = RunnerFactory(lg)
-        service = SimpleService(lg)
-
-        runner = factory.create_process_runner(service)
-
-        assert isinstance(runner, ProcessRunner)
-        assert runner.service is service
 
 
 # ServiceFactory tests
@@ -440,82 +367,3 @@ class TestChannelPairFactory:
         pair.close()
         assert pair.parent.is_closed
         assert pair.child.is_closed
-
-
-class TestPluggableTransport:
-    """Tests for transport injection in RunnerFactory."""
-
-    def test_runner_factory_with_custom_channel_factory(self, lg: Logger) -> None:
-        """RunnerFactory uses injected channel factory."""
-        stub_factory = StubChannelFactory()
-        runner_factory = RunnerFactory(lg, channel_factory=stub_factory)
-        service = SimpleService(lg)
-
-        result = runner_factory.create_task_runner_with_channel(MagicMock(), service)
-
-        assert stub_factory.calls == 1
-        assert isinstance(result.channel, Channel)
-        assert isinstance(result.service_channel, Channel)
-
-    def test_process_runner_with_custom_channel_factory(self, lg: Logger) -> None:
-        """ProcessRunner uses injected channel factory."""
-        stub_factory = StubChannelFactory()
-        runner_factory = RunnerFactory(lg, channel_factory=stub_factory)
-        service = SimpleService(lg)
-
-        result = runner_factory.create_process_runner_with_channel(service)
-
-        assert stub_factory.calls == 1
-        assert isinstance(result.channel, Channel)
-        assert isinstance(result.service_channel, Channel)
-
-    def test_task_runner_with_injected_pair(self, lg: Logger) -> None:
-        """Per-call channel_pair overrides factory."""
-        pair = _stub_pair()
-        runner_factory = RunnerFactory(lg)
-        service = SimpleService(lg)
-
-        result = runner_factory.create_task_runner_with_channel(
-            MagicMock(), service, channel_pair=pair
-        )
-
-        assert result.channel is pair.parent
-        assert result.service_channel is pair.child
-
-    def test_process_runner_with_injected_pair(self, lg: Logger) -> None:
-        """Per-call channel_pair overrides factory for process runner."""
-        pair = _stub_pair()
-        runner_factory = RunnerFactory(lg)
-        service = SimpleService(lg)
-
-        result = runner_factory.create_process_runner_with_channel(
-            service, channel_pair=pair
-        )
-
-        assert result.channel is pair.parent
-        assert result.service_channel is pair.child
-
-    def test_injected_pair_takes_precedence_over_factory(self, lg: Logger) -> None:
-        """Per-call channel_pair beats factory-level channel_factory."""
-        stub_factory = StubChannelFactory()
-        pair = _stub_pair()
-        runner_factory = RunnerFactory(lg, channel_factory=stub_factory)
-        service = SimpleService(lg)
-
-        result = runner_factory.create_task_runner_with_channel(
-            MagicMock(), service, channel_pair=pair
-        )
-
-        assert stub_factory.calls == 0
-        assert result.channel is pair.parent
-        assert result.service_channel is pair.child
-
-    def test_default_factory_unchanged(self, lg: Logger) -> None:
-        """Without injection, default channel factory behavior is preserved."""
-        runner_factory = RunnerFactory(lg)
-        service = SimpleService(lg)
-
-        result = runner_factory.create_task_runner_with_channel(MagicMock(), service)
-
-        assert isinstance(result.channel, Channel)
-        assert isinstance(result.service_channel, Channel)

@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright 2026 The appinfra Authors
 
-"""Tests for how a TaskRunner's thread and a ProcessRunner drive a service, and
-which services each runner accepts."""
+"""Tests for how a service's thread task and a ProcessRunner drive a service, and
+which services the Runner and ProcessRunner accept."""
 
 from unittest.mock import MagicMock
 
@@ -11,9 +11,9 @@ import pytest
 from appinfra.service import (
     AsyncService,
     ProcessRunner,
+    Runner,
     ScheduledService,
     Service,
-    TaskRunner,
 )
 from appinfra.service.runtime.drive import drive
 
@@ -125,18 +125,18 @@ class TestRunnerAccepts:
 
     def test_non_service_is_refused(self):
         with pytest.raises(TypeError, match="must be a Service"):
-            TaskRunner(MagicMock(), object())
+            Runner(object())
 
     def test_scheduled_and_async_at_once_is_refused(self):
         with pytest.raises(
             TypeError, match="both a ScheduledService and an AsyncService"
         ):
-            TaskRunner(MagicMock(), TickAndAwait())
+            Runner(TickAndAwait())
 
     def test_a_process_runner_refuses_an_async_service(self):
         with pytest.raises(TypeError, match="runs on an event loop"):
             ProcessRunner(Idle())
 
     @pytest.mark.parametrize("service_cls", [Once, Ticker, Idle])
-    def test_a_task_runner_takes_every_kind(self, service_cls: type):
-        assert TaskRunner(MagicMock(), service_cls()).service is not None
+    def test_a_runner_takes_every_kind(self, service_cls: type):
+        assert Runner(service_cls()).service is not None

@@ -22,14 +22,14 @@ from ...runtime import StopToken
 from ..base import Service
 from ..state import RestartPolicy, State
 from .drive import check_drivable, drive
-from .runner import Runner
+from .process_base import ProcessBase
 
 
-class ProcessRunner(Runner):
+class ProcessRunner(ProcessBase):
     """Runs a service in a separate process using multiprocessing.
 
     The service must be picklable for this to work. An AsyncService runs under
-    a TaskRunner instead, on its runtime's event loop.
+    the service Runtime instead, on its event loop.
 
     Note:
         In the subprocess, ``self.stopping`` is set when the parent stops the

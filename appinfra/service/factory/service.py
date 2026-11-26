@@ -44,8 +44,8 @@ class ServiceFactory:
     - Create services with consistent dependencies (logger)
     - Support custom factory functions for complex initialization
 
-    For services that need channels, use RunnerFactory which provides
-    create_task_runner_with_channel() and create_process_runner_with_channel().
+    A service registered with_channel gets its channel from the caller: create
+    a pair with a channel factory and hand the service its end.
 
     Example:
         factory = ServiceFactory(lg)
@@ -68,10 +68,9 @@ class ServiceFactory:
         db = factory.create("database")
         cache = factory.create("cache", ttl=300)
 
-        # Check if service needs a channel (for use with RunnerFactory)
+        # Check if service needs a channel
         if factory.needs_channel("worker"):
-            # Use RunnerFactory.create_task_runner_with_channel()
-            pass
+            pair = QueueChannelFactory().create_pair()
     """
 
     def __init__(self, lg: Logger) -> None:
