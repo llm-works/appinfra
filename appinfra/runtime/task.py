@@ -217,6 +217,10 @@ class _Task(ABC):
     # What a stop ends a call with, on this kind of task
     stop_signals: tuple[type[BaseException], ...] = (StoppedError,)
 
+    # Whether terminate() and kill() can end a call this kind of task runs: a
+    # thread and the loop cannot be killed, a process can
+    killable = False
+
     def __init__(
         self,
         on_end: Callable[[_Task], None],
@@ -290,14 +294,13 @@ class _Task(ABC):
     def is_running(self) -> bool:
         """True while the call has not ended."""
 
-    def force(self) -> bool:
-        """End a call that outlived the runtime's stop, if this kind of task
-        can: a thread or the loop cannot be killed, a process can.
+    def terminate(self) -> None:
+        """Ask a call that outlived the runtime's stop to end now, if this kind
+        of task is killable; returns at once."""
 
-        Returns:
-            True if the call has ended.
-        """
-        return not self.is_running()
+    def kill(self) -> None:
+        """End a call that outlived terminate(), if this kind of task is
+        killable; returns at once."""
 
     def _raised(self, e: BaseException) -> None:
         """Record how the call ended on *e*: a stop if it is the stop's own

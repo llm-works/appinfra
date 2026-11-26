@@ -21,10 +21,6 @@ from .stop import StopToken
 from .task import _label, _Task
 from .thread import _ThreadTask
 
-# Seconds a child gets after terminate(), then after kill(), once the
-# runtime's stop has given up on it
-_GRACE = 2.0
-
 
 class _ProcessTask(_ThreadTask):
     """Calls a function in a child process, started with the ``spawn`` method:
@@ -36,12 +32,15 @@ class _ProcessTask(_ThreadTask):
     and task_id() work there, with this task's id. Its token stops when this
     task's does, or when the parent's end of the stop connection closes, so a
     child outliving its parent stops. The outcome comes back over a second
-    connection: the result, the exception with the child's traceback as its
-    cause, or the stop. A child that exits without one fails the task with
+    connection: the result, the exception with the child's traceback as a
+    note (PEP 678), which, unlike a cause, survives any later pickling, as a
+    done pipe's, or the stop. A child that exits without one fails the task with
     ProcessExitError, unless the task was stopped.
     """
 
     __slots__ = ("_process",)
+
+    killable = True
 
     def __init__(
         self,
@@ -59,10 +58,11 @@ class _ProcessTask(_ThreadTask):
     def _call(self, fn: Callable[..., Any], args: tuple[Any, ...]) -> Any:
         """Run *fn*(*args*) in a child and return or raise its outcome."""
         ctx = mp.get_context("spawn")
-        outcome_recv, outcome_send = ctx.Pipe(duplex=False)
-        stop_recv, stop_send = ctx.Pipe(duplex=False)
-        unregister = self.token._on_stop(functools.partial(_signal, stop_send))
-        try:
+        with contextlib.ExitStack() as ends:
+            # Each end is closed on any exit from the moment it is opened
+            outcome_recv, outcome_send = _opened(ends, ctx.Pipe(duplex=False))
+            stop_recv, stop_send = _opened(ends, ctx.Pipe(duplex=False))
+            ends.callback(self.token._on_stop(functools.partial(_signal, stop_send)))
             process = ctx.Process(
                 target=_child,
                 args=(self.id, self.name, fn, args, stop_recv, outcome_send),
@@ -75,56 +75,77 @@ class _ProcessTask(_ThreadTask):
             stop_recv.close()
             outcome_send.close()
             return self._outcome(process, outcome_recv)
-        finally:
-            unregister()
-            for conn in (outcome_recv, outcome_send, stop_recv, stop_send):
-                conn.close()
 
     def _outcome(self, process: BaseProcess, outcome: Connection) -> Any:
-        """Wait for the child to report its outcome or exit; return or raise
-        the outcome."""
+        """Wait for the child to report its outcome or exit. A report is
+        recorded on this task as the child made it, and its result returned.
+        Without one: StoppedError if this task's token is stopped, else
+        ProcessExitError, read as any call's error is (_raised())."""
         wait([outcome, process.sentinel])
         payload: bytes | None = None
         if outcome.poll():
             with contextlib.suppress(EOFError, OSError):
                 payload = outcome.recv_bytes()
         process.join()
+        exitcode = process.exitcode
+        # Reaped: release its descriptors, as the handle may be held long after
+        self._process = None
+        process.close()
         if payload is None:
             if self.token.is_set():
                 raise StoppedError()
-            raise ProcessExitError(self.id, process.exitcode)
-        result, error, text, stopped = pickle.loads(payload)
+            raise ProcessExitError(self.id, exitcode)
+        # The child's report is the outcome, recorded as reported: raised, it
+        # would be read against this task's token (_raised()), which can
+        # differ from the child's
+        result, error, stopped = self._decode(payload)
         if stopped:
-            raise StoppedError()
-        if error is not None:
-            error.__cause__ = _ChildError(text)
-            raise error
+            self.stopped = True
+        elif error is not None:
+            self.exception, self.exception_tb = error, error.__traceback__
         return result
 
-    def force(self) -> bool:
-        """Terminate the child, then kill it, and wait for this task's end."""
+    def _decode(self, payload: bytes) -> tuple[Any, BaseException | None, bool]:
+        """The child's report: its result, its error, and whether it was
+        stopped.
+
+        Raises:
+            RuntimeError: If it does not unpickle here, though it did in the
+                child: a class only the child can import.
+        """
+        try:
+            report: tuple[Any, BaseException | None, bool] = pickle.loads(payload)
+        except Exception as e:
+            raise RuntimeError(
+                f"task {self.id}'s outcome could not be unpickled here: {e!r}"
+            ) from e
+        return report
+
+    def terminate(self) -> None:
+        """Send the child SIGTERM, if it is running."""
+        self._send(lambda process: process.terminate())
+
+    def kill(self) -> None:
+        """Send the child SIGKILL, if it is running."""
+        self._send(lambda process: process.kill())
+
+    def _send(self, signal: Callable[[BaseProcess], None]) -> None:
+        """*signal* the child, if it is running. One reaped and closed while
+        this ran (_outcome()) raises ValueError: nothing is left to signal."""
         process = self._process
-        if process is not None and process.is_alive():
-            process.terminate()
-            process.join(_GRACE)
-            if process.is_alive():
-                process.kill()
-                process.join(_GRACE)
-        return self.join(_GRACE)
+        if process is not None:
+            with contextlib.suppress(ValueError):
+                if process.is_alive():
+                    signal(process)
 
 
-class _ChildError(Exception):
-    """The traceback of an exception raised in a task's child process, as the
-    child formatted it: the cause of that exception as the parent raises it."""
-
-    def __init__(self, text: str) -> None:
-        """The child's traceback, formatted."""
-        super().__init__(text)
-        self.text = text
-
-    def __str__(self) -> str:
-        """The traceback, as the child printed it."""
-        return f"\n{self.text}"
+def _opened(
+    ends: contextlib.ExitStack, pair: tuple[Connection, Connection]
+) -> tuple[Connection, Connection]:
+    """*pair*, each end closed when *ends* exits."""
+    for end in pair:
+        ends.callback(end.close)
+    return pair
 
 
 def _signal(stop: Connection) -> None:
@@ -144,8 +165,14 @@ def _child(
     outcome: Connection,
 ) -> None:
     """The child's main: run the call as a thread task, inline, and send its
-    outcome; its token stops on a signal or EOF on *stop*."""
+    outcome; its token stops on a signal or EOF on *stop*. A signal sent
+    before the child started is read here, before the call, not left to the
+    listener thread to win the race against it: the runtime's stop signals a
+    child before it forces it, so a child its stop forced before it was
+    started skips the call."""
     token = StopToken()
+    if stop.poll(0):  # a signal, or EOF: the parent is gone
+        token.stop()
     threading.Thread(
         target=_stop_on_signal, args=(stop, token), name="stop", daemon=True
     ).start()
@@ -163,13 +190,20 @@ def _stop_on_signal(stop: Connection, token: StopToken) -> None:
 
 def _report(task: _Task, outcome: Connection) -> None:
     """Send *task*'s outcome to the parent: pickled, once the bytes unpickle
-    here; else a RuntimeError naming why, in place of its result and error."""
+    here; else a RuntimeError naming why, in place of its result and error.
+    An error carries its traceback in the child as a note."""
     error = task.exception
-    text = "" if error is None else "".join(traceback.format_exception(error))
+    note = None
+    if error is not None:
+        trace = "".join(traceback.format_exception(error))
+        note = f"Traceback in the process of task {task.id}:\n{trace}"
+        error.add_note(note)
     try:
-        payload = pickle.dumps((task.result, error, text, task.stopped))
+        payload = pickle.dumps((task.result, error, task.stopped))
         pickle.loads(payload)
     except Exception as e:
         failure = RuntimeError(f"task {task.id} ended unpicklable: {e!r}")
-        payload = pickle.dumps((None, failure, text, False))
+        if note is not None:
+            failure.add_note(note)
+        payload = pickle.dumps((None, failure, False))
     outcome.send_bytes(payload)

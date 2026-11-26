@@ -91,8 +91,9 @@ if __name__ == "__main__":
   process creation goes under `if __name__ == "__main__":`; the child does not see the parent's
   `contextvars`
 - inside the child, `stopping()` and `task_id()` work as in any task, with the parent's task id
-- the result comes back pickled; an exception is raised with the child's traceback as its cause;
-  an outcome that does not survive a pickle round trip arrives as a `RuntimeError` naming why
+- the result comes back pickled; an exception is raised with the child's traceback as a note
+  (`__notes__`), so it survives a `done=` pipe too; an outcome that does not survive a pickle
+  round trip, here or in the child, arrives as a `RuntimeError` naming why
 - `cancel()` and the runtime's stop stop the child's token; so does the parent going away
 - a child that exits without an outcome (killed, crashed, `os._exit()`) fails the task with
   `ProcessExitError`, whose `exitcode` is negative for the signal that ended it; a task stopped
@@ -153,8 +154,9 @@ def worker(jobs: Chan[int]) -> None:
         handle(job, task_id())
 ```
 
-A task runs in a copy of its spawner's `contextvars`, as `asyncio.create_task()` and
-`asyncio.to_thread()` do: it sees the spawner's values, and what it sets stays its own.
+A task on a thread or the loop runs in a copy of its spawner's `contextvars`, as
+`asyncio.create_task()` and `asyncio.to_thread()` do: it sees the spawner's values, and what it
+sets stays its own. A process task's child starts with a fresh context (see Processes).
 
 ### StopToken
 
@@ -201,7 +203,9 @@ lost. Through a pipe, an end that does not survive a pickle round trip arrives w
 
 `Runtime.stop(timeout=5.0)` stops every task's token, cancels the loop tasks and waits for the
 thread and process tasks, all within `timeout`. A thread task still running then is logged and
-left: a thread cannot be killed. A process task's child is terminated, then killed. Leaving a
+left: a thread cannot be killed. Process tasks still running then are ended by force, on top of
+`timeout`: every such child is sent SIGTERM and given 2 seconds, then every survivor SIGKILL and
+2 seconds more, so a stop with late children takes up to `timeout` plus 4 seconds. Leaving a
 `with Runtime(lg) as rt:` block calls it, and a runtime left running is stopped at interpreter
 exit.
 

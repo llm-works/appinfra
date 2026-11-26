@@ -36,7 +36,8 @@ For API stability guarantees and deprecation policy, see
   a shared event loop, any other on a thread of its own) and returns its `Task`: `wait()`, or
   `await task` on any event loop, as often as wanted; `cancel()`, `alive()`, `detach()`. Inside a
   task, `stopping()` and `task_id()` return its token and id; a task its stop ended without a
-  result raises `StoppedError`. A task runs in a copy of the spawner's `contextvars`.
+  result raises `StoppedError`. A task on a thread or the loop runs in a copy of the spawner's
+  `contextvars`.
 - `Runtime.spawn(..., name=, token=, done=)`: the task's name, on its thread and log records; its
   token derives from the given one; its end (`TaskDone`: its name, result, or error as `wait()`
   would raise it) is sent on a channel or pipe.

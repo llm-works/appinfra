@@ -11,6 +11,7 @@ import contextlib
 import contextvars
 import functools
 import inspect
+import operator
 import pickle
 import threading
 import time
@@ -26,6 +27,10 @@ from .process import _ProcessTask
 from .stop import StopToken
 from .task import Task, TaskDone, _current_task, _Task
 from .thread import _ThreadTask
+
+# Seconds a process task's child still running past stop()'s timeout gets
+# after SIGTERM, and then after SIGKILL: on top of the timeout
+_GRACE = 2.0
 
 
 @final
@@ -43,8 +48,9 @@ class Runtime:
 
     Every task's token derives from the token of the task that spawned it, or
     from the runtime's; ``stopping()`` returns it inside the task, ``task_id()``
-    its id. A task runs in a copy of the spawner's contextvars, as asyncio's
-    create_task() and to_thread() do. stop() stops every task's token, cancels
+    its id. A task on a thread or the loop runs in a copy of the spawner's
+    contextvars, as asyncio's create_task() and to_thread() do; a process
+    task's child starts with a fresh context. stop() stops every task's token, cancels
     the tasks on the loop, and waits for the ones on threads.
 
     A task its stop ended has no result: wait() raises StoppedError for it,
@@ -138,7 +144,10 @@ class Runtime:
                 method: *fn* and *args* are pickled, so *fn* is defined at
                 module level, and process creation goes under ``if __name__ ==
                 "__main__":``. Its result or exception comes back pickled; an
-                exception carries the child's traceback as its cause. The
+                exception carries the child's traceback as a note, which a
+                done pipe keeps. The child is a fresh interpreter: it does not
+                see the spawner's contextvars; stopping() and task_id() work
+                there, as the child sets them up itself. The
                 child's token stops with the task's, or once the parent is
                 gone. A child that exits without an outcome fails the task
                 with ProcessExitError. stop() kills one still running past its
@@ -150,7 +159,7 @@ class Runtime:
             RuntimeError: If the runtime is not running.
         """
         name = _task_name(name)
-        if process and inspect.iscoroutinefunction(fn):
+        if process and _async_callable(fn):
             raise TypeError("an async function runs on the loop, not in a process")
         if token is None:
             parent = _current_task()
@@ -326,10 +335,14 @@ class Runtime:
 
     def stop(self, timeout: float = 5.0) -> None:
         """Stop every task's token, then the loop, which cancels the tasks on
-        it; then wait for the tasks on threads. All of it takes at most
-        *timeout* seconds: the loop and the thread tasks share the one budget.
-        A task still running then is logged and left, as a thread cannot be
-        killed. The tasks keep their outcomes, to be waited for.
+        it; then wait for the tasks on threads and in processes. All of it
+        takes at most *timeout* seconds: the loop, the thread and the process
+        tasks share the one budget. A thread task still running then is logged
+        and left, as a thread cannot be killed. Process tasks still running
+        then are ended by force, on top of *timeout*: every child is sent
+        SIGTERM and given _GRACE seconds, then every survivor SIGKILL and
+        _GRACE seconds more; one still running after that is logged. The tasks
+        keep their outcomes, to be waited for.
 
         Raises:
             RuntimeError: If called on the runtime's loop thread.
@@ -361,11 +374,17 @@ class Runtime:
                 )
 
     def _still_running(self, tasks: list[_Task], deadline: float) -> list[_Task]:
-        """The *tasks* still running once the loop has stopped. A thread task
-        is waited for until *deadline*; a loop task only checked, as the loop's
-        stop had its time already. One still running then is ended by force if
-        its kind can be (a process). A task stopping the runtime does not wait
-        for itself."""
+        """The *tasks* still running once the loop has stopped and the killable
+        ones have been ended by force (_escalate())."""
+        late = self._overdue(tasks, deadline)
+        killable = _escalate([t for t in late if t.killable])
+        return [t for t in late if not t.killable] + killable
+
+    def _overdue(self, tasks: list[_Task], deadline: float) -> list[_Task]:
+        """The *tasks* still running at *deadline*. A thread or process task is
+        waited for until then; a loop task only checked, as the loop's stop had
+        its time already. A task stopping the runtime does not wait for
+        itself."""
         caller = _current_task()
         late = []
         for t in tasks:
@@ -375,7 +394,7 @@ class Runtime:
                 ended = not t.is_running()
             else:
                 ended = t.join(max(0.0, deadline - time.monotonic()))
-            if not ended and not t.force():
+            if not ended:
                 late.append(t)
         return late
 
@@ -420,6 +439,38 @@ def _error(t: _Task) -> BaseException | None:
     if t.stopped:
         return StoppedError(f"task {t.id} was stopped")
     return None
+
+
+def _escalate(late: list[_Task]) -> list[_Task]:
+    """Terminate every one of *late*, killable tasks, then wait for them, all
+    against one deadline _GRACE away; kill the survivors and wait for them the
+    same way. No task's wait delays another's signal.
+
+    Returns:
+        The tasks still running after the kill's grace.
+    """
+    for end in (operator.methodcaller("terminate"), operator.methodcaller("kill")):
+        if not late:
+            break
+        for t in late:
+            end(t)
+        grace = time.monotonic() + _GRACE
+        late = [t for t in late if not t.join(max(0.0, grace - time.monotonic()))]
+    return late
+
+
+def _async_callable(fn: Callable[..., Any]) -> bool:
+    """True if calling *fn* makes something only a loop can run: a coroutine
+    function or an async generator function, or an object whose __call__ is
+    one."""
+
+    def is_async(f: object) -> bool:
+        return inspect.iscoroutinefunction(f) or inspect.isasyncgenfunction(f)
+
+    if is_async(fn):
+        return True
+    call = getattr(type(fn), "__call__", None)
+    return not inspect.isfunction(fn) and is_async(call)
 
 
 def _task_name(name: object) -> str | None:

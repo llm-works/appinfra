@@ -17,6 +17,12 @@ class ProcessExitError(Exception):
     the signal that ended it."""
 
     def __init__(self, task_id: int, exitcode: int | None) -> None:
+        # Both in args, which pickling passes back to __init__: a done pipe
+        # pickles the error again
+        super().__init__(task_id, exitcode)
         self.task_id = task_id
         self.exitcode = exitcode
-        super().__init__(f"task {task_id}'s process exited with code {exitcode}")
+
+    def __str__(self) -> str:
+        """``task 7's process exited with code -9``."""
+        return f"task {self.task_id}'s process exited with code {self.exitcode}"
