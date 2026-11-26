@@ -294,6 +294,15 @@ class _Task(ABC):
     def is_running(self) -> bool:
         """True while the call has not ended."""
 
+    def force(self) -> bool:
+        """End a call that outlived the runtime's stop, if this kind of task
+        can: a thread or the loop cannot be killed, a process can.
+
+        Returns:
+            True if the call has ended.
+        """
+        return not self.is_running()
+
     def _raised(self, e: BaseException) -> None:
         """Record how the call ended on *e*: a stop if it is the stop's own
         signal and the token is stopped, a failure otherwise. StopIteration
@@ -359,7 +368,7 @@ class _ThreadTask(_Task):
             else:
                 try:
                     fn, args = self._take_call()
-                    self.result = fn(*args)
+                    self.result = self._call(fn, args)
                 except BaseException as e:
                     self._raised(e)
             self._end()
@@ -367,6 +376,10 @@ class _ThreadTask(_Task):
             # Last, so the outcome is settled before is_running() reports the
             # end
             self._finished = True
+
+    def _call(self, fn: Callable[..., Any], args: tuple[Any, ...]) -> Any:
+        """The call itself: *fn*(*args*) on this thread."""
+        return fn(*args)
 
     def cancel(self) -> None:
         """Stop the task's token; the function sees it and returns."""

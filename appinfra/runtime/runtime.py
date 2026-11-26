@@ -22,6 +22,7 @@ from ..log import Logger
 from .chan import Chan, ClosedError, Sender
 from .errors import StoppedError
 from .loop import LoopHost
+from .process import _ProcessTask
 from .stop import StopToken
 from .task import Task, TaskDone, _current_task, _LoopTask, _Task, _ThreadTask
 
@@ -109,15 +110,17 @@ class Runtime:
         name: str | None = None,
         token: StopToken | None = None,
         done: Chan[TaskDone] | Sender[TaskDone] | None = None,
+        process: bool = False,
     ) -> Task:
         """Call *fn*(*args*) as a task: on the loop if it is an async function,
-        else on a thread of its own. Returns the task.
+        else on a thread of its own, or in a process of its own if *process*.
+        Returns the task.
 
         Args:
             fn: The function to call.
             *args: Its arguments.
             name: Who the task is: on its handle, its thread or asyncio task,
-                its log records and its TaskDone.
+                its process, its log records and its TaskDone.
             token: The token the task's derives from, instead of the spawning
                 task's or the runtime's. stop() stops the task all the same.
             done: A channel, or a pipe's sending end, the task's TaskDone is
@@ -130,20 +133,24 @@ class Runtime:
                 closed channel the end is dropped. Through a pipe, an end
                 that cannot be pickled and unpickled again is sent with a
                 RuntimeError naming why, in place of its result and error.
+            process: Call *fn* in a child process, started with the ``spawn``
+                method: *fn* and *args* are pickled, so *fn* is defined at
+                module level, and process creation goes under ``if __name__ ==
+                "__main__":``. Its result or exception comes back pickled; an
+                exception carries the child's traceback as its cause. The
+                child's token stops with the task's, or once the parent is
+                gone. A child that exits without an outcome fails the task
+                with ProcessExitError. stop() kills one still running past its
+                timeout.
 
         Raises:
-            TypeError: If *name* is not a string.
+            TypeError: If *name* is not a string, or *process* is asked for an
+                async function: a child has no event loop.
             RuntimeError: If the runtime is not running.
         """
-        if name is not None:
-            if not isinstance(name, str):
-                raise TypeError(
-                    f"task name must be a string, not {type(name).__name__}"
-                )
-            # A plain str, bypassing a subclass's own __str__: one whose
-            # formatting or pickling raises would fail on the loop or the pipe,
-            # where the caller never sees it. A StrEnum becomes its value
-            name = str.__str__(name)
+        name = _task_name(name)
+        if process and inspect.iscoroutinefunction(fn):
+            raise TypeError("an async function runs on the loop, not in a process")
         if token is None:
             parent = _current_task()
             token = self._root if parent is None else parent.token
@@ -154,7 +161,7 @@ class Runtime:
                 raise RuntimeError("runtime is not running")
             task_id = self._next_task_id
             self._next_task_id += 1
-            t = self._task_for(task_id, name, fn, args, token)
+            t = self._task_for(task_id, name, fn, args, token, process)
             t.done_chan = done
             t.detached = done is not None
             self._tasks[task_id] = t
@@ -169,8 +176,12 @@ class Runtime:
         fn: Callable[..., Any],
         args: tuple[Any, ...],
         token: StopToken,
+        process: bool,
     ) -> _Task:
-        """The task that calls *fn*: on the loop if it is an async function."""
+        """The task that calls *fn*: in a process if asked, on the loop if it
+        is an async function, else on a thread."""
+        if process:
+            return _ProcessTask(self._end_hook, task_id, name, fn, args, token)
         if inspect.iscoroutinefunction(fn):
             return _LoopTask(self._end_hook, self._host, task_id, name, fn, args, token)
         return _ThreadTask(self._end_hook, task_id, name, fn, args, token)
@@ -351,7 +362,8 @@ class Runtime:
     def _still_running(self, tasks: list[_Task], deadline: float) -> list[_Task]:
         """The *tasks* still running once the loop has stopped. A thread task
         is waited for until *deadline*; a loop task only checked, as the loop's
-        stop had its time already. A task stopping the runtime does not wait
+        stop had its time already. One still running then is ended by force if
+        its kind can be (a process). A task stopping the runtime does not wait
         for itself."""
         caller = _current_task()
         late = []
@@ -362,7 +374,7 @@ class Runtime:
                 ended = not t.is_running()
             else:
                 ended = t.join(max(0.0, deadline - time.monotonic()))
-            if not ended:
+            if not ended and not t.force():
                 late.append(t)
         return late
 
@@ -407,6 +419,21 @@ def _error(t: _Task) -> BaseException | None:
     if t.stopped:
         return StoppedError(f"task {t.id} was stopped")
     return None
+
+
+def _task_name(name: object) -> str | None:
+    """spawn()'s *name* as a plain str: bypassing a subclass's own __str__,
+    whose formatting or pickling could fail on the loop, a pipe or in a child,
+    where the caller never sees it. A StrEnum becomes its value.
+
+    Raises:
+        TypeError: If *name* is not a string or None.
+    """
+    if name is None:
+        return None
+    if not isinstance(name, str):
+        raise TypeError(f"task name must be a string, not {type(name).__name__}")
+    return str.__str__(name)
 
 
 def _portable(end: TaskDone) -> bytes:

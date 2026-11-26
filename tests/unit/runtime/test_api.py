@@ -41,6 +41,7 @@ def test_the_runtime_exports_its_api() -> None:
         "PipeRecvEnd",
         "PipeSendEnd",
         "PipeSender",
+        "ProcessExitError",
         "Runtime",
         "StopToken",
         "StoppedError",

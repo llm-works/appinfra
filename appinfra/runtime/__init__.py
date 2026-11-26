@@ -15,7 +15,7 @@ from .chan import Receiver as PipeReceiver
 from .chan import Recv as ChanRecv
 from .chan import Send as ChanSend
 from .chan import Sender as PipeSender
-from .errors import StoppedError
+from .errors import ProcessExitError, StoppedError
 from .runtime import Runtime
 from .stop import StopToken
 from .task import Task, TaskDone, stopping, task_id
@@ -31,6 +31,7 @@ __all__ = [
     "PipeSender",
     "Runtime",
     "StopToken",
+    "ProcessExitError",
     "StoppedError",
     "Task",
     "TaskDone",
