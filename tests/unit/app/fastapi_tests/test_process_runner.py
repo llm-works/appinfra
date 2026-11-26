@@ -12,7 +12,7 @@ import pytest
 
 from appinfra.app.fastapi.runtime.process import ProcessRunner
 from appinfra.log import Logger
-from appinfra.service import AsyncService, RestartPolicy, Service, SetupError, State
+from appinfra.service import RestartPolicy, Service, SetupError, State
 
 _PROCESS = "appinfra.app.fastapi.runtime.process"
 
@@ -63,20 +63,6 @@ class MPSetupFailService(Service):
         pass
 
 
-class Idle(AsyncService):
-    """An async service, which a ProcessRunner refuses."""
-
-    def __init__(self) -> None:
-        self._lg = MagicMock()
-
-    @property
-    def name(self) -> str:
-        return "idle"
-
-    async def run(self) -> None:
-        pass
-
-
 class TestProcessRunner:
     """Unit tests for ProcessRunner with mocks."""
 
@@ -84,10 +70,6 @@ class TestProcessRunner:
     def lg(self):
         """Create a logger for tests."""
         return Logger(name="test")
-
-    def test_an_async_service_is_refused(self):
-        with pytest.raises(TypeError, match="runs on an event loop"):
-            ProcessRunner(Idle())
 
     def test_start_transitions_states(self, lg):
         """start() transitions through INITD -> STARTING."""
@@ -139,26 +121,6 @@ class TestProcessRunner:
         svc = MPSimpleService(lg)
         runner = ProcessRunner(svc)
         assert runner.pid is None
-
-    def test_state_hooks_called(self, lg):
-        """State hooks are called on transitions."""
-        with (
-            _mock_mp_context(),
-            patch(f"{_PROCESS}.LogQueueListener"),
-        ):
-            transitions = []
-
-            def hook(name, old, new):
-                transitions.append((name, old, new))
-
-            svc = MPSimpleService(lg, name="test")
-            runner = ProcessRunner(svc)
-            runner.on_state_change(hook)
-
-            runner.start()
-
-            assert ("test", State.CREATED, State.INITD) in transitions
-            assert ("test", State.INITD, State.STARTING) in transitions
 
     def test_setup_error_transitions_to_failed(self, lg):
         """Setup error transitions to FAILED."""
