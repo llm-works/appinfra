@@ -244,10 +244,17 @@ jobs:
           docker compose -f docker-compose.yml \
                         -f docker-compose.override.py3.12.yml \
                         up -d postgres
-          sleep 3
+          # The server listens on 25432 (docker-compose.yml), once its first-boot
+          # init is done; after 60s the CREATE below fails with the reason
+          for _ in $(seq 60); do
+            docker compose -f docker-compose.yml \
+                          -f docker-compose.override.py3.12.yml \
+                          exec -T postgres pg_isready -U postgres -p 25432 -q && break
+            sleep 1
+          done
           docker compose -f docker-compose.yml \
                         -f docker-compose.override.py3.12.yml \
-                        exec -T postgres psql -U postgres -c "CREATE DATABASE infra_test;" || true
+                        exec -T postgres psql -U postgres -p 25432 -c "CREATE DATABASE infra_test;"
 
       - name: Run tests with coverage
         working-directory: appinfra/scripts/cicd
