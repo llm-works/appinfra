@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 
+from appinfra.app.fastapi.runtime.process import ProcessRunner
 from appinfra.log import Logger
 from appinfra.service import (
     BufferedChannel,
@@ -20,7 +21,6 @@ from appinfra.service import (
     Message,
     ProcessQueueChannelFactory,
     ProcessQueueTransport,
-    ProcessRunner,
     Service,
 )
 

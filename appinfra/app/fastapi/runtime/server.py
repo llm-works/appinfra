@@ -11,11 +11,11 @@ import time
 from multiprocessing.process import BaseProcess
 from typing import TYPE_CHECKING, Any
 
-from ....service import ProcessRunner
 from ....service.state import RestartPolicy
 from ..config.api import ApiConfig
 from ..config.ipc import IPCConfig
 from .adapter import LifecycleCallbackDefinition
+from .process import ProcessRunner
 from .service import UvicornService
 
 #: Default interval (seconds) for process health monitor checks

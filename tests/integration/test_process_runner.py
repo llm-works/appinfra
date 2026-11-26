@@ -9,10 +9,10 @@ import time
 
 import pytest
 
+from appinfra.app.fastapi.runtime.process import ProcessRunner
 from appinfra.log import Logger
 from appinfra.service import (
     InvalidTransitionError,
-    ProcessRunner,
     Service,
     State,
     StopToken,

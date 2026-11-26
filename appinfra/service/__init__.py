@@ -43,8 +43,7 @@ Usage:
         run_application()
 
 spawn() returns the service's runner; ``runner.on_state_change(hook)``
-observes its transitions. ProcessRunner runs a service in a process of its own
-on its own, without a Runtime.
+observes its transitions.
 """
 
 from ..runtime import StopToken
@@ -90,7 +89,7 @@ from .factory import (
     ServiceFactory,
     ServiceRegistration,
 )
-from .runtime import ProcessRunner, Runner, Runtime
+from .runtime import Runner, Runtime
 from .state import RestartPolicy, State, StateHook
 
 __all__ = [
@@ -99,7 +98,6 @@ __all__ = [
     "ScheduledService",
     "AsyncService",
     "Runner",
-    "ProcessRunner",
     "Runtime",
     # Transport (wire level)
     "Transport",

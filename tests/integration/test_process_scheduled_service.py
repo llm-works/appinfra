@@ -8,8 +8,9 @@ from multiprocessing.synchronize import Event as MPEvent
 
 import pytest
 
+from appinfra.app.fastapi.runtime.process import ProcessRunner
 from appinfra.log import Logger
-from appinfra.service import ProcessRunner, ScheduledService, State
+from appinfra.service import ScheduledService, State
 from tests.helpers.fork import forks_in_xdist_worker
 
 

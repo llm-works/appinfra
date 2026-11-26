@@ -12,8 +12,9 @@ from pathlib import Path
 
 import pytest
 
+from appinfra.app.fastapi.runtime.process import ProcessRunner
 from appinfra.log import Logger
-from appinfra.service import ProcessRunner, RestartPolicy, Service, State
+from appinfra.service import RestartPolicy, Service, State
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 

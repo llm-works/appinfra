@@ -57,16 +57,17 @@ class Service(ABC):
     """
 
     _lg: Logger
-    """Logger instance. Set by subclass __init__ or by ProcessRunner."""
+    """Logger instance. Set by subclass __init__, and in a process of its own by
+    the runtime."""
 
     stopping: StopToken
     """Set when this run of the service is to stop, and once the run has ended
-    however it ended; set by the runner before setup(), a new token for each
+    however it ended; set by the runtime before setup(), a new token for each
     start. ``stopping.child()`` derives a token stopped with it, so work the run
     starts is told to stop with it, before teardown(); stopping does not wait
     for that work.
 
-    A synchronous run(), on its thread or in a ProcessRunner's subprocess,
+    A synchronous run(), on its thread or in a process of its own,
     checks it (``is_set()``) or blocks on it (``wait()``) and returns once it
     is set. An AsyncService's run() never calls ``wait()``, which would block
     the loop it shares: stopping it cancels its task, and it uses the token to

@@ -1,7 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright 2026 The appinfra Authors
 
-"""ProcessRunner - runs services in subprocesses."""
+"""ProcessRunner - runs a service in a subprocess.
+
+Interim: the FastAPI server runs its UvicornService under this runner, apart from
+the service Runtime. It is to run on the service Runtime instead (spawned with
+isolate=True), and this module and process_base.py then go.
+"""
 
 from __future__ import annotations
 
@@ -16,12 +21,12 @@ from multiprocessing.process import BaseProcess
 from multiprocessing.synchronize import Event as MPEvent
 from typing import Any
 
-from ...log import Logger
-from ...log.mp import LogQueueListener
-from ...runtime import StopToken
-from ..base import Service
-from ..state import RestartPolicy, State
-from .drive import check_drivable, drive
+from ....log import Logger
+from ....log.mp import LogQueueListener
+from ....runtime import StopToken
+from ....service.base import Service
+from ....service.runtime.drive import check_drivable, drive
+from ....service.state import RestartPolicy, State
 from .process_base import ProcessBase
 
 
@@ -37,7 +42,8 @@ class ProcessRunner(ProcessBase):
         runner ends their loop.
 
     Example:
-        from appinfra.service import ProcessRunner, Service
+        from appinfra.app.fastapi.runtime.process import ProcessRunner
+        from appinfra.service import Service
 
         class MyService(Service):
             def __init__(self, lg: Logger):

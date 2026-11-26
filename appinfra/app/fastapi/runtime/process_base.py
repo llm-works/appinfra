@@ -3,7 +3,11 @@
 
 """ProcessBase: the self-driving state machine ProcessRunner runs on, apart from
 the service Runtime's Runner: start(), stop(), wait_healthy() and check() from
-any thread, under a lock."""
+any thread, under a lock.
+
+Interim, as ProcessRunner is (see process.py): it goes once the FastAPI server
+runs its service on the service Runtime.
+"""
 
 from __future__ import annotations
 
@@ -13,11 +17,16 @@ from abc import ABC, abstractmethod
 from collections.abc import Iterator
 from contextlib import contextmanager
 
-from ...runtime import StopToken
-from ..base import Service
-from ..errors import HealthTimeoutError, InvalidTransitionError, RunError, SetupError
-from ..state import TRANSITIONS, RestartPolicy, State, StateHook
-from .drive import check_service
+from ....runtime import StopToken
+from ....service.base import Service
+from ....service.errors import (
+    HealthTimeoutError,
+    InvalidTransitionError,
+    RunError,
+    SetupError,
+)
+from ....service.runtime.drive import check_service
+from ....service.state import TRANSITIONS, RestartPolicy, State, StateHook
 
 # The runners whose state hooks the current thread is running (_notify())
 _in_hooks = threading.local()

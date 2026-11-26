@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright 2026 The appinfra Authors
 
-"""Tests for how a service's thread task and a ProcessRunner drive a service, and
-which services the Runner and ProcessRunner accept."""
+"""Tests for how drive() runs a service's work, and which services a Runner
+accepts."""
 
 from unittest.mock import MagicMock
 
@@ -10,7 +10,6 @@ import pytest
 
 from appinfra.service import (
     AsyncService,
-    ProcessRunner,
     Runner,
     ScheduledService,
     Service,
@@ -132,10 +131,6 @@ class TestRunnerAccepts:
             TypeError, match="both a ScheduledService and an AsyncService"
         ):
             Runner(TickAndAwait())
-
-    def test_a_process_runner_refuses_an_async_service(self):
-        with pytest.raises(TypeError, match="runs on an event loop"):
-            ProcessRunner(Idle())
 
     @pytest.mark.parametrize("service_cls", [Once, Ticker, Idle])
     def test_a_runner_takes_every_kind(self, service_cls: type):
