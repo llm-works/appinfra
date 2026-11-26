@@ -261,6 +261,7 @@ class TestInterruptDuringLaunch:
             ctx.Pipe.side_effect = lambda duplex=True: (MagicMock(), MagicMock())
             ctx.Queue.return_value.get_nowait.side_effect = queue.Empty
             child = ctx.Process.return_value
+            child.exitcode = None  # running, as a real one starts
             child.is_alive.return_value = False  # not published yet
 
             def forked() -> None:

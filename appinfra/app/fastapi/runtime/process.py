@@ -65,12 +65,19 @@ class _RunErrors:
 
     Reads and the close are serialized: the close drains the queue into the
     record first, so a cause queued before cleanup is kept.
+
+    The queue of a child ended by a signal is never read: one killed while
+    its feeder was writing leaves a partial frame, and a read of it waits for
+    the rest, which never comes (this process holds a writer too, so no EOF).
+    Its cause, if it had written one, is lost. A child that exited on its own
+    flushed its queue at exit: its frames are whole.
     """
 
-    __slots__ = ("queue", "first", "_lock")
+    __slots__ = ("queue", "process", "first", "_lock")
 
     def __init__(self) -> None:
         self.queue: mp.Queue[BaseException] | None = None  # once launched
+        self.process: BaseProcess | None = None  # the child writing to it
         self.first: BaseException | None = None
         self._lock = threading.Lock()
 
@@ -92,7 +99,7 @@ class _RunErrors:
 
     def _drain_locked(self) -> None:
         errors = self.queue
-        if errors is None:
+        if errors is None or self._killed():
             return
         # Drained until empty: Queue.empty() is unreliable
         with contextlib.suppress(Exception):
@@ -103,6 +110,11 @@ class _RunErrors:
                     break
                 if self.first is None:
                     self.first = exc
+
+    def _killed(self) -> bool:
+        """True once the child has ended by a signal (a negative exit code)."""
+        exitcode = self.process.exitcode if self.process is not None else None
+        return exitcode is not None and exitcode < 0
 
 
 class ProcessRunner:
@@ -339,21 +351,8 @@ class ProcessRunner:
             setattr(self.service, "_lg", None)
 
         try:
-            # typeshed declares Process on each concrete context, not BaseContext
-            self._process = ctx.Process(  # type: ignore[attr-defined]
-                target=_process_entry,
-                args=(
-                    self.service,
-                    self._shutdown_event,
-                    self._stop_reader,
-                    self._inherited_writer(ctx),
-                    self._healthy_event,
-                    self._errors.queue,
-                    log_config,
-                ),
-                name=f"svc-{self.name}",
-                daemon=True,
-            )
+            self._process = self._new_process(ctx, log_config)
+            self._errors.process = self._process  # the writer of its queue
             # A SIGINT between the fork and Process.start() storing the child's
             # handle would leave a child no cleanup can reach: held until then
             with _interrupt_held():
@@ -362,6 +361,25 @@ class ProcessRunner:
             # Restore logger in parent process
             if saved_lg is not None:
                 setattr(self.service, "_lg", saved_lg)
+
+    def _new_process(self, ctx: BaseContext, log_config: dict[str, Any]) -> BaseProcess:
+        """The service's subprocess, not yet started, with this run's IPC."""
+        # typeshed declares Process on each concrete context, not BaseContext
+        process: BaseProcess = ctx.Process(  # type: ignore[attr-defined]
+            target=_process_entry,
+            args=(
+                self.service,
+                self._shutdown_event,
+                self._stop_reader,
+                self._inherited_writer(ctx),
+                self._healthy_event,
+                self._errors.queue,
+                log_config,
+            ),
+            name=f"svc-{self.name}",
+            daemon=True,
+        )
+        return process
 
     def _release_start(self, run: int) -> bool:
         """Release the start of *run*: a second start() could not claim it
@@ -566,30 +584,40 @@ class ProcessRunner:
         Returns:
             True if a restart was initiated.
         """
+        return self._check(threading.Event())  # no monitor's: never stopped
+
+    def _check(self, stopped: threading.Event) -> bool:
+        """check(), for a monitor that *stopped* stops. Whether it is set is
+        read under the lock with the run: stop() sets it under the lock that
+        ends the run, so a pass either finds it set and acts on nothing, or
+        observed a run that every transition below is bound to."""
         with self._lock:
+            if stopped.is_set():
+                return False
             # The run this check observes, and its process
             state, run, process = self._state, self._run, self._process
-        if state == State.FAILED:
-            # The restart stops what is left of the failed run first, and waits
-            # for it: nothing starts on top of it
-            return self._maybe_restart(run)
-        if state != State.RUNNING:
+        if state not in (State.RUNNING, State.FAILED):
             return False
-
-        if self.is_alive() and self.is_healthy():
-            return False
+        if state == State.RUNNING:
+            if self.is_alive() and self.is_healthy():
+                return False
+            if process is None or not self._exited_cleanly(process):
+                # Only the observed run: one started since is not this check's
+                if not self._transition_from(run, State.RUNNING, State.FAILED):
+                    return False
+                if self.is_alive():
+                    return False  # unhealthy: the next check restarts it
         # Exit code 0 is a clean shutdown, whenever it is seen: never restarted
-        if process is not None and not self.is_alive() and process.exitcode == 0:
+        if process is not None and self._exited_cleanly(process):
             self._end_clean(run, process)
             return False
+        # The restart stops what is left of the failed run first, and waits for
+        # it: nothing starts on top of it
+        return self._maybe_restart(run)
 
-        # Only the observed run: one started since is not this check's to fail
-        if not self._transition_from(run, State.RUNNING, State.FAILED):
-            return False
-        # Only restart if not alive
-        if not self.is_alive():
-            return self._maybe_restart(run)
-        return False
+    def _exited_cleanly(self, process: BaseProcess) -> bool:
+        """True if *process*, the run's child, is gone with exit code 0."""
+        return not self.is_alive() and process.exitcode == 0
 
     def _maybe_restart(self, run: int) -> bool:
         """Wait the policy's backoff, then attempt a restart of the failed
@@ -656,8 +684,14 @@ class ProcessRunner:
                 daemon=True,
                 name=f"monitor-{self.name}",
             )
+            # Started under the lock: until then is_alive() is False, and another
+            # call would take it for no monitor and start its own
             self._monitor = _Monitor(thread, stopped)
-        thread.start()
+            try:
+                thread.start()
+            except BaseException:
+                self._monitor = None  # a later call can start one
+                raise
 
     @property
     def monitoring(self) -> bool:
@@ -694,20 +728,9 @@ class ProcessRunner:
             if self._state in (State.STOPPED, State.DONE):
                 break
 
-            # Check for clean exit (exit_code == 0) - don't restart
-            with self._lock:
-                run, process = self._run, self._process
-            # A clean shutdown (e.g., SIGINT/SIGTERM) of the run observed
-            if (
-                process is not None
-                and not self.is_alive()
-                and process.exitcode == 0
-                and self._end_clean(run, process)
-            ):
-                break
-
-            # check() handles failure detection and restart
-            restarted = self.check()
+            # Failure detection and restart, a clean exit ending the run DONE;
+            # nothing once a stop() has signalled this monitor
+            restarted = self._check(stopped)
             # A dead process the policy won't restart again: nothing left to watch. Still
             # RUNNING means it died after check() looked; the next pass records how it ended.
             if (
@@ -762,6 +785,10 @@ class ProcessRunner:
             self._run += 1
             run = self._run  # this stop's: a stop or start after it moves it on
             monitor = self._monitor  # this run's: one started later is not ended
+            if monitor is not None:
+                # With the run's end: a pass that takes its snapshot from now
+                # on finds it set (_check())
+                monitor.stopped.set()
             if self._start_done is not None:
                 self._start_done.notify_all()  # their run ended: waiters learn it
             if self._start_thread == threading.get_ident():

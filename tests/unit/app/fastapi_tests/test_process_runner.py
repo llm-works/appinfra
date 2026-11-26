@@ -43,6 +43,7 @@ def _mock_mp_context() -> Iterator[tuple[MagicMock, MagicMock, MagicMock]]:
         ctx = get_context.return_value
         ctx.Pipe.side_effect = lambda duplex=True: (MagicMock(), MagicMock())
         ctx.Queue.return_value.get_nowait.side_effect = queue.Empty
+        ctx.Process.return_value.exitcode = None  # running, as a real one starts
         yield ctx.Process, ctx.Event, ctx.Queue
 
 
@@ -287,6 +288,32 @@ class TestProcessRunner:
             assert derived[0].is_set()
             assert runner.state == State.FAILED
             assert runner.process is None
+
+    @pytest.mark.parametrize(
+        ("exitcode", "read"), [(-15, False), (3, True)], ids=["killed", "exited"]
+    )
+    def test_stop_reads_no_error_queue_of_a_killed_child(self, lg, exitcode, read):
+        """A child ended by a signal can leave a partial frame in its error
+        queue, which a read would wait on forever: its queue is closed
+        unread. A child that exited on its own flushed its queue: it is read."""
+        with (
+            _mock_mp_context() as (mock_process, _, mock_queue),
+            patch(f"{_PROCESS}.LogQueueListener"),
+        ):
+            errors = MagicMock()
+            errors.get_nowait.side_effect = queue.Empty
+            mock_queue.side_effect = [MagicMock(), errors]  # the log queue first
+            child = mock_process.return_value
+            child.is_alive.return_value = True
+            runner = ProcessRunner(MPSimpleService(lg))
+            runner.start()
+
+            child.is_alive.return_value = False
+            child.exitcode = exitcode
+            runner.stop()
+
+        assert errors.get_nowait.called is read
+        errors.close.assert_called_once()
 
     def test_start_failure_kills_a_child_that_ignores_terminate(self, lg):
         """A child still alive after terminate() is killed."""
@@ -958,8 +985,8 @@ class TestProcessRunner:
         assert runner.state == state
 
     def test_a_clean_exit_observed_for_a_replaced_run_cleans_nothing(self, lg):
-        """The monitor sees run 1's process exit 0; before it ends the run, run
-        2 is RUNNING with process B: B's IPC stays, and the runner stays
+        """check() sees run 1's process exit 0; before it ends the run, run 2
+        is RUNNING with process B: B's IPC stays, and the runner stays
         RUNNING."""
         runner = ProcessRunner(MPSimpleService(lg))
         runner._state = State.RUNNING
@@ -975,17 +1002,8 @@ class TestProcessRunner:
         type(a).exitcode = property(lambda _: replaced())
         runner._process = a
 
-        stopped = threading.Event()
-
-        def check_once() -> bool:
-            stopped.set()
-            return False
-
-        with (
-            patch.object(runner, "is_alive", return_value=False),
-            patch.object(runner, "check", side_effect=check_once),
-        ):
-            runner._monitor_loop(0, stopped)
+        with patch.object(runner, "is_alive", return_value=False):
+            assert runner.check() is False
 
         assert runner.state == State.RUNNING
         assert runner.process is b
@@ -1037,6 +1055,72 @@ class TestProcessRunner:
             runner.stop()
 
         assert claims == [True]
+
+    def test_a_stopped_monitor_pass_does_not_fail_a_later_run(self, lg):
+        """A monitor pass is between its stop check and its check() when a
+        stop() signals it and a start() makes run 3 current, unhealthy: the
+        pass fails nothing and restarts nothing."""
+        runner = ProcessRunner(MPSimpleService(lg))
+        runner._state = State.RUNNING
+        runner._run = 1
+        stopped = threading.Event()
+
+        def stopped_then_started() -> None:
+            stopped.set()  # a stop() signalled this monitor
+            runner._run = 3  # and a start() made run 3 current
+            runner._state = State.RUNNING
+
+        hook = HookedLock(runner, stopped_then_started)
+        hook.arm()
+        with (
+            patch.object(runner, "is_alive", return_value=False),
+            patch.object(runner, "is_healthy", return_value=False),
+            patch.object(runner, "_maybe_restart") as restart,
+        ):
+            runner._monitor_loop(0, stopped)
+
+        assert runner.state == State.RUNNING
+        restart.assert_not_called()
+
+    def test_one_monitor_runs_when_two_callers_start_one(self, lg):
+        """A second start_monitor() right after the first released the lock
+        finds the first monitor running and starts none of its own."""
+        runner = ProcessRunner(MPSimpleService(lg))
+        threads: list[MagicMock] = []
+
+        def new_thread(*args: Any, **kwargs: Any) -> MagicMock:
+            thread = MagicMock()
+            thread.is_alive.return_value = False  # until started
+            thread.start.side_effect = lambda: setattr(
+                thread.is_alive, "return_value", True
+            )
+            threads.append(thread)
+            return thread
+
+        hook = HookedLock(
+            runner, lambda: runner.start_monitor(interval=0), on_release=True
+        )
+        hook.arm()
+        with patch(f"{_PROCESS}.threading.Thread", side_effect=new_thread):
+            runner.start_monitor(interval=0)
+
+        assert len(threads) == 1
+        threads[0].start.assert_called_once()
+
+    def test_a_failed_monitor_start_leaves_none_registered(self, lg):
+        """A monitor thread that fails to start is not left registered: a
+        later start_monitor() starts one."""
+        runner = ProcessRunner(MPSimpleService(lg))
+        failing = MagicMock()
+        failing.is_alive.return_value = False
+        failing.start.side_effect = RuntimeError("can't start new thread")
+        with (
+            patch(f"{_PROCESS}.threading.Thread", return_value=failing),
+            pytest.raises(RuntimeError),
+        ):
+            runner.start_monitor(interval=0)
+
+        assert runner._monitor is None
 
     def test_a_stop_does_not_end_a_monitor_started_after_it(self, lg):
         """stop() is waiting for a start in progress when another stop() ends
@@ -1096,6 +1180,46 @@ class TestProcessRunner:
 
         assert runner.state == State.DONE
         restart.assert_not_called()
+
+    def test_check_ends_a_child_exiting_cleanly_during_it_done(self, lg):
+        """check() finds the child alive but unhealthy; by its second look the
+        child has exited with code 0: the run ends DONE, not restarted."""
+        runner = ProcessRunner(MPSimpleService(lg))
+        runner._state = State.RUNNING
+        runner._process = MagicMock(exitcode=0)
+        alive = itertools.chain([True, True], itertools.repeat(False))
+        with (
+            patch.object(runner, "is_alive", side_effect=lambda: next(alive)),
+            patch.object(runner, "is_healthy", return_value=False),
+            patch.object(runner, "_maybe_restart") as restart,
+        ):
+            assert runner.check() is False
+
+        assert runner.state == State.DONE
+        restart.assert_not_called()
+
+    @pytest.mark.parametrize(
+        ("process", "restarts"),
+        [(MagicMock(exitcode=0), False), (MagicMock(exitcode=3), True), (None, True)],
+        ids=["clean-exit", "failed-exit", "setup-failed"],
+    )
+    def test_check_restarts_a_failed_run_unless_it_exited_cleanly(
+        self, lg, process, restarts
+    ):
+        """A FAILED run is restarted, unless its child has since exited with
+        code 0, which ends it DONE: a nonzero exit, or a setup() that failed
+        before any child, still restarts."""
+        runner = ProcessRunner(MPSimpleService(lg))
+        runner._state = State.FAILED
+        runner._process = process
+        with (
+            patch.object(runner, "is_alive", return_value=False),
+            patch.object(runner, "_maybe_restart", return_value=True) as restart,
+        ):
+            assert runner.check() is restarts
+
+        assert restart.called is restarts
+        assert (runner.state == State.DONE) is not restarts
 
     def test_a_clean_exit_stops_the_work_setup_started(self, lg):
         """setup() derived a token for its work; the child then exits cleanly:
