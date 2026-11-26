@@ -181,11 +181,14 @@ class StopToken:
 
     def detach(self) -> None:
         """Leave the parent's tree, so a run that has ended is not kept alive by
-        it; the token keeps its own state."""
+        it; the token keeps its own state. A parent left with no children
+        drops its set: an empty one still costs 216 B for its lifetime."""
         with _lock:
             parent, self._parent = self._parent, None
             if parent is not None and parent._children is not None:
                 parent._children.discard(self)
+                if not parent._children:
+                    parent._children = None
 
 
 def _run(callbacks: Iterable[Callable[[], None]]) -> None:
