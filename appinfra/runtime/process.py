@@ -56,9 +56,10 @@ class _ProcessTask(_ThreadTask):
     ) -> None:
         """Initialize task; see _Task."""
         super().__init__(on_end, task_id, name, fn, args, token)
-        # The child, once started; terminate() and kill() read it, and record
-        # what they were asked in _forced, under _lock, so a force between the
-        # child's start and its publication is not lost
+        # The child, once started. Under _lock: terminate() and kill() record
+        # what they were asked in _forced and signal it, so a force between
+        # the child's start and its publication is not lost; and _release()
+        # closes it, never in the middle of a signal
         self._process: BaseProcess | None = None
         self._lock = threading.Lock()
         self._forced = 0  # _TERMINATE or _KILL once forced
@@ -96,9 +97,7 @@ class _ProcessTask(_ThreadTask):
                 payload = outcome.recv_bytes()
         process.join()
         exitcode = process.exitcode
-        # Reaped: release its descriptors, as the handle may be held long after
-        self._process = None
-        process.close()
+        self._release(process)
         if payload is None:
             if self.token.is_set():
                 raise StoppedError()
@@ -142,8 +141,7 @@ class _ProcessTask(_ThreadTask):
         (_publish()), and send it to one that is."""
         with self._lock:
             self._forced = max(self._forced, level)
-            process = self._process
-        _send(process, level)
+            _send(self._process, level)
 
     def _publish(self, process: BaseProcess) -> None:
         """Make the started *process* the one terminate() and kill() reach,
@@ -151,14 +149,23 @@ class _ProcessTask(_ThreadTask):
         task may have come between its start and here."""
         with self._lock:
             self._process = process
-            forced = self._forced
-        _send(process, forced)
+            _send(process, self._forced)
+
+    def _release(self, process: BaseProcess) -> None:
+        """Forget the reaped *process* and close it, releasing its descriptors,
+        as the handle may be held long after. Under the lock that signals take
+        too: Process.close() clears its handle before it marks itself closed,
+        so a signal sent across a close fails with AttributeError."""
+        with self._lock:
+            self._process = None
+            process.close()
 
 
 def _send(process: BaseProcess | None, level: int) -> None:
     """Send *process* SIGKILL for _KILL, SIGTERM for _TERMINATE, if it is
-    running; nothing for no process or no level. One reaped and closed
-    meanwhile (_outcome()) raises ValueError: nothing is left to signal."""
+    running; nothing for no process or no level. Called under the task's
+    lock, which _release() closes the process under: a closed one is never
+    signalled. ValueError, a closed process's, is suppressed all the same."""
     if process is None or not level:
         return
     with contextlib.suppress(ValueError):

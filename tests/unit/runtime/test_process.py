@@ -12,7 +12,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from appinfra.runtime import ProcessExitError, Runtime
+from appinfra.runtime import ProcessExitError, Runtime, StopToken
+from appinfra.runtime.process import _ProcessTask
 
 
 async def parked() -> None:
@@ -77,6 +78,62 @@ def test_the_stop_escalates_every_late_task_before_waiting_on_one() -> None:
         ("kill", "a"), ("kill", "b"),
         ("join", "a"), ("join", "b"),
     ]  # fmt: skip
+
+
+class LockChecking:
+    """A child's Process that records, per call, whether its task's lock was
+    held: a close and a signal must not interleave."""
+
+    def __init__(self, task: Any) -> None:
+        self._task = task
+        self.held: dict[str, bool] = {}
+
+    def _note(self, call: str) -> None:
+        self.held[call] = self._task._lock.locked()
+
+    def is_alive(self) -> bool:
+        self._note("is_alive")
+        return True
+
+    def terminate(self) -> None:
+        self._note("terminate")
+
+    def kill(self) -> None:
+        self._note("kill")
+
+    def close(self) -> None:
+        self._note("close")
+
+
+def process_task() -> Any:
+    """A process task not launched."""
+    return _ProcessTask(lambda _: None, 1, None, abs, (), StopToken())
+
+
+def test_a_published_child_is_signalled_under_the_lock() -> None:
+    task = process_task()
+    child = LockChecking(task)
+    task._process = child
+    task.terminate()
+    task.kill()
+    assert child.held == {"is_alive": True, "terminate": True, "kill": True}
+
+
+def test_a_child_forced_before_its_publication_is_signalled_under_the_lock() -> None:
+    task = process_task()
+    task.terminate()  # nothing published yet: recorded
+    child = LockChecking(task)
+    task._publish(child)
+    assert child.held == {"is_alive": True, "terminate": True}
+
+
+def test_a_reaped_child_is_released_under_the_lock() -> None:
+    task = process_task()
+    child = LockChecking(task)
+    task._process = child
+    task._release(child)
+    assert child.held == {"close": True}
+    assert task._process is None
 
 
 def test_a_process_exit_error_survives_a_pickle_round_trip() -> None:
