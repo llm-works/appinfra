@@ -132,7 +132,7 @@ class Runner:
         isolated run's includes the forcing of its process."""
         task = self._task
         process = None if task is None else task.process
-        return timeout if process is None else timeout + 2 * process.grace
+        return timeout if process is None else timeout + process.grace
 
     def is_alive(self) -> bool:
         """True while a step of the service runs: its setup, run or teardown.

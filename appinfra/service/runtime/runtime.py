@@ -150,7 +150,7 @@ class Runtime:
         """Stop one service and wait up to *timeout* seconds until it has ended
         and been torn down; then it leaves the runtime. An isolated service's
         process still running then is terminated, and killed if it outlives
-        that: the wait goes on through both (task.process.grace each).
+        that: the wait goes on through both (task.process.grace).
 
         Raises:
             ValueError: If *timeout* is negative.

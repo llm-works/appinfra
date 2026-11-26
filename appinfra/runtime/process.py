@@ -174,8 +174,10 @@ class _ProcessTask(_ThreadTask):
             process.close()
 
     def grace(self) -> float:
-        """_GRACE: read on each call, so a test can shorten it."""
-        return _GRACE
+        """Seconds past a stop's timeout by which a forced child has been
+        terminated, killed _GRACE later, and given _GRACE more to be reaped.
+        Read on each call, so a test can shorten _GRACE."""
+        return 2 * _GRACE
 
     def process_detail(self) -> ProcessDetail:
         """The child as it is now: running, or ended and not yet reaped; as

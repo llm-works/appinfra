@@ -94,10 +94,10 @@ class ProcessDetail:
     alive: bool
 
 
-class _Waits(Protocol):
-    """What a Task needs of the runtime that runs it: its waits, which take
-    the runtime's lock and table of tasks. A protocol, so this module need
-    not import the runtime, which imports it."""
+class _TaskOps(Protocol):
+    """What a Task needs of the runtime that runs it: its waits, detach and
+    stop, which take the runtime's lock and table of tasks. A protocol, so
+    this module need not import the runtime, which imports it."""
 
     def _wait(self, t: _Task, timeout: float | None) -> Any: ...
 
@@ -117,7 +117,7 @@ class Task:
     keeps the outcome as long as it is held. Not to be subclassed."""
 
     __slots__ = ("_rt", "_t")
-    _rt: _Waits
+    _rt: _TaskOps
     _t: _Task
 
     def __init__(self) -> None:
@@ -130,7 +130,7 @@ class Task:
         raise TypeError("a Task comes from Runtime.spawn()")
 
     @classmethod
-    def _of(cls, rt: _Waits, t: _Task) -> Task:
+    def _of(cls, rt: _TaskOps, t: _Task) -> Task:
         """The handle to *t*, run by *rt*; for Runtime.spawn()."""
         task = object.__new__(cls)
         task._rt = rt
@@ -247,9 +247,9 @@ class TaskProcess:
 
     @property
     def grace(self) -> float:
-        """Seconds a stop's forcing gives the child after SIGTERM, before
-        SIGKILL, and again after SIGKILL: a stop with *timeout* has run its
-        course *timeout* + 2 * grace seconds on."""
+        """Seconds past a stop's timeout that forcing the child can take:
+        SIGTERM, SIGKILL a grace later, and a grace more for the reap. A stop
+        with *timeout* has run its course *timeout* + grace seconds on."""
         return self._t.grace()
 
     def terminate(self) -> None:
