@@ -292,6 +292,18 @@ class TestLoop:
         assert await ch.arecv(timeout=0) == 1
 
     @pytest.mark.asyncio
+    async def test_an_unbounded_send_is_allowed_on_the_loop(self):
+        """It never waits, whatever the channel holds, so it cannot block the
+        loop: sync code the loop runs, a state hook, sends with no timeout.
+        A receive can still wait, and stays refused."""
+        ch = Chan[int](None)
+        ch.send(1)
+        ch.send(2)
+        with pytest.raises(RuntimeError, match="await arecv"):
+            ch.recv()
+        assert [await ch.arecv(timeout=0), await ch.arecv(timeout=0)] == [1, 2]
+
+    @pytest.mark.asyncio
     async def test_a_call_without_waiting_is_allowed_on_the_loop(self):
         """Sync code the loop runs, which cannot await, uses timeout=0."""
         ch = Chan[int](1)
@@ -330,6 +342,39 @@ class TestAcrossTaskKinds:
         consumer = rt.spawn(lambda: list(ch))
         rt.spawn(produce).detach()
         assert consumer.wait(timeout=5.0) == [0, 1, 2]
+
+    def test_unbounded_sends_from_the_loop_and_threads_keep_their_order(
+        self, rt: Runtime
+    ):
+        """Sync sends from loop tasks and thread tasks into one unbounded
+        channel, as state hooks post to an inbox: none waits, and each
+        sender's values arrive in the order it sent them."""
+        ch = Chan[tuple[str, int]](None)
+        count = 2_000
+
+        def on_thread(sender: str) -> None:
+            for i in range(count):
+                ch.send((sender, i))
+
+        async def on_loop(sender: str) -> None:
+            for i in range(count):
+                ch.send((sender, i))  # sync, on the loop: never waits
+                if i % 100 == 0:
+                    await asyncio.sleep(0)  # let the other loop sender in
+
+        senders = [
+            rt.spawn(on_thread, "thread-a"),
+            rt.spawn(on_thread, "thread-b"),
+            rt.spawn(on_loop, "loop-a"),
+            rt.spawn(on_loop, "loop-b"),
+        ]
+        for sender in senders:
+            sender.wait(timeout=10.0)
+        ch.close()
+        received = list(ch)
+        assert len(received) == 4 * count
+        for name in ("thread-a", "thread-b", "loop-a", "loop-b"):
+            assert [i for s, i in received if s == name] == list(range(count))
 
 
 class TestStop:

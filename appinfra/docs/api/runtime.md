@@ -170,6 +170,10 @@ running is stopped at interpreter exit.
 
 `Chan[T](capacity)` is a one-way FIFO channel between tasks of either kind. A send waits while
 `capacity` values are buffered; with capacity 0 a send waits for a receiver to take the value.
+With capacity `None` the buffer has no bound and a send never waits: for senders that must not,
+such as a callback or sync code on the event loop. Nothing then slows a fast sender down; its
+values pile up until received. `len(ch)` tells the receiver how many wait, so it can decide what
+a depth means: log it, alert, or slow its senders.
 
 | Thread code | Coroutine | Meaning |
 |-------------|-----------|---------|
@@ -177,13 +181,15 @@ running is stopped at interpreter exit.
 | `ch.recv(timeout=None)` | `await ch.arecv(timeout=None)` | receive, waiting for a value |
 | `for v in ch:` | `async for v in ch:` | receive until closed and drained |
 | `ch.close()` | | end the channel |
+| `len(ch)` | | values waiting to be received |
 
 - `timeout=0` means do not wait (`TimeoutError` when the call would have to wait)
 - after `close()`, a receive still gets the buffered values, then raises `ChanClosedError`; a
   send raises `ChanClosedError`
 - a wait ends with `StoppedError` when the waiting task's token is stopped
 - on an event loop's thread, `send()` and `recv()` take only `timeout=0`: coroutines await
-  `asend()` and `arecv()`
+  `asend()` and `arecv()`. A `send()` on an unbounded channel is allowed there with any timeout,
+  as it never waits
 
 ### Select
 

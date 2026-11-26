@@ -15,6 +15,16 @@ class TestChan:
         with pytest.raises(ValueError, match="capacity"):
             Chan[int](-1)
 
+    def test_len_counts_buffered_values_not_waiting_senders(self):
+        """As Go's len(ch): what the buffer holds. A channel without a buffer
+        holds nothing; its values pass from sender to receiver directly."""
+        ch = Chan[int](2)
+        ch.send(1)
+        assert len(ch) == 1
+        ch.send(2)
+        assert len(ch) == 2
+        assert len(Chan[int](0)) == 0
+
     def test_values_come_out_in_the_order_sent(self):
         ch = Chan[int](3)
         for i in range(3):
@@ -85,6 +95,54 @@ class TestChan:
             ch.send(i)
         ch.close()
         assert list(ch) == [0, 1, 2]
+
+
+class TestUnbounded:
+    """Chan(None): a send never waits, so values from senders that must not
+    block arrive, in order."""
+
+    def test_a_send_never_waits(self):
+        ch = Chan[int](None)
+        for i in range(10_000):
+            ch.send(i, timeout=0)
+        assert [ch.recv(timeout=0) for _ in range(10_000)] == list(range(10_000))
+        assert not ch._senders  # Private: no send queued to wait
+
+    def test_a_closed_channel_is_drained_then_raises(self):
+        ch = Chan[int](None)
+        ch.send(1)
+        ch.send(2)
+        ch.close()
+        assert [ch.recv(timeout=0), ch.recv(timeout=0)] == [1, 2]
+        with pytest.raises(ChanClosedError):
+            ch.recv(timeout=0)
+
+    def test_a_send_on_a_closed_channel_raises(self):
+        ch = Chan[int](None)
+        ch.close()
+        with pytest.raises(ChanClosedError):
+            ch.send(1, timeout=0)
+
+    def test_len_is_the_values_waiting_to_be_received(self):
+        """The depth of the buffer, for the owner to watch: an unbounded
+        channel enforces nothing, its receiver decides what a depth means."""
+        ch = Chan[int](None)
+        assert len(ch) == 0
+        for i in range(5):
+            ch.send(i)
+        assert len(ch) == 5
+        ch.recv(timeout=0)
+        assert len(ch) == 4
+        ch.close()
+        assert len(ch) == 4  # still to be drained
+        assert list(ch) == [1, 2, 3, 4]
+        assert len(ch) == 0
+
+    def test_a_select_send_is_always_ready(self):
+        ch = Chan[int](None)
+        ch.send(1)
+        assert select(Send(ch, 2), timeout=0) == (0, None)
+        assert [ch.recv(timeout=0), ch.recv(timeout=0)] == [1, 2]
 
 
 class TestSelect:

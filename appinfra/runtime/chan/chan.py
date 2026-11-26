@@ -28,8 +28,11 @@ class Chan(Generic[T]):
     A send waits while the buffer holds *capacity* values; a receive waits
     while it is empty. With capacity 0 there is no buffer: a send waits until a
     receiver takes the value, and a receive until a sender hands one over.
-    Values are received in the order sent; waiting senders and receivers are
-    served in the order they came.
+    With capacity None the buffer has no bound and a send never waits, for
+    senders that must not: a callback, or sync code on the loop. Nothing then
+    holds a fast sender back; its values pile up until received. Values are
+    received in the order sent; waiting senders and receivers are served in
+    the order they came.
 
     ``close()`` ends the channel. A receive still gets the buffered values,
     then raises ClosedError; iteration (``for``, ``async for``) ends there. A
@@ -45,7 +48,8 @@ class Chan(Generic[T]):
     ``timeout=0``, whatever the channel holds: a wait there would block the
     loop, and refusing only the calls that happen to wait would make the error
     depend on timing. Coroutines await ``asend()``/``arecv()``; sync code the
-    loop runs uses ``timeout=0``.
+    loop runs uses ``timeout=0``. A send on an unbounded channel is the
+    exception: it never waits, so it is allowed with any timeout.
     """
 
     __slots__ = (
@@ -59,14 +63,15 @@ class Chan(Generic[T]):
         "_receivers",
     )
 
-    def __init__(self, capacity: int) -> None:
-        """A channel buffering up to *capacity* values; 0 for none.
+    def __init__(self, capacity: int | None) -> None:
+        """A channel buffering up to *capacity* values; 0 for none, None for
+        no bound.
 
         Raises:
             ValueError: If *capacity* is negative.
         """
-        if capacity < 0:
-            raise ValueError(f"capacity must be 0 or more, not {capacity}")
+        if capacity is not None and capacity < 0:
+            raise ValueError(f"capacity must be 0 or more, or None, not {capacity}")
         self._capacity = capacity
         self._lock = threading.Lock()
         self._buffer: deque[T] = deque()
@@ -91,9 +96,12 @@ class Chan(Generic[T]):
             TimeoutError: If there is no room after *timeout*.
             ValueError: If *timeout* is negative.
             RuntimeError: If called on an event loop's thread with a timeout
-                other than 0.
+                other than 0, on a bounded channel.
         """
-        _check_off_loop(timeout, "send")
+        if self._capacity is None:
+            _check_valid(timeout)  # Never waits: allowed on the loop as well
+        else:
+            _check_off_loop(timeout, "send")
         with self._lock:
             if self._put(value):
                 return
@@ -163,6 +171,14 @@ class Chan(Generic[T]):
                 if waiter.claim():
                     waiter.settle(Outcome.CLOSED)
 
+    def __len__(self) -> int:
+        """The values waiting to be received, as Go's len(ch): what the buffer
+        holds, not the values of senders still waiting. Information for the
+        owner, which decides what a depth means; nothing is enforced, and the
+        number may change as soon as it is read."""
+        with self._lock:
+            return len(self._buffer) + len(self._given_back)
+
     def __iter__(self) -> Chan[T]:
         """Iterate with recv() until the channel is closed and drained."""
         return self
@@ -195,7 +211,7 @@ class Chan(Generic[T]):
             self._handed += 1
             _hand(receiver, value, self._handed)
             return True
-        if len(self._buffer) < self._capacity:
+        if self._capacity is None or len(self._buffer) < self._capacity:
             self._buffer.append(value)
             return True
         return False
@@ -210,8 +226,9 @@ class Chan(Generic[T]):
         if self._buffer:
             value = self._buffer.popleft()
             # Its slot is free now. The buffer never holds more than the
-            # capacity; the refill relies on that, so it checks
-            if len(self._buffer) < self._capacity:
+            # capacity; the refill relies on that, so it checks. Unbounded,
+            # no sender ever waits
+            if self._capacity is not None and len(self._buffer) < self._capacity:
                 sender = _first(self._senders)
                 if sender is not None:
                     self._buffer.append(sender.value)
