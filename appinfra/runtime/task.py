@@ -350,12 +350,23 @@ class _LoopTask(_Task):
             self._raised(e)
             self._ended_on_loop()
             return
-        aio = asyncio.get_running_loop().create_task(
+        loop = asyncio.get_running_loop()
+        # Queued before the task's first step, so it runs right before it
+        loop.call_soon(self._check_start, context=self._context)
+        aio = loop.create_task(
             coro, name=_label(self.id, self.name), context=self._context
         )
         # In the task's context: without one, asyncio copies the loop's for it
         aio.add_done_callback(self._finish, context=self._context)
         self._aio = aio
+
+    def _check_start(self) -> None:
+        """On the loop, right before the task's first step: cancel the task if
+        its token was stopped since _spawn(), as a parent that returns right
+        after spawning stops it. A task cancelled before its first step never
+        calls its function, and is recorded as a stop."""
+        if self.token.is_set() and self._aio is not None:
+            self._aio.cancel()
 
     def _coroutine(self) -> Any:
         """The call's coroutine; its frame holds the function's arguments,

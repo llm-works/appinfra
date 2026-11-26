@@ -308,6 +308,23 @@ class TestLoopTask:
             with pytest.raises(StoppedError):
                 t.wait(timeout=5.0)
 
+    def test_a_task_stopped_before_its_first_step_never_runs(self, rt):
+        """A parent that returns right after spawning stops its token, and
+        with it the child's, after the child's task is created but before its
+        first step: the child is a stop, its function never called."""
+        ran = threading.Event()
+
+        async def child() -> None:
+            ran.set()
+
+        async def spawns_and_returns() -> Task:
+            return rt.spawn(child)
+
+        t = rt.spawn(spawns_and_returns).wait(timeout=5.0)
+        with pytest.raises(StoppedError):
+            t.wait(timeout=5.0)
+        assert not ran.is_set()
+
     def test_a_task_cancelled_before_its_first_step_never_runs(self, rt):
         release = _hold_loop(rt)
         fn = Parked()
@@ -1588,27 +1605,83 @@ def _exits() -> None:
     raise SystemExit()
 
 
+class _CleansUpSlowly:
+    """Parks; once cancelled, takes a few iterations of the loop to clean up."""
+
+    def __init__(self) -> None:
+        self.entered = threading.Event()
+        self.cleaned = threading.Event()
+        # Held here: the task parked on it is then reachable from the test.
+        # Else the task, its waiter and this event form a cycle nothing
+        # holds, which the garbage collector destroys while still pending
+        self.parked: asyncio.Event | None = None
+
+    async def run(self) -> None:
+        self.parked = asyncio.Event()
+        self.entered.set()
+        try:
+            await self.parked.wait()
+        except asyncio.CancelledError:
+            for _ in range(3):
+                await asyncio.sleep(0)
+            self.cleaned.set()
+            raise
+
+
+def _hold_host(host: LoopHost) -> threading.Event:
+    """Block the host's loop until the returned event is set. Returns once the
+    loop is blocked, so what is scheduled next runs in one iteration, in the
+    order scheduled."""
+    held, release = threading.Event(), threading.Event()
+
+    def hold() -> None:
+        held.set()
+        release.wait(5.0)  # blocks the loop on purpose
+
+    host.loop.call_soon_threadsafe(hold)
+    assert held.wait(5.0)
+    return release
+
+
+def _stop_queued(host: LoopHost) -> threading.Thread:
+    """Start host.stop() on a thread of its own; returns once its stop of the
+    loop is queued."""
+    stopping = threading.Thread(target=host.stop, args=(5.0,))
+    stopping.start()
+    assert _wait_until(lambda: host._closing)  # Private: stop() begun
+    with host._lock:  # Private: stop() queues the loop's stop under it
+        pass
+    return stopping
+
+
 class TestLoopHostStop:
+    def test_an_exit_just_before_a_stop_still_lets_the_tasks_finish(self):
+        """An exit leaves the loop's run with its stop still queued: that stop
+        must not end the run that waits for the cancelled tasks to finish."""
+        host = LoopHost()
+        host.start()
+        slow = _CleansUpSlowly()
+        asyncio.run_coroutine_threadsafe(slow.run(), host.loop)
+        assert slow.entered.wait(5.0)
+        release = _hold_host(host)
+        try:
+            host.loop.call_soon_threadsafe(_exits)
+            stopping = _stop_queued(host)
+        finally:
+            release.set()
+        stopping.join(10.0)  # the deadline is the failure path
+        assert slow.cleaned.is_set()
+        assert host._thread is None  # Private: stop() saw the thread end
+
     def test_a_stop_run_just_before_an_exit_still_ends_the_loop(self):
         """The loop's stop and an exit in one iteration: the exit leaves
         run_forever(), which forgets the stop on its way out. The loop must
         not be resumed as if no stop had been asked for: no second one comes."""
         host = LoopHost()
         host.start()
-        held, release = threading.Event(), threading.Event()
-
-        def hold() -> None:
-            held.set()
-            release.wait(5.0)  # blocks the loop on purpose
-
-        host.loop.call_soon_threadsafe(hold)
-        assert held.wait(5.0)
-        stopping = threading.Thread(target=host.stop, args=(5.0,))
+        release = _hold_host(host)
         try:
-            stopping.start()
-            assert _wait_until(lambda: host._closing)  # Private: stop() begun
-            with host._lock:  # Private: stop() queues the loop's stop under it
-                pass
+            stopping = _stop_queued(host)
             # Behind the stop, in the same iteration once the hold returns
             host._loop.call_soon_threadsafe(_exits)  # Private: closing refuses
         finally:
