@@ -71,6 +71,23 @@ class TestStopToken:
         assert not child.is_set()
         assert not root._children  # Private: the parent dropped its reference
 
+    def test_a_token_whose_children_all_left_holds_no_set(self):
+        """A long-lived token with short-lived children, as a service's token
+        with its health checks, does not keep an empty set for its lifetime."""
+        root = StopToken()
+        first, second = root.child(), root.child()
+        first.detach()
+        assert root._children == {second}  # Private: one child is left
+        second.detach()
+        assert root._children is None  # Private: none is left, nor its set
+
+    def test_a_child_taken_after_the_set_is_gone_is_stopped_with_its_parent(self):
+        root = StopToken()
+        root.child().detach()
+        child = root.child()
+        root.stop()
+        assert child.is_set()
+
     def test_a_pickled_child_stays_linked_to_its_pickled_parent(self):
         """A service sent to a subprocess keeps the tokens its setup() derived
         tied to its own: stopping the unpickled parent stops the child."""
