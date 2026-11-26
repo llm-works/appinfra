@@ -1,121 +1,28 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright 2026 The appinfra Authors
 
-"""Tests for runners that run a service on a thread."""
+"""Tests for one service's lifecycle under the Runtime: start, health, end,
+teardown, restart, and what its runner records of it."""
 
 import threading
-import time
 from unittest.mock import MagicMock
 
 import pytest
 
 from appinfra.service import (
     HealthTimeoutError,
-    InvalidTransitionError,
     RestartPolicy,
     RunError,
+    Runtime,
     ScheduledService,
     Service,
     SetupError,
     State,
     StopToken,
-    ThreadRunner,
 )
-from tests.helpers.service.runner import SimpleService
+from tests.helpers.service.runner import SimpleService, wait_until
 
-
-class FailingService(Service):
-    """Service that raises during run()."""
-
-    def __init__(self) -> None:
-        self._lg = MagicMock()
-
-    @property
-    def name(self) -> str:
-        return "failing"
-
-    def run(self) -> None:
-        raise RuntimeError("intentional failure")
-
-
-class FailOnFirstRun(Service):
-    """Service that fails on first run but succeeds on retry."""
-
-    def __init__(self) -> None:
-        self._lg = MagicMock()
-        self._runs = 0
-        self._stop_event = threading.Event()
-        self._healthy = False
-
-    @property
-    def name(self) -> str:
-        return "flaky"
-
-    def run(self) -> None:
-        self._runs += 1
-        if self._runs == 1:
-            raise RuntimeError("first run fails")
-        # Clear stop event in case it was set during previous teardown
-        self._stop_event.clear()
-        self._healthy = True
-        self._stop_event.wait()
-        self._healthy = False
-
-    def teardown(self) -> None:
-        self._stop_event.set()
-
-    def is_healthy(self) -> bool:
-        return self._healthy
-
-
-class SlowSetup(SimpleService):
-    """Counts setup() calls; each blocks until released."""
-
-    def __init__(self) -> None:
-        super().__init__("slow-setup")
-        self.setups = 0
-        self.in_setup = threading.Event()
-        self.release = threading.Event()
-
-    def setup(self) -> None:
-        self.setups += 1
-        self.in_setup.set()
-        self.release.wait(5.0)
-
-
-class FailsFirstRun(SlowSetup):
-    """Its first run() fails; later runs park like SimpleService. Counts
-    teardown() calls."""
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.runs = 0
-        self.teardowns = 0
-
-    def run(self) -> None:
-        self.runs += 1
-        if self.runs == 1:
-            raise RuntimeError("first run fails")
-        super().run()
-
-    def teardown(self) -> None:
-        self.teardowns += 1
-        super().teardown()
-
-
-class OutlivesStop(Service):
-    """run() ignores teardown() and returns only once released."""
-
-    def __init__(self) -> None:
-        self._lg = MagicMock()
-        self.release = threading.Event()
-
-    @property
-    def name(self) -> str:
-        return "outlives-stop"
-
-    def run(self) -> None:
-        self.release.wait(5.0)
+NO_RESTART = RestartPolicy(restart_on_failure=False)
 
 
 class CountsTeardowns(Service):
@@ -140,6 +47,33 @@ class CountsTeardowns(Service):
         self.torn_down.set()
 
 
+class NeverHealthy(Service):
+    """run() returns at once, or blocks until stopped if *blocks*; it is
+    never healthy."""
+
+    def __init__(self, blocks: bool = False) -> None:
+        self._lg = MagicMock()
+        self._blocks = blocks
+
+    @property
+    def name(self) -> str:
+        return "never-healthy"
+
+    def run(self) -> None:
+        if self._blocks:
+            self.stopping.wait()
+
+    def is_healthy(self) -> bool:
+        return False
+
+
+class Failing(NeverHealthy):
+    """run() fails at once, before it could be healthy."""
+
+    def run(self) -> None:
+        raise RuntimeError("intentional failure")
+
+
 class DerivesThenFails(Service):
     """run() derives a token for its work from its own, then fails."""
 
@@ -158,24 +92,241 @@ class DerivesThenFails(Service):
         raise RuntimeError("run() fails")
 
 
-class TestThreadRunner:
-    """Test ThreadRunner class."""
+class OutlivesStop(Service):
+    """run() ignores its token and returns only once released."""
+
+    def __init__(self) -> None:
+        self._lg = MagicMock()
+        self.release = threading.Event()
+
+    @property
+    def name(self) -> str:
+        return "outlives-stop"
+
+    def run(self) -> None:
+        assert self.release.wait(5.0)  # the timeout is the failure path
+
+
+class HealthyOnAnswer(SimpleService):
+    """is_healthy() blocks until answered, then reports healthy."""
+
+    def __init__(self) -> None:
+        super().__init__("healthy-on-answer")
+        self.asked = threading.Event()
+        self.answer = threading.Event()
+        self.returned = threading.Event()
+
+    def is_healthy(self) -> bool:
+        self.asked.set()
+        assert self.answer.wait(5.0)  # the timeout is the failure path
+        self.returned.set()
+        return True
+
+
+class FailsAfterFirstRun(Service):
+    """Its first run is healthy until released, then fails; every later run
+    fails before it could be healthy."""
+
+    def __init__(self) -> None:
+        self._lg = MagicMock()
+        self.runs = 0
+        self.up = threading.Event()
+        self.release = threading.Event()
+
+    @property
+    def name(self) -> str:
+        return "fails-after-first-run"
+
+    def run(self) -> None:
+        self.runs += 1
+        if self.runs == 1:
+            self.up.set()
+            assert self.release.wait(5.0)  # the timeout is the failure path
+        raise RuntimeError(f"run {self.runs} fails")
+
+    def is_healthy(self) -> bool:
+        return self.runs == 1 and self.up.is_set()
+
+
+class HeldInSetup(SimpleService):
+    """setup() waits until released, so a hook can be attached first."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.release = threading.Event()
+
+    def setup(self) -> None:
+        assert self.release.wait(5.0)  # the timeout is the failure path
+
+
+class TestLifecycle:
+    def test_a_service_runs_once_healthy_and_stops(self, rt: Runtime) -> None:
+        moves: list[tuple[State, State]] = []
+        svc = HeldInSetup()
+        runner = rt.spawn(svc)
+        runner.on_state_change(lambda _name, old, new: moves.append((old, new)))
+        svc.release.set()
+
+        rt.ready(runner, timeout=5.0)
+        assert runner.state == State.RUNNING
+        assert runner.is_alive()
+        rt.stop_service(runner)
+
+        assert runner.state == State.STOPPED
+        assert not runner.is_alive()
+        assert "test" not in rt.services
+        assert moves == [
+            (State.CREATED, State.INITD),
+            (State.INITD, State.STARTING),
+            (State.STARTING, State.RUNNING),
+            (State.RUNNING, State.STOPPING),
+            (State.STOPPING, State.STOPPED),
+        ]
 
     @pytest.mark.parametrize("fails", [False, True], ids=["returns", "raises"])
-    def test_a_run_that_ends_on_its_own_is_torn_down_once(self, fails):
-        """However run() ends, the service is torn down when it does, once:
-        a stop() after that does not tear it down again."""
+    def test_a_run_that_ends_on_its_own_is_torn_down_once(
+        self, rt: Runtime, fails: bool
+    ) -> None:
+        """However run() ends, the service is torn down when it does, once,
+        and leaves the runtime: stopping the runtime does not tear it down
+        again."""
         svc = CountsTeardowns(fails=fails)
-        runner = ThreadRunner(svc)
-        runner.start()
+        rt.spawn(svc, NO_RESTART)
 
         assert svc.torn_down.wait(5.0)  # the timeout is the failure path
-        runner.stop()
+        assert wait_until(lambda: "counts-teardowns" not in rt.services)
+        rt.stop()
         assert svc.teardowns == 1
 
-    def test_a_start_after_stop_whose_setup_fails_fails(self):
-        """A start from STOPPED that fails in setup() is a failed start, as one
-        from CREATED is: SetupError, and the runner FAILED."""
+    def test_a_run_failing_while_starting_fails_its_start(self, rt: Runtime) -> None:
+        runner = rt.spawn(Failing())
+
+        with pytest.raises(RunError, match="intentional failure"):
+            rt.ready(runner, timeout=5.0)
+        assert runner.state == State.FAILED
+        assert "intentional failure" in str(runner.exception)
+
+    def test_a_run_returning_while_starting_fails_its_start(self, rt: Runtime) -> None:
+        runner = rt.spawn(NeverHealthy())
+
+        with pytest.raises(RunError, match="exited during startup"):
+            rt.ready(runner, timeout=5.0)
+        assert runner.state == State.FAILED
+
+    def test_a_service_not_healthy_in_time_fails(self, rt: Runtime) -> None:
+        """ready() gives up on it, and its run ends: it fails and leaves."""
+        runner = rt.spawn(NeverHealthy(blocks=True))
+
+        with pytest.raises(HealthTimeoutError):
+            rt.ready(runner, timeout=0.1)
+
+        assert wait_until(lambda: "never-healthy" not in rt.services)
+        assert runner.state == State.FAILED
+
+    def test_a_run_that_ends_stops_its_token(self, rt: Runtime) -> None:
+        """A run that ends without a stop, here by failing, stops its token,
+        so work derived from it ends with the run instead of outliving it."""
+        svc = DerivesThenFails()
+        rt.spawn(svc, NO_RESTART)
+
+        assert svc.derived.wait(5.0)  # the timeouts are the failure path
+        assert svc.work is not None
+        assert svc.work.wait(5.0)
+
+    def test_a_ready_a_stop_overtook_raises(self, rt: Runtime) -> None:
+        """The service looks healthy, but a stop ends its start before the
+        check reports it: ready() learns of the stop, not of health."""
+        svc = HealthyOnAnswer()
+        runner = rt.spawn(svc)
+        errors: list[BaseException] = []
+
+        def wait() -> None:
+            try:
+                rt.ready(runner, timeout=5.0)
+            except Exception as e:
+                errors.append(e)
+
+        waiter = threading.Thread(target=wait)
+        waiter.start()
+        assert svc.asked.wait(5.0)  # the timeout is the failure path
+        # Completes while the check still holds a "healthy": a stop that waited
+        # for the check would raise at its deadline, well before the check's
+        rt.stop_service(runner, timeout=2.0)
+        assert not svc.returned.is_set()
+        svc.answer.set()
+        waiter.join(5.0)
+
+        assert runner.state == State.STOPPED
+        assert len(errors) == 1 and isinstance(errors[0], RunError), errors
+
+    def test_a_run_outliving_its_stop_is_stopping_until_it_ends(
+        self, rt: Runtime
+    ) -> None:
+        svc = OutlivesStop()
+        runner = rt.spawn(svc)
+        rt.ready(runner, timeout=5.0)
+
+        with pytest.raises(TimeoutError):
+            rt.stop_service(runner, timeout=0.05)
+        assert runner.state == State.STOPPING
+        assert "outlives-stop" in rt.services
+        svc.release.set()
+
+        assert wait_until(lambda: "outlives-stop" not in rt.services)
+        assert runner.state == State.STOPPED
+
+    def test_hooks_cannot_call_the_runtime(self, rt: Runtime) -> None:
+        """A state hook runs on the runtime's own task: a call back into the
+        runtime would wait for itself, so it is refused, and the transitions
+        go on as without it."""
+        runner = rt.spawn(SimpleService())
+        refused: list[State] = []
+
+        def calls_back(_name: str, _old: State, new: State) -> None:
+            try:
+                rt.stop_service(runner)
+            except RuntimeError:
+                refused.append(new)
+
+        runner.on_state_change(calls_back)
+        rt.ready(runner, timeout=5.0)
+        rt.stop_service(runner)
+
+        # Registered after spawn() returned, the hook may also see INITD and
+        # STARTING, as the service starts at once: those are not under test
+        later = (State.RUNNING, State.STOPPING, State.STOPPED)
+        assert [s for s in refused if s in later] == list(later)
+        assert runner.state == State.STOPPED
+
+    def test_a_stop_refused_in_a_hook_leaves_the_runtime_running(
+        self, rt: Runtime
+    ) -> None:
+        """A hook's stop() is refused before it changes anything: the runtime
+        takes services and stops them as without it."""
+        runner = rt.spawn(SimpleService())
+        refused = threading.Event()
+
+        def stops(_name: str, _old: State, new: State) -> None:
+            if new == State.RUNNING:
+                try:
+                    rt.stop()
+                except RuntimeError:
+                    refused.set()
+
+        runner.on_state_change(stops)
+        rt.ready(runner, timeout=5.0)
+        assert refused.is_set()
+
+        other = rt.spawn(SimpleService("other"))  # still taking services
+        rt.ready(other, timeout=5.0)
+        rt.stop()
+
+        assert runner.state == State.STOPPED
+        assert other.state == State.STOPPED
+
+    def test_a_service_spawned_again_whose_setup_fails_fails(self, rt: Runtime) -> None:
+        """Spawned again after a stop, a service whose setup() fails is a
+        failed start, as on its first spawn: SetupError, and FAILED."""
 
         class SecondSetupFails(SimpleService):
             setups = 0
@@ -185,504 +336,107 @@ class TestThreadRunner:
                 if SecondSetupFails.setups > 1:
                     raise RuntimeError("no second setup")
 
-        runner = ThreadRunner(SecondSetupFails())
-        runner.start()
-        runner.wait_healthy(timeout=5.0)
-        runner.stop()
+        svc = SecondSetupFails()
+        rt.ready(rt.spawn(svc), timeout=5.0)
+        rt.stop_service(rt.services["test"])
 
+        again = rt.spawn(svc)
         with pytest.raises(SetupError, match="no second setup"):
-            runner.start()
-        assert runner.state == State.FAILED
+            rt.ready(again, timeout=5.0)
+        assert again.state == State.FAILED
 
-    def test_wait_healthy_does_not_report_health_a_stop_overtook(self):
-        """The service looks healthy, but a stop() has ended the start before
-        wait_healthy() could move it to RUNNING: that is no success."""
 
-        class HealthyAfterGate(SimpleService):
-            def __init__(self) -> None:
-                super().__init__()
-                self.asked = threading.Event()
-                self.answer = threading.Event()
-
-            def is_healthy(self) -> bool:
-                self.asked.set()
-                assert self.answer.wait(5.0)  # the timeout is the failure path
-                return True
-
-        svc = HealthyAfterGate()
-        runner = ThreadRunner(svc)
-        runner.start()
-        errors: list[BaseException] = []
-
-        def wait() -> None:
-            try:
-                runner.wait_healthy(timeout=5.0)
-            except Exception as e:
-                errors.append(e)
-
-        waiter = threading.Thread(target=wait)
-        waiter.start()
-        assert svc.asked.wait(5.0)
-        runner.stop()  # completes while wait_healthy() holds a "healthy"
-        svc.answer.set()
-        waiter.join(5.0)
-
-        assert runner.state == State.STOPPED
-        assert len(errors) == 1 and isinstance(errors[0], RunError), errors
-
-    def test_wait_healthy_waits_for_a_start_in_progress(self):
-        """Between setup() and launching its thread, a runner is STARTING but
-        not alive yet: a wait_healthy() on another thread then waits for the
-        start() to return instead of taking the service for one that exited."""
-        runner = ThreadRunner(SimpleService())
-        at_starting, release = threading.Event(), threading.Event()
-
-        def hold(name: str, old: State, new: State) -> None:
-            if new == State.STARTING:  # on the starting thread, before the launch
-                at_starting.set()
-                release.wait(5.0)
-
-        runner.on_state_change(hold)
-        starter = threading.Thread(target=runner.start)
-        starter.start()
-        assert at_starting.wait(5.0)
-        errors: list[BaseException] = []
-
-        def wait() -> None:
-            try:
-                runner.wait_healthy(timeout=5.0)
-            except Exception as e:
-                errors.append(e)
-
-        waiter = threading.Thread(target=wait)
-        waiter.start()
-        # Until it waits for the start() or has given up; the deadline is the
-        # failure path. Private: the condition a wait for start() creates
-        deadline = time.monotonic() + 5.0
-        while waiter.is_alive() and runner._start_done is None:
-            assert time.monotonic() < deadline
-            time.sleep(0.01)
-        release.set()
-        starter.join(5.0)
-        waiter.join(5.0)
-
-        assert errors == []
-        assert runner.state == State.RUNNING
-        runner.stop()
-
-    def test_a_run_that_ends_stops_its_token(self):
-        """A run that ends without a stop(), here by failing, stops its token,
-        so work derived from it ends with the run instead of outliving it."""
-        svc = DerivesThenFails()
-        ThreadRunner(svc).start()
-        assert svc.derived.wait(timeout=5.0)
-        assert svc.work is not None
-        assert svc.work.wait(timeout=5.0)  # the deadline is the failure path
-
-    def test_stop_during_a_start_from_failed_leaves_the_start_alone(self):
-        """A stop() that lands while a start() from FAILED is in setup() does
-        not tear the service down under it; with no time to wait it returns,
-        and the start completes."""
-        svc = FailsFirstRun()
-        runner = ThreadRunner(svc)
-        failed = threading.Event()
-        runner.on_state_change(
-            lambda _name, _old, new: failed.set() if new == State.FAILED else None
-        )
-        svc.release.set()
-        runner.start()
-        assert failed.wait(5.0)
-        torn_down = svc.teardowns  # the failed first run's, done as it ended
-        svc.in_setup.clear()
-        svc.release.clear()
-        errors: list[BaseException] = []
-
-        def start() -> None:
-            try:
-                runner.start()
-            except BaseException as e:
-                errors.append(e)
-
-        first = threading.Thread(target=start)
-        first.start()
-        assert svc.in_setup.wait(5.0)
-
-        runner.stop(timeout=0)  # the start is in progress: no time to wait for it
-
-        assert svc.teardowns == torn_down
-        assert runner.state == State.FAILED
-        svc.release.set()
-        first.join(5.0)
-        assert errors == []
-        runner.wait_healthy(timeout=5.0)
-        runner.stop()
-        assert runner.state == State.STOPPED
-
-    def test_thread_ending_after_stop_gave_up_stops_the_runner(self):
-        """A thread that outlives stop()'s join still moves the runner to
-        STOPPED when it ends, so the runner can start again."""
-        svc = OutlivesStop()
-        runner = ThreadRunner(svc)
-        stopped = threading.Event()
-        runner.on_state_change(
-            lambda _name, _old, new: stopped.set() if new == State.STOPPED else None
-        )
-        runner.start()
-        runner.stop(timeout=0)
-        assert runner.state == State.STOPPING
+class TestRestart:
+    def test_restarts_end_once_the_retries_are_used_up(self, rt: Runtime) -> None:
+        """It ran, then failed: each restart fails before it is healthy,
+        until max_retries attempts have; then it leaves the runtime."""
+        svc = FailsAfterFirstRun()
+        runner = rt.spawn(svc, RestartPolicy(max_retries=2, backoff=0.0))
+        rt.ready(runner, timeout=5.0)
 
         svc.release.set()
 
-        assert stopped.wait(5.0)
-        runner.start()
-        runner.stop()
-        assert runner.state == State.STOPPED
-
-    def test_start_and_stop_from_a_state_hook_are_refused(self):
-        """A state hook, on the caller's thread or the service thread, cannot
-        start or stop its own runner; the transitions go on as without it."""
-        runner = ThreadRunner(SimpleService())
-        refused: list[tuple[State, str]] = []
-
-        def drives(_name: str, _old: State, new: State) -> None:
-            for call in (runner.start, runner.stop):
-                try:
-                    call()
-                except RuntimeError:
-                    refused.append((new, call.__name__))
-
-        runner.on_state_change(drives)
-        runner.start()
-        runner.wait_healthy(timeout=5.0)
-        runner.stop()
-
-        steps = [
-            State.INITD,
-            State.STARTING,
-            State.RUNNING,
-            State.STOPPING,
-            State.STOPPED,  # on the service thread or in stop(), whichever is first
-        ]
-        assert refused == [
-            (state, call) for state in steps for call in ("start", "stop")
-        ]
-        assert runner.state == State.STOPPED
-        assert not runner.is_alive()
-
-    def test_start_while_another_start_runs_setup_is_refused(self):
-        """A start() that lands while another start() is in setup() fails
-        before calling setup() again."""
-        svc = SlowSetup()
-        runner = ThreadRunner(svc)
-        first = threading.Thread(target=runner.start)
-        first.start()
-        try:
-            assert svc.in_setup.wait(5.0)
-
-            with pytest.raises(InvalidTransitionError):
-                runner.start()
-        finally:
-            svc.release.set()
-            first.join(5.0)
-            runner.stop()
-
-        assert svc.setups == 1
-
-    def test_start_spawns_thread(self):
-        """start() spawns a daemon thread."""
-        svc = SimpleService()
-        runner = ThreadRunner(svc)
-
-        runner.start()
-        try:
-            time.sleep(0.05)
-            assert runner.is_alive()
-            assert runner.state == State.STARTING
-        finally:
-            runner.stop()
-
-    def test_wait_healthy_transitions_to_running(self):
-        """wait_healthy() transitions to RUNNING state."""
-        svc = SimpleService()
-        runner = ThreadRunner(svc)
-
-        runner.start()
-        runner.wait_healthy(timeout=5.0)
-
-        assert runner.state == State.RUNNING
-        assert runner.is_healthy()
-
-        runner.stop()
-
-    def test_stop_transitions_to_stopped(self):
-        """stop() transitions to STOPPED state."""
-        svc = SimpleService()
-        runner = ThreadRunner(svc)
-
-        runner.start()
-        runner.wait_healthy(timeout=5.0)
-        runner.stop()
-
-        assert runner.state == State.STOPPED
-        assert not runner.is_alive()
-
-    def test_exception_captured(self):
-        """Exception from run() is captured."""
-        svc = FailingService()
-        runner = ThreadRunner(svc)
-
-        runner.start()
-        time.sleep(0.1)
-
-        assert not runner.is_alive()
-        assert runner.exception is not None
-        assert "intentional failure" in str(runner.exception)
-
-    def test_state_hooks_called(self):
-        """State change hooks are called."""
-        transitions = []
-
-        def hook(name, old, new):
-            transitions.append((name, old, new))
-
-        svc = SimpleService()
-        runner = ThreadRunner(svc)
-        runner.on_state_change(hook)
-
-        runner.start()
-        runner.wait_healthy(timeout=5.0)
-        runner.stop()
-
-        assert (svc.name, State.CREATED, State.INITD) in transitions
-        assert (svc.name, State.INITD, State.STARTING) in transitions
-        assert (svc.name, State.STARTING, State.RUNNING) in transitions
-        assert (svc.name, State.RUNNING, State.STOPPING) in transitions
-        assert (svc.name, State.STOPPING, State.STOPPED) in transitions
-
-    def test_hook_exception_ignored(self):
-        """Exception in hook is ignored."""
-
-        def bad_hook(name, old, new):
-            raise RuntimeError("hook failed")
-
-        svc = SimpleService()
-        runner = ThreadRunner(svc)
-        runner.on_state_change(bad_hook)
-
-        # Should not raise despite bad hook
-        runner.start()
-        runner.wait_healthy(timeout=5.0)
-        runner.stop()
-
-        assert runner.state == State.STOPPED
-
-    def test_restart_policy(self):
-        """Restart policy triggers restart on failure."""
-        svc = FailOnFirstRun()
-        policy = RestartPolicy(max_retries=3, backoff=0.01)
-        runner = ThreadRunner(svc, policy)
-
-        runner.start()
-        with pytest.raises(RunError):
-            runner.wait_healthy(timeout=0.5)
-
-        assert runner.state == State.FAILED
-
-        # check() should trigger restart
-        result = runner.check()
-        assert result is True
-        assert runner.state == State.RUNNING
-
-        runner.stop()
-
-    def test_health_timeout_raises(self):
-        """wait_healthy() raises HealthTimeoutError on timeout."""
-
-        class NeverHealthy(Service):
-            @property
-            def name(self) -> str:
-                return "never-healthy"
-
-            def __init__(self) -> None:
-                self._stop = threading.Event()
-
-            def run(self) -> None:
-                self._stop.wait()
-
-            def teardown(self) -> None:
-                self._stop.set()
-
-            def is_healthy(self) -> bool:
-                return False
-
-        svc = NeverHealthy()
-        runner = ThreadRunner(svc)
-
-        runner.start()
-        with pytest.raises(HealthTimeoutError):
-            runner.wait_healthy(timeout=0.1)
-
-        assert runner.state == State.FAILED
-        runner.stop()
-
-    def test_exit_without_exception(self):
-        """Service that exits cleanly without exception."""
-
-        class QuietExit(Service):
-            @property
-            def name(self) -> str:
-                return "quiet-exit"
-
-            def run(self) -> None:
-                pass  # Exits immediately
-
-        svc = QuietExit()
-        runner = ThreadRunner(svc)
-
-        runner.start()
-        with pytest.raises(RunError, match="exited during startup"):
-            runner.wait_healthy(timeout=0.5)
-
-        assert runner.state == State.FAILED
-
-
-class TestRunnerRestart:
-    """Test restart functionality."""
-
-    def test_max_retries_exhausted(self):
-        """Restart stops after max_retries."""
-
-        class AlwaysFails(Service):
-            def __init__(self) -> None:
-                self._lg = MagicMock()
-
-            @property
-            def name(self) -> str:
-                return "always-fails"
-
-            def run(self) -> None:
-                raise RuntimeError("always fails")
-
-        policy = RestartPolicy(max_retries=2, backoff=0.01)
-        service = AlwaysFails()
-        runner = ThreadRunner(service, policy)
-
-        runner.start()
-        with pytest.raises(RunError):
-            runner.wait_healthy(timeout=0.1)
-
-        # First restart attempt
-        runner.check()
-        assert runner.retries == 1
-
-        # Second restart attempt
-        runner.check()
+        assert wait_until(lambda: "fails-after-first-run" not in rt.services)
+        assert svc.runs == 3
         assert runner.retries == 2
-
-        # Third attempt should not restart (max reached)
-        result = runner.check()
-        assert result is False
-
-        # Each failed restart is logged, not dropped
-        failures = [
-            c
-            for c in service._lg.warning.call_args_list
-            if c.args == ("restart failed",)
-        ]
-        assert len(failures) == 2
-
-    def test_restart_disabled(self):
-        """Restart can be disabled."""
-
-        class FailsOnce(Service):
-            @property
-            def name(self) -> str:
-                return "fails-once"
-
-            def run(self) -> None:
-                raise RuntimeError("fails")
-
-        policy = RestartPolicy(restart_on_failure=False)
-        runner = ThreadRunner(FailsOnce(), policy)
-
-        runner.start()
-        with pytest.raises(RunError):
-            runner.wait_healthy(timeout=0.1)
-
-        result = runner.check()
-        assert result is False
+        assert runner.state == State.FAILED
+        assert "run 3 fails" in str(runner.exception)
 
 
 class TestScheduledService:
-    """Test ScheduledService with ThreadRunner."""
-
-    def test_tick_called_repeatedly(self):
-        """tick() is called repeatedly."""
-        tick_count = 0
+    def test_it_ticks_until_stopped(self, rt: Runtime) -> None:
+        ticks = 0
         two_ticks = threading.Event()
 
-        class CountingService(ScheduledService):
-            interval = 0.2
+        class Counter(ScheduledService):
+            interval = 0.01
+
+            def __init__(self) -> None:
+                self._lg = MagicMock()
 
             @property
             def name(self) -> str:
                 return "counter"
 
             def tick(self) -> None:
-                nonlocal tick_count
-                tick_count += 1
-                if tick_count == 2:
+                nonlocal ticks
+                ticks += 1
+                if ticks == 2:
                     two_ticks.set()
 
-            def is_healthy(self) -> bool:
-                return tick_count > 0
+        runner = rt.spawn(Counter())
+        rt.ready(runner, timeout=5.0)
+        assert two_ticks.wait(5.0)  # the timeout is the failure path
+        rt.stop_service(runner)
 
-        svc = CountingService()
-        runner = ThreadRunner(svc)
-
-        runner.start()
-        runner.wait_healthy(timeout=5.0)
-        assert two_ticks.wait(timeout=5.0)
-        runner.stop()
-
-        assert tick_count >= 2
-        # The runner ends the loop: the service has no teardown() of its own
         assert runner.state == State.STOPPED
 
-    def test_teardown_runs_on_the_service_thread_after_the_last_tick(self):
-        """stop() ends the loop, then teardown() runs on the thread that ticked."""
-        ticked = threading.Event()
-        threads: dict[str, str] = {}
+    def test_teardown_follows_the_last_tick(self, rt: Runtime) -> None:
+        """A stop ends the loop first: teardown() never overlaps tick(). A tick
+        held when the stop comes keeps teardown() waiting until it returns."""
+        ticked, release = threading.Event(), threading.Event()
+        calls: list[str] = []
 
         class Ticker(ScheduledService):
             interval = 5.0
+
+            def __init__(self) -> None:
+                self._lg = MagicMock()
 
             @property
             def name(self) -> str:
                 return "ticker"
 
             def tick(self) -> None:
-                threads["tick"] = threading.current_thread().name
+                calls.append("tick")
                 ticked.set()
+                assert release.wait(5.0)  # the timeout is the failure path
 
             def teardown(self) -> None:
-                threads["teardown"] = threading.current_thread().name
+                calls.append("teardown")
 
-        runner = ThreadRunner(Ticker())
-        runner.start()
-        runner.wait_healthy(timeout=5.0)
-        assert ticked.wait(timeout=5.0)
+        runner = rt.spawn(Ticker())
+        rt.ready(runner, timeout=5.0)
+        assert ticked.wait(5.0)  # the timeout is the failure path
+        stopper = threading.Thread(target=rt.stop_service, args=(runner, 10.0))
+        stopper.start()
+        try:
+            assert wait_until(lambda: runner.state == State.STOPPING, 5.0)
+            assert calls == ["tick"]  # the tick is held: no teardown yet
+        finally:
+            release.set()
+            stopper.join(10.0)
 
-        runner.stop()
-
-        assert threads == {"tick": "svc-ticker", "teardown": "svc-ticker"}
+        assert calls == ["tick", "teardown"]
         assert runner.state == State.STOPPED
 
-    def test_teardown_runs_after_tick_fails(self):
-        """A failing tick() ends the loop; teardown() still runs on its thread."""
+    def test_teardown_runs_after_a_tick_fails(self, rt: Runtime) -> None:
         torn_down = threading.Event()
 
         class Boom(ScheduledService):
+            def __init__(self) -> None:
+                self._lg = MagicMock()
+
             @property
             def name(self) -> str:
                 return "boom"
@@ -693,8 +447,8 @@ class TestScheduledService:
             def teardown(self) -> None:
                 torn_down.set()
 
-        runner = ThreadRunner(Boom())
-        runner.start()
+        runner = rt.spawn(Boom(), NO_RESTART)
 
-        assert torn_down.wait(timeout=5.0)
+        assert torn_down.wait(5.0)  # the timeout is the failure path
+        assert wait_until(lambda: "boom" not in rt.services)
         assert "tick failed" in str(runner.exception)

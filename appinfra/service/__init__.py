@@ -4,12 +4,12 @@
 """Services, and the runtime that runs them.
 
 - Service: WHAT to run (definition, config, behavior)
-- Runner: HOW to run it (a thread, a process, or a task on an event loop),
-  with its state machine, hooks and restart policy
 - Runtime: the entry point. spawn() takes services in any order and from any
-  thread, picks the runner from the service's kind, starts each once its
+  thread, runs each as appinfra.runtime tasks (a thread, the event loop, or a
+  process of its own, from the service's kind), starts each once its
   ``depends_on`` run, restarts a failed one per its policy, and stops them in
   reverse start order
+- Runner: a service's state in the Runtime, its restart policy and hooks
 
 A Service implements run(), which returns once ``self.stopping`` is set. Two
 subclasses work differently:
@@ -43,8 +43,7 @@ Usage:
         run_application()
 
 spawn() returns the service's runner; ``runner.on_state_change(hook)``
-observes its transitions. A runner can also be used on its own, without a
-runtime: ThreadRunner, ProcessRunner, or a LoopHost's TaskRunner.
+observes its transitions.
 """
 
 from ..runtime import StopToken
@@ -52,13 +51,22 @@ from .base import AsyncService, ScheduledService, Service
 from .channel import (
     AsyncBufferedChannel,
     AsyncChannel,
+    AsyncChannelPair,
+    AsyncProcessChannelPair,
+    AsyncProcessQueueChannelFactory,
     AsyncProcessQueueTransport,
+    AsyncQueueChannelFactory,
     AsyncQueueTransport,
     AsyncTransport,
     BufferedChannel,
     Channel,
+    ChannelConfig,
+    ChannelPair,
+    ChannelPairFactory,
     Message,
+    ProcessQueueChannelFactory,
     ProcessQueueTransport,
+    QueueChannelFactory,
     QueueTransport,
     Transport,
 )
@@ -77,29 +85,7 @@ from .errors import (
     RunError,
     SetupError,
 )
-from .factory import (
-    AsyncChannelPair,
-    AsyncProcessChannelPair,
-    AsyncProcessQueueChannelFactory,
-    AsyncQueueChannelFactory,
-    ChannelConfig,
-    ChannelPair,
-    ChannelPairFactory,
-    ProcessQueueChannelFactory,
-    QueueChannelFactory,
-    RunnerFactory,
-    RunnerWithChannel,
-    ServiceFactory,
-    ServiceRegistration,
-)
-from .runtime import (
-    LoopHost,
-    ProcessRunner,
-    Runner,
-    Runtime,
-    TaskRunner,
-    ThreadRunner,
-)
+from .runtime import Runner, Runtime
 from .state import RestartPolicy, State, StateHook
 
 __all__ = [
@@ -108,10 +94,6 @@ __all__ = [
     "ScheduledService",
     "AsyncService",
     "Runner",
-    "ThreadRunner",
-    "ProcessRunner",
-    "LoopHost",
-    "TaskRunner",
     "Runtime",
     # Transport (wire level)
     "Transport",
@@ -132,7 +114,7 @@ __all__ = [
     "ChannelClosedError",
     "ChannelFullError",
     "ChannelResponseError",
-    # Factories
+    # Channel pairs and their factories
     "ChannelConfig",
     "ChannelPair",
     "ChannelPairFactory",
@@ -142,10 +124,6 @@ __all__ = [
     "AsyncProcessChannelPair",
     "AsyncQueueChannelFactory",
     "AsyncProcessQueueChannelFactory",
-    "RunnerFactory",
-    "RunnerWithChannel",
-    "ServiceFactory",
-    "ServiceRegistration",
     # State management
     "State",
     "RestartPolicy",

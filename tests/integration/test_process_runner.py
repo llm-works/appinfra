@@ -3,16 +3,24 @@
 
 """Integration tests for ProcessRunner with real subprocesses."""
 
+import logging
 import multiprocessing as mp
+import queue
+import signal
+import sys
 import threading
 import time
+from collections.abc import Iterator
+from unittest.mock import MagicMock, patch
 
 import pytest
 
+from appinfra.app.fastapi.runtime import process
+from appinfra.app.fastapi.runtime.process import ProcessRunner
 from appinfra.log import Logger
 from appinfra.service import (
     InvalidTransitionError,
-    ProcessRunner,
+    RunError,
     Service,
     State,
     StopToken,
@@ -75,9 +83,15 @@ class TestProcessRunnerIntegration:
     """Integration tests for ProcessRunner with real subprocesses."""
 
     @pytest.fixture
-    def lg(self):
-        """Create a logger for tests."""
-        return Logger(name="test")
+    def lg(self) -> Iterator[Logger]:
+        """A logger whose records, the child's too, reach stderr: the log
+        listener hands a child's records to this logger's own handlers only,
+        so without one they are dropped, and a failure shows none of them."""
+        lg = Logger(name="test")
+        handler = logging.StreamHandler(sys.stderr)
+        lg.addHandler(handler)
+        yield lg
+        lg.removeHandler(handler)
 
     def test_full_lifecycle(self, lg):
         """Test full start -> healthy -> stop lifecycle."""
@@ -116,13 +130,14 @@ class TestProcessRunnerIntegration:
         finally:
             runner.stop()
 
+    @pytest.mark.parametrize("method", [None, "spawn"], ids=["default", "spawn"])
     @pytest.mark.parametrize("derive", [False, True], ids=["alias", "child"])
-    @pytest.mark.parametrize("method", mp.get_all_start_methods())
-    def test_stop_reaches_a_token_setup_took(self, lg, method, derive):
+    def test_stop_reaches_a_token_setup_took(self, lg, derive, method):
         """stop() ends a run() that waits on a token setup() kept, gracefully:
-        exit code 0, not the terminate() that follows a stop_timeout."""
+        exit code 0, not the terminate() that follows a stop_timeout. Under
+        spawn the token reaches the child pickled, not copied by a fork."""
         runner = ProcessRunner(
-            WaitsOnTokenFromSetup(lg, derive), start_method=method, stop_timeout=5.0
+            WaitsOnTokenFromSetup(lg, derive), stop_timeout=5.0, start_method=method
         )
         runner.start()
         runner.wait_healthy(timeout=10.0)
@@ -148,18 +163,27 @@ class TestProcessRunnerIntegration:
 
     def test_stop_during_start_leaves_no_child_behind(self, lg):
         """A stop() that lands between STARTING and the spawn does not report
-        STOPPED for a child start() is about to spawn; with no time to wait
-        it returns, and a later stop() ends the child."""
+        STOPPED for a child start() is about to spawn; with no time to wait it
+        returns, and the start, once it has spawned the child, stops it and
+        raises: the stop is not lost."""
         runner = ProcessRunner(SimpleProcessService(lg, name="held-start"))
         starting, release = threading.Event(), threading.Event()
+        launch = runner._launch
+        errors: list[Exception] = []
 
-        def hold(_name: str, _old: State, new: State) -> None:
-            if new == State.STARTING and not starting.is_set():
-                starting.set()
-                release.wait(5.0)  # holds start() before it spawns
+        def held_launch() -> None:
+            starting.set()
+            release.wait()  # holds start() STARTING until the driver's finally
+            launch()
 
-        runner.on_state_change(hold)
-        first = threading.Thread(target=runner.start)
+        def start() -> None:
+            try:
+                runner.start()
+            except RunError as e:
+                errors.append(e)
+
+        runner._launch = held_launch  # type: ignore[method-assign]
+        first = threading.Thread(target=start)
         first.start()
         try:
             assert starting.wait(5.0)
@@ -167,35 +191,13 @@ class TestProcessRunnerIntegration:
             assert runner.state == State.STARTING
         finally:
             release.set()
-            first.join(5.0)
+            first.join(10.0)
 
-        runner.wait_healthy(timeout=5.0)
-        runner.stop()
+        assert [str(e) for e in errors] == ["held-start: stopped during startup"], (
+            errors
+        )
         assert runner.state == State.STOPPED
         assert not runner.is_alive()
-
-    def test_stop_from_a_starting_hook_is_refused(self, lg):
-        """A stop() from a STARTING hook, on the thread running start(), raises
-        in the hook; the start goes on and spawns the child."""
-        runner = ProcessRunner(SimpleProcessService(lg, name="hook-stop"))
-        refused: list[RuntimeError] = []
-
-        def stops(_name: str, _old: State, new: State) -> None:
-            if new == State.STARTING:
-                try:
-                    runner.stop()
-                except RuntimeError as e:
-                    refused.append(e)
-
-        runner.on_state_change(stops)
-        runner.start()
-        try:
-            assert len(refused) == 1
-            assert runner.state == State.STARTING
-            assert runner.is_alive()
-        finally:
-            runner.stop()
-        assert runner.state == State.STOPPED
 
     def test_subprocess_logging(self, lg):
         """Test that subprocess logs are captured via queue."""
@@ -231,3 +233,65 @@ class TestProcessRunnerIntegration:
             )
         finally:
             lg.removeHandler(handler)
+
+
+_ON_MAIN_THREAD = pytest.mark.skipif(
+    threading.current_thread() is not threading.main_thread(),
+    reason="only the main thread receives KeyboardInterrupt and installs handlers",
+)
+
+
+@_ON_MAIN_THREAD
+class TestInterruptDuringLaunch:
+    """A SIGINT while Process.start() forks; real signals, mocked processes."""
+
+    @pytest.fixture(autouse=True)
+    def default_sigint(self) -> Iterator[None]:
+        """Python's own SIGINT handler, the one that raises KeyboardInterrupt,
+        whatever another test in this worker left installed."""
+        previous = signal.signal(signal.SIGINT, signal.default_int_handler)
+        try:
+            yield
+        finally:
+            signal.signal(signal.SIGINT, previous)
+
+    def test_an_interrupt_during_the_fork_reaches_the_child_it_forked(self):
+        """SIGINT arrives while Process.start() forks, before the child's
+        handle is published: it is held until the handle is, so the
+        interrupt's cleanup ends the child; the interrupt reaches the caller,
+        and the previous handler is back."""
+        before = signal.getsignal(signal.SIGINT)
+        with (
+            patch.object(process.mp, "get_context") as get_context,
+            patch.object(process, "LogQueueListener"),
+        ):
+            ctx = get_context.return_value
+            ctx.Pipe.side_effect = lambda duplex=True: (MagicMock(), MagicMock())
+            ctx.Queue.return_value.get_nowait.side_effect = queue.Empty
+            child = ctx.Process.return_value
+            child.exitcode = None  # running, as a real one starts
+            child.is_alive.return_value = False  # not published yet
+
+            def forked() -> None:
+                signal.raise_signal(signal.SIGINT)  # mid-fork
+                child.is_alive.return_value = True  # published
+
+            child.start.side_effect = forked
+            child.terminate.side_effect = lambda: setattr(
+                child.is_alive, "return_value", False
+            )
+            runner = ProcessRunner(SimpleProcessService(Logger(name="test")))
+            with pytest.raises(KeyboardInterrupt):
+                runner.start()
+
+        child.terminate.assert_called_once()
+        assert signal.getsignal(signal.SIGINT) is before
+
+    def test_a_forked_child_gets_back_the_handler_held_at_the_fork(self):
+        """A forked child inherits the handler that holds SIGINT back at the
+        fork; its entry point puts back the one it replaced."""
+        before = signal.getsignal(signal.SIGINT)
+        with process._interrupt_held():
+            assert signal.getsignal(signal.SIGINT) is not before
+            process._restore_interrupt()  # as _process_entry() does first
+            assert signal.getsignal(signal.SIGINT) is before

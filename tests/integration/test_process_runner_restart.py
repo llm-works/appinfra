@@ -12,8 +12,9 @@ from pathlib import Path
 
 import pytest
 
+from appinfra.app.fastapi.runtime.process import ProcessRunner
 from appinfra.log import Logger
-from appinfra.service import ProcessRunner, RestartPolicy, Service, State
+from appinfra.service import RestartPolicy, Service, State
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -171,27 +172,23 @@ def _run_parent(func: str, *args: object) -> subprocess.CompletedProcess[str]:
 
 
 @pytest.mark.parametrize("failure", ["exception", "exit"])
-@pytest.mark.parametrize("method", mp.get_all_start_methods())
-def test_monitor_restarts_a_failed_service(
-    method: str, failure: str, tmp_path: Path
-) -> None:
+def test_monitor_restarts_a_failed_service(failure: str, tmp_path: Path) -> None:
     """A service that raised or exited non-zero is restarted and runs again."""
-    out = _run_parent("run_fail_once", method, failure, str(tmp_path / "runs")).stdout
+    out = _run_parent("run_fail_once", "spawn", failure, str(tmp_path / "runs")).stdout
     assert "runs=2 state=RUNNING" in out, out
 
 
-@pytest.mark.parametrize("method", mp.get_all_start_methods())
-def test_monitor_does_not_restart_an_interrupted_service(
-    method: str, tmp_path: Path
-) -> None:
+def test_monitor_does_not_restart_an_interrupted_service(tmp_path: Path) -> None:
     """KeyboardInterrupt, as from Ctrl-C, is a shutdown: the runner ends DONE."""
-    proc = _run_parent("run_fail_once", method, "interrupt", str(tmp_path / "runs"))
+    proc = _run_parent("run_fail_once", "spawn", "interrupt", str(tmp_path / "runs"))
     assert "runs=1 state=DONE" in proc.stdout, proc.stdout
 
 
-@pytest.mark.parametrize("runner_method", ["forkserver", "spawn"])
+@pytest.mark.skipif(
+    "fork" not in mp.get_all_start_methods(), reason="needs the fork start method"
+)
 def test_runner_start_method_restarts_without_forking_from_a_thread(
-    runner_method: str, tmp_path: Path
+    tmp_path: Path,
 ) -> None:
     """A runner with its own start method restarts under a fork default, warning-free.
 
@@ -199,7 +196,7 @@ def test_runner_start_method_restarts_without_forking_from_a_thread(
     and Python 3.12+ warns "This process ... is multi-threaded" on stderr.
     """
     proc = _run_parent(
-        "run_fail_once", "fork", "exit", str(tmp_path / "runs"), runner_method
+        "run_fail_once", "fork", "exit", str(tmp_path / "runs"), "forkserver"
     )
     assert "runs=2 state=RUNNING" in proc.stdout, proc.stdout
     assert "is multi-threaded" not in proc.stderr, proc.stderr

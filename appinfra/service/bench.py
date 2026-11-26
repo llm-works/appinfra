@@ -2,15 +2,16 @@
 # SPDX-FileCopyrightText: Copyright 2026 The appinfra Authors
 
 """
-Measure what services on a LoopHost cost: memory per service, start and stop rate of
-their runners and of a Runtime's spawn() and stop(), and the submit/reply rate through
-an async channel.
+Measure what async services on one event loop cost: memory per service, the rate a
+Runtime spawns and stops them one at a time and all at once, and the submit/reply rate
+through an async channel. The services run on the service Runtime's loop.
 
 The memory figure is the net cost of a service: a service holding nothing of its own,
 idle on the loop, as an idle goroutine parks on a channel. It is asyncio's part (the
-task, the coroutine, the instance, its wait) plus the framework's (the runner and its
-bookkeeping); what a real service holds comes on top. The same services run once as
-plain asyncio tasks and once under runners, and the difference is the framework's.
+task, the coroutine, the instance, its wait) plus the framework's (the runner, the
+service's task and token, the runtime's bookkeeping); what a real service holds comes
+on top. The same services run once as plain asyncio tasks and once spawned into a
+Runtime, and the difference is the framework's.
 
 scripts/runtime_bench.py prints these numbers next to appinfra.runtime.bench's; the
 performance tests assert on them.
@@ -22,14 +23,15 @@ import asyncio
 import functools
 import time
 from collections.abc import Callable
+from concurrent.futures import Future
 from dataclasses import dataclass
 
 from ..log import Logger
+from ..runtime import Runtime as Tasks
 from ..runtime.bench import Arrivals, bytes_per_warmed, check_count
 from .base import AsyncService
-from .channel import AsyncChannel, Message
-from .factory import AsyncQueueChannelFactory
-from .runtime import LoopHost, Runtime, TaskRunner
+from .channel import AsyncChannel, AsyncQueueChannelFactory, Message
+from .runtime import Runner, Runtime
 
 ServiceMaker = Callable[[int, Arrivals], AsyncService]
 """Makes the i-th service of a run, which calls arrive() once its run() has started."""
@@ -87,7 +89,7 @@ class Cost:
 
     @property
     def net(self) -> float:
-        """What a service costs on a LoopHost, before what it holds."""
+        """What a service costs on the loop, before what it holds."""
         return self.asyncio + self.framework
 
 
@@ -110,51 +112,51 @@ def parked_maker(lg: Logger) -> ServiceMaker:
     return make
 
 
-def start_runners(
-    host: LoopHost, make: ServiceMaker, count: int
-) -> tuple[list[TaskRunner], float]:
-    """Start *count* services made by *make* and wait until each run() has started.
+def spawn_services(
+    rt: Runtime, make: ServiceMaker, count: int
+) -> tuple[list[Runner], float]:
+    """Spawn *count* services made by *make* into *rt* and wait until each run()
+    has started.
 
     Returns:
-        The runners, and how many services per second started and ran: timed
-        until each run() has started, not until the last start() returns, as
-        how much of the loop's share falls before that depends on how the GIL
-        switches between the threads.
+        The runners, and how many services per second were spawned and ran:
+        timed until each run() has started, not until the last spawn() returns,
+        as how much of the loop's share falls before that depends on how the
+        GIL switches between the threads.
     """
     arrivals = Arrivals(count)
-    runners = [host.runner(make(i, arrivals)) for i in range(count)]
+    services = [make(i, arrivals) for i in range(count)]
     began = time.perf_counter()
-    for runner in runners:
-        runner.start()
+    runners = [rt.spawn(service) for service in services]
     if not arrivals.all.wait(timeout=60.0):
         raise TimeoutError(f"{count:,} services did not all start in 60 s")
     return runners, count / (time.perf_counter() - began)
 
 
-def stop_runners(runners: list[TaskRunner]) -> float:
-    """Stop *runners*; returns how many stop() calls per second that took."""
+def stop_services(rt: Runtime, runners: list[Runner]) -> float:
+    """Stop *runners* in *rt*, one stop_service() each; returns how many per
+    second that took."""
     began = time.perf_counter()
     for runner in runners:
-        runner.stop()
+        rt.stop_service(runner)
     return len(runners) / (time.perf_counter() - began)
 
 
 def runtime_rates(lg: Logger, make: ServiceMaker, count: int) -> tuple[float, float]:
-    """spawn() and stop() rates of a Runtime over *count* services made by *make*,
-    independent of each other: it picks each a runner on its own loop and tracks
-    it for ordering, restarts and stop.
+    """spawn() and stop() rates of a Runtime of its own over *count* services
+    made by *make*, independent of each other.
 
     Returns:
         Services per second spawned and running (timed until each run() has
-        started, as start_runners() is), and services stopped per second by
+        started, as spawn_services() is), and services stopped per second by
         one stop(), which stops them in reverse start order and then the
-        runtime's loop.
+        runtime's tasks.
 
     Raises:
         ValueError: If *count* is less than 1.
     """
     arrivals = Arrivals(count)
-    with Runtime(lg, name="bench-runtime") as rt:
+    with Runtime(lg) as rt:
         began = time.perf_counter()
         for i in range(count):
             rt.spawn(make(i, arrivals))
@@ -168,76 +170,118 @@ def runtime_rates(lg: Logger, make: ServiceMaker, count: int) -> tuple[float, fl
 
 
 def start_plain(
-    host: LoopHost, make: ServiceMaker, count: int
+    tasks: Tasks, make: ServiceMaker, count: int
 ) -> list[asyncio.Task[None]]:
-    """Run the run() of *count* services made by *make* as plain tasks on the
-    host's loop, with no runner, and wait until each has started."""
+    """Run the run() of *count* services made by *make* as plain asyncio tasks on
+    the loop of *tasks*, with no runner, and wait until each has started."""
     arrivals = Arrivals(count)
     services = [make(i, arrivals) for i in range(count)]
-    tasks: list[asyncio.Task[None]] = []
 
-    def spawn() -> None:
-        tasks.extend(host.loop.create_task(s.run()) for s in services)
+    async def spawn() -> list[asyncio.Task[None]]:
+        return [asyncio.create_task(s.run()) for s in services]
 
-    host.loop.call_soon_threadsafe(spawn)
+    plain: list[asyncio.Task[None]] = tasks.spawn(spawn).wait(timeout=60.0)
     if not arrivals.all.wait(timeout=60.0):
         raise TimeoutError(f"{count:,} tasks did not all start in 60 s")
-    return tasks
+    return plain
 
 
-def end_plain(host: LoopHost, tasks: list[asyncio.Task[None]]) -> None:
-    """Cancel *tasks* on the host's loop and wait until they have ended."""
+def end_plain(tasks: Tasks, plain: list[asyncio.Task[None]]) -> None:
+    """Cancel the asyncio tasks *plain* on the loop of *tasks* and wait until they
+    have ended."""
 
     async def end() -> None:
-        for task in tasks:
+        for task in plain:
             task.cancel()
-        await asyncio.gather(*tasks, return_exceptions=True)
+        await asyncio.gather(*plain, return_exceptions=True)
 
-    asyncio.run_coroutine_threadsafe(end(), host.loop).result(timeout=60.0)
+    tasks.spawn(end).wait(timeout=60.0)
 
 
-def service_cost(host: LoopHost, lg: Logger, count: int) -> Cost:
+def _check_idle(runners: list[Runner]) -> None:
+    """Refuse a measurement of services that ended: what a failed one holds
+    (its error and traceback) is not what an idle one costs.
+
+    Raises:
+        RuntimeError: If one of *runners* has failed.
+    """
+    failed = [r for r in runners if r.exception is not None]
+    if failed:
+        raise RuntimeError(
+            f"{len(failed):,} of {len(runners):,} measured services failed, "
+            f"first: {failed[0].exception!r}"
+        )
+
+
+def service_cost(tasks: Tasks, rt: Runtime, lg: Logger, count: int) -> Cost:
     """The net cost of an idle service, over *count* Minimal services run once as
-    plain tasks and once under runners, each measured warmed
-    (bytes_per_warmed())."""
+    plain asyncio tasks on the loop of *tasks* and once spawned into *rt*, each
+    measured warmed (bytes_per_warmed()). Each run has a maker of its own: the
+    event its services share binds to the loop that first waits on it."""
     make = minimal_maker(lg)
-    plain, tasks = bytes_per_warmed(
-        lambda: start_plain(host, make, count),
-        lambda started: end_plain(host, started),
+    plain, aio = bytes_per_warmed(
+        lambda: start_plain(tasks, make, count),
+        lambda started: end_plain(tasks, started),
         count,
     )
-    end_plain(host, tasks)
-    del tasks
+    end_plain(tasks, aio)
+    del aio
+    make = minimal_maker(lg)
     net, (runners, _) = bytes_per_warmed(
-        lambda: start_runners(host, make, count),
-        lambda started: stop_runners(started[0]),
+        lambda: spawn_services(rt, make, count),
+        lambda started: stop_services(rt, started[0]),
         count,
     )
-    stop_runners(runners)
+    _check_idle(runners)
+    stop_services(rt, runners)
     return Cost(asyncio=plain, framework=net - plain)
 
 
-def round_trip_rate(host: LoopHost, lg: Logger, count: int) -> float:
-    """Round trips per second, *count* of them, from a caller on the loop to a
-    Doubler and back.
+class _Caller(AsyncService):
+    """Submits *count* requests to a Doubler on the same loop, one at a time,
+    and reports the round trips per second in *rate*."""
+
+    def __init__(
+        self, lg: Logger, outbox: AsyncChannel, count: int, rate: Future[float]
+    ) -> None:
+        self._lg = lg
+        self._outbox = outbox
+        self._count = count
+        self._rate = rate
+
+    @property
+    def name(self) -> str:
+        """``caller``."""
+        return "caller"
+
+    @property
+    def depends_on(self) -> list[str]:
+        """The Doubler it calls."""
+        return ["doubler"]
+
+    async def run(self) -> None:  # type: ignore[override]
+        """Make the round trips, report their rate, then park until stopped."""
+        try:
+            began = time.perf_counter()
+            for i in range(self._count):
+                await self._outbox.submit(Message(payload=i), timeout=5.0)
+            self._rate.set_result(self._count / (time.perf_counter() - began))
+        except Exception as e:
+            self._rate.set_exception(e)
+        await asyncio.Event().wait()
+
+
+def round_trip_rate(lg: Logger, count: int) -> float:
+    """Round trips per second, *count* of them, from a caller service to a
+    Doubler and back, both on the loop of a Runtime of their own.
 
     Raises:
         ValueError: If *count* is less than 1.
     """
     check_count(count)
     pair = AsyncQueueChannelFactory().create_pair()
-    runner = host.runner(Doubler(lg, pair.child))
-    runner.start()
-    runner.wait_healthy(timeout=5.0)
-
-    async def round_trips() -> float:
-        began = time.perf_counter()
-        for i in range(count):
-            await pair.parent.submit(Message(payload=i), timeout=5.0)
-        return count / (time.perf_counter() - began)
-
-    try:
-        future = asyncio.run_coroutine_threadsafe(round_trips(), host.loop)
-        return future.result(timeout=300.0)
-    finally:
-        runner.stop()
+    rate: Future[float] = Future()
+    with Runtime(lg) as rt:
+        rt.spawn(_Caller(lg, pair.parent, count, rate))
+        rt.ready(rt.spawn(Doubler(lg, pair.child)), timeout=5.0)
+        return rate.result(timeout=300.0)

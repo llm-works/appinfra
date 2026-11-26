@@ -5,8 +5,8 @@ Services, and the runtime that runs them.
 ## Overview
 
 The service module runs long-lived services with:
-- **One entry point**: `Runtime.spawn()` takes services in any order, from any thread, and picks
-  how to run each from its kind
+- **One entry point**: `Runtime.spawn()` takes services in any order, from any thread, and runs
+  each as it needs to run
 - **Dependency ordering**: a service starts as soon as the services it depends on run
 - **One stop signal**: every service gets a hierarchical `StopToken` as `self.stopping`
 - **State machine**: explicit states with hooks for observability
@@ -18,10 +18,12 @@ The service module runs long-lived services with:
 | Layer | Responsibility | Examples |
 |-------|---------------|----------|
 | **Service** | WHAT to run (definition, config, behavior) | `Service`, `ScheduledService`, `AsyncService` |
-| **Runner** | HOW to run one service (execution + state management) | `ThreadRunner`, `ProcessRunner`, `TaskRunner` |
-| **Runtime** | Running many: runner choice, dependency ordering, restarts, ordered stop | `Runtime` |
+| **Runtime** | Running them: dependency ordering, health, restarts, ordered stop | `Runtime` |
+| **Runner** | A service's record in the runtime: state, policy, hooks | `Runner` |
 
-A runner can be used on its own, without a runtime; see [Runners](#runners).
+The `Runtime` runs every step of a service (`setup()`, its run, `teardown()`, its health checks) as
+a task on an [`appinfra.runtime`](runtime.md) runtime it owns. One task of its own holds the state
+of every service, so a service needs no lock of its own for it.
 
 ## Quick Start
 
@@ -71,9 +73,9 @@ with Runtime(lg) as rt:
 ## Services
 
 Services define WHAT to run. A `Service` implements `run()`, which holds its thread until the
-service is stopped. A `ScheduledService` hands its loop to the runner, which calls `tick()`. An
-`AsyncService`'s `run()` is a coroutine: it runs as a task on an event loop shared with other async
-services, the runtime's or a `LoopHost`'s.
+service is stopped. A `ScheduledService` implements `tick()` instead: its `run()` is the tick loop.
+An `AsyncService`'s `run()` is a coroutine: it runs as a task on the runtime's event loop, shared
+with every other async service.
 
 ```python
 class Service(ABC):
@@ -98,7 +100,7 @@ class Service(ABC):
         """Cleanup, once the run is told to stop. run() returns on self.stopping, not on teardown()."""
 
     def is_healthy(self) -> bool:
-        """Check if ready. Runner waits for this before RUNNING state."""
+        """Check if ready. The runtime waits for this before RUNNING state."""
         return True
 
     @property
@@ -111,11 +113,11 @@ class Service(ABC):
 |-------|-----------|---------|
 | `Service` | `run()` | a thread of its own, or a process with `isolate=True`; held until stopped |
 | `ScheduledService` | `tick()`, `interval` | as `Service`; `tick()` runs `interval` seconds after the last one returned |
-| `AsyncService` | `async def run()` | a task on an event loop shared with other async services |
+| `AsyncService` | `async def run()` | a task on the runtime's event loop, shared by every async service |
 
-For a scheduled service, the runner owns the loop and calls `teardown()` once it has ended (stop or
-failure), on the thread or in the process that ran it: `teardown()` never overlaps `tick()`, so
-cleanup that must happen on the service's own thread belongs there.
+`setup()` and `teardown()` run on threads of their own, before and after the run: never on the
+event loop, and in a process of its own for an isolated service. `teardown()` of a scheduled
+service runs once its loop has ended (stopped or failed), so it never overlaps `tick()`.
 
 ### AsyncService
 
@@ -136,31 +138,21 @@ class Doubler(AsyncService):
 
 
 pair = AsyncQueueChannelFactory().create_pair()
-with LoopHost() as host:
-    runner = host.runner(Doubler(lg, pair.child))
-    runner.start()
-    runner.wait_healthy()
-    # Callers on the loop await pair.parent directly; from another thread:
-    reply = asyncio.run_coroutine_threadsafe(
-        pair.parent.submit(Message(payload=21)), host.loop
-    ).result()  # reply.payload == 42
-    runner.stop()
+with Runtime(lg) as rt:
+    rt.ready(rt.spawn(Doubler(lg, pair.child)))
+    # Callers on the same loop, another AsyncService for one, await pair.parent
 ```
 
-`host.runner(service)` returns a `TaskRunner`, with the usual runner interface (`start()`,
-`stop()`, `wait_healthy()`, restart policy). Under a `Runtime`, `spawn()` does this on the
-runtime's own loop. Every service on a loop shares one thread: a service waiting on an `await`
+Every async service shares the runtime's one event loop thread: a service waiting on an `await`
 costs its task, not a thread.
 
-- `setup()` runs on the thread that calls `start()`; `run()` and then `teardown()` run on the
-  loop. Open clients bound to the loop inside `run()` and close them in its `finally`.
-- `stop()` cancels the task: `CancelledError` is raised at the `await` `run()` is parked on.
+- `run()` runs on the loop; `setup()` and `teardown()` run on threads, off the loop. Open clients
+  bound to the loop inside `run()` and close them in its `finally`.
+- A stop cancels the task: `CancelledError` is raised at the `await` `run()` is parked on.
 - An exception from `run()` fails that service only; the loop and its other services run on.
-- A service stays on the loop it started on. `LoopHost.stop()` stops the tokens of the services
-  still running, then cancels their tasks and lets them finish.
 - `run()` must not call anything that blocks without awaiting: that stalls every service on the
   loop. Run blocking code through `asyncio.to_thread()`.
-- One loop uses one core. `ThreadRunner` and `ProcessRunner` refuse an `AsyncService`.
+- One loop uses one core. An `AsyncService` cannot run with `isolate=True`.
 
 ### Service with run()
 
@@ -178,22 +170,22 @@ class Database(Service):
         self.stopping.wait()  # Block until stopped
 ```
 
-Every runner gives the service a `StopToken` as `self.stopping`, set when the service is to stop.
-Under a `Runtime`, each service's token derives from the runtime's, so stopping the runtime reaches
-every service. `self.stopping.child()` derives a token that is stopped with it, for work the
-service starts. The
-runner also stops the token once `run()` has ended, however it ended, before it calls
-`teardown()`: work derived from the token is told to stop first. Stopping a token does not wait for
-that work; a service that must not release resources while its workers still use them waits for
-them, for instance by joining them in `teardown()`.
+The runtime gives every service a `StopToken` as `self.stopping`, set when the service is to stop.
+Each service's token derives from the runtime's, so stopping the runtime reaches every service.
+`self.stopping.child()` derives a token that is stopped with it, for work the service starts. The
+runtime also stops the token once the run has ended, however it ended, before `teardown()`: work
+derived from the token is told to stop first. Stopping a token does not wait for that work; a
+service that must not release resources while its workers still use them waits for them, for
+instance by joining them in `teardown()`.
 
-- **A service with a synchronous `run()`**, under `ThreadRunner` or `ProcessRunner` (in the
-  subprocess, where `teardown()` runs after `run()` returns), blocks on `self.stopping.wait()` or
-  checks `self.stopping.is_set()` instead of keeping an event of its own.
-- **An `AsyncService`**, under a LoopHost's `TaskRunner`, needs no token to learn of a stop:
-  stopping cancels its task at the `await` it is parked on. It never calls `self.stopping.wait()`,
-  which blocks the thread and so the loop every service on the host shares. It derives tokens for
-  work it hands to threads (`await asyncio.to_thread(token.wait)`), and may check `is_set()`.
+- **A service with its own synchronous `run()`** blocks on `self.stopping.wait()` or checks
+  `self.stopping.is_set()` instead of keeping an event of its own. In the runtime's process, a
+  stop also calls `teardown()` while `run()` still runs, so a `run()` blocked on something else
+  can be released there; in a process of its own, `teardown()` runs after `run()` returns.
+- **An `AsyncService`** needs no token to learn of a stop: stopping cancels its task at the
+  `await` it is parked on. It never calls `self.stopping.wait()`, which blocks the loop every async
+  service shares. It derives tokens for work it hands to threads
+  (`await asyncio.to_thread(token.wait)`), and may check `is_set()`.
 
 ## State Machine
 
@@ -207,11 +199,11 @@ CREATED → INITD → STARTING → RUNNING → STOPPING → STOPPED → DONE
 
 | State | Description |
 |-------|-------------|
-| `CREATED` | Service created but never started |
+| `CREATED` | Spawned, not started: waiting for its dependencies, or in `setup()` |
 | `INITD` | Setup completed successfully |
-| `STARTING` | Execution beginning |
+| `STARTING` | Running, not yet healthy |
 | `RUNNING` | Healthy and serving |
-| `IDLE` | Between scheduled executions |
+| `IDLE` | Allowed after `RUNNING`; the Runtime does not enter it, and a `ScheduledService` ticks while `RUNNING` |
 | `STOPPING` | Shutdown in progress |
 | `STOPPED` | Cleanly stopped |
 | `FAILED` | Error occurred |
@@ -219,26 +211,31 @@ CREATED → INITD → STARTING → RUNNING → STOPPING → STOPPED → DONE
 
 ### State Hooks
 
-Register callbacks for state changes:
+Register callbacks for state changes on the runner `spawn()` returns:
 
 ```python
 def on_change(name: str, old: State, new: State) -> None:
     print(f"{name}: {old.value} -> {new.value}")
 
 
+runner = rt.spawn(service)
 runner.on_state_change(on_change)
 ```
 
+`spawn()` starts the service at once, so a hook sees the transitions from the moment it is
+registered. Hooks run on the runtime's own task: a hook observes, and calling the runtime from it
+(`spawn()`, `ready()`, `stop_service()`, `stop()`) raises `RuntimeError`.
+
 ## Runtime
 
-`Runtime` is the entry point for running services. `spawn()` takes a service, picks its runner,
-and starts it once its dependencies run:
+`Runtime` is the entry point for running services. `spawn()` takes a service and starts it once its
+dependencies run; each step of the service is a task:
 
-| Service | Runner |
-|---------|--------|
-| `AsyncService` | a `TaskRunner` on the runtime's event loop, shared by every async service |
-| `Service`, `ScheduledService` | a `ThreadRunner`: a thread of its own |
-| `Service`, `ScheduledService` with `isolate=True` | a `ProcessRunner`: a process of its own |
+| Service | Its run |
+|---------|---------|
+| `AsyncService` | a task on the runtime's event loop, shared by every async service |
+| `Service`, `ScheduledService` | a task on a thread of its own |
+| `Service`, `ScheduledService` with `isolate=True` | a task in a process of its own |
 
 ```python
 from appinfra.service import RestartPolicy, Runtime
@@ -252,8 +249,17 @@ with Runtime(lg) as rt:
 ```
 
 `Runtime(lg)` is started by `start()` or by entering the `with` block, once; `stop()` or leaving
-the block stops it. `spawn()` returns the service's runner, for `on_state_change()`, `state` and
-the like; `rt.services` maps the names of the services in the runtime to their runners.
+the block stops it. `spawn()` returns the service's `Runner`, its record in the runtime: `state`,
+`retries`, `exception`, `on_state_change()`. `rt.services` maps the names of the services in the
+runtime to their runners. `stop_service(runner, timeout=5.0)` stops one service and waits until it
+has ended and been torn down; it then leaves the runtime.
+
+### Isolated services
+
+`isolate=True` runs the service in a child process started with the `spawn` method: `setup()`,
+`run()` and `teardown()` all run there. The service must be picklable; its logger is not pickled,
+the child makes one that forwards its records to the service's logger in the parent. The child
+reports health to the parent, and its `self.stopping` is stopped when the parent stops the service.
 
 ### Dependencies
 
@@ -268,11 +274,14 @@ class Api(Service):
 
 - **Any order.** `spawn()` takes services in any order, from any thread, before or after others
   start. A service whose dependencies are all `RUNNING` starts at once; any other waits, its
-  runner `CREATED`, and starts as soon as the last of them reaches `RUNNING`. The runtime waits
-  for the health of a service others wait on, so a chain moves on without `ready()`.
-- **`ready(*runners, timeout=30.0)`** waits until each has started and is healthy, *timeout* in
-  all. A service still waiting for a dependency then raises `DependencyNotRunningError`, which
-  names the dependency.
+  runner `CREATED`, and starts as soon as the last of them reaches `RUNNING`. The runtime checks
+  the health of a service others wait on, so a chain moves on without `ready()`.
+- **`ready(*runners, timeout=30.0)`** waits until each is healthy, *timeout* in all, and raises how
+  a start failed: `SetupError` if `setup()` failed, `RunError` if the run ended or was stopped
+  while starting, `HealthTimeoutError` if it is not healthy in time (its run is then ended). A
+  service still waiting for a dependency raises `DependencyNotRunningError`, which names it.
+- **Health is checked while something waits.** Only `ready()`, a service waiting on it, or a
+  restart under way moves a service from `STARTING` to `RUNNING`.
 - **Cycles.** A `spawn()` whose dependencies would lead back to the service raises `CycleError`.
 - **A dependency that leaves.** A service waiting on one that leaves the runtime (it failed with
   no restart left, ended or was stopped) fails with `DependencyFailedError`, and so does what
@@ -280,73 +289,20 @@ class Api(Service):
 
 ### Restarts and stop
 
-- A service that fails while running is restarted per its `RestartPolicy`, after the policy's
-  backoff. A process service is restarted by its runner's own monitor. A service that ends, is
-  stopped, or fails with no restart left leaves the runtime.
-- `stop(timeout=5.0)` waits for restarts under way, then stops the started services in reverse
-  start order, each within *timeout*: dependents before what they depend on. A failure to stop
-  one is logged and the rest stop regardless. A service still waiting for its dependencies never
-  starts; `ready()` on it raises `RunError`.
-
-## Runners
-
-A runner runs one service. The runtime picks and drives them; each can also be used on its own.
-
-### ThreadRunner
-
-Runs the service in a daemon thread:
-
-```python
-runner = ThreadRunner(service)
-runner.start()
-runner.wait_healthy(timeout=30.0)
-# ... service running ...
-runner.stop()
-```
-
-### ProcessRunner
-
-Runs the service in a subprocess for isolation:
-
-```python
-runner = ProcessRunner(service)
-runner.start()
-runner.wait_healthy(timeout=30.0)
-# ... service running in subprocess ...
-runner.stop()
-```
-
-ProcessRunner features:
-- Uses `multiprocessing.Process` for subprocess isolation
-- Queue-based logging forwarded to parent process
-- IPC for shutdown signaling and health status
-- Service must be picklable
-
-#### Start method and restarts
-
-`start_monitor()` restarts a service whose process raised or exited non-zero, according to its
-`RestartPolicy`. The restart runs on the monitor thread. Under the fork start method, the default
-on Linux before Python 3.14, the restarted process is forked from that thread: Python 3.12+ warns
-that this may deadlock the child, which inherits any lock another thread of the parent holds at
-that moment. Spawn and forkserver start a fresh interpreter instead:
-
-```python
-runner = ProcessRunner(
-    service, policy=RestartPolicy(max_retries=5), start_method="forkserver"
-)
-
-# RunnerFactory applies it to the runner and its channel queues alike
-factory = RunnerFactory(lg, start_method="forkserver")
-result = factory.create_process_runner_with_channel(service)
-```
-
-`start_method=None` (the default) uses multiprocessing's default. Queues and events passed to the
-service must come from the same start method: multiprocessing refuses them in the child otherwise.
+- A service that fails while `RUNNING` is restarted per its `RestartPolicy`, after the policy's
+  backoff: `setup()` and the run again, in a new process for an isolated service. A failure while
+  starting is not restarted. A service that ends, is stopped, or fails with no restart left
+  leaves the runtime.
+- `stop(timeout=5.0)` ends the backoffs under way, then stops the started services in reverse
+  start order, each within *timeout*: dependents before what they depend on. A service that does
+  not end in time is logged and the rest stop regardless. A service still waiting for its
+  dependencies never starts; `ready()` on it raises `RunError`.
 
 ## Scheduled Services
 
-For periodic execution, extend `ScheduledService`. The runner calls `tick()`, then waits `interval`
-seconds, until the service is stopped; ticks start `interval` plus the time `tick()` took apart:
+For periodic execution, extend `ScheduledService`. Its `run()` calls `tick()`, then waits
+`interval` seconds, until the service is stopped; ticks start `interval` plus the time `tick()`
+took apart. An exception from `tick()` ends the run with it:
 
 ```python
 class MetricsCollector(ScheduledService):
@@ -373,30 +329,27 @@ class MetricsCollector(ScheduledService):
 Configure automatic restart on failure:
 
 ```python
-from appinfra.service import RestartPolicy, ThreadRunner
+from appinfra.service import RestartPolicy
 
 policy = RestartPolicy(
-    max_retries=5,  # Max restart attempts
+    max_retries=5,  # Restart attempts since the service was last healthy
     backoff=1.0,  # Initial backoff in seconds
     backoff_multiplier=2.0,  # Exponential backoff
     max_backoff=60.0,  # Maximum backoff cap
     restart_on_failure=True,
 )
 
-runner = ThreadRunner(service, policy=policy)
-rt.spawn(service, policy=policy)  # the same, under a runtime
+rt.spawn(service, policy=policy)
 ```
 
-Under a `Runtime`, restarts are automatic. A runner used on its own restarts when
-`runner.check()` is called after a failure; `ProcessRunner.start_monitor()` calls it on a thread
-of its own.
+`RestartPolicy` is frozen; derive a variant with `dataclasses.replace()`.
 
 ## Error Handling
 
 | Error | When Raised |
 |-------|-------------|
-| `SetupError` | Service setup fails |
-| `RunError` | Execution fails to start, or the runtime stopped before the service started |
+| `SetupError` | `setup()` failed; from `ready()`. Any other exception from `setup()` becomes one, caused by it |
+| `RunError` | The run ended or was stopped while starting, or the runtime stopped before the service started |
 | `HealthTimeoutError` | Service doesn't become healthy |
 | `InvalidTransitionError` | Invalid state transition attempted |
 | `CycleError` | A `spawn()` whose dependencies lead back to the service |
@@ -405,7 +358,7 @@ of its own.
 
 ## Channels
 
-For bidirectional communication between services and their runners.
+For bidirectional communication between services and the code that calls them.
 
 Architecture: Transport handles wire-level send/recv, Channel wraps a Transport with correlation
 logic (request/response matching), and ChannelPairFactory creates connected pairs.
@@ -548,47 +501,24 @@ pipe. Unread messages that fit in the pipe do not delay exit, but once the pipe 
 feeder blocks until a reader takes from it, so messages nobody reads can keep the sender alive.
 Pipe capacity varies by system and can be as small as one page, so code must not rely on it.
 
-- `RunnerFactory.create_process_runner_with_channel()` handles the parent side. The service runs
-  as a daemon process, which multiprocessing terminates at exit before the queues flush, so
-  requests the service has not read are dropped instead of blocking exit.
-- Elsewhere, consume every message sent, or call `allow_exit_without_flush()` on the sending
+- Consume every message sent, or call `allow_exit_without_flush()` on the sending
   `ProcessQueueTransport` where unread messages may be dropped at exit.
-- A channel passed to a child under the spawn or forkserver start method is pickled, by
-  `ProcessRunner` as part of the service or as a `Process` argument; this works only while the
-  child starts. The child's copy starts with an empty redelivery buffer.
+- A channel an isolated service holds is pickled with the service when its process starts, under
+  the `spawn` method; this works only while the child starts. The child's copy starts with an
+  empty redelivery buffer. Queues and events passed to a child must come from the same start
+  method: multiprocessing refuses them in the child otherwise.
 
-## Factories
+### Channel Pairs
 
-Centralized creation of service components:
+A channel factory creates connected pairs with one configuration; a service takes its end of a
+pair, and the code that calls it keeps the other:
 
 ```python
-from appinfra.service import (
-    QueueChannelFactory,
-    ChannelConfig,
-    RunnerFactory,
-    ServiceFactory,
-)
+from appinfra.service import ChannelConfig, QueueChannelFactory
 
-# Channel factory
-ch_factory = QueueChannelFactory(ChannelConfig(response_timeout=60.0))
-pair = ch_factory.create_pair()
-
-# Runner factory with channels
-runner_factory = RunnerFactory(lg, default_policy=RestartPolicy(max_retries=3))
-result = runner_factory.create_thread_runner_with_channel(service)
-# result.runner, result.channel, result.service_channel
-
-# Inject a custom channel factory
-runner_factory = RunnerFactory(
-    lg,
-    channel_factory=QueueChannelFactory(ChannelConfig(response_timeout=60.0)),
-)
-result = runner_factory.create_thread_runner_with_channel(service)
-
-# Service factory with registry
-svc_factory = ServiceFactory(lg)
-svc_factory.register("worker", WorkerService, with_channel=True)
-worker = svc_factory.create("worker")
+pair = QueueChannelFactory(ChannelConfig(response_timeout=60.0)).create_pair()
+rt.spawn(WorkerService(lg, channel=pair.child))
+reply = pair.parent.submit(Message(payload="work"))
 ```
 
 ## API Reference
@@ -596,14 +526,10 @@ worker = svc_factory.create("worker")
 ### Classes
 
 - `Service` - Base class for service definitions; its run() holds its thread until stopped
-- `ScheduledService` - Service with periodic tick() execution
-- `AsyncService` - Service whose run() is a coroutine, run as a task on a LoopHost
-- `Runner` - Abstract base for execution
-- `ThreadRunner` - Thread-based execution
-- `ProcessRunner` - Subprocess-based execution
-- `LoopHost` - An event loop on its own thread, running many AsyncServices as tasks
-- `TaskRunner` - Runner for one AsyncService on a LoopHost (from `LoopHost.runner()`)
-- `Runtime` - The entry point: spawns services on the runner their kind needs, in dependency order
+- `ScheduledService` - Service whose run() calls tick() every interval seconds
+- `AsyncService` - Service whose run() is a coroutine, run as a task on the runtime's event loop
+- `Runtime` - The entry point: spawns services in dependency order, restarts and stops them
+- `Runner` - A service's record in the runtime: state, restart policy, hooks
 - `StopToken` - Hierarchical, one-way stop signal; every service's `self.stopping`
 - `RestartPolicy` - Restart configuration
 - `State` - State enum
@@ -631,7 +557,7 @@ worker = svc_factory.create("worker")
 - `AsyncBufferedChannel` - Wraps an `AsyncTransport` with correlation, streaming, and redelivery
 - `Message` - Generic message with id for correlation
 
-### Factories
+### Channel Pairs and Factories
 
 - `ChannelPairFactory` - Protocol for pluggable channel pair creation (`create_pair()`)
 - `QueueChannelFactory` - Creates sync `Channel` pairs over `QueueTransport`
@@ -642,5 +568,3 @@ worker = svc_factory.create("worker")
 - `ChannelPair` - Sync channel pair (parent, child)
 - `AsyncChannelPair` - Async channel pair (parent, child)
 - `AsyncProcessChannelPair` - Mixed async parent + sync child pair
-- `RunnerFactory` - Creates runners with optional channels
-- `ServiceFactory` - Registry-based service creation

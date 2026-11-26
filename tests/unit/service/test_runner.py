@@ -1,591 +1,147 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright 2026 The appinfra Authors
 
-"""Tests for Runner classes."""
+"""Tests for the Runner record: its state machine, hooks and restart policy."""
 
-import itertools
-import threading
-from collections.abc import Iterator
-from contextlib import contextmanager
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
-from appinfra.log import Logger
 from appinfra.service import (
     AsyncService,
     InvalidTransitionError,
-    LoopHost,
-    ProcessRunner,
     RestartPolicy,
-    Service,
-    SetupError,
+    Runner,
+    ScheduledService,
     State,
-    TaskRunner,
-    ThreadRunner,
 )
+from appinfra.service.runtime.runner import TEARING, TORN
 from tests.helpers.service.runner import SimpleService
 
 
-class IdleAsync(AsyncService):
-    """An async service these tests never run."""
-
+class Ticker(ScheduledService):
     def __init__(self) -> None:
         self._lg = MagicMock()
 
     @property
     def name(self) -> str:
-        return "idle-async"
+        return "ticker"
+
+    def tick(self) -> None:
+        raise AssertionError("never run by these tests")
+
+
+class Idle(AsyncService):
+    def __init__(self) -> None:
+        self._lg = MagicMock()
+
+    @property
+    def name(self) -> str:
+        return "idle"
 
     async def run(self) -> None:
         raise AssertionError("never run by these tests")
 
 
-@contextmanager
-def _mock_mp_context() -> Iterator[tuple[MagicMock, MagicMock, MagicMock]]:
-    """Patch ProcessRunner's multiprocessing context; yield its Process, Event, Queue.
-    Its Pipe gives a pair of mock ends."""
-    with patch("appinfra.service.runtime.process.mp.get_context") as get_context:
-        ctx = get_context.return_value
-        ctx.Pipe.side_effect = lambda duplex=True: (MagicMock(), MagicMock())
-        yield ctx.Process, ctx.Event, ctx.Queue
-
-
-# Module-level service for ProcessRunner tests (must be picklable)
-class MPSimpleService(Service):
-    """Simple service for multiprocessing tests."""
-
-    def __init__(self, lg: Logger, name: str = "mp-test") -> None:
-        self._lg = lg
-        self._name = name
-
-    @property
-    def name(self) -> str:
-        return self._name
-
-    def run(self) -> None:
-        self.stopping.wait()
-
-    def is_healthy(self) -> bool:
-        return True
-
-
-class MPSetupFailService(Service):
-    """Service that fails during setup. Module-level for ProcessRunner (picklable)."""
-
-    def __init__(self, lg: Logger) -> None:
-        self._lg = lg
-
-    @property
-    def name(self) -> str:
-        return "fail-setup"
-
-    def setup(self) -> None:
-        raise SetupError(self.name, "setup failed")
-
-    def run(self) -> None:
-        pass
-
-
-class SetupFailService(Service):
-    """Service that fails during setup()."""
+class TickAndAwait(ScheduledService, AsyncService):
+    """A scheduled service that is also an async one."""
 
     def __init__(self) -> None:
         self._lg = MagicMock()
 
     @property
     def name(self) -> str:
-        return "setup-fail"
+        return "both"
 
-    def setup(self) -> None:
-        raise SetupError(self.name, "config invalid")
-
-    def run(self) -> None:
-        pass
+    def tick(self) -> None:
+        raise AssertionError("never run by these tests")
 
 
-class TestThreadRunner:
-    """Test ThreadRunner class."""
+class TestRunnerAccepts:
+    """Which services a Runner accepts."""
 
-    def test_setup_error_transitions_to_failed(self):
-        """SetupError transitions to FAILED."""
-        svc = SetupFailService()
-        runner = ThreadRunner(svc)
+    def test_what_is_not_a_service_is_refused(self):
+        with pytest.raises(TypeError, match="must be a Service"):
+            Runner(object())
 
-        with pytest.raises(SetupError, match="config invalid"):
-            runner.start()
+    def test_scheduled_and_async_at_once_is_refused(self):
+        with pytest.raises(
+            TypeError, match="both a ScheduledService and an AsyncService"
+        ):
+            Runner(TickAndAwait())
 
-        assert runner.state == State.FAILED
+    @pytest.mark.parametrize("service_cls", [SimpleService, Ticker, Idle])
+    def test_every_kind_is_taken(self, service_cls: type):
+        assert Runner(service_cls()).service is not None
 
-    def test_invalid_transition_raises(self):
-        """Invalid state transition raises error."""
-        svc = SimpleService()
-        runner = ThreadRunner(svc)
 
+class TestRunner:
+    """The Runner record: its state machine, hooks and restart policy."""
+
+    def test_a_move_transitions_allow_is_made(self):
+        runner = Runner(SimpleService())
+        assert runner._move(State.INITD) == State.CREATED  # Private: the Runtime's
+        assert runner.state == State.INITD
+
+    def test_a_move_transitions_forbid_raises(self):
+        runner = Runner(SimpleService())
         with pytest.raises(InvalidTransitionError):
-            runner._transition(State.RUNNING)
-
-    def test_check_not_running(self):
-        """check() returns False when not running."""
-        svc = SimpleService()
-        runner = ThreadRunner(svc)
-
-        # Not started yet
-        result = runner.check()
-        assert result is False
-
-    def test_settling_the_exit_state_leaves_no_window_for_a_stop(self):
-        """The end state is chosen and set in one step: a stop() that moves
-        the runner to STOPPING after the first lock release cannot strand it
-        there once the work has ended."""
-        runner = ThreadRunner(SimpleService())
-        runner._state = State.RUNNING  # Private: a running runner
-        real = runner._lock
-
-        class StopsAfterFirstRelease:
-            """The runner's lock; its first release, if the runner is still
-            RUNNING, lets a stop(timeout=0) on another thread move it on."""
-
-            released = 0
-
-            def __enter__(self) -> None:
-                real.acquire()
-
-            def __exit__(self, *exc: object) -> None:
-                real.release()
-                self.released += 1
-                if self.released == 1 and runner._state == State.RUNNING:
-                    runner._state = State.STOPPING
-
-        runner._lock = StopsAfterFirstRelease()  # type: ignore[assignment]
-
-        runner._settle_exit_state(None)
-
-        assert runner.state != State.STOPPING
-
-    def test_an_ended_thread_leaves_a_newer_run_alive(self):
-        """A thread that ends after start() has launched a newer one does not
-        mark the newer run as exited."""
-        runner = ThreadRunner(SetupFailService())  # its run() returns at once
-        runner._thread = MagicMock()  # Private: the newer run's thread
-
-        runner._run()  # the old thread's last steps, on this thread
-
-        assert runner.is_alive()
-
-    def test_a_run_launched_as_the_old_thread_ends_stays_alive(self):
-        """A start() on another thread that launches a newer run while the old
-        thread takes its last step leaves the newer run alive."""
-        runner = ThreadRunner(SetupFailService())  # its run() returns at once
-        old = threading.current_thread()
-        runner._thread = old  # Private: this thread plays the old run
-        newer = MagicMock()
-        newer.is_alive.return_value = True
-
-        def launch_newer() -> threading.Thread:
-            runner._launch()
-            return old
-
-        with patch("appinfra.service.runtime.thread.threading") as mod:
-            mod.Thread.return_value = newer
-            mod.current_thread.side_effect = launch_newer
-            runner._run()  # the old thread's last steps, on this thread
-
-        assert runner.is_alive()
-
-    def test_stop_joins_for_what_is_left_after_waiting_for_start(self):
-        """The time stop() spends waiting for a start() in progress comes off
-        the time it then joins the service thread for."""
-        runner = ThreadRunner(SimpleService())
-        runner._state = State.RUNNING  # Private: a started runner, no thread
-        thread = MagicMock()
-        thread.is_alive.return_value = False
-        runner._thread = thread
-        clock = "appinfra.service.runtime.runner.time.monotonic"
-
-        # The wait for start() takes 4 of the 5 seconds
-        with (
-            patch.object(runner, "_await_start", return_value=True),
-            patch(clock, side_effect=[100.0, 104.0]),
-        ):
-            runner.stop(timeout=5.0)
-
-        thread.join.assert_called_once_with(timeout=1.0)
-
-
-class TestProcessRunner:
-    """Unit tests for ProcessRunner with mocks."""
-
-    @pytest.fixture
-    def lg(self):
-        """Create a logger for tests."""
-        return Logger(name="test")
-
-    def test_start_transitions_states(self, lg):
-        """start() transitions through INITD -> STARTING."""
-        with (
-            _mock_mp_context() as (mock_process, _, _),
-            patch("appinfra.service.runtime.process.LogQueueListener"),
-        ):
-            mock_process.return_value.is_alive.return_value = True
-            mock_process.return_value.pid = 12345
-
-            svc = MPSimpleService(lg)
-            runner = ProcessRunner(svc)
-
-            runner.start()
-
-            assert runner.state == State.STARTING
-            mock_process.assert_called_once()
-            mock_process.return_value.start.assert_called_once()
-
-    def test_stop_not_started(self, lg):
-        """stop() on unstarted runner is no-op."""
-        svc = MPSimpleService(lg)
-        runner = ProcessRunner(svc)
-
-        runner.stop()  # Should not raise
+            runner._move(State.RUNNING)
         assert runner.state == State.CREATED
 
-    def test_stop_idempotent(self, lg):
-        """stop() is idempotent."""
-        svc = MPSimpleService(lg)
-        runner = ProcessRunner(svc)
-        runner.stop()
-        runner.stop()  # Still OK
+    def test_hooks_see_each_move_and_a_failing_one_is_logged(self):
+        svc = SimpleService()
+        svc._lg = MagicMock()
+        runner = Runner(svc)
+        seen: list[tuple[State, State]] = []
 
-    def test_is_alive_not_started(self, lg):
-        """is_alive() returns False when not started."""
-        svc = MPSimpleService(lg)
-        runner = ProcessRunner(svc)
-        assert not runner.is_alive()
+        def fails(_name: str, _old: State, _new: State) -> None:
+            raise RuntimeError("hook fails")
 
-    def test_is_healthy_not_started(self, lg):
-        """is_healthy() returns False when not started."""
-        svc = MPSimpleService(lg)
-        runner = ProcessRunner(svc)
-        assert not runner.is_healthy()
+        runner.on_state_change(fails)
+        runner.on_state_change(lambda _n, old, new: seen.append((old, new)))
+        runner._move(State.INITD)
 
-    def test_pid_not_started(self, lg):
-        """pid is None when not started."""
-        svc = MPSimpleService(lg)
-        runner = ProcessRunner(svc)
-        assert runner.pid is None
+        assert seen == [(State.CREATED, State.INITD)]
+        svc._lg.warning.assert_called_once()
 
-    def test_state_hooks_called(self, lg):
-        """State hooks are called on transitions."""
-        with (
-            _mock_mp_context(),
-            patch("appinfra.service.runtime.process.LogQueueListener"),
-        ):
-            transitions = []
-
-            def hook(name, old, new):
-                transitions.append((name, old, new))
-
-            svc = MPSimpleService(lg, name="test")
-            runner = ProcessRunner(svc)
-            runner.on_state_change(hook)
-
-            runner.start()
-
-            assert ("test", State.CREATED, State.INITD) in transitions
-            assert ("test", State.INITD, State.STARTING) in transitions
-
-    def test_setup_error_transitions_to_failed(self, lg):
-        """Setup error transitions to FAILED."""
-        svc = MPSetupFailService(lg)
-        runner = ProcessRunner(svc)
-
-        with pytest.raises(SetupError):
-            runner.start()
-
-        assert runner.state == State.FAILED
-
-    def test_stop_running_process(self, lg):
-        """stop() terminates a running process."""
-        with (
-            _mock_mp_context() as (mock_process, mock_event, _),
-            patch("appinfra.service.runtime.process.LogQueueListener"),
-        ):
-            mock_process.return_value.is_alive.return_value = False
-            mock_event.return_value.set = lambda: None
-
-            svc = MPSimpleService(lg)
-            runner = ProcessRunner(svc)
-            runner.start()
-            runner._transition(State.RUNNING)  # Simulate healthy
-
-            runner.stop()
-
-            assert runner.state == State.STOPPED
-            mock_process.return_value.join.assert_called()
-
-    def test_start_failure_after_fork_ends_the_child(self, lg):
-        """A failure after the fork terminates the forked child before start() raises."""
-        with (
-            _mock_mp_context() as (mock_process, _, _),
-            patch("appinfra.service.runtime.process.LogQueueListener") as mock_listener,
-        ):
-            child = mock_process.return_value
-            child.is_alive.return_value = True  # alive until terminated
-            child.terminate.side_effect = lambda: setattr(
-                child.is_alive, "return_value", False
-            )
-            mock_listener.return_value.start.side_effect = RuntimeError("no thread")
-
-            runner = ProcessRunner(MPSimpleService(lg))
-            with pytest.raises(RuntimeError, match="no thread"):
-                runner.start()
-
-            child.terminate.assert_called_once()
-            child.join.assert_called_once_with(timeout=2.0)
-            child.kill.assert_not_called()
-            assert runner.state == State.FAILED
-            assert runner.process is None  # ended, so the handles are released
-
-    def test_start_failure_kills_a_child_that_ignores_terminate(self, lg):
-        """A child still alive after terminate() is killed."""
-        with (
-            _mock_mp_context() as (mock_process, _, _),
-            patch("appinfra.service.runtime.process.LogQueueListener") as mock_listener,
-        ):
-            child = mock_process.return_value
-            child.is_alive.return_value = True
-            mock_listener.return_value.start.side_effect = RuntimeError("no thread")
-
-            runner = ProcessRunner(MPSimpleService(lg))
-            with pytest.raises(RuntimeError):
-                runner.start()
-
-            child.kill.assert_called_once()
-            assert runner.state == State.FAILED
-            # Still alive: the handle stays so a later stop() can retry
-            assert runner.process is child
-
-    def test_is_alive_when_running(self, lg):
-        """is_alive() returns True when process is alive."""
-        with (
-            _mock_mp_context() as (mock_process, _, _),
-            patch("appinfra.service.runtime.process.LogQueueListener"),
-        ):
-            mock_process.return_value.is_alive.return_value = True
-
-            svc = MPSimpleService(lg)
-            runner = ProcessRunner(svc)
-            runner.start()
-
-            assert runner.is_alive()
-
-    def test_is_healthy_when_running(self, lg):
-        """is_healthy() returns True when process alive and healthy event set."""
-        with (
-            _mock_mp_context() as (mock_process, mock_event, _),
-            patch("appinfra.service.runtime.process.LogQueueListener"),
-        ):
-            mock_process.return_value.is_alive.return_value = True
-            mock_event.return_value.is_set.return_value = True
-
-            svc = MPSimpleService(lg)
-            runner = ProcessRunner(svc)
-            runner.start()
-
-            assert runner.is_healthy()
-
-    def test_pid_when_running(self, lg):
-        """pid returns process ID when running."""
-        with (
-            _mock_mp_context() as (mock_process, _, _),
-            patch("appinfra.service.runtime.process.LogQueueListener"),
-        ):
-            mock_process.return_value.is_alive.return_value = True
-            mock_process.return_value.pid = 12345
-
-            svc = MPSimpleService(lg)
-            runner = ProcessRunner(svc)
-            runner.start()
-
-            assert runner.pid == 12345
-
-    def test_exit_code_when_stopped(self, lg):
-        """exit_code returns code when process stopped."""
-        with (
-            _mock_mp_context() as (mock_process, _, _),
-            patch("appinfra.service.runtime.process.LogQueueListener"),
-        ):
-            mock_process.return_value.is_alive.return_value = False
-            mock_process.return_value.exitcode = 0
-
-            svc = MPSimpleService(lg)
-            runner = ProcessRunner(svc)
-            runner.start()
-
-            assert runner.exit_code == 0
-
-    def test_exception_from_queue(self, lg):
-        """exception property reads from error queue."""
-        from queue import Empty
-
-        with (
-            _mock_mp_context() as (_, _, mock_queue_cls),
-            patch("appinfra.service.runtime.process.LogQueueListener"),
-        ):
-            # Create separate mocks for log queue and error queue
-            log_queue_mock = MagicMock()
-            error_queue_mock = MagicMock()
-            mock_queue_cls.side_effect = [log_queue_mock, error_queue_mock]
-
-            # Setup error queue: return exception first, then raise Empty
-            # (side_effect with exception instances raises them, so use a list
-            # with the value to return, then a callable that raises)
-            test_error = RuntimeError("test error")
-            call_count = 0
-
-            def get_nowait_effect():
-                nonlocal call_count
-                call_count += 1
-                if call_count == 1:
-                    return test_error  # Return the exception object
-                raise Empty()  # Then raise Empty
-
-            error_queue_mock.get_nowait.side_effect = get_nowait_effect
-
-            svc = MPSimpleService(lg)
-            runner = ProcessRunner(svc)
-            runner.start()
-
-            exc = runner.exception
-            assert exc is test_error
-
-    def test_stop_with_stubborn_process(self, lg):
-        """stop() kills a process that won't terminate."""
-        with (
-            _mock_mp_context() as (mock_process, mock_event, _),
-            patch("appinfra.service.runtime.process.LogQueueListener"),
-        ):
-            # Process stays alive through terminate, dies on kill()
-            # Calls: 1) after join (alive->terminate), 2) after terminate (alive->kill), 3) final check (dead)
-            mock_process.return_value.is_alive.side_effect = [True, True, False]
-            mock_event.return_value.set = lambda: None
-
-            svc = MPSimpleService(lg)
-            runner = ProcessRunner(svc)
-            runner.start()
-            runner._transition(State.RUNNING)
-
-            runner.stop()
-
-            assert runner.state == State.STOPPED
-            mock_process.return_value.terminate.assert_called()
-            mock_process.return_value.kill.assert_called()
-
-    def test_exit_code_not_started(self, lg):
-        """exit_code returns None when not started."""
-        svc = MPSimpleService(lg)
-        runner = ProcessRunner(svc)
-        assert runner.exit_code is None
-
-    @pytest.mark.parametrize(
-        ("exitcode", "state"), [(3, State.FAILED), (0, State.DONE)]
-    )
-    def test_monitor_records_an_exit_right_after_check(self, lg, exitcode, state):
-        """A process that dies after check() saw it healthy ends the monitor in its
-        end state, not RUNNING, when no restart can follow."""
-        runner = ProcessRunner(
-            MPSimpleService(lg), RestartPolicy(restart_on_failure=False)
-        )
-        runner._state = State.RUNNING
-        runner._process = MagicMock(exitcode=exitcode)
-        # Alive for the clean-exit test and inside check(), dead from then on
-        alive = itertools.chain([True, True], itertools.repeat(False))
-        with (
-            patch.object(runner, "is_alive", side_effect=lambda: next(alive)),
-            patch.object(runner, "is_healthy", return_value=True),
-        ):
-            runner._monitor_loop(interval=0)
-
-        assert runner.state == state
-
-    def test_a_clean_exit_releases_the_log_listener_and_queues(self, lg):
-        """A process that exits cleanly under the monitor leaves no log listener
-        thread or queues behind: DONE is final, so no stop() will release them.
-        The exit code stays readable."""
-        runner = ProcessRunner(MPSimpleService(lg))
-        runner._state = State.RUNNING
-        runner._process = MagicMock(exitcode=0)
-        listener = runner._log_listener = MagicMock()
-        with patch.object(runner, "is_alive", return_value=False):
-            runner._monitor_loop(interval=0)
-
-        assert runner.state == State.DONE
-        listener.stop.assert_called_once()
-        assert runner.exit_code == 0
-
-
-class TestTaskRunner:
-    """TaskRunner steps that need no running loop."""
-
-    def test_a_run_started_as_the_old_task_ends_stays_alive(self):
-        """A start() on another thread that launches a newer run while the old
-        task takes its last step leaves the newer run alive."""
-        host = LoopHost()
-        old = MagicMock()
-
-        class StartsOnRead(TaskRunner):
-            """Reading the old task, as it ends, is when the newer run's
-            start() lands."""
-
-            @property  # type: ignore[override]
-            def _task(self) -> object:
-                task = self.__dict__["task"]
-                if task is old:
-                    self._launch()
-                return task
-
-            @_task.setter
-            def _task(self, task: object) -> None:
-                self.__dict__["task"] = task
-
-        runner = StartsOnRead(host, IdleAsync())
-        with patch.object(host, "_schedule"):
-            runner._launch()  # the old run
-            runner._task = old
-            runner._finish(old)  # its last step, on the loop
-
-        assert runner.is_alive()
-
-
-class TestRunnerRestart:
-    """Test restart functionality."""
+    def test_restart_delay_grows_with_retries_up_to_its_cap(self):
+        policy = RestartPolicy(backoff=1.0, backoff_multiplier=2.0, max_backoff=5.0)
+        runner = Runner(SimpleService(), policy)
+        delays = []
+        for retries in range(4):
+            runner._retries = retries  # Private: the Runtime counts them
+            delays.append(runner.restart_delay)
+        assert delays == [1.0, 2.0, 4.0, 5.0]
 
     def test_can_restart(self):
         """can_restart holds until max_retries is reached, and never when disabled."""
-        runner = ThreadRunner(SimpleService(), RestartPolicy(max_retries=2))
+        runner = Runner(SimpleService(), RestartPolicy(max_retries=2))
         assert runner.can_restart
         runner._retries = 2
         assert not runner.can_restart
 
         disabled = RestartPolicy(restart_on_failure=False)
-        assert not ThreadRunner(SimpleService(), disabled).can_restart
+        assert not Runner(SimpleService(), disabled).can_restart
 
-    def test_restart_pending_through_the_last_attempt(self):
-        """The last allowed restart counts as pending while it runs.
+    def test_a_scheduled_service_overriding_run_is_refused(self):
+        """Its run() is the tick loop: an override would replace it, and its
+        ticks would stop. tick(), setup() and teardown() are for overriding."""
 
-        _maybe_restart() counts the attempt before making it, so can_restart is
-        already False during it; a waiter must not give up on that attempt.
-        """
-        runner = ThreadRunner(SimpleService(), RestartPolicy(max_retries=1, backoff=0))
-        during: list[bool] = []
-        with (
-            patch.object(
-                runner,
-                "_stop_for_restart",
-                lambda: during.append(runner.restart_pending),
-            ),
-            patch.object(runner, "start"),
-            patch.object(runner, "wait_healthy"),
-        ):
-            assert runner._maybe_restart()
+        class Looping(Ticker):
+            def run(self) -> None:
+                pass
 
-        assert during == [True]
-        assert not runner.restart_pending  # attempt over, no retries left
+        with pytest.raises(TypeError, match="override tick"):
+            Runner(Looping())
+        Runner(Ticker())  # tick() alone is fine
+
+    def test_is_alive_through_a_teardown(self):
+        """A teardown in progress still holds the service's resources; the run
+        may have ended before it, or still be running beside it."""
+        runner = Runner(SimpleService())
+        assert not runner.is_alive()
+        runner._teardown = TEARING  # Private: the Runtime tracks it
+        assert runner.is_alive()
+        runner._teardown = TORN
+        assert not runner.is_alive()

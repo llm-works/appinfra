@@ -1,12 +1,24 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright 2026 The appinfra Authors
 
-"""A service for the runner tests."""
+"""A service for the runner tests, and a wait for what no event signals."""
 
 import time
+from collections.abc import Callable
 from unittest.mock import MagicMock
 
 from appinfra.service import Service
+
+
+def wait_until(condition: Callable[[], bool], timeout: float = 5.0) -> bool:
+    """Poll *condition* until it holds; False once *timeout* passes. For changes
+    no event signals, such as a service leaving the runtime."""
+    deadline = time.monotonic() + timeout
+    while not condition():
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.01)
+    return True
 
 
 class SimpleService(Service):

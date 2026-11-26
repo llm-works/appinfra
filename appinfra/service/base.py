@@ -14,14 +14,16 @@ from ..runtime import StopToken
 class Service(ABC):
     """Base class for service definitions.
 
-    A Service defines WHAT to run - configuration and behavior.
-    The Runner handles HOW to run it and manages state.
+    A Service defines WHAT to run: configuration and behavior. The Runtime
+    runs it, each step as an appinfra.runtime task, and keeps its state in a
+    Runner.
 
     A plain Service implements run(), which holds its thread, or process, until
     the service is stopped. Two subclasses work differently:
-    - ScheduledService: the runner calls tick() every interval seconds
-    - AsyncService: run() is a coroutine; a LoopHost runs many of them as tasks
-      on one event loop, and one waiting on an await holds no thread
+    - ScheduledService: its run() is the tick loop, calling tick() every
+      interval seconds until the service is stopped
+    - AsyncService: run() is a coroutine; many of them run as tasks on one
+      event loop, and one waiting on an await holds no thread
 
     Lifecycle methods, common to all services:
     - setup(): Initialize resources, validate config
@@ -57,20 +59,21 @@ class Service(ABC):
     """
 
     _lg: Logger
-    """Logger instance. Set by subclass __init__ or by ProcessRunner."""
+    """Logger instance. Set by subclass __init__, and in a process of its own by
+    the runtime."""
 
     stopping: StopToken
     """Set when this run of the service is to stop, and once the run has ended
-    however it ended; set by the runner before setup(), a new token for each
+    however it ended; set by the runtime before setup(), a new token for each
     start. ``stopping.child()`` derives a token stopped with it, so work the run
     starts is told to stop with it, before teardown(); stopping does not wait
     for that work.
 
-    A synchronous run(), under ThreadRunner or ProcessRunner (in the
-    subprocess), checks it (``is_set()``) or blocks on it (``wait()``) and
-    returns once it is set. An AsyncService's run() never calls ``wait()``,
-    which would block the loop it shares: under TaskRunner, stopping cancels
-    its task, and it uses the token to derive tokens for what it starts."""
+    A synchronous run(), on its thread or in a process of its own,
+    checks it (``is_set()``) or blocks on it (``wait()``) and returns once it
+    is set. An AsyncService's run() never calls ``wait()``, which would block
+    the loop it shares: stopping it cancels its task, and it uses the token to
+    derive tokens for what it starts."""
 
     @property
     def lg(self) -> Logger:
@@ -96,10 +99,10 @@ class Service(ABC):
     def run(self) -> None:
         """Do the service's work, blocking until it is stopped.
 
-        The runner calls it once, and it returns once ``self.stopping`` is set.
-        Under ThreadRunner, stop() also calls teardown() while run() still runs,
-        so a run() blocked elsewhere can be released there; under ProcessRunner,
-        teardown() runs in the subprocess after run() returns.
+        The runtime calls it once, and it returns once ``self.stopping`` is set.
+        In the runtime's process, a stop also calls teardown() while run()
+        still runs, so a run() blocked elsewhere can be released there; in a
+        process of its own, teardown() runs there after run() returns.
         """
         ...
 
@@ -117,15 +120,15 @@ class Service(ABC):
     def teardown(self) -> None:
         """Cleanup the service, once the run is told to stop.
 
-        run() returns on ``self.stopping``, under every runner; teardown()
-        releases resources. For a scheduled service, the runner calls it once
-        the loop has ended (stopped or failed), on the thread or in the process
-        that ran the loop, so it never overlaps tick(). For an async service, it
-        runs on the LoopHost's thread after run() has ended, so it must not
-        block. For a service with its own run(), ProcessRunner calls it in the
-        subprocess after run() has returned; ThreadRunner's stop() calls it once
-        the token is set, while run() may still be running, so there it can also
-        release a run() blocked on something other than the token. Default does
+        run() returns on ``self.stopping``; teardown() releases resources. It
+        runs on a thread of its own, or in the service's process when it has
+        one. For a scheduled service, it runs once the loop has ended (stopped
+        or failed), so it never overlaps tick(). For an async service, it runs
+        after run() has ended, off the event loop: it must not touch objects
+        bound to the loop. For a service with its own run(), a stop calls it
+        once the token is set, while run() may still be running, so it can also
+        release a run() blocked on something other than the token; in a process
+        of its own, it runs there after run() has returned. Default does
         nothing.
         """
 
@@ -144,16 +147,16 @@ class Service(ABC):
 class AsyncService(Service):
     """Service whose run() is a coroutine.
 
-    A LoopHost runs it as a task on its event loop, alongside many others
-    (``host.runner(service)``): while run() waits on an await, the service
-    holds no thread. It stays on that loop for its lifetime. Stopping it
-    cancels the task, raising CancelledError at the await it is parked on.
-    ThreadRunner and ProcessRunner refuse an AsyncService.
+    The runtime runs it as a task on its event loop, alongside many others:
+    while run() waits on an await, the service holds no thread. It stays on
+    that loop for its lifetime. Stopping it cancels the task, raising
+    CancelledError at the await it is parked on. A process of its own is
+    refused for an AsyncService.
 
     run() must not call anything that blocks without awaiting: that stalls
     every service on the loop. Run blocking code through asyncio.to_thread().
     Open clients bound to the loop in run() and close them in its finally:
-    setup() runs on the caller's thread, before the task starts.
+    setup() and teardown() run on threads, off the loop.
 
     Example:
         class Doubler(AsyncService):
@@ -171,8 +174,8 @@ class AsyncService(Service):
                     await self._inbox.send(Message(id=msg.id, payload=msg.payload * 2))
     """
 
-    # A coroutine, unlike Service.run(): only a LoopHost runs it, and ThreadRunner
-    # and ProcessRunner refuse an AsyncService
+    # A coroutine, unlike Service.run(): the runtime runs it on its event loop,
+    # and never in a process of its own
     @abstractmethod
     async def run(self) -> None:  # type: ignore[override]
         """Do the service's work until it returns or is cancelled."""
@@ -182,9 +185,10 @@ class AsyncService(Service):
 class ScheduledService(Service):
     """Service that runs on a schedule.
 
-    The runner calls tick(), then waits ``interval`` seconds, until the service
+    Its run() calls tick(), then waits ``interval`` seconds, until the service
     is stopped: ticks start interval plus tick() time apart. An exception from
-    tick() fails the service.
+    tick() fails the service. A subclass implements tick() and keeps run():
+    the Runtime refuses one that overrides it.
 
     Example:
         class MetricsCollector(ScheduledService):
@@ -214,7 +218,8 @@ class ScheduledService(Service):
         ...
 
     def run(self) -> None:
-        """Not used: the runner drives a scheduled service through tick()."""
-        raise TypeError(
-            f"scheduled service '{self.name}' is driven through tick(), not run()"
-        )
+        """tick(), then wait ``interval`` seconds, until ``stopping`` is set; an
+        exception from tick() ends the run with it."""
+        while not self.stopping.is_set():
+            self.tick()
+            self.stopping.wait(self.interval)

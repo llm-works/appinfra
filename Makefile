@@ -17,10 +17,8 @@ APPINFRA_DEV_CQ_SPDX ?= true
 # No ruff rules reported as warnings only: appinfra enforces them in pyproject's select
 APPINFRA_DEV_CQ_LINT_SELECT ?= false
 
-# Duplicated code and dead private code checks: false, warn or strict. Duplicated
-# code warns: appinfra.runtime's LoopHost and LoopTask share blocks with
-# appinfra.service's LoopHost and TaskRunner
-APPINFRA_DEV_CQ_DUP ?= warn
+# Duplicated code and dead private code checks: false, warn or strict
+APPINFRA_DEV_CQ_DUP ?= strict
 APPINFRA_DEV_CQ_DEAD ?= strict
 
 # Run every example script as a test subcheck of `make check`

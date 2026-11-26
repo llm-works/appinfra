@@ -37,8 +37,16 @@ class _Item(_Base):
 
 
 def _make_pg(pg_config: Any, pg_logger: Any, **overrides: Any) -> PG:
-    """Create a PG on a fresh schema holding one _Item row."""
-    cfg = {"url": pg_config.url, "pool_size": 2, "max_overflow": 2, **overrides}
+    """Create a PG on a fresh schema holding one _Item row. The database is
+    created if missing, as the unittest config does: no test may rely on
+    another having created it first."""
+    cfg = {
+        "url": pg_config.url,
+        "create_db": True,
+        "pool_size": 2,
+        "max_overflow": 2,
+        **overrides,
+    }
     pg = PG(pg_logger, cfg, schema=f"returned_{uuid.uuid4().hex[:12]}")
     pg.create_schema()
     pg.migrate(_Base)

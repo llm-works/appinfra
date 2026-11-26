@@ -3,13 +3,32 @@
 
 """Service errors."""
 
+from __future__ import annotations
+
 from typing import Any
 
 from appinfra.errors import InfraError
 
 
 class Error(InfraError):
-    """Base error for service operations."""
+    """Base error for service operations.
+
+    It pickles whole, as an isolated service's process sends its errors to
+    the parent: unpickling does not call a subclass's __init__, whose
+    arguments are not those Exception keeps (its args hold the message), but
+    restores the message and the attributes as they were."""
+
+    def __reduce__(self) -> tuple[Any, ...]:
+        return (_restore, (type(self), self.args, self.__dict__))
+
+
+def _restore(cls: type[Error], args: tuple[Any, ...], state: dict[str, Any]) -> Error:
+    """An Error of type *cls* with *args* and the attributes *state*, as it
+    was pickled; see Error.__reduce__()."""
+    error = cls.__new__(cls)
+    Exception.__init__(error, *args)
+    error.__dict__.update(state)
+    return error
 
 
 class CycleError(Error):
@@ -27,6 +46,16 @@ class SetupError(Error):
     def __init__(self, name: str, message: str) -> None:
         self.service_name = name
         super().__init__(f"{name}: setup failed: {message}")
+
+    @classmethod
+    def of(cls, name: str, error: Exception) -> SetupError:
+        """*error*, which service *name*'s setup() raised, as a SetupError:
+        itself if it is one, else a new one caused by it."""
+        if isinstance(error, SetupError):
+            return error
+        wrapped = cls(name, str(error))
+        wrapped.__cause__ = error
+        return wrapped
 
 
 class RunError(Error):

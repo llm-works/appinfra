@@ -11,7 +11,7 @@ Architecture:
 - Transport / AsyncTransport: Protocol — implement for dumb wire transports
 - BufferedChannel / AsyncBufferedChannel: Concrete — wraps Transport with
   request/response correlation and redelivery buffering
-- Factory classes: Create connected channel pairs
+- Pairs and their factories (pairs.py): create connected channel pairs
 
 Smart transport (ZMQ, gRPC — handles own correlation):
     class ZMQChannel:
@@ -38,6 +38,17 @@ from .async_ import (
     AsyncTransport,
 )
 from .base import HasId, Message
+from .pairs import (
+    AsyncChannelPair,
+    AsyncProcessChannelPair,
+    AsyncProcessQueueChannelFactory,
+    AsyncQueueChannelFactory,
+    ChannelConfig,
+    ChannelPair,
+    ChannelPairFactory,
+    ProcessQueueChannelFactory,
+    QueueChannelFactory,
+)
 from .sync import (
     BufferedChannel,
     Channel,
@@ -62,4 +73,14 @@ __all__ = [
     "AsyncBufferedChannel",
     "AsyncQueueTransport",
     "AsyncProcessQueueTransport",
+    # Pairs and their factories
+    "ChannelConfig",  # cq: keep re-export list, repeated by appinfra.service
+    "ChannelPair",
+    "ChannelPairFactory",
+    "QueueChannelFactory",
+    "ProcessQueueChannelFactory",
+    "AsyncChannelPair",
+    "AsyncProcessChannelPair",
+    "AsyncQueueChannelFactory",
+    "AsyncProcessQueueChannelFactory",
 ]
