@@ -284,7 +284,57 @@ class IgnoresItsStop(Service):
         threading.Event().wait()
 
 
+class CleansUpOnStop(AsyncService):
+    """Cancelled, awaits a gate in its cleanup: notes when the cleanup starts
+    and when it has run to its end."""
+
+    def __init__(self) -> None:
+        self._lg = MagicMock()
+        self.cleaning = threading.Event()
+        self.cleaned = threading.Event()
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._gate: asyncio.Event | None = None
+
+    @property
+    def name(self) -> str:
+        return "cleans-up"
+
+    async def run(self) -> None:
+        self._loop = asyncio.get_running_loop()
+        self._gate = asyncio.Event()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            self.cleaning.set()
+            await self._gate.wait()
+            self.cleaned.set()
+
+    def release(self) -> None:
+        """From any thread: let the cleanup finish, after any cancel already
+        scheduled on the loop."""
+        assert self._loop is not None and self._gate is not None
+        self._loop.call_soon_threadsafe(self._gate.set)
+
+
 class TestStopEscalation:
+    def test_a_second_stop_leaves_an_async_cleanup_be(self, rt):
+        """An async run cancelled by a first stop awaits in its cleanup: a
+        second stop does not cancel it again, and the cleanup finishes."""
+        svc = CleansUpOnStop()
+        runner = rt.spawn(svc)
+        rt.ready(runner, timeout=30.0)
+        first = threading.Thread(target=rt.stop_service, args=(runner, 30.0))
+        first.start()
+        assert svc.cleaning.wait(30.0)
+
+        with pytest.raises(TimeoutError):
+            rt.stop_service(runner, timeout=0.0)
+        assert rt.services  # answered once the runtime has taken the second stop
+        svc.release()
+
+        assert svc.cleaned.wait(30.0)
+        first.join(30.0)
+
     def test_an_isolated_run_outliving_its_stop_is_terminated(self, rt):
         """stop_service(timeout): a run still going at *timeout* gets SIGTERM,
         and the stop returns once it has ended."""

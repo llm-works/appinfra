@@ -624,8 +624,12 @@ class Owner:
             self._stop_asked.add(runner)
         elif runner.state == State.STOPPING:
             # Stopping already, maybe under a longer timeout: this stop forces
-            # it within its own. Ending the run again is harmless otherwise
-            self._end_run(runner, timeout)
+            # an isolated run within its own. Nothing more for one on the loop
+            # or a thread: cancelling an async run again would interrupt its
+            # cleanup, and its token is stopped already
+            task = runner._task
+            if task is not None and task.process is not None:
+                task.stop(timeout)
         else:
             self._let_go(runner)
 
