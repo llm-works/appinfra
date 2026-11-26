@@ -11,6 +11,9 @@ For API stability guarantees and deprecation policy, see
 ## [Unreleased]
 
 ### Added
+- `appinfra.runtime`: `Task.kind` tells what a task runs as (`TaskKind`: loop, thread, process).
+  A process task's `Task.process` gives its child's `detail()` (pid, exit code, liveness) and
+  `terminate()`/`kill()`; `Runtime.process_context` is the context its children start in.
 - `pgserver.bind` sets the host address the port of the local dev server (`make pg.server.up`,
   `appinfra pg up`) listens on. `pgserver.pass`, set through `INFRA_PGSERVER_PASS`, makes the
   server require that password on its port; it takes effect on the next start, existing volumes

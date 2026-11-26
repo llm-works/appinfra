@@ -11,11 +11,13 @@ import contextlib
 import contextvars
 import functools
 import inspect
+import multiprocessing as mp
 import operator
 import pickle
 import threading
 import time
 from collections.abc import Callable
+from multiprocessing.context import BaseContext
 from types import TracebackType
 from typing import Any, final
 
@@ -23,7 +25,7 @@ from ..log import Logger
 from .chan import Chan, ClosedError, Sender
 from .errors import StoppedError
 from .loop import LoopHost, _LoopTask
-from .process import _ProcessTask
+from .process import START_METHOD, _ProcessTask
 from .stop import StopToken
 from .task import Task, TaskDone, _current_task, _Task
 from .thread import _ThreadTask
@@ -107,6 +109,13 @@ class Runtime:
             self.stop()
         except Exception as e:
             self._lg.warning("runtime stop at exit failed", extra={"exception": e})
+
+    @property
+    def process_context(self) -> BaseContext:
+        """The multiprocessing context a process task's child starts in. A
+        queue, event or value shared with a child is made from it: one from
+        another context fails in the child."""
+        return mp.get_context(START_METHOD)
 
     # -- spawn --------------------------------------------------------------
 

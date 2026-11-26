@@ -528,7 +528,16 @@ class TestHandle:
 
     def test_its_public_surface_is_the_api(self):
         public = {name for name in dir(Task) if not name.startswith("_")}
-        assert public == {"id", "name", "wait", "cancel", "alive", "detach"}
+        assert public == {
+            "id",
+            "name",
+            "wait",
+            "cancel",
+            "alive",
+            "detach",
+            "kind",
+            "process",
+        }
 
     def test_it_holds_nothing_but_the_task(self, rt):
         t = rt.spawn(lambda: None)

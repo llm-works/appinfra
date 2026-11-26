@@ -21,11 +21,13 @@ import pytest
 
 from appinfra.runtime import (
     Chan,
+    ProcessDetail,
     ProcessExitError,
     Runtime,
     StoppedError,
     StopToken,
     TaskDone,
+    TaskKind,
     pipe,
     stopping,
     task_id,
@@ -295,6 +297,73 @@ class TestReport:
         task._outcome(*reported((None, StoppedError("its own"), False)))
         assert task.stopped is False
         assert isinstance(task.exception, StoppedError)
+
+
+async def returns_on_the_loop() -> int:
+    return 1
+
+
+class TestKindAndDetail:
+    """What a task tells about how it runs: its kind, and for a process task
+    the child's pid, exit code and liveness."""
+
+    @pytest.mark.parametrize(
+        ("fn", "process", "kind"),
+        [
+            (double, False, TaskKind.THREAD),
+            (returns_on_the_loop, False, TaskKind.LOOP),
+            (double, True, TaskKind.PROCESS),
+        ],
+        ids=["thread", "loop", "process"],
+    )
+    def test_a_task_tells_its_kind(
+        self, rt: Runtime, fn: Any, process: bool, kind: TaskKind
+    ) -> None:
+        args = () if fn is returns_on_the_loop else (1,)
+        task = rt.spawn(fn, *args, process=process)
+        task.wait(timeout=30.0)
+        assert task.kind is kind
+        assert (task.process is not None) is (kind is TaskKind.PROCESS)
+
+    def test_the_detail_follows_the_child(self, rt: Runtime) -> None:
+        """While the child runs: its pid, alive, no exit code; once it has
+        ended and been reaped: the same pid and its exit code."""
+        started = rt.process_context.Event()
+        task = rt.spawn(returns_on_stop, started, process=True)
+        assert task.process is not None
+        assert started.wait(30.0)
+
+        running = task.process.detail()
+        assert running.pid is not None and running.pid != os.getpid()
+        assert running.alive
+        assert running.exitcode is None
+
+        task.cancel()
+        task.wait(timeout=30.0)
+        ended = task.process.detail()
+        assert ended == ProcessDetail(pid=running.pid, exitcode=0, alive=False)
+
+    @pytest.mark.parametrize(
+        ("end", "signum"),
+        [("terminate", signal.SIGTERM), ("kill", signal.SIGKILL)],
+    )
+    def test_the_handle_ends_the_child(
+        self, rt: Runtime, end: str, signum: int
+    ) -> None:
+        """terminate() and kill() reach the child; its exit code names the
+        signal."""
+        started = rt.process_context.Event()
+        task = rt.spawn(returns_on_stop, started, process=True)
+        assert task.process is not None
+        assert started.wait(30.0)
+
+        getattr(task.process, end)()
+        with pytest.raises(ProcessExitError):
+            task.wait(timeout=30.0)
+        assert task.process.detail().exitcode == -signum
+
+    def test_children_start_in_the_runtimes_context(self, rt: Runtime) -> None:
+        assert rt.process_context.get_start_method() == "spawn"
 
 
 class TestStop:
