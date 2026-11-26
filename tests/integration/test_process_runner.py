@@ -117,11 +117,15 @@ class TestProcessRunnerIntegration:
         finally:
             runner.stop()
 
+    @pytest.mark.parametrize("method", [None, "spawn"], ids=["default", "spawn"])
     @pytest.mark.parametrize("derive", [False, True], ids=["alias", "child"])
-    def test_stop_reaches_a_token_setup_took(self, lg, derive):
+    def test_stop_reaches_a_token_setup_took(self, lg, derive, method):
         """stop() ends a run() that waits on a token setup() kept, gracefully:
-        exit code 0, not the terminate() that follows a stop_timeout."""
-        runner = ProcessRunner(WaitsOnTokenFromSetup(lg, derive), stop_timeout=5.0)
+        exit code 0, not the terminate() that follows a stop_timeout. Under
+        spawn the token reaches the child pickled, not copied by a fork."""
+        runner = ProcessRunner(
+            WaitsOnTokenFromSetup(lg, derive), stop_timeout=5.0, start_method=method
+        )
         runner.start()
         runner.wait_healthy(timeout=10.0)
         process = runner.process

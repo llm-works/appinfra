@@ -139,6 +139,10 @@ class ProcessRunner:
     @property
     def can_restart(self) -> bool:
         """True if the restart policy still allows another restart attempt."""
+        return self._retry_left()
+
+    def _retry_left(self) -> bool:
+        """can_restart, for a caller holding the lock."""
         return (
             self.policy.restart_on_failure and self._retries < self.policy.max_retries
         )
@@ -191,7 +195,11 @@ class ProcessRunner:
                 raise RunError(self.name, "stopped during startup")
 
     def _launch(self) -> None:
-        """Spawn the service's subprocess."""
+        """Spawn the service's subprocess.
+
+        Raises:
+            RunError: If the launch fails, caused by what failed.
+        """
         try:
             # One context for the process and every queue and event it uses:
             # multiprocessing refuses a lock from another context in the child
@@ -202,14 +210,14 @@ class ProcessRunner:
             # After the fork, so its thread is not running while the child is
             # forked; the queue holds any records the child sends before then
             listener.start()
-        except Exception:
+        except Exception as e:
             self._reap_spawned()
             # As in stop(): keep the handles of a child that survived, so a
             # later stop() can retry
             if not self.is_alive():
                 self._cleanup_ipc()
             self._transition(State.FAILED)
-            raise
+            raise RunError(self.name, f"failed to start: {e}") from e
 
     def _reap_spawned(self) -> None:
         """End a child that start() forked before failing, so none is left running."""
@@ -232,11 +240,13 @@ class ProcessRunner:
         return log_config, self._log_listener
 
     def _create_ipc_primitives(self, ctx: BaseContext) -> None:
-        """Create IPC primitives for subprocess communication."""
+        """Create IPC primitives for subprocess communication: the run's own,
+        its exception read from its error queue alone."""
         self._shutdown_event = ctx.Event()
         self._stop_reader, self._stop_writer = ctx.Pipe(duplex=False)
         self._healthy_event = ctx.Event()
         self._error_queue = ctx.Queue()
+        self._exception = None
 
     def _inherited_writer(self, ctx: BaseContext) -> Connection | None:
         """The stop pipe's writer as the child inherits it: a forked child holds
@@ -364,11 +374,15 @@ class ProcessRunner:
             self.service.stopping = StopToken()
 
     def _run_setup(self) -> None:
-        """Run service setup, transition to FAILED on error."""
+        """Run service setup, transition to FAILED on error. A failed setup's
+        token is stopped, so work it started on it ends; the next start()
+        gives the service a new one (_reset_stop())."""
         try:
             self.service.setup()
         except Exception as e:
-            self._transition(State.FAILED)
+            self.service.stopping.stop()
+            if self._state != State.FAILED:  # a retry from FAILED stays there
+                self._transition(State.FAILED)
             if isinstance(e, SetupError):
                 raise
             raise SetupError(self.name, str(e)) from e
@@ -465,17 +479,20 @@ class ProcessRunner:
         return False
 
     def _maybe_restart(self) -> bool:
-        """Wait the policy's backoff, then attempt a restart."""
-        if not self.can_restart:
-            return False
-        run = self._run  # the failed run: a stop() from now on ends it
-        backoff = min(
-            self.policy.backoff * (self.policy.backoff_multiplier**self._retries),
-            self.policy.max_backoff,
-        )
-        # Before counting it, so restart_pending holds without a gap
-        self._restarting = True
-        self._retries += 1
+        """Wait the policy's backoff, then attempt a restart. The retry is
+        checked and counted under the lock: two callers finding one retry
+        left (the monitor, and check() on another thread) spend it once."""
+        with self._lock:
+            if not self._retry_left():
+                return False
+            run = self._run  # the failed run: a stop() from now on ends it
+            backoff = min(
+                self.policy.backoff * (self.policy.backoff_multiplier**self._retries),
+                self.policy.max_backoff,
+            )
+            # Before counting it, so restart_pending holds without a gap
+            self._restarting = True
+            self._retries += 1
         try:
             time.sleep(backoff)
             return self._attempt_restart(run)
@@ -588,9 +605,13 @@ class ProcessRunner:
         gracefully take at most *timeout* (stop_timeout if None) together.
 
         It ends the current run first, even with no child left to stop: a
-        restart of that run the monitor has under way starts nothing."""
+        restart of that run the monitor has under way starts nothing. Called
+        from setup(), on the start's own thread, it returns at once: start()
+        stops the child it spawns and raises RunError."""
         with self._lock:
             self._run += 1
+            if self._start_thread == threading.get_ident():
+                return  # from setup(): its start() stops the child it spawns
         budget = self.stop_timeout if timeout is None else timeout
         began = time.monotonic()
         if not self._await_start(budget):

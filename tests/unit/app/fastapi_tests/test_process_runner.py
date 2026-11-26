@@ -4,6 +4,7 @@
 """Unit tests for ProcessRunner, the runner the FastAPI server runs uvicorn under."""
 
 import itertools
+import queue
 from collections.abc import Iterator
 from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
@@ -12,6 +13,7 @@ import pytest
 
 from appinfra.app.fastapi.runtime.process import ProcessRunner
 from appinfra.log import Logger
+from appinfra.runtime import StopToken
 from appinfra.service import (
     AsyncService,
     InvalidTransitionError,
@@ -173,8 +175,9 @@ class TestProcessRunner:
             mock_listener.return_value.start.side_effect = RuntimeError("no thread")
 
             runner = ProcessRunner(MPSimpleService(lg))
-            with pytest.raises(RuntimeError, match="no thread"):
+            with pytest.raises(RunError, match="failed to start: no thread") as e:
                 runner.start()
+            assert isinstance(e.value.__cause__, RuntimeError)
 
             child.terminate.assert_called_once()
             child.join.assert_called_once_with(timeout=2.0)
@@ -193,7 +196,7 @@ class TestProcessRunner:
             mock_listener.return_value.start.side_effect = RuntimeError("no thread")
 
             runner = ProcessRunner(MPSimpleService(lg))
-            with pytest.raises(RuntimeError):
+            with pytest.raises(RunError):
                 runner.start()
 
             child.kill.assert_called_once()
@@ -259,6 +262,27 @@ class TestProcessRunner:
             runner.start()
 
             assert runner.exit_code == 0
+
+    def test_a_new_run_reports_its_own_exception(self, lg):
+        """The first run's exception, read and kept, does not stand for the
+        next run's: a run's primitives start it afresh."""
+        runner = ProcessRunner(MPSimpleService(lg))
+        runner._exception = RuntimeError("first run")
+        ctx = MagicMock()
+        second = RuntimeError("second run")
+        queued: list[BaseException] = [second]  # returned, not raised, by get_nowait
+
+        def get_nowait() -> BaseException:
+            if not queued:
+                raise queue.Empty()
+            return queued.pop()
+
+        ctx.Queue.return_value.get_nowait.side_effect = get_nowait
+        ctx.Pipe.return_value = (MagicMock(), MagicMock())
+
+        runner._create_ipc_primitives(ctx)
+
+        assert runner.exception is second
 
     def test_exception_from_queue(self, lg):
         """exception property reads from error queue."""
@@ -337,6 +361,48 @@ class TestProcessRunner:
 
             assert runner.state == State.STOPPED
             assert runner._process is None
+
+    def test_a_failed_setup_stops_the_work_it_started(self, lg):
+        """setup() derives a token for its work, then raises: that work is told
+        to stop, and a retry gets a token of its own."""
+        derived: list[StopToken] = []
+
+        class FailsAfterDeriving(MPSimpleService):
+            def setup(self) -> None:
+                derived.append(self.stopping.child())
+                raise RuntimeError("no database")
+
+        runner = ProcessRunner(FailsAfterDeriving(lg))
+        first = runner.service.stopping
+        with pytest.raises(SetupError):
+            runner.start()
+
+        assert derived[0].is_set()
+        with pytest.raises(SetupError):
+            runner.start()
+        assert runner.service.stopping is not first
+
+    def test_a_stop_from_setup_does_not_wait_for_its_own_start(self):
+        """setup() stops its runner: the start in progress is its own thread's,
+        so the stop takes effect without waiting for it, and start() raises
+        once its child is spawned."""
+
+        class StopsInSetup(MPSimpleService):
+            def setup(self) -> None:
+                runner.stop(timeout=5.0)
+
+        lg = MagicMock()
+        with (
+            _mock_mp_context() as (mock_process, _, _),
+            patch(f"{_PROCESS}.LogQueueListener"),
+        ):
+            mock_process.return_value.is_alive.return_value = False
+            runner = ProcessRunner(StopsInSetup(lg))
+            with pytest.raises(RunError, match="stopped during startup"):
+                runner.start()
+
+        waited = [c for c in lg.warning.call_args_list if "waited" in c.args[0]]
+        assert waited == []
 
     def test_an_async_service_is_refused(self, lg):
         """Its run() would return an unawaited coroutine in the subprocess."""
@@ -495,12 +561,42 @@ class TestProcessRunner:
         runner._state = State.RUNNING
         runner._process = MagicMock(exitcode=0)
         listener = runner._log_listener = MagicMock()
+        errors = runner._error_queue = MagicMock()
+        logs = runner._log_queue = MagicMock()
         with patch.object(runner, "is_alive", return_value=False):
             runner._monitor_loop(interval=0)
 
         assert runner.state == State.DONE
         listener.stop.assert_called_once()
+        errors.close.assert_called_once()
+        logs.close.assert_called_once()
         assert runner.exit_code == 0
+
+    def test_the_last_retry_is_spent_once(self):
+        """Two callers find one retry left: only one of them spends it. The
+        second caller is made to run between the first one's check and its
+        count, which is what a second thread calling check() can do."""
+        runner = ProcessRunner(
+            MPSimpleService(MagicMock()), RestartPolicy(max_retries=1, backoff=0)
+        )
+        other_ran = False
+        real = ProcessRunner.can_restart.fget
+
+        def can_restart(self: ProcessRunner) -> bool:
+            nonlocal other_ran
+            allowed = real(self)
+            if not other_ran:
+                other_ran = True
+                runner._maybe_restart()  # the other caller
+            return allowed
+
+        with (
+            patch.object(ProcessRunner, "can_restart", property(can_restart)),
+            patch.object(runner, "_attempt_restart", return_value=False),
+        ):
+            runner._maybe_restart()
+
+        assert runner._retries == 1
 
     def test_restart_pending_through_the_last_attempt(self):
         """The last allowed restart counts as pending while it runs.
