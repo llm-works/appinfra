@@ -21,17 +21,16 @@ For API stability guarantees and deprecation policy, see
   `None` (any type) for a vector's elements. See `docs/api/cas.md`.
 - `Repo.batch()` stores several objects with one lock hold and one link lookup, through the new
   `Store.object_types` and `Store.write_objects`; their defaults loop over the single-object calls.
-- `AsyncService`: a service whose `run()` is a coroutine. `LoopHost.runner()` runs it as a task on
-  one shared event loop thread, so a service waiting on an `await` holds no thread of its own.
+- `AsyncService`: a service whose `run()` is a coroutine. The `Runtime` runs it as a task on one
+  shared event loop thread, so a service waiting on an `await` holds no thread of its own.
 - `BufferedChannel.stream()`: the sync counterpart of `AsyncBufferedChannel.stream()`, yielding
   the response chunks of a request until the one with `is_final=True`.
-- `Runtime`: `spawn()` takes services in any order, from any thread, and starts each on the runner
-  its kind needs (a task on a shared event loop, a thread, or a process with `isolate=True`) once
-  its `depends_on` run. `stop()` goes in reverse start order; a service that fails while running
-  is restarted per its policy.
-- `Service.stopping`: a `StopToken` every runner sets before `setup()` and stops when the service
-  is to stop; `run()` returns on it under any runner. `stopping.child()` derives a token stopped
-  with it.
+- `Runtime`: `spawn()` takes services in any order, from any thread, and runs each once its
+  `depends_on` run: on a shared event loop, a thread, or a process of its own (`isolate=True`).
+  `ready()` waits for health, `stop_service()` stops one; `stop()` goes in reverse start order. A
+  service that fails while running is restarted per its policy.
+- `Service.stopping`: a `StopToken` the runtime sets before `setup()` and stops when the service
+  is to stop; `run()` returns on it. `stopping.child()` derives a token stopped with it.
 - `appinfra.runtime`: `Runtime.spawn(fn, *args)` calls a function once as a task (an async one on
   a shared event loop, any other on a thread of its own) and returns its `Task`: `wait()`, or
   `await task` on any event loop, as often as wanted; `cancel()`, `alive()`, `detach()`. Inside a
@@ -69,12 +68,16 @@ For API stability guarantees and deprecation policy, see
   `close()` wakes it instead. A custom `AsyncTransport` opts in with `wakes_on_close = True`.
 - **Breaking:** the `appinfra.service.runner` package is `appinfra.service.runtime`, and its
   `base` module is `runtime.runner`. Imports from `appinfra.service` are unchanged.
-- **Breaking:** `ProcessRunner` no longer injects `_shutdown_event` into the service; `run()`
-  waits on `self.stopping` in the subprocess instead.
 - **Breaking:** `RestartPolicy` is frozen: runners share one policy, so a field cannot change for
   one of them alone. Derive a variant with `dataclasses.replace()`.
-- **Breaking:** `Service.execute()` is renamed `run()`. A `ScheduledService` override of it is
-  never called: the runner runs the tick loop and calls `teardown()` on that thread after it ends.
+- **Breaking:** `Service.execute()` is renamed `run()`. `ScheduledService.run()` is its tick loop:
+  an override replaces the loop. `teardown()` runs on a thread of its own after the loop ends.
+- **Breaking:** `Runner` is a service's record in a `Runtime` (`state`, `retries`, `exception`,
+  `on_state_change()`) and runs nothing: `start()`, `stop()`, `wait_healthy()` and `check()` are
+  gone. `Runtime.ready()` and `Runtime.stop_service()` take their place.
+- **Breaking:** `setup()` runs on a thread after `spawn()` returns: a failure surfaces from
+  `ready()` as `SetupError`, no longer from `spawn()`. `setup()` and `teardown()` of an
+  `AsyncService` run off the event loop.
 - **Breaking:** the local dev server listens on `127.0.0.1` by default instead of every
   interface; `pgserver.bind: 0.0.0.0` lets other hosts reach it.
 - **Breaking:** the `pg.*` targets load their config file when they run, as the application
@@ -92,6 +95,8 @@ For API stability guarantees and deprecation policy, see
   expressions with it.
 
 ### Removed
+- **Breaking:** `ThreadRunner`, `ProcessRunner`, `RunnerFactory` and `RunnerWithChannel` from
+  `appinfra.service`: `Runtime.spawn()` runs every service, `isolate=True` in a process of its own.
 - **Breaking:** `appinfra.service.Manager`: `Runtime` replaces it. `rt.spawn(service)` takes the
   place of `add_service()`/`add()`: a service whose dependency is not running yet waits for it
   instead of being refused. `rt.services[name].state` replaces `is_running(name)`; a stopped
