@@ -290,6 +290,32 @@ class TestLifecycle:
         assert refused == [State.RUNNING, State.STOPPING, State.STOPPED]
         assert runner.state == State.STOPPED
 
+    def test_a_stop_refused_in_a_hook_leaves_the_runtime_running(
+        self, rt: Runtime
+    ) -> None:
+        """A hook's stop() is refused before it changes anything: the runtime
+        takes services and stops them as without it."""
+        runner = rt.spawn(SimpleService())
+        refused = threading.Event()
+
+        def stops(_name: str, _old: State, new: State) -> None:
+            if new == State.RUNNING:
+                try:
+                    rt.stop()
+                except RuntimeError:
+                    refused.set()
+
+        runner.on_state_change(stops)
+        rt.ready(runner, timeout=5.0)
+        assert refused.is_set()
+
+        other = rt.spawn(SimpleService("other"))  # still taking services
+        rt.ready(other, timeout=5.0)
+        rt.stop()
+
+        assert runner.state == State.STOPPED
+        assert other.state == State.STOPPED
+
     def test_a_service_spawned_again_whose_setup_fails_fails(self, rt: Runtime) -> None:
         """Spawned again after a stop, a service whose setup() fails is a
         failed start, as on its first spawn: SetupError, and FAILED."""

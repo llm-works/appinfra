@@ -150,7 +150,12 @@ class Runtime:
         """Stop every service, last started first, each given up to *timeout*
         seconds to end; one still running then is logged and the rest stop
         regardless. A service still waiting for its dependencies never starts.
-        Then stop the runtime's tasks: see appinfra.runtime Runtime.stop()."""
+        Then stop the runtime's tasks: see appinfra.runtime Runtime.stop().
+
+        Raises:
+            RuntimeError: If called from a state hook, before anything changes.
+        """
+        self._refuse_own_task()
         if not self._started_runtime or self._closing:
             return
         self._closing = True
@@ -210,11 +215,7 @@ class Runtime:
             RuntimeError: If called from the runtime's own task (a state hook),
                 which would wait for itself.
         """
-        if self._on_own_task():
-            raise RuntimeError(
-                f"runtime '{self.name}' called from a state hook: hooks run on the "
-                "runtime's own task and cannot call spawn(), ready() or stop()"
-            )
+        self._refuse_own_task()
         reply: Chan[Any] = Chan(1)
         self._inbox.send(make(reply))
         outcome = reply.recv(timeout=timeout)
@@ -222,13 +223,23 @@ class Runtime:
             raise outcome
         return outcome
 
-    def _on_own_task(self) -> bool:
+    def _refuse_own_task(self) -> None:
+        """Refuse a call from the runtime's own task: a state hook.
+
+        Raises:
+            RuntimeError: If called there.
+        """
         if self._own is None:
-            return False
+            return
         try:
-            return current_task_id() == self._own.id
+            own = current_task_id() == self._own.id
         except RuntimeError:  # not in a task at all
-            return False
+            return
+        if own:
+            raise RuntimeError(
+                f"runtime '{self.name}' called from a state hook: hooks run on the "
+                "runtime's own task and cannot call spawn(), ready() or stop()"
+            )
 
 
 def _check_isolable(service: Service) -> None:
