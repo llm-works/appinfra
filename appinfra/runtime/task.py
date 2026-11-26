@@ -104,6 +104,25 @@ class _Task(ABC):
     it reports its end.
     """
 
+    # Slots, not an instance dict: a runtime holds one of these per task
+    __slots__ = (
+        "id",
+        "name",
+        "token",
+        "_on_end",
+        "_fn",
+        "_args",
+        "_context",
+        "result",
+        "exception",
+        "exception_tb",
+        "stopped",
+        "ended",
+        "detached",
+        "wakes",
+        "done_chan",
+    )
+
     # What a stop ends a call with, on this kind of task
     stop_signals: tuple[type[BaseException], ...] = (StoppedError,)
 
@@ -130,7 +149,8 @@ class _Task(ABC):
         self.name = name
         self.token = token
         self._on_end = on_end
-        self._fn = fn
+        # Until the call takes them (_take_call())
+        self._fn: Callable[..., Any] | None = fn
         self._args = args
         # The context the call runs in, with the task current in it
         self._context = contextvars.copy_context()
@@ -150,6 +170,14 @@ class _Task(ABC):
         # spawn()'s done, a Chan or a pipe's Sender: typed in Runtime.spawn(),
         # as chan imports this module
         self.done_chan: Any = None
+
+    def _take_call(self) -> tuple[Callable[..., Any], tuple[Any, ...]]:
+        """The function and its arguments, no longer held here: the call's
+        frame holds them while it runs, and a parked task keeps no copy."""
+        fn, args = self._fn, self._args
+        assert fn is not None, "a task's function is called once"
+        self._fn, self._args = None, ()
+        return fn, args
 
     @abstractmethod
     def launch(self) -> None:
@@ -198,6 +226,8 @@ class _ThreadTask(_Task):
     """Calls a function on a daemon thread of its own. A thread cannot be
     interrupted: the function sees its token (``stopping()``) and returns."""
 
+    __slots__ = ("_thread", "_finished")
+
     def __init__(
         self,
         on_end: Callable[[_Task], None],
@@ -233,7 +263,8 @@ class _ThreadTask(_Task):
                 self.stopped = True
             else:
                 try:
-                    self.result = self._fn(*self._args)
+                    fn, args = self._take_call()
+                    self.result = fn(*args)
                 except BaseException as e:
                     self._raised(e)
             self._end()
@@ -271,6 +302,8 @@ class _LoopTask(_Task):
     an await holds no thread. cancel() raises CancelledError at the await it is
     parked on; a cancel is a stop."""
 
+    __slots__ = ("_host", "_aio", "_finished", "_waiters")
+
     stop_signals = (asyncio.CancelledError, StoppedError)
 
     def __init__(
@@ -301,35 +334,63 @@ class _LoopTask(_Task):
         self._host._schedule(self._spawn)
 
     def _spawn(self) -> None:
-        """Create the asyncio task, in the task's context; called on the loop.
-        _finish() runs when it ends, however it ends: also when cancelled
-        before its first step, when the call never runs."""
-        aio = asyncio.get_running_loop().create_task(
-            self._call(), name=_label(self.id, self.name), context=self._context
-        )
-        aio.add_done_callback(self._finish)
-        self._aio = aio
-
-    async def _call(self) -> None:
-        """The call, unless a stop came first. A cancel, from cancel() or the
-        host shutting down, comes with the token stopped: it is a stop."""
+        """Make the call's coroutine the asyncio task, in the task's context;
+        called on the loop. A task whose token is stopped by then skips the
+        call. _finish() runs when the asyncio task ends, however it ends: also
+        when cancelled before its first step, when the call never runs. No
+        coroutine of the runtime's wraps the call: a parked task holds the
+        call's frame alone."""
         if self.token.is_set():
             self.stopped = True
+            self._ended_on_loop()
             return
         try:
-            self.result = await self._fn(*self._args)
-        except BaseException as e:
+            coro = self._coroutine()
+        except BaseException as e:  # Calling the function made no coroutine
             self._raised(e)
+            self._ended_on_loop()
+            return
+        aio = asyncio.get_running_loop().create_task(
+            coro, name=_label(self.id, self.name), context=self._context
+        )
+        # In the task's context: without one, asyncio copies the loop's for it
+        aio.add_done_callback(self._finish, context=self._context)
+        self._aio = aio
 
-    def _finish(self, aio: asyncio.Task[None]) -> None:
-        """On the loop, once the asyncio task has ended: end the task and wake
-        the join() calls waiting for it."""
+    def _coroutine(self) -> Any:
+        """The call's coroutine; its frame holds the function's arguments,
+        and this one's frame, gone once it returns, the function and them."""
+        fn, args = self._take_call()
+        return fn(*args)
+
+    def _finish(self, aio: asyncio.Task[Any]) -> None:
+        """On the loop, once the asyncio task has ended: record how the call
+        ended, end the task and wake the join() calls waiting for it."""
         self._aio = None
-        waiters, self._waiters = self._waiters, None
-        # Cancelled before its first step: _call() never ran to record it.
-        # _call() catches everything, so a task that ran is never cancelled
+        self._record(aio)
+        self._ended_on_loop()
+
+    def _record(self, aio: asyncio.Task[Any]) -> None:
+        """Record the outcome of *aio*, as _raised() does for a call that
+        raised. A cancelled one was cancelled by cancel() or the host's
+        shutdown, with the token stopped, which is a stop, or raised
+        CancelledError on its own, which is a failure."""
         if aio.cancelled():
-            self.stopped = True
+            try:
+                aio.result()
+            except asyncio.CancelledError as e:
+                self._raised(e)
+            return
+        error = aio.exception()
+        if error is None:
+            self.result = aio.result()
+        else:
+            self._raised(error)
+
+    def _ended_on_loop(self) -> None:
+        """On the loop, once the call has ended or was skipped: end the task
+        and wake the join() calls waiting for it."""
+        waiters, self._waiters = self._waiters, None
         self._end()
         # Last, so the outcome is settled before is_running() reports the end
         self._finished = True

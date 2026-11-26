@@ -8,6 +8,9 @@ from __future__ import annotations
 import asyncio
 import threading
 from collections.abc import Callable
+from typing import TypeVar
+
+T = TypeVar("T")
 
 # Prefixed, as the stdlib names the threads it creates: a thread dump shows whose it is
 THREAD_NAME = "appinfra-loop"
@@ -93,12 +96,25 @@ class LoopHost:
         asyncio.run() does, and close it."""
         asyncio.set_event_loop(loop)
         try:
-            loop.run_forever()
+            _resumed(loop.run_forever)
             tasks = asyncio.all_tasks(loop)
             for task in tasks:
                 task.cancel()
-            loop.run_until_complete(asyncio.gather(*tasks, return_exceptions=True))
+            gathered = asyncio.gather(*tasks, return_exceptions=True)
+            _resumed(lambda: loop.run_until_complete(gathered))
             loop.run_until_complete(loop.shutdown_asyncgens())
             loop.run_until_complete(loop.shutdown_default_executor())
         finally:
             loop.close()
+
+
+def _resumed(run: Callable[[], T]) -> T:
+    """*run*, a run of the loop, resumed when a task's SystemExit or
+    KeyboardInterrupt comes out of it. asyncio records it as that task's
+    outcome, then re-raises it from the loop, which would end every other
+    task with it; the task's own end is already scheduled on the loop."""
+    while True:
+        try:
+            return run()
+        except (SystemExit, KeyboardInterrupt):
+            continue

@@ -417,14 +417,14 @@ class TestThreadTask:
         """Once the runtime has recorded the end, wait() collects the outcome,
         even while the task's thread has not yet run its last line."""
         in_window, release = threading.Event(), threading.Event()
-        real_on_end = Runtime._on_end
+        real_on_end = rt._end_hook  # Private: what every task reports its end to
 
-        def on_end_then_hold(self: Runtime, task: object) -> None:
-            real_on_end(self, task)
+        def on_end_then_hold(task: object) -> None:
+            real_on_end(task)
             in_window.set()
             release.wait(10.0)  # holds the thread after the end is recorded
 
-        monkeypatch.setattr(Runtime, "_on_end", on_end_then_hold)
+        monkeypatch.setattr(rt, "_end_hook", on_end_then_hold)
         t = rt.spawn(lambda: 42)
         try:
             assert in_window.wait(5.0)

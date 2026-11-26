@@ -159,6 +159,8 @@ class Runtime:
         # TaskDones awaiting room on a full done channel; loop thread only.
         # Held here: the loop keeps only a weak reference to a task
         self._sending: set[asyncio.Task[None]] = set()
+        # One bound method every task reports its end to, not one per task
+        self._end_hook = self._on_end
 
     def start(self) -> None:
         """Start the runtime's event loop.
@@ -253,8 +255,8 @@ class Runtime:
     ) -> _Task:
         """The task that calls *fn*: on the loop if it is an async function."""
         if inspect.iscoroutinefunction(fn):
-            return _LoopTask(self._on_end, self._host, task_id, name, fn, args, token)
-        return _ThreadTask(self._on_end, task_id, name, fn, args, token)
+            return _LoopTask(self._end_hook, self._host, task_id, name, fn, args, token)
+        return _ThreadTask(self._end_hook, task_id, name, fn, args, token)
 
     def _launch(self, t: _Task) -> None:
         """Launch *t*; under the lock. A task the loop refuses leaves the
