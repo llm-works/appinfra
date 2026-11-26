@@ -38,6 +38,7 @@ from ..errors import (
 )
 from ..state import State
 from . import child as child_process
+from .deps import Dependencies
 from .runner import OWED, TEARING, TORN, Runner
 
 # States in which a service has started and is, or was, healthy
@@ -123,8 +124,7 @@ class Owner:
         # Every service, by name: the waiting in spawn order, then the started
         # in start order (_begin() moves each to the end as it first starts)
         self._runners: dict[str, Runner] = {}
-        self._pending: set[str] = set()  # waiting for dependencies
-        self._waiters: dict[str, set[str]] = {}  # dependency -> pending on it
+        self._deps = Dependencies(self._runners)
         self._isolated: set[Runner] = set()
         self._children: dict[Runner, _Child] = {}
         self._ready: dict[Runner, list[Chan[Any]]] = {}  # ready() waiting
@@ -183,10 +183,10 @@ class Owner:
         if m.isolate:
             self._isolated.add(runner)
         _reply(m.reply, None)
-        if self._dependencies_run(runner.service):
+        if self._deps.all_run(runner.service):
             self._begin(runner)
         else:
-            self._wait(runner)
+            self._deps.wait(runner.service)
             self._watch_dependencies(runner.service)
 
     def _on_ready(self, m: Ready) -> None:
@@ -210,8 +210,10 @@ class Owner:
     def _give_up(self, runner: Runner, reply: Chan[Any]) -> None:
         """A ready() timed out: name the missing dependency of a service still
         waiting, or end the run of one still starting, which fails it."""
-        if runner.name in self._pending and self._runners.get(runner.name) is runner:
-            _reply(reply, DependencyNotRunningError(runner.name, self._missing(runner)))
+        waiting = self._deps.is_waiting(runner.name)
+        if waiting and self._runners.get(runner.name) is runner:
+            missing = self._deps.missing(runner.service)
+            _reply(reply, DependencyNotRunningError(runner.name, missing))
             return
         if runner.state == State.STARTING:
             self._end_run(runner)
@@ -228,9 +230,9 @@ class Owner:
         """stop(): refuse the waiting, end the backoffs, then stop the started
         services one at a time, last started first."""
         self._closing = True
-        for name in list(self._pending):
+        for name in self._deps.waiting():
             # Refusing one fails what waited on it: gone by its turn
-            if name in self._pending:
+            if self._deps.is_waiting(name):
                 self._refuse(self._runners[name])
         for task in self._backoffs.values():
             task.cancel()
@@ -283,7 +285,7 @@ class Owner:
         if not _current(runner, m):
             return
         runner._task = None
-        gone = self._gone_dependency(runner.service)
+        gone = self._deps.gone(runner.service)
         if m.error is not None:
             self._setup_failed(runner, _setup_error(runner, m.error))
         elif runner in self._stop_asked or self._closing:
@@ -329,7 +331,7 @@ class Owner:
             # stops the token and cancels the task.
             runner._task = self._step(runner, "run", service.run)
             runner._teardown = OWED if _overrides(service, "teardown") else TORN
-        awaited = runner in self._ready or self._waiters.get(runner.name)
+        awaited = runner in self._ready or self._deps.awaited(runner.name)
         if awaited or runner.name in self._restarting:
             self._watch(runner)
 
@@ -510,7 +512,7 @@ class Owner:
     def _halt(self, runner: Runner) -> None:
         """Begin to stop *runner*; its stops are answered once it has settled."""
         task = runner._task
-        if runner.name in self._pending:
+        if self._deps.is_waiting(runner.name):
             self._refuse(runner)
         elif task is not None and (task.name or "").endswith("/setup"):
             self._stop_asked.add(runner)  # stopped once its setup ends
@@ -578,63 +580,15 @@ class Owner:
             return RuntimeError(f"runtime '{self._name}' is not running")
         if service.name in self._runners:
             return ValueError(f"service '{service.name}' is in the runtime already")
-        cycle = self._cycle(service)
+        cycle = self._deps.cycle(service)
         return CycleError(cycle) if cycle is not None else None
-
-    def _cycle(self, service: Service) -> list[str] | None:
-        """The services a dependency cycle through *service* would pass."""
-        stack = [(dep, [service.name, dep]) for dep in service.depends_on]
-        seen: set[str] = set()
-        while stack:
-            name, path = stack.pop()
-            if name == service.name:
-                return path[:-1]
-            if name in seen or name not in self._runners:
-                continue
-            seen.add(name)
-            deps = self._runners[name].service.depends_on
-            stack.extend((dep, [*path, dep]) for dep in deps)
-        return None
-
-    def _dependencies_run(self, service: Service) -> bool:
-        return all(
-            dep in self._runners and self._runners[dep].state == State.RUNNING
-            for dep in service.depends_on
-        )
-
-    def _gone_dependency(self, service: Service) -> str | None:
-        return next((d for d in service.depends_on if d not in self._runners), None)
-
-    def _missing(self, runner: Runner) -> str:
-        """The first dependency of *runner* that is not running."""
-        for dep in runner.service.depends_on:
-            if dep not in self._runners or self._runners[dep].state != State.RUNNING:
-                return dep
-        return ", ".join(runner.service.depends_on)
-
-    def _wait(self, runner: Runner) -> None:
-        self._pending.add(runner.name)
-        for dep in runner.service.depends_on:
-            self._waiters.setdefault(dep, set()).add(runner.name)
-
-    def _unindex(self, name: str) -> None:
-        for dep in self._runners[name].service.depends_on:
-            waiters = self._waiters.get(dep)
-            if waiters is not None:
-                waiters.discard(name)
-                if not waiters:
-                    del self._waiters[dep]
 
     def _start_waiters(self, name: str) -> None:
         """Start the services waiting on *name* whose dependencies all run."""
         if self._closing:
             return
-        for waiter in list(self._waiters.get(name, ())):
-            runner = self._runners[waiter]
-            if waiter in self._pending and self._dependencies_run(runner.service):
-                self._pending.discard(waiter)
-                self._unindex(waiter)
-                self._begin(runner)
+        for waiter in self._deps.released(name):
+            self._begin(self._runners[waiter])
 
     def _watch_dependencies(self, service: Service) -> None:
         """Check the health of the dependencies a new waiter waits on."""
@@ -666,12 +620,7 @@ class Owner:
         name = runner.name
         if self._runners.get(name) is not runner:
             return
-        if name in self._pending:
-            self._pending.discard(name)
-            self._unindex(name)
-        waiting = [
-            self._runners[w] for w in self._waiters.pop(name, ()) if w in self._pending
-        ]
+        waiting = [self._runners[w] for w in self._deps.drop(name)]
         del self._runners[name]
         self._restarting.discard(name)
         self._isolated.discard(runner)
