@@ -505,9 +505,12 @@ class Owner:
             self._fail(runner, _startup_error(runner))
         for reply in self._stops.pop(runner, ()):
             _reply(reply, None)
+        stopped = runner in self._stop_asked
         self._stop_asked.discard(runner)
-        restart = new == State.FAILED and (
-            old in (State.RUNNING, State.IDLE) or runner.name in self._restarting
+        restart = (
+            new == State.FAILED
+            and not stopped
+            and (old in (State.RUNNING, State.IDLE) or runner.name in self._restarting)
         )
         if restart and self._runners.get(runner.name) is runner:
             self._retry(runner)
@@ -613,6 +616,10 @@ class Owner:
             self._end_run(runner)
         elif runner.name in self._backoffs:
             self._backoffs[runner.name].cancel()
+        elif runner._teardown == TEARING:
+            # A setup that ended expired or with a dependency down, being torn
+            # down: stopped once its teardown settles
+            self._stop_asked.add(runner)
         elif runner.state != State.STOPPING:
             self._let_go(runner)
 

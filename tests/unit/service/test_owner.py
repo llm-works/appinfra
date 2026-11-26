@@ -8,9 +8,12 @@ import sys
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from appinfra.runtime import Chan, TaskDone
-from appinfra.service import Runner, Runtime, Service, State
+from appinfra.service import RunError, Runner, Runtime, Service, State
 from appinfra.service.runtime.owner import GiveUp, Owner, Ready, StopService
+from appinfra.service.runtime.runner import TEARING
 from tests.helpers.service.runner import SimpleService
 
 
@@ -143,6 +146,39 @@ def test_a_waiter_reached_twice_as_its_dependencies_leave_fails_once() -> None:
 
     assert a.state == State.FAILED and c.state == State.FAILED
     assert owner._runners == {}
+
+
+@pytest.mark.parametrize(
+    "state", [State.CREATED, State.FAILED], ids=["start", "restart-attempt"]
+)
+def test_a_stop_during_the_teardown_of_an_expired_setup_waits_for_it(
+    state: State,
+) -> None:
+    """setup() ended after its ready() expired, and the service is being torn
+    down: a stop_service() is answered once the teardown has settled, with the
+    service in the runtime until then; a restart attempt is not retried."""
+    owner = Runtime(MagicMock())._owner
+    runner = _admit(owner, SimpleService("late"), State.RUNNING)
+    runner._state = state  # Private: the owner moves it
+    if state == State.FAILED:
+        owner._restarting.add(runner.name)
+    # As _on_setup() leaves an expired setup
+    runner._error = RunError(runner.name, "not ready in time")
+    runner._teardown = TEARING
+    owner._tearing[runner.name] = 11
+    reply: Chan[Any] = Chan(1)
+
+    owner._on_stop_service(StopService(runner, reply))
+    with pytest.raises(TimeoutError):
+        reply.recv(timeout=0)  # not before the teardown settles
+    assert owner._runners.get(runner.name) is runner
+
+    with patch.object(owner, "_retry") as retry:
+        owner._on_teardown(runner, TaskDone(11, "late/teardown", None, None))
+
+    assert reply.recv(timeout=0) is None
+    assert runner.name not in owner._runners
+    retry.assert_not_called()
 
 
 def test_a_stop_queued_before_a_finished_backoff_ends_the_restart() -> None:
