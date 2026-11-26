@@ -535,6 +535,7 @@ class TestHandle:
             "cancel",
             "alive",
             "detach",
+            "stop",
             "kind",
             "process",
         }

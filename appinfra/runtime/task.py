@@ -105,6 +105,8 @@ class _Waits(Protocol):
 
     def _detach(self, t: _Task) -> None: ...
 
+    def _stop(self, t: _Task, timeout: float) -> None: ...
+
 
 @final
 class Task:
@@ -174,6 +176,19 @@ class Task:
         A task on a thread sees its token and returns."""
         self._t.cancel()
 
+    def stop(self, timeout: float) -> None:
+        """cancel(), and for a process task, an end within *timeout* seconds:
+        a child still running then gets SIGTERM, and SIGKILL a grace later.
+        A task on the loop or a thread cannot be forced: its token is all a
+        stop has. Returns at once.
+
+        Raises:
+            ValueError: If *timeout* is negative.
+        """
+        if timeout < 0:
+            raise ValueError(f"timeout must not be negative: {timeout}")
+        self._rt._stop(self._t, timeout)
+
     def alive(self) -> bool:
         """True while the task has not ended."""
         return not self._t.ended
@@ -229,6 +244,13 @@ class TaskProcess:
     def detail(self) -> ProcessDetail:
         """The child as it is now, or as it ended: read anew on each call."""
         return self._t.process_detail()
+
+    @property
+    def grace(self) -> float:
+        """Seconds a stop's forcing gives the child after SIGTERM, before
+        SIGKILL, and again after SIGKILL: a stop with *timeout* has run its
+        course *timeout* + 2 * grace seconds on."""
+        return self._t.grace()
 
     def terminate(self) -> None:
         """Send the child SIGTERM, now or once it has started; returns at once."""
@@ -380,6 +402,14 @@ class _Task(ABC):
     def process_detail(self) -> ProcessDetail:
         """The child of a process task, which overrides this; reached through
         Task.process, which only a process task has.
+
+        Raises:
+            TypeError: For a task of another kind.
+        """
+        raise TypeError(f"task {self.id} runs as {self.kind.value}, not a process")
+
+    def grace(self) -> float:
+        """The forcing grace of a process task, which overrides this.
 
         Raises:
             TypeError: For a task of another kind.

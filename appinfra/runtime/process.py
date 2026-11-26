@@ -28,6 +28,10 @@ START_METHOD: Final = "spawn"
 # What terminate() and kill() ask of a child, the stronger one winning
 _TERMINATE, _KILL = 1, 2
 
+# Seconds a child forced to end gets after SIGTERM, and then after SIGKILL:
+# on top of the timeout of the stop that forces it
+_GRACE = 2.0
+
 
 class _ProcessTask(_ThreadTask):
     """Calls a function in a child process, started with the ``spawn`` method:
@@ -168,6 +172,10 @@ class _ProcessTask(_ThreadTask):
             self._ended = ProcessDetail(process.pid, process.exitcode, alive=False)
             self._process = None
             process.close()
+
+    def grace(self) -> float:
+        """_GRACE: read on each call, so a test can shorten it."""
+        return _GRACE
 
     def process_detail(self) -> ProcessDetail:
         """The child as it is now: running, or ended and not yet reaped; as

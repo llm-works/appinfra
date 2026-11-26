@@ -9,6 +9,7 @@ import asyncio
 import functools
 import multiprocessing as mp
 import random
+import signal
 import threading
 from collections.abc import Iterator
 from unittest.mock import MagicMock, patch
@@ -16,7 +17,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from appinfra.log import Logger
-from appinfra.runtime import Chan
+from appinfra.runtime import Chan, TaskKind
 from appinfra.service import (
     AsyncService,
     CycleError,
@@ -269,6 +270,45 @@ class HealthFails(Service):
         raise RuntimeError("no health")
 
 
+class IgnoresItsStop(Service):
+    """Runs in its subprocess until a signal ends it: never looks at stopping."""
+
+    def __init__(self) -> None:
+        self._lg = Logger(name="test")
+
+    @property
+    def name(self) -> str:
+        return "ignores-its-stop"
+
+    def run(self) -> None:
+        threading.Event().wait()
+
+
+class TestStopEscalation:
+    def test_an_isolated_run_outliving_its_stop_is_terminated(self, rt):
+        """stop_service(timeout): a run still going at *timeout* gets SIGTERM,
+        and the stop returns once it has ended."""
+        runner = rt.spawn(IgnoresItsStop(), isolate=True)
+        rt.ready(runner, timeout=30.0)
+        task = runner.task
+
+        rt.stop_service(runner, timeout=0.2)
+        assert task.process.detail().exitcode == -signal.SIGTERM
+        assert runner.task is None
+
+    @pytest.mark.parametrize("stop", ["stop_service", "stop"])
+    def test_a_negative_timeout_is_refused(self, rt, stop):
+        runner = rt.spawn(Parked("async"))
+        args = (runner,) if stop == "stop_service" else ()
+        with pytest.raises(ValueError, match="negative"):
+            getattr(rt, stop)(*args, timeout=-1.0)
+        assert runner.state != State.STOPPING  # nothing was asked of it
+
+    def test_a_policy_refuses_a_negative_stop_timeout(self):
+        with pytest.raises(ValueError, match="negative"):
+            RestartPolicy(stop_timeout=-1.0)
+
+
 class TestSpawn:
     def test_each_kind_runs(self, rt):
         """On the loop, on a thread, and in a process of its own."""
@@ -280,6 +320,26 @@ class TestSpawn:
         rt.ready(*runners, timeout=30.0)
         assert all(isinstance(r, Runner) for r in runners)
         assert {r.state for r in runners} == {State.RUNNING}
+
+    def test_a_runner_shows_the_task_its_service_runs_on(self, rt):
+        """runner.task is the runtime task of the run: on the loop, on a
+        thread, or in a process, whose child it exposes; none once stopped."""
+        loop, thread, isolated = (
+            rt.spawn(Parked("async")),
+            rt.spawn(Blocking("thread", [])),
+            rt.spawn(InProcess(), isolate=True),
+        )
+        rt.ready(loop, thread, isolated, timeout=30.0)
+        assert [r.task.kind for r in (loop, thread, isolated)] == [
+            TaskKind.LOOP,
+            TaskKind.THREAD,
+            TaskKind.PROCESS,
+        ]
+        assert thread.task.process is None
+        assert isolated.task.process.detail().alive
+
+        rt.stop_service(isolated, timeout=30.0)
+        assert isolated.task is None
 
     def test_an_isolated_setup_error_reaches_ready(self, rt):
         """setup() fails in the service's own process: ready() raises that

@@ -22,6 +22,7 @@ from types import TracebackType
 from typing import Any, final
 
 from ..log import Logger
+from . import process as process_module
 from .chan import Chan, ClosedError, Sender
 from .errors import StoppedError
 from .loop import LoopHost, _LoopTask
@@ -29,10 +30,6 @@ from .process import START_METHOD, _ProcessTask
 from .stop import StopToken
 from .task import Task, TaskDone, _current_task, _Task
 from .thread import _ThreadTask
-
-# Seconds a process task's child still running past stop()'s timeout gets
-# after SIGTERM, and then after SIGKILL: on top of the timeout
-_GRACE = 2.0
 
 
 @final
@@ -278,6 +275,16 @@ class Runtime:
         if ended:
             self._log_failure(t)
 
+    def _stop(self, t: _Task, timeout: float) -> None:
+        """Task.stop(): cancel *t*; a killable one still running *timeout*
+        seconds on is terminated, then killed _GRACE seconds later, on the
+        loop's timers. Once the loop is stopping, stop() escalates instead."""
+        t.cancel()
+        if not t.killable or t.ended:
+            return
+        with contextlib.suppress(RuntimeError):  # the loop is stopping
+            self._host._schedule(functools.partial(_force_later, t, timeout))
+
     def _on_end(self, t: _Task) -> None:
         """Once *t*'s call has ended: forget it, wake the awaits waiting for
         it, then, if it is detached, send its end on its *done*, or log its
@@ -463,9 +470,28 @@ def _escalate(late: list[_Task]) -> list[_Task]:
             break
         for t in late:
             end(t)
-        grace = time.monotonic() + _GRACE
+        grace = time.monotonic() + process_module._GRACE
         late = [t for t in late if not t.join(max(0.0, grace - time.monotonic()))]
     return late
+
+
+def _force_later(t: _Task, timeout: float) -> None:
+    """On the loop: terminate *t* *timeout* seconds from now, if it still runs."""
+    asyncio.get_running_loop().call_later(timeout, _terminate_late, t)
+
+
+def _terminate_late(t: _Task) -> None:
+    """On the loop: terminate *t*, which outlived its stop's timeout, and kill
+    it _GRACE seconds later if it outlives that too."""
+    if not t.ended:
+        t.terminate()
+        asyncio.get_running_loop().call_later(process_module._GRACE, _kill_late, t)
+
+
+def _kill_late(t: _Task) -> None:
+    """On the loop: kill *t*, which outlived its SIGTERM's grace."""
+    if not t.ended:
+        t.kill()
 
 
 def _async_callable(fn: Callable[..., Any]) -> bool:
