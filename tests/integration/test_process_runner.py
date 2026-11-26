@@ -13,6 +13,7 @@ from appinfra.app.fastapi.runtime.process import ProcessRunner
 from appinfra.log import Logger
 from appinfra.service import (
     InvalidTransitionError,
+    RunError,
     Service,
     State,
     StopToken,
@@ -145,19 +146,27 @@ class TestProcessRunnerIntegration:
 
     def test_stop_during_start_leaves_no_child_behind(self, lg):
         """A stop() that lands between STARTING and the spawn does not report
-        STOPPED for a child start() is about to spawn; with no time to wait
-        it returns, and a later stop() ends the child."""
+        STOPPED for a child start() is about to spawn; with no time to wait it
+        returns, and the start, once it has spawned the child, stops it and
+        raises: the stop is not lost."""
         runner = ProcessRunner(SimpleProcessService(lg, name="held-start"))
         starting, release = threading.Event(), threading.Event()
         launch = runner._launch
+        errors: list[Exception] = []
 
         def held_launch() -> None:
             starting.set()
             release.wait(5.0)  # holds start() STARTING, before it spawns
             launch()
 
+        def start() -> None:
+            try:
+                runner.start()
+            except RunError as e:
+                errors.append(e)
+
         runner._launch = held_launch  # type: ignore[method-assign]
-        first = threading.Thread(target=runner.start)
+        first = threading.Thread(target=start)
         first.start()
         try:
             assert starting.wait(5.0)
@@ -165,10 +174,11 @@ class TestProcessRunnerIntegration:
             assert runner.state == State.STARTING
         finally:
             release.set()
-            first.join(5.0)
+            first.join(10.0)
 
-        runner.wait_healthy(timeout=5.0)
-        runner.stop()
+        assert [str(e) for e in errors] == ["held-start: stopped during startup"], (
+            errors
+        )
         assert runner.state == State.STOPPED
         assert not runner.is_alive()
 

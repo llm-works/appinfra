@@ -13,11 +13,12 @@ wait_healthy() and check() may be called from any thread, under a lock.
 from __future__ import annotations
 
 import contextlib
+import functools
 import multiprocessing as mp
 import sys
 import threading
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from multiprocessing.connection import Connection
 from multiprocessing.context import BaseContext
@@ -27,8 +28,9 @@ from typing import Any
 
 from ....log import Logger
 from ....log.mp import LogQueueListener
-from ....runtime import StopToken
+from ....runtime import StoppedError, StopToken
 from ....service import (
+    AsyncService,
     HealthTimeoutError,
     InvalidTransitionError,
     RestartPolicy,
@@ -69,7 +71,16 @@ class ProcessRunner:
                 None uses multiprocessing's default. Under fork, a restart forks
                 from the monitor thread, which Python 3.12+ warns may deadlock the
                 child; spawn or forkserver avoids it.
+
+        Raises:
+            TypeError: If *service* is an AsyncService: the subprocess calls
+                run() on no event loop.
         """
+        if isinstance(service, AsyncService):
+            raise TypeError(
+                f"async service '{service.name}' cannot run in a process of "
+                "its own: an async service runs on an event loop"
+            )
         self.service = service
         # Before setup(), which may already derive from it
         self.service.stopping = StopToken()
@@ -86,6 +97,11 @@ class ProcessRunner:
         # condition; it shares _lock, which guards both fields.
         self._start_thread: int | None = None
         self._start_done: threading.Condition | None = None
+        # Counts the runs start() has claimed, under _lock: a wait_healthy()
+        # acts only on the run it began waiting for, not one started since
+        self._run = 0
+        # The thread stopping the subprocess, under _lock: one stop at a time
+        self._stopper: int | None = None
         self._init_handles()
         # Monitor thread for auto-restart
         self._monitor_thread: threading.Thread | None = None
@@ -152,11 +168,27 @@ class ProcessRunner:
             SetupError: If setup fails.
             RunError: If execution fails to start.
         """
-        with self._start_claim():
+        self._start(self._claim_start)
+
+    def _start(self, claim: Callable[[], int]) -> None:
+        """Set up and launch a run, once *claim* has claimed the start.
+
+        A stop() that ended the run meanwhile, with no time left to wait for
+        this start, has its effect once the child is spawned: it is stopped
+        here, through its stop pipe, so it tears down as on any stop. The
+        child is spawned first because teardown() runs in it.
+
+        Raises:
+            RunError: If a stop() ended the run during the start.
+        """
+        with self._start_claim(claim) as run:
             self._run_setup()
             self._transition(State.INITD)
             self._transition(State.STARTING)
             self._launch()
+            if self._run != run:
+                self._stop_process(None)
+                raise RunError(self.name, "stopped during startup")
 
     def _launch(self) -> None:
         """Spawn the service's subprocess."""
@@ -243,19 +275,19 @@ class ProcessRunner:
                 setattr(self.service, "_lg", saved_lg)
 
     @contextmanager
-    def _start_claim(self) -> Iterator[None]:
-        """Hold the start for one start() call, from its state check until it
-        returns or raises. A second start() fails before it calls setup(), and
-        a stop() from another thread waits for the claim to be released
-        (_await_start()).
+    def _start_claim(self, claim: Callable[[], int]) -> Iterator[int]:
+        """Hold the start for one start() call, from its state check (*claim*)
+        until it returns or raises, and yield the run it claimed. A second
+        start() fails before it calls setup(), and a stop() from another thread
+        waits for the claim to be released (_await_start()).
 
         Raises:
             InvalidTransitionError: If the runner is not CREATED, STOPPED or
                 FAILED, or another start() is in progress.
         """
-        self._claim_start()
+        run = claim()
         try:
-            yield
+            yield run
         finally:
             with self._lock:
                 self._start_thread = None
@@ -263,22 +295,51 @@ class ProcessRunner:
                     self._start_done.notify_all()
                     self._start_done = None
 
-    def _claim_start(self) -> None:
+    def _claim_start(self) -> int:
         """Check under the lock that the runner can start and no other start()
         is in progress, claim the start, and reset the stop request there
         (_reset_stop()), before a stop() from another thread can reach this
         start: such a stop() waits for the claim.
 
+        Returns:
+            The run claimed.
+
         Raises:
             InvalidTransitionError: If the runner is not CREATED, STOPPED or
-                FAILED, or another start() is in progress.
+                FAILED, is FAILED with its child still alive (a wait_healthy()
+                that timed out leaves it so: stop() it first), or another
+                start() is in progress.
         """
         with self._lock:
-            startable = self._state in (State.CREATED, State.STOPPED, State.FAILED)
-            if self._start_thread is not None or not startable:
-                raise InvalidTransitionError(self.name, self._state, State.INITD)
-            self._start_thread = threading.get_ident()
-            self._reset_stop()
+            return self._claim_locked()
+
+    def _claim_restart(self, run: int) -> int:
+        """Claim the start of a restart of *run*, which failed, as
+        _claim_start() does, unless a stop() has ended *run* since.
+
+        Returns:
+            The run claimed.
+
+        Raises:
+            StoppedError: If a stop() ended *run*: the restart is cancelled.
+            InvalidTransitionError: As for _claim_start().
+        """
+        with self._lock:
+            if self._run != run:
+                raise StoppedError()
+            return self._claim_locked()
+
+    def _claim_locked(self) -> int:
+        """_claim_start()'s check and claim, under the lock; returns the run."""
+        startable = self._state in (State.CREATED, State.STOPPED, State.FAILED)
+        if self._state == State.FAILED and self.is_alive():
+            startable = False
+        if self._start_thread is not None or not startable:
+            raise InvalidTransitionError(self.name, self._state, State.INITD)
+        self._start_thread = threading.get_ident()
+        self._run += 1
+        self._reset_stop()
+        return self._run
 
     def _await_start(self, timeout: float) -> bool:
         """Wait up to *timeout* seconds for a start() in progress on another
@@ -334,30 +395,42 @@ class ProcessRunner:
         on_start_thread = self._start_thread == threading.get_ident()
         if not on_start_thread and not self._await_start(timeout):
             raise HealthTimeoutError(self.name, timeout)
+        run = self._run  # the run waited for; a later one is not this wait's
 
         while time.monotonic() - start < timeout:
+            if self._run != run:
+                raise RunError(self.name, "stopped during startup")
             # FAILED: the run ended before it was healthy, settled by the
             # runner; not alive: a process that is gone, which nothing settles
             if self._state == State.FAILED or not self.is_alive():
                 self._handle_execution_exit()
 
             if self.is_healthy():
-                # Only from STARTING: another waiter may have moved it already,
-                # which is success; the run ending or a stop() first is not
-                if self._transition_from(State.STARTING, State.RUNNING):
-                    self._retries = 0
-                elif self._state == State.FAILED:
-                    self._handle_execution_exit()
-                elif self._state not in (State.RUNNING, State.IDLE):
-                    raise RunError(self.name, "stopped during startup")
+                self._settle_healthy(run)
                 return
 
             time.sleep(interval)
 
-        # Guard transition - the process may have ended meanwhile
-        if self._state not in (State.FAILED, State.STOPPED, State.DONE):
-            self._transition(State.FAILED)
+        if not self._fail_run(run):
+            raise RunError(self.name, "stopped during startup")
         raise HealthTimeoutError(self.name, timeout)
+
+    def _settle_healthy(self, run: int) -> None:
+        """*run* reported healthy: it is RUNNING, from STARTING only. Another
+        waiter may have moved it already, which is success; the run ending, a
+        stop() or a later run first is not.
+
+        Raises:
+            RunError: If the run ended or was stopped before.
+        """
+        if self._transition_from(run, State.STARTING, State.RUNNING):
+            self._retries = 0
+        elif self._run != run:
+            raise RunError(self.name, "stopped during startup")
+        elif self._state == State.FAILED:
+            self._handle_execution_exit()
+        elif self._state not in (State.RUNNING, State.IDLE):
+            raise RunError(self.name, "stopped during startup")
 
     def _handle_execution_exit(self) -> None:
         """Handle execution exit during health wait."""
@@ -395,6 +468,7 @@ class ProcessRunner:
         """Wait the policy's backoff, then attempt a restart."""
         if not self.can_restart:
             return False
+        run = self._run  # the failed run: a stop() from now on ends it
         backoff = min(
             self.policy.backoff * (self.policy.backoff_multiplier**self._retries),
             self.policy.max_backoff,
@@ -404,19 +478,24 @@ class ProcessRunner:
         self._retries += 1
         try:
             time.sleep(backoff)
-            return self._attempt_restart()
+            return self._attempt_restart(run)
         finally:
             self._restarting = False
 
-    def _attempt_restart(self) -> bool:
-        """Stop the failed run, start again and wait until healthy; a failure is
-        logged. Cleans up via _stop_for_restart() first, so no residual state of
-        the failed run remains."""
+    def _attempt_restart(self, run: int) -> bool:
+        """Stop the failed *run*, start again and wait until healthy; a failure
+        is logged. Cleans up via _stop_for_restart() first, so no residual state
+        of the failed run remains. A stop() that ended *run* meanwhile cancels
+        the restart, checked again when its start is claimed."""
+        if self._run != run:
+            return False
         try:
             self._stop_for_restart()
-            self.start()
+            self._start(functools.partial(self._claim_restart, run))
             self.wait_healthy()
             return True
+        except StoppedError:
+            return False
         except Exception as e:
             self.service.lg.warning(
                 "restart failed",
@@ -506,7 +585,12 @@ class ProcessRunner:
     def stop(self, timeout: float | None = None) -> None:
         """Stop the subprocess. A start() in progress on another thread is
         waited for first; that wait and the wait for the child to exit
-        gracefully take at most *timeout* (stop_timeout if None) together."""
+        gracefully take at most *timeout* (stop_timeout if None) together.
+
+        It ends the current run first, even with no child left to stop: a
+        restart of that run the monitor has under way starts nothing."""
+        with self._lock:
+            self._run += 1
         budget = self.stop_timeout if timeout is None else timeout
         began = time.monotonic()
         if not self._await_start(budget):
@@ -515,7 +599,9 @@ class ProcessRunner:
                 extra={"service": self.name, "timeout": budget},
             )
             return
-        if self._state in (State.CREATED, State.STOPPED, State.STOPPING, State.DONE):
+        # STOPPING goes on: a stop the child outlived is finished here, and
+        # one in progress on another thread is left to it (_stop_process())
+        if self._state in (State.CREATED, State.STOPPED, State.DONE):
             return
 
         # Stop monitor thread first
@@ -528,11 +614,37 @@ class ProcessRunner:
         self._stop_process(None)
 
     def _stop_process(self, timeout: float | None) -> None:
-        """Signal the subprocess to stop, escalating to terminate and kill."""
-        self._transition(State.STOPPING)
-        if timeout is None:
-            timeout = self.stop_timeout
+        """Signal the subprocess to stop, escalating to terminate and kill. One
+        stop runs at a time: another one in progress is left to finish. From
+        STOPPING, which a child that outlived kill() leaves, it tries again."""
+        if not self._claim_stop():
+            return
+        try:
+            self._end_process(self.stop_timeout if timeout is None else timeout)
+        finally:
+            with self._lock:
+                self._stopper = None
 
+    def _claim_stop(self) -> bool:
+        """Claim the stop and move to STOPPING under the lock, unless another
+        stop is in progress.
+
+        Returns:
+            False if another stop is in progress.
+        """
+        with self._lock:
+            if self._stopper is not None:
+                return False
+            if self._state != State.STOPPING:
+                if State.STOPPING not in TRANSITIONS.get(self._state, set()):
+                    raise InvalidTransitionError(self.name, self._state, State.STOPPING)
+                self._state = State.STOPPING
+            self._stopper = threading.get_ident()
+        return True
+
+    def _end_process(self, timeout: float) -> None:
+        """Signal the subprocess to stop and wait for it, escalating to
+        terminate and kill; STOPPED once it is gone."""
         # Signal shutdown: the parent's token, and through the pipe the
         # subprocess's own. A write never waits for the reader, so a subprocess
         # that has died cannot block it.
@@ -558,8 +670,8 @@ class ProcessRunner:
         if process_stopped:
             self._cleanup_ipc()
             self._transition(State.STOPPED)
-        # If process still alive after kill, stay in STOPPING state
-        # and preserve IPC handles so supervisor can retry/monitor
+        # A process still alive after kill() leaves the runner STOPPING with its
+        # handles: a later stop() tries again and cleans up once it is gone
 
     def _cleanup_ipc(self) -> None:
         """Clean up IPC resources."""
@@ -593,17 +705,34 @@ class ProcessRunner:
 
     # -- state ------------------------------------------------------------------------
 
-    def _transition_from(self, from_state: State, to: State) -> bool:
-        """Transition to *to* if the state is *from_state*, checked under the
-        lock, so that two threads ending the same state cannot both do it.
+    def _transition_from(self, run: int, from_state: State, to: State) -> bool:
+        """Transition to *to* if *run* is still the current run and its state is
+        *from_state*, checked under the lock, so that two threads ending the
+        same state cannot both do it, nor one end a run started since.
 
         Returns:
             True if this call made the transition.
         """
         with self._lock:
-            if self._state != from_state:
+            if self._run != run or self._state != from_state:
                 return False
             self._state = to
+        return True
+
+    def _fail_run(self, run: int) -> bool:
+        """A wait_healthy() for *run* timed out: fail the run unless it has
+        settled already, checked under the lock.
+
+        Returns:
+            False if *run* is no longer the current run, which is left as it is.
+        """
+        with self._lock:
+            if self._run != run:
+                return False
+            if self._state not in (State.FAILED, State.STOPPED, State.DONE):
+                if State.FAILED not in TRANSITIONS.get(self._state, set()):
+                    raise InvalidTransitionError(self.name, self._state, State.FAILED)
+                self._state = State.FAILED
         return True
 
     def _transition(self, to: State) -> None:

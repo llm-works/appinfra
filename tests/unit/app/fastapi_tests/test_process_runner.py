@@ -12,7 +12,15 @@ import pytest
 
 from appinfra.app.fastapi.runtime.process import ProcessRunner
 from appinfra.log import Logger
-from appinfra.service import RestartPolicy, Service, SetupError, State
+from appinfra.service import (
+    AsyncService,
+    InvalidTransitionError,
+    RestartPolicy,
+    RunError,
+    Service,
+    SetupError,
+    State,
+)
 
 _PROCESS = "appinfra.app.fastapi.runtime.process"
 
@@ -309,6 +317,149 @@ class TestProcessRunner:
             mock_process.return_value.terminate.assert_called()
             mock_process.return_value.kill.assert_called()
 
+    def test_a_later_stop_finishes_a_stop_the_child_outlived(self, lg):
+        """A child alive even after kill() leaves the runner STOPPING with its
+        handles; once it has died, the next stop() reaps it and ends STOPPED."""
+        with (
+            _mock_mp_context() as (mock_process, _, _),
+            patch(f"{_PROCESS}.LogQueueListener"),
+        ):
+            # Alive through the first stop's join, terminate and kill; dead after
+            alive = itertools.chain([True, True, True], itertools.repeat(False))
+            mock_process.return_value.is_alive.side_effect = lambda: next(alive)
+            runner = ProcessRunner(MPSimpleService(lg))
+            runner.start()
+            runner._transition(State.RUNNING)
+
+            runner.stop()
+            assert runner.state == State.STOPPING
+            runner.stop()
+
+            assert runner.state == State.STOPPED
+            assert runner._process is None
+
+    def test_an_async_service_is_refused(self, lg):
+        """Its run() would return an unawaited coroutine in the subprocess."""
+
+        class Parked(AsyncService):
+            def __init__(self) -> None:
+                self._lg = lg
+
+            @property
+            def name(self) -> str:
+                return "parked"
+
+            async def run(self) -> None:
+                raise AssertionError("never run")
+
+        with pytest.raises(TypeError, match="cannot run in a process"):
+            ProcessRunner(Parked())
+
+    def test_a_failed_runner_with_a_live_child_does_not_start_again(self, lg):
+        """A FAILED runner whose child still runs, as after a wait_healthy() that
+        timed out, needs stop() first: a start() would replace the handles of a
+        child nothing could stop then."""
+        runner = ProcessRunner(MPSimpleService(lg))
+        runner._state = State.FAILED
+        runner._process = MagicMock()
+        runner._process.is_alive.return_value = True
+
+        with pytest.raises(InvalidTransitionError):
+            runner.start()
+        assert runner._start_thread is None
+
+    def test_a_failed_runner_whose_child_ended_starts_again(self, lg):
+        runner = ProcessRunner(MPSimpleService(lg))
+        runner._state = State.FAILED
+        runner._process = MagicMock()
+        runner._process.is_alive.return_value = False
+
+        runner._claim_start()  # no InvalidTransitionError
+        assert runner._start_thread is not None
+
+    def test_a_healthy_run_is_running_for_its_waiter(self, lg):
+        runner = ProcessRunner(MPSimpleService(lg))
+        runner._state = State.STARTING
+        with (
+            patch.object(runner, "is_alive", return_value=True),
+            patch.object(runner, "is_healthy", return_value=True),
+        ):
+            runner.wait_healthy(timeout=5.0)
+        assert runner.state == State.RUNNING
+
+    def test_a_waiter_does_not_mark_a_later_run_running(self, lg):
+        """The run waited for was stopped and another started between its
+        health check and the transition: the new run, not yet healthy, stays
+        STARTING and the waiter learns its run is gone."""
+        runner = ProcessRunner(MPSimpleService(lg))
+        runner._state = State.STARTING
+
+        def healthy_then_replaced() -> bool:
+            runner._run += 1  # stop() and start() of another run, on another thread
+            return True
+
+        with (
+            patch.object(runner, "is_alive", return_value=True),
+            patch.object(runner, "is_healthy", side_effect=healthy_then_replaced),
+            pytest.raises(RunError, match="stopped during startup"),
+        ):
+            runner.wait_healthy(timeout=5.0)
+        assert runner.state == State.STARTING
+
+    def test_a_waiter_timing_out_does_not_fail_a_later_run(self, lg):
+        runner = ProcessRunner(MPSimpleService(lg))
+        runner._state = State.STARTING
+
+        def replaced() -> bool:
+            runner._run += 1
+            return False
+
+        # A fake clock: one check within the timeout, then past it
+        clock = itertools.chain([0.0, 0.0], itertools.repeat(10.0))
+        with (
+            patch(f"{_PROCESS}.time.monotonic", side_effect=lambda: next(clock)),
+            patch(f"{_PROCESS}.time.sleep"),
+            patch.object(runner, "is_alive", return_value=True),
+            patch.object(runner, "is_healthy", side_effect=replaced),
+            pytest.raises(RunError, match="stopped during startup"),
+        ):
+            runner.wait_healthy(timeout=5.0)
+        assert runner.state == State.STARTING
+
+    def test_a_stop_between_the_restart_cleanup_and_its_start_cancels_it(self, lg):
+        """stop() lands after the restart stopped the failed child, which leaves
+        the runner STOPPED, and before the restart's start(): the restart
+        launches nothing once stop() has returned."""
+        runner = ProcessRunner(MPSimpleService(lg), RestartPolicy(backoff=0.0))
+        runner._state = State.FAILED
+
+        def cleaned_up_then_stopped() -> None:
+            runner._state = State.STOPPED
+            runner.stop()
+
+        with (
+            patch.object(runner, "_stop_for_restart", cleaned_up_then_stopped),
+            patch.object(runner, "_launch") as launch,
+        ):
+            assert runner._maybe_restart() is False
+        launch.assert_not_called()
+        assert runner.state == State.STOPPED
+
+    def test_a_restart_no_stop_interrupts_starts_again(self, lg):
+        runner = ProcessRunner(MPSimpleService(lg), RestartPolicy(backoff=0.0))
+        runner._state = State.FAILED
+
+        def cleaned_up() -> None:
+            runner._state = State.STOPPED
+
+        with (
+            patch.object(runner, "_stop_for_restart", cleaned_up),
+            patch.object(runner, "_launch") as launch,
+            patch.object(runner, "wait_healthy"),
+        ):
+            assert runner._maybe_restart() is True
+        launch.assert_called_once()
+
     def test_exit_code_not_started(self, lg):
         """exit_code returns None when not started."""
         svc = MPSimpleService(lg)
@@ -367,7 +518,7 @@ class TestProcessRunner:
                 "_stop_for_restart",
                 lambda: during.append(runner.restart_pending),
             ),
-            patch.object(runner, "start"),
+            patch.object(runner, "_start"),  # a restart's start
             patch.object(runner, "wait_healthy"),
         ):
             assert runner._maybe_restart()
