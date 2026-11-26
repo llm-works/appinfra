@@ -199,8 +199,10 @@ class Runtime:
             if runner.state not in UP:
                 raise RunError(runner.name, "the runtime stopped") from None
         except TimeoutError:
-            # Raises DependencyNotRunningError for a service still waiting
-            self._ask(functools.partial(Ready, runner, True))
+            # Raises DependencyNotRunningError for a service still waiting; a
+            # runtime stopped meanwhile has nothing more to say than the timeout
+            with contextlib.suppress(ChanClosedError):
+                self._ask(functools.partial(Ready, runner, True))
             raise HealthTimeoutError(runner.name, timeout) from None
 
     def _ask(

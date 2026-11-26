@@ -203,7 +203,7 @@ CREATED → INITD → STARTING → RUNNING → STOPPING → STOPPED → DONE
 | `INITD` | Setup completed successfully |
 | `STARTING` | Running, not yet healthy |
 | `RUNNING` | Healthy and serving |
-| `IDLE` | Between scheduled executions |
+| `IDLE` | Allowed after `RUNNING`; the Runtime does not enter it, and a `ScheduledService` ticks while `RUNNING` |
 | `STOPPING` | Shutdown in progress |
 | `STOPPED` | Cleanly stopped |
 | `FAILED` | Error occurred |

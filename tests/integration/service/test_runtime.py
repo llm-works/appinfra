@@ -228,6 +228,24 @@ class InProcess(Service):
         self.stopping.wait()
 
 
+class HealthFails(Service):
+    """Runs until stopping is set; is_healthy() raises. Module level, so the
+    spawn start method can pickle it."""
+
+    def __init__(self) -> None:
+        self._lg = Logger(name="test")
+
+    @property
+    def name(self) -> str:
+        return "health-fails"
+
+    def run(self) -> None:
+        self.stopping.wait()
+
+    def is_healthy(self) -> bool:
+        raise RuntimeError("no health")
+
+
 class TestSpawn:
     def test_each_kind_runs(self, rt):
         """On the loop, on a thread, and in a process of its own."""
@@ -283,6 +301,15 @@ class TestSpawn:
         runner = rt.spawn(NeverHealthy("sick"))
         with pytest.raises(HealthTimeoutError):
             rt.ready(runner, timeout=0.2)
+
+    @pytest.mark.parametrize("isolate", [False, True], ids=["in-process", "isolated"])
+    def test_a_health_check_that_raises_fails_the_start(self, rt, isolate):
+        """The error ends the run, in its process too, so ready() fails with
+        it rather than waiting out its timeout, which is the failure path."""
+        runner = rt.spawn(HealthFails(), isolate=isolate)
+        with pytest.raises(RunError, match="no health"):
+            rt.ready(runner, timeout=15.0)
+        assert runner.state == State.FAILED
 
     def test_independent_services_run_at_once(self, rt):
         """spawn() starts a service without waiting for its health, so services

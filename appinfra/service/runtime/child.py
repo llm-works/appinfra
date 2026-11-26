@@ -6,7 +6,6 @@ process task, and the parent's wait for the health the child reports."""
 
 from __future__ import annotations
 
-import contextlib
 import threading
 from typing import Any
 
@@ -26,7 +25,8 @@ def main(service: Service, healthy: Any, log_config: dict[str, Any]) -> None:
     stops. *healthy* is set once is_healthy() reports it.
 
     Raises:
-        SetupError: If setup() fails; whatever the run raised otherwise.
+        SetupError: If setup() fails; what is_healthy() raised, which ends the
+            run; whatever the run raised otherwise.
     """
     token = stopping()
     lg = Logger.from_queue_config(log_config, name=f"svc/{service.name}")
@@ -37,8 +37,12 @@ def main(service: Service, healthy: Any, log_config: dict[str, Any]) -> None:
         service.setup()
     except Exception as e:
         raise SetupError.of(service.name, e)  # noqa: B904  # of() sets the cause
+    failed: list[Exception] = []  # what is_healthy() raised, if it did
     threading.Thread(
-        target=_report_health, args=(service, healthy), name="health", daemon=True
+        target=_report_health,
+        args=(lg, service, healthy, failed),
+        name="health",
+        daemon=True,
     ).start()
     try:
         service.run()
@@ -48,6 +52,8 @@ def main(service: Service, healthy: Any, log_config: dict[str, Any]) -> None:
             service.teardown()
         except Exception as e:
             lg.warning("teardown failed", extra={"exception": e})
+    if failed:
+        raise failed[0]
 
 
 def wait_healthy(healthy: Any) -> bool:
@@ -65,13 +71,21 @@ def wait_healthy(healthy: Any) -> bool:
     return False
 
 
-def _report_health(service: Service, healthy: Any) -> None:
+def _report_health(
+    lg: Logger, service: Service, healthy: Any, failed: list[Exception]
+) -> None:
     """In the child: set *healthy* once the service reports it, unless the
-    run ends first."""
+    run ends first. An is_healthy() that raises ends the run, as it does for a
+    service in the parent's process: its error goes to *failed*, for main() to
+    raise, and the service's token stops."""
     token = service.stopping
-    with contextlib.suppress(Exception):
+    try:
         while not token.is_set():
             if service.is_healthy():
                 healthy.set()
                 return
             token.wait(HEALTH_INTERVAL)
+    except Exception as e:
+        lg.warning("service health check failed", extra={"exception": e})
+        failed.append(e)
+        token.stop()
