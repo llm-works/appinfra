@@ -6,7 +6,6 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import functools
 import multiprocessing as mp
 import random
@@ -17,6 +16,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from appinfra.log import Logger
+from appinfra.runtime import Chan
 from appinfra.service import (
     AsyncService,
     CycleError,
@@ -31,7 +31,7 @@ from appinfra.service import (
     SetupError,
     State,
 )
-from appinfra.service.runtime.owner import Ready
+from appinfra.service.runtime.owner import GiveUp
 from tests.helpers.service.runner import wait_until as _wait_until
 
 
@@ -178,13 +178,15 @@ class GatedSetup(Parked):
 
 
 class FailsInProcess(Service):
-    """Its run() fails in its process at once; setup(), there too, fails from
-    its second call on, counted across processes. Module level, so the spawn
-    start method can pickle it."""
+    """Healthy, its run() fails in its process once *go* is set; setup(), there
+    too, fails from its second call on, counted across processes. Module
+    level, so the spawn start method can pickle it."""
 
     def __init__(self) -> None:
         self._lg = Logger(name="test")
-        self.setups = mp.get_context("spawn").Value("i", 0)
+        ctx = mp.get_context("spawn")
+        self.setups = ctx.Value("i", 0)
+        self.go = ctx.Event()
 
     @property
     def name(self) -> str:
@@ -197,6 +199,7 @@ class FailsInProcess(Service):
                 raise RuntimeError("no second setup")
 
     def run(self) -> None:
+        self.go.wait(30.0)  # the deadline is the failure path
         raise RuntimeError("run fails")
 
 
@@ -231,6 +234,23 @@ class InProcess(Service):
         self.stopping.wait()
 
 
+class SetupFails(Service):
+    """setup() raises. Module level, so the spawn start method can pickle it."""
+
+    def __init__(self) -> None:
+        self._lg = Logger(name="test")
+
+    @property
+    def name(self) -> str:
+        return "setup-fails"
+
+    def setup(self) -> None:
+        raise RuntimeError("no database")
+
+    def run(self) -> None:
+        raise AssertionError("never run")
+
+
 class HealthFails(Service):
     """Runs until stopping is set; is_healthy() raises. Module level, so the
     spawn start method can pickle it."""
@@ -260,6 +280,13 @@ class TestSpawn:
         rt.ready(*runners, timeout=30.0)
         assert all(isinstance(r, Runner) for r in runners)
         assert {r.state for r in runners} == {State.RUNNING}
+
+    def test_an_isolated_setup_error_reaches_ready(self, rt):
+        """setup() fails in the service's own process: ready() raises that
+        SetupError, as for a service in this one."""
+        runner = rt.spawn(SetupFails(), isolate=True)
+        with pytest.raises(SetupError, match="setup-fails: setup failed: no database"):
+            rt.ready(runner, timeout=30.0)
 
     def test_an_isolated_launch_that_fails_fails_the_start(self, rt):
         """The service cannot be copied for its process: its start fails with
@@ -296,6 +323,16 @@ class TestSpawn:
 
         rt.stop_service(runner, timeout=5.0)
         assert runner.state == State.STOPPED
+
+    def test_a_runtime_not_started_has_no_services(self):
+        """Read before start(): no task answers yet, and none is needed."""
+        runtime = Runtime(MagicMock())
+        seen: list[dict[str, Runner]] = []
+        reader = threading.Thread(target=lambda: seen.append(runtime.services))
+        reader.daemon = True  # a read that blocks must not keep the process up
+        reader.start()
+        reader.join(5.0)  # the deadline is the failure path
+        assert seen == [{}]
 
     def test_spawn_needs_a_running_runtime(self):
         runtime = Runtime(MagicMock())
@@ -627,17 +664,18 @@ class TestSupervision:
         assert _wait_until(lambda: "fails" not in rt.services)
 
     def test_a_process_service_failing_its_last_restart_leaves_the_runtime(self, rt):
-        """Its run fails in its process, once restarted too: no attempt is left,
-        so the service leaves the runtime instead of staying FAILED in it."""
-        runner = rt.spawn(
-            FailsInProcess(), RestartPolicy(max_retries=1, backoff=0.0), isolate=True
-        )
-        with contextlib.suppress(RunError):  # it may die before it is healthy
-            rt.ready(runner, timeout=10.0)
+        """Its run fails in its process once running, and its restart fails too:
+        no attempt is left, so the service leaves the runtime instead of staying
+        FAILED in it."""
+        svc = FailsInProcess()
+        runner = rt.spawn(svc, RestartPolicy(max_retries=1, backoff=0.0), isolate=True)
+        rt.ready(runner, timeout=30.0)
+        svc.go.set()
 
         # A process starts in seconds; the deadline is the failure path
         assert _wait_until(lambda: "fails-in-process" not in rt.services, 30.0)
         assert runner.state == State.FAILED
+        assert svc.setups.value == 2  # restarted once
 
     def test_a_service_failing_to_start_is_not_restarted(self, rt):
         class FailsSetup(Parked):
@@ -895,7 +933,7 @@ class TestForeignRunners:
         assert _wait_until(lambda: runner.state == State.STARTING, 5.0)
 
         with pytest.raises(ValueError, match="not a service of runtime"):
-            rt._ask(functools.partial(Ready, runner, True))
+            rt._ask(functools.partial(GiveUp, runner, Chan(1)))
         assert runner.state == State.STARTING
 
 
@@ -919,7 +957,8 @@ class TestStopAndStart:
 
         stopper = threading.Thread(target=rt.stop)
         stopper.start()
-        assert _wait_until(lambda: rt._closing)  # Private: stop() has begun
+        # Private: the runtime's task has taken the stop, so setup() ends after it
+        assert _wait_until(lambda: rt._owner._closing)
         release.set()
         stopper.join(10.0)
 

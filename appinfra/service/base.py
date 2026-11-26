@@ -14,12 +14,14 @@ from ..runtime import StopToken
 class Service(ABC):
     """Base class for service definitions.
 
-    A Service defines WHAT to run - configuration and behavior.
-    The Runner handles HOW to run it and manages state.
+    A Service defines WHAT to run: configuration and behavior. The Runtime
+    runs it, each step as an appinfra.runtime task, and keeps its state in a
+    Runner.
 
     A plain Service implements run(), which holds its thread, or process, until
     the service is stopped. Two subclasses work differently:
-    - ScheduledService: the runner calls tick() every interval seconds
+    - ScheduledService: its run() is the tick loop, calling tick() every
+      interval seconds until the service is stopped
     - AsyncService: run() is a coroutine; many of them run as tasks on one
       event loop, and one waiting on an await holds no thread
 
@@ -185,7 +187,8 @@ class ScheduledService(Service):
 
     Its run() calls tick(), then waits ``interval`` seconds, until the service
     is stopped: ticks start interval plus tick() time apart. An exception from
-    tick() fails the service.
+    tick() fails the service. A subclass implements tick() and keeps run():
+    the Runtime refuses one that overrides it.
 
     Example:
         class MetricsCollector(ScheduledService):

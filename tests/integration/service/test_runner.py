@@ -114,10 +114,12 @@ class HealthyOnAnswer(SimpleService):
         super().__init__("healthy-on-answer")
         self.asked = threading.Event()
         self.answer = threading.Event()
+        self.returned = threading.Event()
 
     def is_healthy(self) -> bool:
         self.asked.set()
         assert self.answer.wait(5.0)  # the timeout is the failure path
+        self.returned.set()
         return True
 
 
@@ -247,7 +249,10 @@ class TestLifecycle:
         waiter = threading.Thread(target=wait)
         waiter.start()
         assert svc.asked.wait(5.0)  # the timeout is the failure path
-        rt.stop_service(runner)  # completes while the check holds a "healthy"
+        # Completes while the check still holds a "healthy": a stop that waited
+        # for the check would raise at its deadline, well before the check's
+        rt.stop_service(runner, timeout=2.0)
+        assert not svc.returned.is_set()
         svc.answer.set()
         waiter.join(5.0)
 
@@ -384,8 +389,9 @@ class TestScheduledService:
         assert runner.state == State.STOPPED
 
     def test_teardown_follows_the_last_tick(self, rt: Runtime) -> None:
-        """A stop ends the loop first: teardown() never overlaps tick()."""
-        ticked = threading.Event()
+        """A stop ends the loop first: teardown() never overlaps tick(). A tick
+        held when the stop comes keeps teardown() waiting until it returns."""
+        ticked, release = threading.Event(), threading.Event()
         calls: list[str] = []
 
         class Ticker(ScheduledService):
@@ -401,6 +407,7 @@ class TestScheduledService:
             def tick(self) -> None:
                 calls.append("tick")
                 ticked.set()
+                assert release.wait(5.0)  # the timeout is the failure path
 
             def teardown(self) -> None:
                 calls.append("teardown")
@@ -408,8 +415,14 @@ class TestScheduledService:
         runner = rt.spawn(Ticker())
         rt.ready(runner, timeout=5.0)
         assert ticked.wait(5.0)  # the timeout is the failure path
-
-        rt.stop_service(runner)
+        stopper = threading.Thread(target=rt.stop_service, args=(runner, 10.0))
+        stopper.start()
+        try:
+            assert wait_until(lambda: runner.state == State.STOPPING, 5.0)
+            assert calls == ["tick"]  # the tick is held: no teardown yet
+        finally:
+            release.set()
+            stopper.join(10.0)
 
         assert calls == ["tick", "teardown"]
         assert runner.state == State.STOPPED

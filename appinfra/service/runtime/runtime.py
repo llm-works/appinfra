@@ -20,7 +20,7 @@ from ...runtime import task_id as current_task_id
 from ..base import AsyncService, Service
 from ..errors import DependencyNotRunningError, HealthTimeoutError, RunError
 from ..state import RestartPolicy
-from .owner import UP, Owner, Ready, Services, Spawn, Stop, StopService
+from .owner import UP, GiveUp, Owner, Ready, Services, Spawn, Stop, StopService
 from .runner import Runner
 
 # Seconds a ready() that timed out waits for the runtime to take its giving
@@ -77,6 +77,8 @@ class Runtime:
     @property
     def services(self) -> dict[str, Runner]:
         """The services in the runtime by name, waiting ones included."""
+        if not self._started_runtime:  # no task to ask, and nothing spawned yet
+            return {}
         try:
             return dict(self._ask(Services))
         except ChanClosedError:  # stopped: its task has ended
@@ -194,8 +196,9 @@ class Runtime:
 
     def _await_ready(self, runner: Runner, left: float, timeout: float) -> None:
         """Wait up to *left* seconds for *runner*; raise why it is not ready."""
+        waited: Chan[Any] = Chan(1)  # its giving up takes this wait back
         try:
-            self._ask(functools.partial(Ready, runner, False), timeout=left)
+            self._ask_on(waited, Ready(runner, waited), timeout=left)
         except ChanClosedError:  # stopped: what its task left
             failure = self._owner.take_failure(runner)
             if failure is not None:
@@ -207,7 +210,7 @@ class Runtime:
             # runtime stopped meanwhile, or too busy to answer within the
             # grace, has nothing more to say than the timeout
             try:
-                self._ask(functools.partial(Ready, runner, True), GIVE_UP_GRACE)
+                self._ask(functools.partial(GiveUp, runner, waited), GIVE_UP_GRACE)
             except DependencyNotRunningError:  # a TimeoutError too: the answer
                 raise
             except (ChanClosedError, TimeoutError):
@@ -226,9 +229,20 @@ class Runtime:
             RuntimeError: If called from the runtime's own task (a state hook),
                 which would wait for itself.
         """
-        self._refuse_own_task()
         reply: Chan[Any] = Chan(1)
-        self._inbox.send(make(reply))
+        return self._ask_on(reply, make(reply), timeout)
+
+    def _ask_on(
+        self, reply: Chan[Any], request: object, timeout: float | None = None
+    ) -> Any:
+        """_ask() with a *request* built around *reply* by the caller, who
+        keeps it: a later request can name the wait.
+
+        Raises:
+            As _ask().
+        """
+        self._refuse_own_task()
+        self._inbox.send(request)
         outcome = reply.recv(timeout=timeout)
         if isinstance(outcome, BaseException):
             raise outcome

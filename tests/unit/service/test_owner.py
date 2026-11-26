@@ -10,7 +10,7 @@ from unittest.mock import MagicMock, patch
 
 from appinfra.runtime import Chan, TaskDone
 from appinfra.service import Runner, Runtime, Service, State
-from appinfra.service.runtime.owner import Owner, StopService
+from appinfra.service.runtime.owner import GiveUp, Owner, Ready, StopService
 from tests.helpers.service.runner import SimpleService
 
 
@@ -40,10 +40,57 @@ def _admit(owner: Owner, service: Service, state: State) -> Runner:
     runner = Runner(service)
     runner._owner = owner
     runner._state = state  # Private: the owner moves it
+    service.stopping = owner._root.child()
     owner._runners[runner.name] = runner
     if state != State.RUNNING:
         owner._deps.wait(service)
     return runner
+
+
+def test_a_health_check_outliving_its_run_does_not_pass_the_next_one() -> None:
+    """The run ended while its health check blocked in is_healthy(). The
+    check's late True belongs to that run: a later start of the service,
+    STARTING again, does not run on it."""
+    owner = Runtime(MagicMock())._owner
+    runner = _admit(owner, SimpleService("slow-check"), State.RUNNING)
+    runner._state = State.STARTING  # Private: the owner moves it
+    runner._task = MagicMock(id=9)  # its run
+    owner._health[runner.name] = 5  # its check, blocked
+
+    owner._on_run(runner, TaskDone(9, "slow-check/run", None, RuntimeError("x")))
+    owner._runners[runner.name] = runner  # started again, as a restart does
+    runner._state = State.STARTING
+    owner._on_health(runner, TaskDone(5, "slow-check/health", True, None))
+
+    assert runner.state == State.STARTING
+
+
+def test_services_that_leave_without_running_leave_no_token_behind() -> None:
+    """A waiter failed as its dependency leaves never reaches a run, which is
+    what detaches a token otherwise: leaving does, so the root holds none."""
+    owner = Runtime(MagicMock())._owner
+    db = _admit(owner, Named("db"), State.RUNNING)
+    _admit(owner, Named("api", "db"), State.CREATED)
+    db.service.stopping.detach()  # as its run did when it ended
+
+    owner._forget(db)
+
+    assert owner._root._children is None
+
+
+def test_a_ready_given_up_on_leaves_no_registration() -> None:
+    """A ready() on a service still waiting registers its reply channel; once
+    the caller gives up, that channel is gone, so repeated waits do not pile
+    up."""
+    owner = Runtime(MagicMock())._owner
+    runner = _admit(owner, Named("api", "db"), State.CREATED)
+    waited: Chan[Any] = Chan(1)
+
+    owner._on_ready(Ready(runner, waited))
+    assert owner._ready == {runner: [waited]}
+    owner._on_give_up(GiveUp(runner, waited, Chan(1)))
+
+    assert owner._ready == {}
 
 
 def test_a_chain_longer_than_the_recursion_limit_fails_to_its_end() -> None:
@@ -88,10 +135,8 @@ def test_a_stop_queued_before_a_finished_backoff_ends_the_restart() -> None:
     a stop_service(): cancelling it did nothing, and its success must not
     restart the stopped service. The stop is answered instead."""
     owner = Runtime(MagicMock())._owner
-    runner = Runner(SimpleService("restarting"))
-    runner._owner = owner
+    runner = _admit(owner, SimpleService("restarting"), State.RUNNING)
     runner._state = State.FAILED  # Private: the owner moves it
-    owner._runners[runner.name] = runner
     owner._restarting.add(runner.name)
     backoff = owner._backoffs[runner.name] = MagicMock(id=7)
     reply: Chan[Any] = Chan(1)

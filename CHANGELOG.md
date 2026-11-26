@@ -124,6 +124,8 @@ For API stability guarantees and deprecation policy, see
   The `_build_info.py` in the wheel carries the SPDX header.
 - The API reference and type checkers describe the real pydantic config models: each is defined
   once, no longer next to a placeholder of the same name.
+- Service errors (`SetupError`, `RunError`, …) can be pickled, so they reach the parent intact
+  from a process of their own.
 
 ## [0.15.0] - 2026-11-11
 

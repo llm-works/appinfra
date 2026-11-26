@@ -18,19 +18,30 @@ OWED, TEARING, TORN = 0, 1, 2
 
 
 def _check_service(service: object) -> Service:
-    """Check that *service* is a Service, and not both scheduled and async.
+    """Check that *service* is a Service, not both scheduled and async, and,
+    if scheduled, keeps its tick loop.
 
     Returns:
         *service*, typed as a Service.
 
     Raises:
-        TypeError: If it is not, or is both a ScheduledService and an AsyncService.
+        TypeError: If it is not, is both a ScheduledService and an AsyncService,
+            or is a ScheduledService overriding run(), its tick loop, which an
+            override would replace.
     """
     if not isinstance(service, Service):
         raise TypeError(f"service must be a Service, got {type(service)}")
     if isinstance(service, ScheduledService) and isinstance(service, AsyncService):
         raise TypeError(
             f"service '{service.name}' is both a ScheduledService and an AsyncService"
+        )
+    if isinstance(service, ScheduledService) and (
+        type(service).run is not ScheduledService.run
+    ):
+        raise TypeError(
+            f"scheduled service '{service.name}' overrides run(), its tick loop: "
+            "override tick() instead, and setup() or teardown() for what goes "
+            "around the loop"
         )
     return service
 
@@ -109,9 +120,10 @@ class Runner:
         return self._error
 
     def is_alive(self) -> bool:
-        """True while a step of the service runs: its setup, run or teardown."""
+        """True while a step of the service runs: its setup, run or teardown.
+        A teardown runs as a task of its own, beside the run or after it."""
         task = self._task
-        return task is not None and task.alive()
+        return (task is not None and task.alive()) or self._teardown == TEARING
 
     def on_state_change(self, hook: StateHook) -> None:
         """Register a callback for state changes; register it before the

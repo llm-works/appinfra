@@ -61,7 +61,15 @@ class Spawn:
 @dataclass(frozen=True, slots=True)
 class Ready:
     runner: Runner
-    give_up: bool  # the caller's wait timed out: why, and fail a start
+    reply: Chan[Any]
+
+
+@dataclass(frozen=True, slots=True)
+class GiveUp:
+    """A ready() timed out: why, and fail a start."""
+
+    runner: Runner
+    waited: Chan[Any]  # the reply channel of the Ready it waited on
     reply: Chan[Any]
 
 
@@ -195,16 +203,7 @@ class Owner:
 
     def _on_ready(self, m: Ready) -> None:
         runner = m.runner
-        if runner._owner is not self:  # another runtime's, or refused at spawn
-            _reply(
-                m.reply,
-                ValueError(
-                    f"{runner.name!r} is not a service of runtime {self._name!r}"
-                ),
-            )
-            return
-        if m.give_up:
-            self._give_up(runner, m.reply)
+        if self._refused_foreign(runner, m.reply):
             return
         failure = self._failures.pop(runner, None)
         if failure is not None:
@@ -219,9 +218,18 @@ class Owner:
             self._ready.setdefault(runner, []).append(m.reply)
             self._watch(runner)
 
-    def _give_up(self, runner: Runner, reply: Chan[Any]) -> None:
-        """A ready() timed out: name the missing dependency of a service still
-        waiting, or end the run of one still starting, which fails it."""
+    def _on_give_up(self, m: GiveUp) -> None:
+        """A ready() timed out: its wait is taken back, then name the missing
+        dependency of a service still waiting, or end the run of one still
+        starting, which fails it."""
+        runner, reply = m.runner, m.reply
+        if self._refused_foreign(runner, reply):
+            return
+        waits = self._ready.get(runner)
+        if waits is not None and m.waited in waits:
+            waits.remove(m.waited)
+            if not waits:
+                del self._ready[runner]
         waiting = self._deps.is_waiting(runner.name)
         if waiting and self._runners.get(runner.name) is runner:
             missing = self._deps.missing(runner.service)
@@ -230,6 +238,21 @@ class Owner:
         if runner.state == State.STARTING:
             self._end_run(runner)
         _reply(reply, None)
+
+    def _refused_foreign(self, runner: Runner, reply: Chan[Any]) -> bool:
+        """Refuse a runner this runtime did not admit: another runtime's, or
+        one refused at spawn.
+
+        Returns:
+            True if refused, with ValueError replied.
+        """
+        if runner._owner is self:
+            return False
+        error = ValueError(
+            f"{runner.name!r} is not a service of runtime {self._name!r}"
+        )
+        _reply(reply, error)
+        return True
 
     def _on_stop_service(self, m: StopService) -> None:
         if self._runners.get(m.runner.name) is not m.runner:
@@ -416,6 +439,9 @@ class Owner:
         if m.error is not None and not isinstance(m.error, StoppedError):
             runner._error = m.error
         _end_token(runner)
+        # A check blocked in is_healthy() outlives the run: what it reports
+        # later is the ended run's, and the next start gets a check of its own
+        self._health.pop(runner.name, None)
         if runner._teardown == OWED:
             self._tear(runner)
         elif runner._teardown == TORN:
@@ -685,9 +711,12 @@ class Owner:
 
     def _drop(self, runner: Runner) -> list[Runner]:
         """Take *runner* out of the runtime and answer its ready() calls;
-        return the services that were waiting on it."""
+        return the services that were waiting on it. Its token ends here too:
+        one that left without a run (refused, failed setup, a dependency gone)
+        never had it ended, and ending it again is a no-op."""
         name = runner.name
         waiting = [self._runners[w] for w in self._deps.drop(name)]
+        _end_token(runner)
         del self._runners[name]
         self._restarting.discard(name)
         self._isolated.discard(runner)
@@ -701,6 +730,7 @@ class Owner:
 _HANDLERS: dict[type, Callable[[Owner, Any], None]] = {
     Spawn: Owner._on_spawn,
     Ready: Owner._on_ready,
+    GiveUp: Owner._on_give_up,
     StopService: Owner._on_stop_service,
     Stop: Owner._on_stop,
     Services: Owner._on_services,

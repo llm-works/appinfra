@@ -15,6 +15,7 @@ from appinfra.service import (
     ScheduledService,
     State,
 )
+from appinfra.service.runtime.runner import TEARING, TORN
 from tests.helpers.service.runner import SimpleService
 
 
@@ -122,3 +123,25 @@ class TestRunner:
 
         disabled = RestartPolicy(restart_on_failure=False)
         assert not Runner(SimpleService(), disabled).can_restart
+
+    def test_a_scheduled_service_overriding_run_is_refused(self):
+        """Its run() is the tick loop: an override would replace it, and its
+        ticks would stop. tick(), setup() and teardown() are for overriding."""
+
+        class Looping(Ticker):
+            def run(self) -> None:
+                pass
+
+        with pytest.raises(TypeError, match="override tick"):
+            Runner(Looping())
+        Runner(Ticker())  # tick() alone is fine
+
+    def test_is_alive_through_a_teardown(self):
+        """A teardown in progress still holds the service's resources; the run
+        may have ended before it, or still be running beside it."""
+        runner = Runner(SimpleService())
+        assert not runner.is_alive()
+        runner._teardown = TEARING  # Private: the Runtime tracks it
+        assert runner.is_alive()
+        runner._teardown = TORN
+        assert not runner.is_alive()
