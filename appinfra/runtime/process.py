@@ -18,7 +18,8 @@ from typing import Any
 
 from .errors import ProcessExitError, StoppedError
 from .stop import StopToken
-from .task import _label, _Task, _ThreadTask
+from .task import _label, _Task
+from .thread import _ThreadTask
 
 # Seconds a child gets after terminate(), then after kill(), once the
 # runtime's stop has given up on it

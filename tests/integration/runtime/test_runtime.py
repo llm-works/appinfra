@@ -25,8 +25,8 @@ from appinfra.runtime import (
     task_id,
 )
 from appinfra.runtime.chan import pipe
-from appinfra.runtime.loop import LoopHost
-from appinfra.runtime.task import _LoopTask, _ThreadTask
+from appinfra.runtime.loop import LoopHost, _LoopTask
+from appinfra.runtime.thread import _ThreadTask
 from appinfra.testing import FakeClock
 
 

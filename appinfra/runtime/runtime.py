@@ -21,10 +21,11 @@ from typing import Any, final
 from ..log import Logger
 from .chan import Chan, ClosedError, Sender
 from .errors import StoppedError
-from .loop import LoopHost
+from .loop import LoopHost, _LoopTask
 from .process import _ProcessTask
 from .stop import StopToken
-from .task import Task, TaskDone, _current_task, _LoopTask, _Task, _ThreadTask
+from .task import Task, TaskDone, _current_task, _Task
+from .thread import _ThreadTask
 
 
 @final
