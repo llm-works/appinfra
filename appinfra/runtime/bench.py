@@ -100,11 +100,24 @@ def bytes_per_warmed(
     for a step costs tens of bytes more per item than one that does not, and
     which run pays depends on what ran before. Warmed, none does.
 
+    The warm-up is traced too: a table it drains does not shrink, so the
+    measured run may still replace it, and the new table is only offset by
+    freeing the old one if the old one was traced. A session the caller
+    started stays theirs.
+
     Raises:
         ValueError: If *count* is less than 1.
     """
-    end(start())
-    return bytes_per(start, count)
+    check_count(count)
+    owned = not tracemalloc.is_tracing()
+    if owned:
+        tracemalloc.start()
+    try:
+        end(start())
+        return bytes_per(start, count)
+    finally:
+        if owned:
+            tracemalloc.stop()
 
 
 @dataclass(frozen=True)

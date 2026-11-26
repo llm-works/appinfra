@@ -372,14 +372,24 @@ class _LoopTask(_Task):
 
     def _record(self, aio: asyncio.Task[Any]) -> None:
         """Record the outcome of *aio*, as _raised() does for a call that
-        raised. A cancelled one was cancelled by cancel() or the host's
-        shutdown, with the token stopped, which is a stop, or raised
-        CancelledError on its own, which is a failure."""
+        raised. It runs after the call ended, behind what was scheduled
+        before, which may stop the token: a cancelled task is told apart by
+        asyncio's record of it instead. One cancelled by cancel() or the
+        host's shutdown, asked to cancel once its token was stopped, is a
+        stop; one whose call raised CancelledError on its own, never asked
+        to, is a failure. A StoppedError the call raises is still read
+        against the token here, not when it was raised: no frame of the
+        runtime's wraps the call. The runtime raises it only on a stopped
+        token; a call raising it on a running one, with a stop landing before
+        this runs, is recorded as a stop."""
         if aio.cancelled():
+            if aio.cancelling() and self.token.is_set():
+                self.stopped = True
+                return
             try:
                 aio.result()
             except asyncio.CancelledError as e:
-                self._raised(e)
+                self.exception, self.exception_tb = e, e.__traceback__
             return
         error = aio.exception()
         if error is None:

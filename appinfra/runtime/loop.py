@@ -8,9 +8,6 @@ from __future__ import annotations
 import asyncio
 import threading
 from collections.abc import Callable
-from typing import TypeVar
-
-T = TypeVar("T")
 
 # Prefixed, as the stdlib names the threads it creates: a thread dump shows whose it is
 THREAD_NAME = "appinfra-loop"
@@ -96,25 +93,31 @@ class LoopHost:
         asyncio.run() does, and close it."""
         asyncio.set_event_loop(loop)
         try:
-            _resumed(loop.run_forever)
+            # Resumed only while no stop was asked for: run_forever() forgets
+            # a stop run in the iteration an exit left, and none comes again
+            _resumed(loop.run_forever, lambda: self._closing)
             tasks = asyncio.all_tasks(loop)
             for task in tasks:
                 task.cancel()
             gathered = asyncio.gather(*tasks, return_exceptions=True)
-            _resumed(lambda: loop.run_until_complete(gathered))
+            # Ends once everything gathered has: resumed until then
+            _resumed(lambda: loop.run_until_complete(gathered), lambda: False)
             loop.run_until_complete(loop.shutdown_asyncgens())
             loop.run_until_complete(loop.shutdown_default_executor())
         finally:
             loop.close()
 
 
-def _resumed(run: Callable[[], T]) -> T:
+def _resumed(run: Callable[[], object], done: Callable[[], bool]) -> None:
     """*run*, a run of the loop, resumed when a task's SystemExit or
-    KeyboardInterrupt comes out of it. asyncio records it as that task's
-    outcome, then re-raises it from the loop, which would end every other
-    task with it; the task's own end is already scheduled on the loop."""
+    KeyboardInterrupt comes out of it, unless *done*() says the run is over.
+    asyncio records the exit as that task's outcome, then re-raises it from
+    the loop, which would end every other task with it; the task's own end
+    is already scheduled on the loop."""
     while True:
         try:
-            return run()
+            run()
+            return
         except (SystemExit, KeyboardInterrupt):
-            continue
+            if done():
+                return

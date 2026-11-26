@@ -839,6 +839,19 @@ class TestTokens:
         with pytest.raises(asyncio.CancelledError):
             rt.spawn(raises).wait(timeout=5.0)
 
+    def test_a_cancelled_error_raised_before_a_stop_stays_a_failure(self, rt):
+        """A stop that lands after the function raised, before its end is
+        recorded, does not turn the failure into a stop."""
+
+        async def raises_then_is_stopped() -> None:
+            # Runs before the task's end is recorded: asyncio schedules that
+            # after the raise, behind this
+            asyncio.get_running_loop().call_soon(stopping().stop)
+            raise asyncio.CancelledError()
+
+        with pytest.raises(asyncio.CancelledError):
+            rt.spawn(raises_then_is_stopped).wait(timeout=5.0)
+
     def test_a_detached_task_failing_with_a_stopped_error_is_logged(self):
         lg = MagicMock()
         with Runtime(lg) as rt:
@@ -1567,3 +1580,38 @@ class TestStop:
         t = rt.spawn(rt.stop, 5.0)
         assert t.wait(timeout=10.0) is None
         assert rt._closing  # Private: the runtime stopped
+
+
+def _exits() -> None:
+    """A callback on the loop that raises SystemExit, as a task's step does
+    once the task raises it: asyncio re-raises it out of the loop."""
+    raise SystemExit()
+
+
+class TestLoopHostStop:
+    def test_a_stop_run_just_before_an_exit_still_ends_the_loop(self):
+        """The loop's stop and an exit in one iteration: the exit leaves
+        run_forever(), which forgets the stop on its way out. The loop must
+        not be resumed as if no stop had been asked for: no second one comes."""
+        host = LoopHost()
+        host.start()
+        held, release = threading.Event(), threading.Event()
+
+        def hold() -> None:
+            held.set()
+            release.wait(5.0)  # blocks the loop on purpose
+
+        host.loop.call_soon_threadsafe(hold)
+        assert held.wait(5.0)
+        stopping = threading.Thread(target=host.stop, args=(5.0,))
+        try:
+            stopping.start()
+            assert _wait_until(lambda: host._closing)  # Private: stop() begun
+            with host._lock:  # Private: stop() queues the loop's stop under it
+                pass
+            # Behind the stop, in the same iteration once the hold returns
+            host._loop.call_soon_threadsafe(_exits)  # Private: closing refuses
+        finally:
+            release.set()
+        stopping.join(10.0)  # the deadline is the failure path
+        assert host._thread is None  # Private: stop() saw the thread end
