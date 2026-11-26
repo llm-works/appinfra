@@ -544,7 +544,18 @@ class ProcessRunner:
 
         if self._fail_run(run) is None:
             raise RunError(self.name, "stopped during startup")
-        raise HealthTimeoutError(self.name, timeout)
+        error = HealthTimeoutError(self.name, timeout)
+        error.add_note(self._child_state())  # what became of the child
+        raise error
+
+    def _child_state(self) -> str:
+        """The child as a health timeout found it: alive, or how it ended."""
+        process = self._process
+        if process is None:
+            return "no child process"
+        if process.is_alive():
+            return f"child pid {process.pid} alive, never reported healthy"
+        return f"child pid {process.pid} exited with code {process.exitcode}"
 
     def _settle_healthy(self, run: int) -> None:
         """*run* reported healthy: it is RUNNING, from STARTING only. Another

@@ -3,9 +3,11 @@
 
 """Integration tests for ProcessRunner with real subprocesses."""
 
+import logging
 import multiprocessing as mp
 import queue
 import signal
+import sys
 import threading
 import time
 from collections.abc import Iterator
@@ -81,9 +83,15 @@ class TestProcessRunnerIntegration:
     """Integration tests for ProcessRunner with real subprocesses."""
 
     @pytest.fixture
-    def lg(self):
-        """Create a logger for tests."""
-        return Logger(name="test")
+    def lg(self) -> Iterator[Logger]:
+        """A logger whose records, the child's too, reach stderr: the log
+        listener hands a child's records to this logger's own handlers only,
+        so without one they are dropped, and a failure shows none of them."""
+        lg = Logger(name="test")
+        handler = logging.StreamHandler(sys.stderr)
+        lg.addHandler(handler)
+        yield lg
+        lg.removeHandler(handler)
 
     def test_full_lifecycle(self, lg):
         """Test full start -> healthy -> stop lifecycle."""
