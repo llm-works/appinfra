@@ -211,6 +211,7 @@ class Server:
             server_name=self._name,
             adapter=self._adapter,
             config=self._config,
+            context=mp.get_context(self._config.start_method),
             request_q=self._request_q,
             response_q=self._response_q,
         )

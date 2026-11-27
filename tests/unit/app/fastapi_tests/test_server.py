@@ -634,20 +634,19 @@ class TestServerStart:
             assert call_args[1]["port"] == 9000
 
 
-class TestUvicornServiceSetup:
-    """Tests for UvicornService.setup() validation."""
+class TestUvicornServiceConfig:
+    """UvicornService checks its configuration when made, in the parent: its
+    setup() runs in the child."""
 
     def test_rejects_multiple_workers(self):
-        """workers != 1 fails setup: the subprocess passes uvicorn an app object."""
+        """workers != 1 is refused: the subprocess passes uvicorn an app object."""
         from appinfra.app.fastapi.config.uvicorn import UvicornConfig
         from appinfra.app.fastapi.errors import ConfigError
         from appinfra.app.fastapi.runtime.service import UvicornService
 
         config = ApiConfig(uvicorn=UvicornConfig(workers=4))
-        service = UvicornService(MagicMock(), "api", MagicMock(), config)
-
         with pytest.raises(ConfigError, match="workers"):
-            service.setup()
+            UvicornService(MagicMock(), "api", MagicMock(), config, MagicMock())
 
     @pytest.mark.parametrize("port", [8000, 0])
     def test_name_is_the_server_name_whatever_the_port(self, port: int):
@@ -655,14 +654,25 @@ class TestUvicornServiceSetup:
         from appinfra.app.fastapi.runtime.service import UvicornService
 
         service = UvicornService(
-            MagicMock(), "myapi", MagicMock(), ApiConfig(port=port)
+            MagicMock(), "myapi", MagicMock(), ApiConfig(port=port), MagicMock()
         )
         assert service.name == "uvicorn-myapi"
 
-    def test_rejects_negative_port(self):
+    @pytest.mark.parametrize("port", [-1, 65536])
+    def test_rejects_a_port_out_of_range(self, port: int):
         from appinfra.app.fastapi.errors import ConfigError
         from appinfra.app.fastapi.runtime.service import UvicornService
 
-        service = UvicornService(MagicMock(), "api", MagicMock(), ApiConfig(port=-1))
         with pytest.raises(ConfigError, match="port"):
-            service.setup()
+            UvicornService(
+                MagicMock(), "api", MagicMock(), ApiConfig(port=port), MagicMock()
+            )
+
+    def test_rejects_no_host(self):
+        from appinfra.app.fastapi.errors import ConfigError
+        from appinfra.app.fastapi.runtime.service import UvicornService
+
+        with pytest.raises(ConfigError, match="Host"):
+            UvicornService(
+                MagicMock(), "api", MagicMock(), ApiConfig(host=""), MagicMock()
+            )
