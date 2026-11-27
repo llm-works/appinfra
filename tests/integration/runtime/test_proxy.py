@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import pickle
 import threading
+import time
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from typing import Any
@@ -16,7 +17,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from appinfra.runtime import Chan
+from appinfra.runtime import Chan, Runtime, StoppedError, stopping
 from appinfra.runtime.chan import ClosedError, Recv, Send
 from appinfra.runtime.chan.endpoint import Endpoint
 from appinfra.runtime.chan.link import link
@@ -53,6 +54,26 @@ def homed() -> Iterator[Callable[[int | None], Homed]]:
     for each in made:
         each.caller.close()
         each.home.close()
+
+
+@pytest.fixture
+def rt() -> Iterator[Runtime]:
+    runtime = Runtime(MagicMock())
+    runtime.start()
+    yield runtime
+    runtime.stop()
+
+
+def _parked(chan: Chan[Any], receivers: int) -> bool:
+    """Whether *receivers* receives wait at *chan*'s home before DUE: a call
+    parks there after its frame crosses the link, which signals nothing
+    here. The deadline is the failure path."""
+    deadline = time.monotonic() + DUE
+    while len(chan._receivers) != receivers:  # Private
+        if time.monotonic() > deadline:
+            return False
+        time.sleep(0.01)
+    return True
 
 
 def _in_thread(fn: Callable[[], Any]) -> tuple[threading.Thread, list[Any]]:
@@ -230,6 +251,75 @@ class TestLoop:
                 await h.proxy.arecv(timeout=DUE)
 
         asyncio.run(main())
+
+
+class TestStop:
+    def test_a_stopped_task_still_drains_what_needs_no_wait(
+        self, homed: Callable[[int | None], Homed], rt: Runtime
+    ) -> None:
+        """As on a local Chan: only a wait is refused, here at the home."""
+        h = homed(2)
+        h.chan.send("a")
+
+        def drain() -> list[str]:
+            stopping().stop()
+            h.proxy.send("b")  # room at the home: no wait
+            got = [h.proxy.recv(), h.proxy.recv()]
+            try:
+                h.proxy.recv()
+            except StoppedError:
+                got.append("stopped")
+            return got
+
+        assert rt.spawn(drain).wait(timeout=DUE) == ["a", "b", "stopped"]
+        assert _parked(h.chan, receivers=0)
+
+    def test_a_loop_task_whose_token_stops_still_drains(
+        self, homed: Callable[[int | None], Homed], rt: Runtime
+    ) -> None:
+        """Its token only: a loop task cancelled leaves its calls instead."""
+        h = homed(1)
+        h.chan.send("a")
+
+        async def drain() -> list[str]:
+            stopping().stop()
+            got = [await h.proxy.arecv()]
+            try:
+                await h.proxy.arecv()
+            except StoppedError:
+                got.append("stopped")
+            return got
+
+        assert rt.spawn(drain).wait(timeout=DUE) == ["a", "stopped"]
+        assert _parked(h.chan, receivers=0)
+
+    def test_a_waiting_task_ends_on_a_stop_and_leaves_the_home(
+        self, homed: Callable[[int | None], Homed], rt: Runtime
+    ) -> None:
+        """StoppedError comes with the home's answer: the wait has left the
+        home by then, and a value sent after it waits for the next receiver."""
+        h = homed(1)
+        t = rt.spawn(lambda: h.proxy.recv())
+        assert _parked(h.chan, receivers=1)
+        t.cancel()
+        with pytest.raises(StoppedError):
+            t.wait(timeout=DUE)
+        assert not h.chan._receivers  # Private: no wait left, at once
+        h.chan.send(1, timeout=0)
+        assert h.proxy.recv(timeout=DUE) == 1
+
+    def test_a_value_handed_over_before_the_stop_is_returned(
+        self, homed: Callable[[int | None], Homed], rt: Runtime
+    ) -> None:
+        """The home decided the call first: its answer is the value, which
+        the stopped call returns, not gives back."""
+        h = homed(0)
+        t = rt.spawn(lambda: h.proxy.recv())
+        assert _parked(h.chan, receivers=1)
+        h.chan.send(7, timeout=DUE)  # handed to the parked call
+        t.cancel()
+        assert t.wait(timeout=DUE) == 7
+        assert len(h.chan) == 0
 
 
 class TestRefused:

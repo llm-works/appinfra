@@ -16,6 +16,8 @@ from multiprocessing.connection import Connection, wait
 from multiprocessing.process import BaseProcess
 from typing import Any, Final
 
+from ..log import Logger
+from .chan.crossing import Crossing, close_child
 from .errors import ProcessExitError, StoppedError
 from .stop import StopToken
 from .task import ProcessDetail, TaskKind, _label, _Task
@@ -47,9 +49,14 @@ class _ProcessTask(_ThreadTask):
     note (PEP 678), which, unlike a cause, survives any later pickling, as a
     done pipe's, or the stop. A child that exits without one fails the task with
     ProcessExitError, unless the task was stopped.
+
+    A process Chan in the arguments pickles, as the child starts, as a
+    reference over a link made for the run, and arrives in the child as a
+    proxy; the runtime's logger, *lg*, is carried over for the child's end
+    of it (chan/crossing.py). A start that meets none makes no link.
     """
 
-    __slots__ = ("_process", "_lock", "_forced", "_ended")
+    __slots__ = ("_lg", "_process", "_lock", "_forced", "_ended")
 
     killable = True
 
@@ -57,6 +64,7 @@ class _ProcessTask(_ThreadTask):
 
     def __init__(
         self,
+        lg: Logger,
         on_end: Callable[[_Task], None],
         task_id: int,
         name: str | None,
@@ -64,8 +72,9 @@ class _ProcessTask(_ThreadTask):
         args: tuple[Any, ...],
         token: StopToken,
     ) -> None:
-        """Initialize task; see _Task."""
+        """Initialize task, logging to the runtime's *lg*; see _Task."""
         super().__init__(on_end, task_id, name, fn, args, token)
+        self._lg = lg
         # The child, once started. Under _lock: terminate() and kill() record
         # what they were asked in _forced and signal it, so a force between
         # the child's start and its publication is not lost; and _release()
@@ -80,6 +89,10 @@ class _ProcessTask(_ThreadTask):
         """Run *fn*(*args*) in a child and return or raise its outcome."""
         ctx = mp.get_context(START_METHOD)
         with contextlib.ExitStack() as ends:
+            # Closed last: it waits for the child's end of the link, which the
+            # child closes as it ends, told to stop by then on an early exit
+            crossing = Crossing(self._lg, ctx)
+            ends.callback(crossing.close)
             # Each end is closed on any exit from the moment it is opened
             outcome_recv, outcome_send = _opened(ends, ctx.Pipe(duplex=False))
             stop_recv, stop_send = _opened(ends, ctx.Pipe(duplex=False))
@@ -89,7 +102,9 @@ class _ProcessTask(_ThreadTask):
                 args=(self.id, self.name, fn, args, stop_recv, outcome_send),
                 name=_label(self.id, self.name),
             )
-            process.start()
+            with crossing.starting():  # the arguments are pickled here
+                process.start()
+            crossing.handed()
             self._publish(process)
             # The child has its copies: EOF on either side means the other end
             # is gone
@@ -239,7 +254,9 @@ def _child(
     before the child started is read here, before the call, not left to the
     listener thread to win the race against it: the runtime's stop signals a
     child before it forces it, so a child its stop forced before it was
-    started skips the call."""
+    started skips the call. The run's link, if a Chan in the arguments
+    opened one, closes before the outcome is sent: what its proxies posted
+    reaches the parent first."""
     token = StopToken()
     if stop.poll(0):  # a signal, or EOF: the parent is gone
         token.stop()
@@ -259,9 +276,11 @@ def _stop_on_signal(stop: Connection, token: StopToken) -> None:
 
 
 def _report(task: _Task, outcome: Connection) -> None:
-    """Send *task*'s outcome to the parent: pickled, once the bytes unpickle
-    here; else a RuntimeError naming why, in place of its result and error.
-    An error carries its traceback in the child as a note."""
+    """Close the run's link, if one was opened, then send *task*'s outcome
+    to the parent: pickled, once the bytes unpickle here; else a
+    RuntimeError naming why, in place of its result and error. An error
+    carries its traceback in the child as a note."""
+    close_child()
     error = task.exception
     note = None
     if error is not None:

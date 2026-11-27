@@ -12,7 +12,7 @@ import pickle
 import threading
 from collections import deque
 from collections.abc import Callable
-from typing import Any, Generic, NoReturn, TypeVar, cast
+from typing import Any, Generic, TypeVar, cast
 
 from ..errors import StoppedError
 from ..task import _current_token
@@ -221,14 +221,19 @@ class Chan(Generic[T]):
         except ClosedError:
             raise StopAsyncIteration from None
 
-    def __reduce__(self) -> NoReturn:
-        """Refused: a channel is pickled only on its way to a process task.
+    def __reduce__(self) -> tuple[Any, ...]:
+        """A process channel in a process task's arguments, as the runtime
+        starts its child: a reference to it, given by the start under way on
+        this thread (crossing.py). Refused anywhere else.
 
         Raises:
-            TypeError: Always.
+            TypeError: For a local channel, or with no start under way.
         """
         if not self._process:
             raise TypeError(_LOCAL_ONLY)
+        reference = getattr(_starting, "reference", None)
+        if reference is not None:
+            return cast(tuple[Any, ...], reference(self))
         raise TypeError(
             "a process Chan crosses to another process only over a link: in a "
             "process task's arguments, or inside a value sent on a process Chan"
@@ -361,6 +366,10 @@ class Chan(Generic[T]):
             at = bisect.bisect_right(self._given_back, seq, key=lambda e: e[0])
             self._given_back.insert(at, (seq, value))
 
+
+# The start of a process task's child under way on this thread, if any: its
+# `reference(chan)` gives the reduction of a process Chan in the arguments
+_starting = threading.local()
 
 _LOCAL_ONLY = (
     "a Chan(n) stays in the process that made it; make it Chan(n, process=True) "

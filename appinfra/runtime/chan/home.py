@@ -128,8 +128,9 @@ class Home:
             self._release(frame)
 
     def close(self) -> None:
-        """The link ended: drop the objects, and end the parked calls without
-        an answer, as no one is left to read it."""
+        """The link is ending: drop the objects, and end the parked calls
+        without an answer, as no one is left to read it. The Results decided
+        before are posted first: returns once the pump is done."""
         with self._lock:
             self._closed = True
             self._objects.clear()
@@ -138,7 +139,8 @@ class Home:
         for waiter in parked:
             waiter.chan._leave(waiter, waiter.queue, Outcome.GONE)
         self._deadlines.close()
-        self._outbox.close()
+        self._outbox.close()  # the pump drains what it holds, then ends
+        self._pump.join()
 
     def _call(self, call: Call) -> None:
         """Run *call* on its object: answered at once if it completes, else
