@@ -90,15 +90,25 @@ class Endpoint:
     and process, from the end of the link this process uses."""
 
     def __init__(self, lg: Logger, end: LinkEnd) -> None:
-        """Open *end* and start the reader and the pump."""
+        """Open *end* and start the reader and the pump; the link is closed
+        again if they cannot start."""
         self._lg = lg
         self._link = end.open()
+        try:
+            self._open()
+        except BaseException:
+            self._link.close()
+            raise
+
+    def _open(self) -> None:
+        """Make the home and start the threads, on the open link; the home is
+        closed again if they cannot start."""
         # Every frame this side sends, the home's Results too, in the order
         # posted; None ends the pump. Never blocks, and put() is safe from a
         # finalizer at any point (a proxy's Release)
         self._outbox: queue.SimpleQueue[Frame | None] = queue.SimpleQueue()
         self._codec = LinkCodec(self)  # process Chans in payloads as references
-        self.home = Home(lg, self._post, self._codec)
+        self.home = Home(self._lg, self._post, self._codec)
         # Guards _pending and _closed; held only for table changes
         self._lock = threading.Lock()
         self._ids = itertools.count(1)
@@ -110,8 +120,12 @@ class Endpoint:
         self._pumping = threading.Thread(
             target=self._pump, name="link-pump", daemon=True
         )
-        threading.Thread(target=self._read, name="link-read", daemon=True).start()
-        self._pumping.start()
+        try:
+            threading.Thread(target=self._read, name="link-read", daemon=True).start()
+            self._pumping.start()
+        except BaseException:
+            self.home.close()  # its pump runs: ended, not left behind
+            raise
 
     def proxy(self, object_id: int) -> Any:
         """The proxy of *object_id*, homed on the other side and handed over

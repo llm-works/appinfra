@@ -225,6 +225,32 @@ class _SlowToEncode:
         return (_SlowToEncode, ())
 
 
+class TestOpen:
+    def test_an_endpoint_that_fails_to_start_closes_its_link(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The endpoint's own threads cannot start: it raises, its link
+        already open, and closes it. The error is kept, with the half-made
+        endpoint, so no collection closes the link in its place."""
+        near, far = link()
+        other = far.open()
+        start = threading.Thread.start
+
+        def refused(self: threading.Thread) -> None:
+            if self.name.startswith("link-"):  # the link's own pipes start theirs
+                raise RuntimeError("can't start new thread")
+            start(self)
+
+        with monkeypatch.context() as patched:
+            patched.setattr(threading.Thread, "start", refused)
+            with pytest.raises(RuntimeError) as raised:
+                Endpoint(MagicMock(), near)
+        with pytest.raises(ClosedError):
+            other.recv(timeout=DUE)  # the near side's close, seen here
+        assert raised.value is not None
+        other.close()
+
+
 class TestClose:
     def test_an_answer_decided_before_the_close_still_goes_out(
         self, pair: Pair
