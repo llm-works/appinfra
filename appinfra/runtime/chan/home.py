@@ -218,8 +218,8 @@ class Home:
 
     def release(self, object_id: int, count: int) -> None:
         """Count *count* handings over of *object_id* as released, also for
-        ones that never reached a proxy (an encoding that failed, a value
-        given back); drop the object once all are."""
+        ones that never reached a proxy (an encoding that failed); drop the
+        object once all are."""
         with self._lock:
             export = self._objects.get(object_id)
             if export is None:
@@ -233,13 +233,12 @@ class Home:
         """Put the value of *frame* back in its object, received again in its
         send order, as a local receive that left after the hand-over does.
         Dropped with the object: released, no proxy is left to receive it.
+        Decoded even then: the Chans the other side handed over in it are
+        released by the proxies decoding makes, once the value is dropped.
 
         Dropped too if it cannot be decoded: it can fail to be rebuilt (a
         __reduce__ whose constructor raises), and the failure stays with it:
         raised here, it would end the reader, and the link with it."""
-        chan = self.exported(frame.object_id)
-        if chan is None:
-            return
         try:
             value = self._codec.decode(frame.value)
         except Exception as e:
@@ -247,6 +246,9 @@ class Home:
                 "returned value dropped: cannot be decoded",
                 extra={"object_id": frame.object_id, "exception": e},
             )
+            return
+        chan = self.exported(frame.object_id)
+        if chan is None:
             return
         with chan._lock:
             chan._return(value, frame.seq)

@@ -21,7 +21,7 @@ import pytest
 from appinfra.runtime import Chan
 from appinfra.runtime.chan import ClosedError
 from appinfra.runtime.chan.endpoint import Endpoint
-from appinfra.runtime.chan.link import link
+from appinfra.runtime.chan.link import Return, link
 from appinfra.runtime.chan.proxy import _ChanProxy
 
 # Seconds a call expected to end now may take: the failure path, not a wait
@@ -159,6 +159,19 @@ class TestRelease:
         back = linked.proxy.recv(timeout=DUE)
         assert back["reply"] is reply
         assert _released(linked.b, reply)
+
+    def test_a_value_given_back_to_an_object_gone_releases_its_chans(
+        self, linked: Linked
+    ) -> None:
+        """The proxy that left the receive is collected before its Result
+        comes: its Release reaches the home ahead of the Return, which finds
+        the object gone. The Chans the giving side handed over in it are
+        still released."""
+        gone_id = linked.a.home.register(Chan(1, process=True))
+        linked.a.home.release(gone_id, 1)
+        mine: Chan[Any] = Chan(1, process=True)
+        linked.b._post(Return(gone_id, linked.b._codec.encode({"x": mine}), 1))
+        assert _released(linked.b, mine)
 
 
 class TestRefused:
