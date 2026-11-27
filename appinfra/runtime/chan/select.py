@@ -17,7 +17,14 @@ from dataclasses import dataclass, field
 from typing import Any, cast
 
 from ..errors import StoppedError
-from .chan import Chan, _check_off_loop, _check_timeout, _check_valid, _on_stop
+from .chan import (
+    Chan,
+    _check_off_loop,
+    _check_timeout,
+    _check_valid,
+    _copied,
+    _on_stop,
+)
 from .errors import ClosedError
 from .pipe import Receiver, Sender
 from .waiter import LoopWaiter, Outcome, ThreadWaiter, Waiter
@@ -40,7 +47,8 @@ class Recv:
 @dataclass(frozen=True)
 class Send:
     """A select case: send *value* on *chan*, a Chan or a pipe's Sender. On
-    a Sender, the value is pickled here, so one that cannot be raises here."""
+    a Sender, the value is pickled here, and on a process Chan copied here,
+    as its send() does: one that cannot be raises here."""
 
     chan: Chan[Any] | Sender[Any]
     value: Any
@@ -53,6 +61,8 @@ class Send:
         """Resolve a Sender's case to its channel and the pickled value."""
         if isinstance(self.chan, Sender):
             target, payload = self.chan._chan, pickle.dumps(self.value)
+        elif self.chan._process:
+            target, payload = self.chan, _copied(self.value)
         else:
             target, payload = self.chan, self.value
         object.__setattr__(self, "_target", target)

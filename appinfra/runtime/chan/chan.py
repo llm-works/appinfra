@@ -7,10 +7,12 @@ from __future__ import annotations
 
 import asyncio
 import bisect
+import io
+import pickle
 import threading
 from collections import deque
 from collections.abc import Callable
-from typing import Any, Generic, TypeVar, cast
+from typing import Any, Generic, NoReturn, TypeVar, cast
 
 from ..errors import StoppedError
 from ..task import _current_token
@@ -50,9 +52,18 @@ class Chan(Generic[T]):
     depend on timing. Coroutines await ``asend()``/``arecv()``; sync code the
     loop runs uses ``timeout=0``. A send on an unbounded channel is the
     exception: it never waits, so it is allowed with any timeout.
+
+    ``Chan(n, process=True)`` can also be handed to a process task, and used
+    there as here. Every send stores a copy of its value, pickled at the
+    sender, so a value that cannot cross fails there, and every receiver,
+    wherever it runs, gets a value of its own. A process channel inside the
+    value stays itself, a reference as in Go; a local one is refused, as it
+    could not cross. A channel is pickled only on its way to a process task:
+    any other pickling raises TypeError.
     """
 
     __slots__ = (
+        "_process",
         "_capacity",
         "_lock",
         "_buffer",
@@ -63,15 +74,16 @@ class Chan(Generic[T]):
         "_receivers",
     )
 
-    def __init__(self, capacity: int | None) -> None:
+    def __init__(self, capacity: int | None, *, process: bool = False) -> None:
         """A channel buffering up to *capacity* values; 0 for none, None for
-        no bound.
+        no bound. A *process* channel can be handed to a process task.
 
         Raises:
             ValueError: If *capacity* is negative.
         """
         if capacity is not None and capacity < 0:
             raise ValueError(f"capacity must be 0 or more, or None, not {capacity}")
+        self._process = process
         self._capacity = capacity
         self._lock = threading.Lock()
         self._buffer: deque[T] = deque()
@@ -97,11 +109,15 @@ class Chan(Generic[T]):
             ValueError: If *timeout* is negative.
             RuntimeError: If called on an event loop's thread with a timeout
                 other than 0, on a bounded channel.
+            TypeError: On a process channel, if *value* holds a local channel;
+                and as pickle.dumps() for a value it cannot pickle.
         """
         if self._capacity is None:
             _check_valid(timeout)  # Never waits: allowed on the loop as well
         else:
             _check_off_loop(timeout, "send")
+        if self._process:
+            value = _copied(value)
         with self._lock:
             if self._put(value):
                 return
@@ -135,6 +151,8 @@ class Chan(Generic[T]):
         """Send *value*, awaiting up to *timeout* seconds for room. Raises as
         send(), except RuntimeError."""
         _check_valid(timeout)
+        if self._process:
+            value = _copied(value)
         with self._lock:
             if self._put(value):
                 return
@@ -200,6 +218,19 @@ class Chan(Generic[T]):
             return await self.arecv()
         except ClosedError:
             raise StopAsyncIteration from None
+
+    def __reduce__(self) -> NoReturn:
+        """Refused: a channel is pickled only on its way to a process task.
+
+        Raises:
+            TypeError: Always.
+        """
+        if not self._process:
+            raise TypeError(_LOCAL_ONLY)
+        raise TypeError(
+            "a process Chan crosses to another process only over a link: in a "
+            "process task's arguments, or inside a value sent on a process Chan"
+        )
 
     # The internals below, with _lock, _senders and _receivers, are also used
     # by home.py: a call from another process parks there as one more Waiter.
@@ -320,6 +351,63 @@ class Chan(Generic[T]):
         else:
             at = bisect.bisect_right(self._given_back, seq, key=lambda e: e[0])
             self._given_back.insert(at, (seq, value))
+
+
+_LOCAL_ONLY = (
+    "a Chan(n) stays in the process that made it; make it Chan(n, process=True) "
+    "to hand it to a process task"
+)
+
+
+def _copied(value: Any) -> Any:
+    """A copy of *value*, as a process channel stores it: pickled and
+    unpickled, the process channels in it kept as themselves.
+
+    Raises:
+        TypeError: If *value* holds a local channel; and as pickle.dumps()
+            for a value it cannot pickle.
+    """
+    refs: list[Chan[Any]] = []
+    buffer = io.BytesIO()
+    _Copier(buffer, refs).dump(value)
+    buffer.seek(0)
+    return _Restorer(buffer, refs).load()
+
+
+class _Copier(pickle.Pickler):
+    """Pickles a value for _copied(): each process channel in it as its index
+    in *refs*, which the unpickling side resolves back to the channel."""
+
+    def __init__(self, file: io.BytesIO, refs: list[Chan[Any]]) -> None:
+        """Pickle into *file*, the channels met appended to *refs*."""
+        super().__init__(file, pickle.HIGHEST_PROTOCOL)
+        self._refs = refs
+
+    def persistent_id(self, obj: Any) -> int | None:
+        """A channel's index in refs; None, pickled as usual, for the rest.
+
+        Raises:
+            TypeError: If *obj* is a local channel.
+        """
+        if not isinstance(obj, Chan):
+            return None
+        if not obj._process:
+            raise TypeError(_LOCAL_ONLY)
+        self._refs.append(obj)
+        return len(self._refs) - 1
+
+
+class _Restorer(pickle.Unpickler):
+    """Unpickles what _Copier pickled, each channel back from *refs*."""
+
+    def __init__(self, file: io.BytesIO, refs: list[Chan[Any]]) -> None:
+        """Unpickle from *file*, the channels taken from *refs*."""
+        super().__init__(file)
+        self._refs = refs
+
+    def persistent_load(self, pid: Any) -> Chan[Any]:
+        """The channel at index *pid*."""
+        return self._refs[int(pid)]
 
 
 def _first(queue: deque[Waiter]) -> Waiter | None:
