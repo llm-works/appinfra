@@ -53,6 +53,20 @@ class _Held:
     """A value only a home's parked call holds, watched for by its class."""
 
 
+def _raise_locked() -> Any:
+    """Decoding a _RaisesLocked: raises an error that cannot be pickled."""
+    error = ValueError("holds a lock")
+    error.lock = threading.Lock()  # type: ignore[attr-defined]
+    raise error
+
+
+class _RaisesLocked:
+    """Encodes, but its decoding raises an error holding a lock."""
+
+    def __reduce__(self) -> tuple[Any, ...]:
+        return (_raise_locked, ())
+
+
 def _freed(kind: type) -> bool:
     """Whether every instance of *kind* in this process is freed before DUE.
     A poll: nothing signals the moment the last reference goes."""
@@ -106,9 +120,11 @@ CODEC = Codec()
 
 
 def _decoded(frame: Any) -> Result:
-    """*frame*, a Result, with its value decoded if it has one."""
+    """*frame*, a Result, with its value or its error decoded."""
     assert isinstance(frame, Result)
-    if frame.error is not None or frame.cancelled:
+    if frame.error is not None:
+        return replace(frame, error=CODEC.decode(frame.error))
+    if frame.cancelled:
         return frame
     return replace(frame, value=CODEC.decode(frame.value))
 
@@ -139,10 +155,10 @@ class TestLink:
         a, b = near.open(), far.open()
         frames = [
             Call(1, 2, "send", CODEC.encode(({"x": [1, 2]},)), 3.0),
-            Result(1, value=(4, 5)),
-            Result(2, error=ValueError("no")),
+            Result(1, value=CODEC.encode((4, 5))),
+            Result(2, error=CODEC.encode(ValueError("no"))),
             Cancel(3),
-            Push(2, 7, "latest"),
+            Push(2, 7, CODEC.encode("latest")),
             Release(2, 1),
         ]
         try:
@@ -154,9 +170,7 @@ class TestLink:
         finally:
             a.close()
             b.close()
-        assert got[:1] + got[3:] == frames[:1] + frames[3:]
-        assert got[1] == frames[1]
-        assert isinstance(got[2], Result) and str(got[2].error) == "no"
+        assert got == frames  # payloads as bytes: every frame compares whole
         assert back == Result(9, cancelled=True)
 
     def test_a_link_that_cannot_be_made_leaves_no_pipe_open(self) -> None:
@@ -417,6 +431,18 @@ class TestHome:
         the calls after it go on."""
         homed.proxy.send(Call(1, homed.object_id, "send", b"not a pickle", DUE))
         assert homed.result().error is not None
+        homed.call(2, "len", timeout=DUE)
+        assert homed.result() == Result(2, value=0)
+
+    def test_an_error_that_cannot_be_pickled_crosses_as_one_naming_it(
+        self, homed: Homed
+    ) -> None:
+        """The decoding of the arguments raises an error holding a lock: the
+        call is still answered, with a RuntimeError naming the error."""
+        homed.call(1, "send", _RaisesLocked(), timeout=DUE)
+        error = homed.result().error
+        assert isinstance(error, RuntimeError)
+        assert "error not picklable: ValueError" in str(error)
         homed.call(2, "len", timeout=DUE)
         assert homed.result() == Result(2, value=0)
 

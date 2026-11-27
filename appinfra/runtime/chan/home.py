@@ -280,25 +280,38 @@ class Home:
             pass  # the link closed: the other side is gone
 
     def _deliver(self, result: Result) -> None:
-        """Send *result* on the link, its value encoded here, outside every
-        lock (encoding runs the value's own code); one that cannot be pickled
-        fails its call in its place, so the results after it still go. Its
-        value is lost: the call took it, and it could never cross the link.
+        """Send *result* on the link, its payload encoded here, outside every
+        lock (encoding runs the payload's own code).
 
         Raises:
             ClosedError: If the link is closed.
         """
-        try:
-            if result.error is None and not result.cancelled:
-                result = replace(result, value=self._codec.encode(result.value))
-            self._link.send(result)
-        except ClosedError:
-            raise
-        except Exception as e:  # pickle.dumps() raises what a value's reduce does
-            error = pickle.PicklingError(
-                f"result not picklable: {type(e).__name__}: {e}"
-            )
-            self._link.send(Result(result.call_id, error=error))
+        self._link.send(self._encoded(result))
+
+    def _encoded(self, result: Result) -> Result:
+        """*result* with its value or its error encoded. A value that cannot
+        be pickled fails its call in its place, so the results after it still
+        go; the value is lost: the call took it, and it could never cross the
+        link. An error that cannot be pickled crosses as a RuntimeError
+        naming it."""
+        if result.error is not None:
+            try:
+                return replace(result, error=self._codec.encode(result.error))
+            except Exception as e:  # pickle.dumps() raises what a reduce does
+                name = type(result.error).__qualname__
+                error: BaseException = RuntimeError(
+                    f"error not picklable: {name}: {type(e).__name__}: {e}"
+                )
+        elif result.cancelled:
+            return result
+        else:
+            try:
+                return replace(result, value=self._codec.encode(result.value))
+            except Exception as e:
+                error = pickle.PicklingError(
+                    f"result not picklable: {type(e).__name__}: {e}"
+                )
+        return Result(result.call_id, error=self._codec.encode(error))
 
 
 class _Deadlines:

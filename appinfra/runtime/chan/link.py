@@ -19,10 +19,13 @@ Frames:
                              handed to it: dropped there once every handing
                              over is released
 
-A frame's payload (Call.args, Result.value, Return.value) crosses as bytes,
-encoded by the Codec of the side that sends it, and decoded by the side that
-uses it. Only the payload: a payload that cannot be decoded fails its own
-call, while the frame itself, with the call it answers, still arrives.
+A frame's payload (Call.args, Result.value and Result.error, Return.value,
+Push.value) crosses as bytes, encoded by the Codec of the side that sends
+it, and decoded by the side that uses it. Only the payload: a payload that
+cannot be decoded fails its own call, while the frame itself, with the call
+it answers, still arrives. Every other field is a plain int, str, float or
+bool, which any side can rebuild: a frame's own pickling never fails at the
+receiver, where the link would have to drop it, leaving its caller waiting.
 
 Internal: callers use the objects, never the link."""
 
@@ -60,14 +63,14 @@ class Call:
 
 @dataclass(frozen=True, slots=True)
 class Result:
-    """How the call *call_id* ended: its *value* (encoded once on the link),
-    the *error* it raised, or *cancelled* after a Cancel came before any
-    outcome. A value received carries its *seq*, its number in the send
-    order, for a Return."""
+    """How the call *call_id* ended: its *value*, the *error* it raised, or
+    *cancelled* after a Cancel came before any outcome; value and error are
+    encoded once on the link. A value received carries its *seq*, its number
+    in the send order, for a Return."""
 
     call_id: int
     value: Any = None
-    error: BaseException | None = None
+    error: Any = None  # an exception at the home; its bytes on the link
     cancelled: bool = False
     seq: int = 0
 
@@ -92,11 +95,12 @@ class Cancel:
 
 @dataclass(frozen=True, slots=True)
 class Push:
-    """The latest *value* of the object *object_id*, its *version*-th."""
+    """The latest *value*, encoded, of the object *object_id*, its
+    *version*-th."""
 
     object_id: int
     version: int
-    value: Any
+    value: bytes
 
 
 @dataclass(frozen=True, slots=True)

@@ -64,6 +64,21 @@ class TestCall:
             pair.caller.call(pair.object_id, "send", (threading.Lock(),), DUE)
         assert pair.caller.call(pair.object_id, "len", (), DUE) == 0
 
+    def test_an_error_that_cannot_be_rebuilt_here_still_ends_the_call(
+        self, pair: Pair
+    ) -> None:
+        """Raised at the home by the decoding of the arguments, the error
+        cannot be rebuilt at the caller: the call still ends, with an error
+        naming it, and is not left waiting for a Result that never comes."""
+
+        async def main() -> Any:
+            call = pair.caller.acall(pair.object_id, "send", (_RaisesBad(),), DUE)
+            return await asyncio.wait_for(call, DUE)
+
+        with pytest.raises(RuntimeError, match="cannot be decoded") as raised:
+            asyncio.run(main())
+        assert isinstance(raised.value.__cause__, TypeError)  # _BadError's rebuild
+
     def test_a_call_awaited_on_the_loop(self, pair: Pair) -> None:
         async def main() -> Any:
             await pair.caller.acall(pair.object_id, "send", (7,), DUE)
@@ -117,6 +132,26 @@ class TestCall:
         extra = pair.lg.warning.call_args.kwargs["extra"]
         assert extra["object_id"] == pair.object_id
         assert isinstance(extra["exception"], ValueError)
+
+
+class _BadError(Exception):
+    """An error pickle can write but not rebuild: its args lack *code*."""
+
+    def __init__(self, message: str, code: int) -> None:
+        super().__init__(message)
+        self.code = code
+
+
+def _raise_bad() -> Any:
+    """Decoding a _RaisesBad: raises a _BadError."""
+    raise _BadError("bad payload", 7)
+
+
+class _RaisesBad:
+    """Encodes, but its decoding raises a _BadError."""
+
+    def __reduce__(self) -> tuple[Any, ...]:
+        return (_raise_bad, ())
 
 
 _rebuilding = threading.Event()

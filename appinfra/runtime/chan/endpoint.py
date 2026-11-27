@@ -151,9 +151,17 @@ class Endpoint:
         Raises:
             Exception: The error the call raised at the home, or as the codec
                 does for a value that cannot be decoded.
+            RuntimeError: If the error raised at the home cannot be decoded
+                here (its class missing, its args not fitting its __init__).
         """
         if result.error is not None:
-            raise result.error
+            try:
+                error = self._codec.decode(result.error)
+            except Exception as e:
+                raise RuntimeError(
+                    f"error at the home cannot be decoded here: {type(e).__name__}: {e}"
+                ) from e
+            raise error
         return self._codec.decode(result.value)
 
     def _settle(self, result: Result) -> None:
