@@ -50,22 +50,26 @@ server.start()  # Blocking
 ```
 
 ### Subprocess Mode
-Runs uvicorn in a separate process with queue-based IPC.
+Runs uvicorn in a separate process with Chan-based IPC: its routes send requests to the main
+process on `server.requests`, each with a Chan to reply on.
 
 ```python
 server = (
     ServerBuilder(lg, "worker-api")
     .with_port(25443)
-    .subprocess.with_ipc()  # makes server.request_queue, server.response_queue
+    .subprocess.with_ipc()  # makes server.requests
     .with_auto_restart(True)
     .with_max_restarts(3)
     .done()
     .routes.with_route("/health", health_handler)
+    .with_route("/work/{data}", work_handler)  # await ipc.submit(WorkRequest(data))
     .done()
     .build()
 )
 
 server.start_subprocess()  # Non-blocking: returns once serving
+request, reply = server.requests.recv(timeout=1.0)
+reply.send(WorkResponse(result=request.data.upper()))
 ```
 
 ## Features

@@ -443,7 +443,7 @@ with pg.session() as session:
 
 ### Server
 
-**FastAPI subprocess isolation** - Run FastAPI in a subprocess with queue-based IPC. Main process
+**FastAPI subprocess isolation** - Run FastAPI in a subprocess with Chan-based IPC. Main process
 stays responsive while workers handle requests, with automatic restart on failure:
 
 ```python
@@ -459,7 +459,11 @@ server = (
 )
 
 server.start_subprocess()  # Non-blocking, runs in subprocess
-request_q, response_q = server.request_queue, server.response_queue
+for (
+    request,
+    reply,
+) in server.requests:  # each route's request, with the Chan to reply on
+    reply.send(handle(request))
 ```
 
 ## Completeness

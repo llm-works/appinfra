@@ -5,7 +5,6 @@
 
 from __future__ import annotations
 
-import multiprocessing as mp
 import pickle
 from collections.abc import Awaitable, Callable
 from contextlib import AbstractAsyncContextManager
@@ -22,9 +21,11 @@ if TYPE_CHECKING:
 
 from dataclasses import replace
 
+from ....runtime import Chan
 from ....service import Runtime as ServiceRuntime
 from ....subprocess import Lazy
 from ..config.api import ApiConfig
+from ..config.ipc import IPCConfig
 from ..runtime.adapter import (
     ExceptionCallbackDefinition,
     FastAPIAdapter,
@@ -52,6 +53,13 @@ def _copy_api(config: ApiConfig) -> ApiConfig:
         uvicorn=replace(config.uvicorn),
         ipc=replace(config.ipc) if config.ipc is not None else None,
     )
+
+
+def _requests(config: IPCConfig | None) -> Chan[Any]:
+    """The server's requests Chan, holding up to max_pending: as many as
+    the subprocess lets be in flight, so a request it admits does not wait
+    for room."""
+    return Chan((config or IPCConfig()).max_pending, process=True)
 
 
 class ServerBuilder:
@@ -89,11 +97,9 @@ class ServerBuilder:
 
         server.start_subprocess()  # Non-blocking
 
-        # Main process handles requests via queues
-        while True:
-            request = server.request_queue.get()
-            result = process(request)
-            server.response_queue.put(result)
+        # Main process answers each request on the Chan it came with
+        for request, reply in server.requests:
+            reply.send(process(request))
     """
 
     def __init__(self, lg: Logger, name: str) -> None:
@@ -109,8 +115,8 @@ class ServerBuilder:
         # The builder's state is the config it will build; the facets are
         # views on it, so defaults live in the config dataclasses only.
         self._api = ApiConfig()
-        self._request_q: mp.Queue[Any] | None = None
-        self._response_q: mp.Queue[Any] | None = None
+        # Set by subprocess.with_ipc(): build() makes the requests Chan
+        self._ipc_enabled = False
         # The service Runtime the server spawns into; None: one of its own
         self._runtime: ServiceRuntime | None = None
         self._defs = ServerDefinitions()
@@ -444,7 +450,7 @@ class ServerBuilder:
 
     def _is_subprocess_mode(self) -> bool:
         """Check if subprocess mode is configured."""
-        return self._request_q is not None and self._response_q is not None
+        return self._ipc_enabled
 
     def _validate_handler_pickling(self, handler: Any, exc_class_name: str) -> bool:
         """Validate a single handler can be pickled.
@@ -533,7 +539,6 @@ class ServerBuilder:
             name=self._name,
             config=config,
             adapter=adapter,
-            request_q=self._request_q,
-            response_q=self._response_q,
+            requests=_requests(config.ipc) if self._ipc_enabled else None,
             runtime=self._runtime,
         )

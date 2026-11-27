@@ -4,7 +4,6 @@
 """Tests for Server runtime."""
 
 import gc
-import multiprocessing as mp
 import sys
 import threading
 import weakref
@@ -14,6 +13,7 @@ import pytest
 
 from appinfra.app.fastapi.config.api import ApiConfig
 from appinfra.app.fastapi.config.ipc import IPCConfig
+from appinfra.runtime import Chan
 from appinfra.service import State
 
 
@@ -47,30 +47,10 @@ class TestServer:
         assert server.name == "test-server"
         assert server.config is config
         assert server._adapter is adapter
-        assert server._request_q is None
-        assert server._response_q is None
-
-    def test_initialization_with_queues(self, mock_dependencies, mock_lg):
-        """Test server initialization with IPC queues."""
-        from appinfra.app.fastapi.runtime.server import Server
-
-        request_q: mp.Queue = mp.Queue()
-        response_q: mp.Queue = mp.Queue()
-
-        server = Server(
-            mock_lg,
-            name="test-server",
-            config=ApiConfig(),
-            adapter=MagicMock(),
-            request_q=request_q,
-            response_q=response_q,
-        )
-
-        assert server._request_q is request_q
-        assert server._response_q is response_q
+        assert server.requests is None
 
     def test_is_subprocess_mode_false(self, mock_dependencies, mock_lg):
-        """Test is_subprocess_mode when no queues configured."""
+        """Test is_subprocess_mode without a requests Chan."""
         from appinfra.app.fastapi.runtime.server import Server
 
         server = Server(mock_lg, name="test", config=ApiConfig(), adapter=MagicMock())
@@ -78,7 +58,7 @@ class TestServer:
         assert server.is_subprocess_mode is False
 
     def test_is_subprocess_mode_true(self, mock_dependencies, mock_lg):
-        """Test is_subprocess_mode when queues configured."""
+        """Test is_subprocess_mode with a requests Chan."""
         from appinfra.app.fastapi.runtime.server import Server
 
         server = Server(
@@ -86,8 +66,7 @@ class TestServer:
             name="test",
             config=ApiConfig(),
             adapter=MagicMock(),
-            request_q=mp.Queue(),
-            response_q=mp.Queue(),
+            requests=Chan(1, process=True),
         )
 
         assert server.is_subprocess_mode is True
@@ -100,37 +79,19 @@ class TestServer:
 
         assert server.is_running is False
 
-    def test_request_queue_property(self, mock_dependencies, mock_lg):
-        """Test request_queue property."""
+    def test_requests_property(self, mock_dependencies, mock_lg):
         from appinfra.app.fastapi.runtime.server import Server
 
-        request_q: mp.Queue = mp.Queue()
+        requests: Chan = Chan(1, process=True)
         server = Server(
             mock_lg,
             name="test",
             config=ApiConfig(),
             adapter=MagicMock(),
-            request_q=request_q,
-            response_q=mp.Queue(),
+            requests=requests,
         )
 
-        assert server.request_queue is request_q
-
-    def test_response_queue_property(self, mock_dependencies, mock_lg):
-        """Test response_queue property."""
-        from appinfra.app.fastapi.runtime.server import Server
-
-        response_q: mp.Queue = mp.Queue()
-        server = Server(
-            mock_lg,
-            name="test",
-            config=ApiConfig(),
-            adapter=MagicMock(),
-            request_q=mp.Queue(),
-            response_q=response_q,
-        )
-
-        assert server.response_queue is response_q
+        assert server.requests is requests
 
     def test_app_property_builds_on_demand(self, mock_dependencies, mock_lg):
         """Test app property builds app on first access."""
@@ -174,8 +135,7 @@ def _subprocess_server(config: ApiConfig | None = None, **kwargs):
         name="test",
         config=config or ApiConfig(),
         adapter=MagicMock(),
-        request_q=MagicMock(),
-        response_q=MagicMock(),
+        requests=Chan(1, process=True),
         **kwargs,
     )
 

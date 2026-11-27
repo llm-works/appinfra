@@ -66,8 +66,12 @@ For API stability guarantees and deprecation policy, see
 ### Changed
 - **Breaking:** the FastAPI server's subprocess runs as an isolated service of a service `Runtime`
   (its own, or one given with `.subprocess.with_runtime()`). `.subprocess.with_ipc()` takes no
-  queues and makes them (`server.request_queue`, `server.response_queue`); `start_subprocess()`
-  returns `None`, with `server.process`, `pid` and `is_running` for the current run.
+  queues; `start_subprocess()` returns `None`, with `server.process`, `pid` and `is_running` for
+  the current run.
+- **Breaking:** the FastAPI server's IPC is a process Chan: `server.requests` yields each
+  `(request, reply)`, answered with `reply.send()`, replacing `server.request_queue` and
+  `server.response_queue`. Messages need no `id`; `IPCConfig.poll_interval`,
+  `.subprocess.with_poll_interval()` and `IPCChannel.start_polling()`/`stop_polling()` are gone.
 - **Breaking:** `submit_stream()` is renamed `stream()` on `AsyncChannel`, `AsyncBufferedChannel`
   and `IPCChannel`. The sync `Channel` protocol gains `stream()`, so a class implementing it
   directly must add the method.

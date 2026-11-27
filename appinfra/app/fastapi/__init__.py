@@ -37,11 +37,9 @@ Example (Subprocess Mode with IPC):
 
     server.start_subprocess()  # Non-blocking
 
-    # Main process handles requests
-    while True:
-        request = server.request_queue.get()
-        result = process(request)
-        server.response_queue.put(result)
+    # Main process answers each request on the Chan it came with
+    for request, reply in server.requests:
+        reply.send(process(request))
 """
 
 from __future__ import annotations
