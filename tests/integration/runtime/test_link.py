@@ -15,7 +15,7 @@ import threading
 import time
 import weakref
 from collections.abc import Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -28,6 +28,7 @@ from appinfra.runtime.chan.link import (
     CAPACITY,
     Call,
     Cancel,
+    Codec,
     Link,
     LinkEnd,
     Push,
@@ -91,14 +92,25 @@ class Homed:
     object_id: int
 
     def call(self, call_id: int, op: str, *args: Any, timeout: float | None) -> None:
-        """Send a call on the homed Chan."""
-        self.proxy.send(Call(call_id, self.object_id, op, args, timeout))
+        """Send a call on the homed Chan, its arguments encoded."""
+        self.proxy.send(Call(call_id, self.object_id, op, CODEC.encode(args), timeout))
 
     def result(self) -> Result:
-        """The next Result from the home."""
-        frame = self.proxy.recv(timeout=DUE)
-        assert isinstance(frame, Result)
+        """The next Result from the home, its value decoded."""
+        return _decoded(self.proxy.recv(timeout=DUE))
+
+
+# Encodes and decodes the payloads, as an endpoint's codec does without
+# process Chans in them
+CODEC = Codec()
+
+
+def _decoded(frame: Any) -> Result:
+    """*frame*, a Result, with its value decoded if it has one."""
+    assert isinstance(frame, Result)
+    if frame.error is not None or frame.cancelled:
         return frame
+    return replace(frame, value=CODEC.decode(frame.value))
 
 
 def _serve(home: Home, home_link: Link) -> None:
@@ -112,7 +124,7 @@ def _serve(home: Home, home_link: Link) -> None:
 def homed() -> Iterator[Homed]:
     near, far = link()
     home_link, proxy = near.open(), far.open()
-    home = Home(home_link)
+    home = Home(home_link, CODEC)
     threading.Thread(target=_serve, args=(home, home_link), daemon=True).start()
     chan: Chan[Any] = Chan(1)
     yield Homed(home, proxy, chan, home.register(chan))
@@ -126,7 +138,7 @@ class TestLink:
         near, far = link()
         a, b = near.open(), far.open()
         frames = [
-            Call(1, 2, "send", ({"x": [1, 2]},), 3.0),
+            Call(1, 2, "send", CODEC.encode(({"x": [1, 2]},)), 3.0),
             Result(1, value=(4, 5)),
             Result(2, error=ValueError("no")),
             Cancel(3),
@@ -357,24 +369,25 @@ class TestHome:
         received again as sent, before the rest of the buffer."""
         near, far = link()
         home_link, proxy = near.open(), far.open()
-        home = Home(home_link)
+        home = Home(home_link, CODEC)
         threading.Thread(target=_serve, args=(home, home_link), daemon=True).start()
         chan: Chan[Any] = Chan(3)
         object_id = home.register(chan)
+        no_args = CODEC.encode(())
         try:
             for value in (1, 2, 3):
                 chan.send(value)
             taken = []
             for call_id in (1, 2):
-                proxy.send(Call(call_id, object_id, "recv", (), DUE))
+                proxy.send(Call(call_id, object_id, "recv", no_args, DUE))
                 result = proxy.recv(timeout=DUE)
                 assert isinstance(result, Result)
-                taken.append(result)
-            assert [(r.value, r.seq) for r in taken] == [(1, 1), (2, 2)]
+                taken.append(result)  # its value as encoded, as a Return sends it
+            assert [(_decoded(r).value, r.seq) for r in taken] == [(1, 1), (2, 2)]
             for result in reversed(taken):
                 proxy.send(Return(object_id, result.value, result.seq))
-            proxy.send(Call(3, object_id, "recv", (), 0))  # after both Returns
-            assert proxy.recv(timeout=DUE) == Result(3, value=1, seq=1)
+            proxy.send(Call(3, object_id, "recv", no_args, 0))  # after both Returns
+            assert _decoded(proxy.recv(timeout=DUE)) == Result(3, value=1, seq=1)
             assert [chan.recv(timeout=0) for _ in range(2)] == [2, 3]
         finally:
             home.close()
@@ -396,6 +409,16 @@ class TestHome:
         homed.proxy.send(Release(homed.object_id, 1))
         homed.call(2, "recv", timeout=0)
         assert isinstance(homed.result().error, ClosedError)
+
+    def test_arguments_that_cannot_be_decoded_fail_their_call_alone(
+        self, homed: Homed
+    ) -> None:
+        """The frame arrives, so the call is answered: with the error, and
+        the calls after it go on."""
+        homed.proxy.send(Call(1, homed.object_id, "send", b"not a pickle", DUE))
+        assert homed.result().error is not None
+        homed.call(2, "len", timeout=DUE)
+        assert homed.result() == Result(2, value=0)
 
     def test_a_released_chan_is_closed_to_calls(self, homed: Homed) -> None:
         homed.proxy.send(Release(homed.object_id, 1))
@@ -428,9 +451,9 @@ class TestHome:
         close there refuses the call, which would otherwise wait in the Chan
         for a value whose Result no one reads."""
         homed.home.close()
-        call = Call(1, homed.object_id, "recv", (), None)
+        call = Call(1, homed.object_id, "recv", CODEC.encode(()), None)
         with pytest.raises(ClosedError):
-            homed.home._park(call, homed.chan)  # Private: the park in that window
+            homed.home._park(call, homed.chan, ())  # Private: the park in that window
         homed.chan.send(7)
         assert homed.chan.recv(timeout=0) == 7
 
