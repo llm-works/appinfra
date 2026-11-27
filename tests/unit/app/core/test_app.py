@@ -14,6 +14,7 @@ Tests key functionality including:
 
 import argparse
 import logging
+import subprocess
 import sys
 from pathlib import Path
 from unittest.mock import Mock, patch
@@ -25,7 +26,6 @@ from appinfra.app.core.config import ConfigLoader
 from appinfra.app.tools.base import Tool, ToolConfig
 from appinfra.dot_dict import DotDict
 from appinfra.yaml import deep_merge
-from tests.helpers.fork import forks_in_xdist_worker
 
 
 def create_test_tool(name: str, aliases: list = None):
@@ -1029,43 +1029,29 @@ class TestSubprocessContextMethod:
         assert "/" not in logging.root.manager.loggerDict
 
 
-# Set before the pool forks; the worker inherits it
-_POOL_APP: App | None = None
-
-
-def _pool_task(i: int) -> int:
-    """One task in a reused pool worker: enter the app's subprocess context."""
-    assert _POOL_APP is not None
-    with _POOL_APP.subprocess_context(handle_signals=False) as ctx:
-        ctx.lg.info("task", extra={"i": i})
-    return i
-
-
 @pytest.mark.integration
 @pytest.mark.skipif(
     "fork" not in __import__("multiprocessing").get_all_start_methods(),
     reason="needs the fork start method",
 )
-@forks_in_xdist_worker
 def test_subprocess_context_in_a_reused_pool_worker():
-    """One pool worker runs two tasks, each with its own root logger."""
-    import multiprocessing
+    """One pool worker runs two tasks, each with its own root logger.
 
-    from appinfra.log import LogConfig, LoggerFactory
-
-    global _POOL_APP
-    _POOL_APP = App()
-    _POOL_APP.config = DotDict(logging=DotDict(level="info", location=0))
-    parent_root = LoggerFactory.create_root(LogConfig.from_params("info"))
+    In an interpreter of its own: forked from this xdist worker, whose other
+    threads may hold a lock at that instant, the pool's child can hang for
+    good (tests/helpers/pool_reuse.py)."""
+    code = "from tests.helpers.pool_reuse import run; run()"
     try:
-        with multiprocessing.get_context("fork").Pool(1) as pool:
-            results = pool.map_async(_pool_task, [1, 2]).get(timeout=30)
-    finally:
-        _POOL_APP = None
-
-    assert results == [1, 2]
-    # the workers' roots were their own; the parent's is untouched
-    assert logging.root.manager.loggerDict["/"] is parent_root
+        proc = subprocess.run(
+            [sys.executable, "-c", code],
+            cwd=Path(__file__).resolve().parents[4],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+    except subprocess.TimeoutExpired:
+        pytest.fail("the pool did not finish within 60 s")
+    assert proc.returncode == 0, proc.stderr
 
 
 class TestCreateConfigWatcherMethod:
