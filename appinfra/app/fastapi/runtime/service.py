@@ -10,7 +10,7 @@ from ctypes import c_int
 from multiprocessing.context import BaseContext
 from typing import TYPE_CHECKING, Any
 
-from ....service import Service
+from ....service import Service, State
 from ..errors import ConfigError
 
 if TYPE_CHECKING:
@@ -22,6 +22,9 @@ if TYPE_CHECKING:
 # uvicorn's exit status for a failed startup (its STARTUP_FAILURE). uvicorn moved the constant
 # from uvicorn.main to uvicorn.config, so no one import path holds it across supported versions.
 _UVICORN_STARTUP_FAILURE = 3
+
+# The states a run has ended in: its process no longer serves
+_ENDED = frozenset({State.FAILED, State.STOPPED, State.DONE})
 
 
 class UvicornService(Service):
@@ -179,6 +182,13 @@ class UvicornService(Service):
         """In the subprocess, once run() returned: uvicorn shut itself down
         there, so no port is bound any more."""
         self._bound_port.value = 0
+
+    def on_run_state(self, _name: str, _old: State, new: State) -> None:
+        """In the parent, a state hook of the service's runner: a run that has
+        ended, however, binds no port. A child killed before its teardown()
+        leaves its port behind otherwise, read until the next run starts."""
+        if new in _ENDED:
+            self._bound_port.value = 0
 
     def is_healthy(self) -> bool:
         """Whether this service's uvicorn server is ready: ran the app's startup, bound

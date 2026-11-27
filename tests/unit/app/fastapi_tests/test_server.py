@@ -6,7 +6,7 @@
 import multiprocessing as mp
 import sys
 import threading
-from unittest.mock import MagicMock, PropertyMock, patch
+from unittest.mock import MagicMock, call, patch
 
 import pytest
 
@@ -178,15 +178,6 @@ def _subprocess_server(config: ApiConfig | None = None, **kwargs):
     )
 
 
-class _SetBeforeWait(threading.Event):
-    """An event whose wait fails at once unless it is set already: a test of
-    what sets it fails instead of blocking."""
-
-    def wait(self, timeout: float | None = None) -> bool:
-        assert self.is_set(), "waited on an event nothing set"
-        return True
-
-
 def _runner(state: State, can_restart: bool = False) -> MagicMock:
     runner = MagicMock()
     runner.state = state
@@ -240,6 +231,15 @@ class TestServerSubprocessMode:
         runtime.ready.assert_called_once_with(
             runtime.spawn.return_value, timeout=pytest.approx(30.0)
         )
+
+    def test_the_runner_reports_its_transitions_to_the_service(self, runtime_deps):
+        """The service hears of a run's end in the parent: its port clears."""
+        server = _subprocess_server()
+        server.start_subprocess()
+
+        runner = runtime_deps["runtime"].spawn.return_value
+        service = runtime_deps["service_cls"].return_value
+        runner.on_state_change.assert_called_once_with(service.on_run_state)
 
     def test_the_service_shares_from_the_runtimes_context(self, runtime_deps):
         server = _subprocess_server()
@@ -319,17 +319,78 @@ class TestServerSubprocessMode:
         from appinfra.app.fastapi.errors import ConfigError
 
         runtime = runtime_deps["runtime"]
+        error: Exception
         if failing == "service":
-            runtime_deps["service_cls"].side_effect = ConfigError("Invalid port")
+            error = ConfigError("Invalid port")
+            runtime_deps["service_cls"].side_effect = error
         else:
-            runtime.spawn.side_effect = RuntimeError("cannot spawn")
+            error = RuntimeError("cannot spawn")
+            runtime.spawn.side_effect = error
         server = _subprocess_server()
 
-        with pytest.raises((ConfigError, RuntimeError)):
+        with pytest.raises(type(error)) as raised:
             server.start_subprocess()
 
+        assert raised.value is error  # not another failure of the same type
         runtime.stop.assert_called_once()
         assert server._own_runtime is None
+
+    def test_an_interrupted_spawn_stops_the_runner_it_left(self, runtime_deps):
+        """Ctrl-C while spawn() waits for its reply: the runtime took the
+        service all the same, and the server stops it in a given runtime."""
+        given = MagicMock()
+        spawned = MagicMock()
+
+        def spawn(service, _policy, *, isolate):
+            spawned.service = service
+            given.services = {service.name: spawned}
+            raise KeyboardInterrupt
+
+        given.spawn.side_effect = spawn
+        server = _subprocess_server(runtime=given)
+
+        with pytest.raises(KeyboardInterrupt):
+            server.start_subprocess()
+
+        given.stop_service.assert_called_once_with(spawned, timeout=5.0)
+
+    def test_a_refused_spawn_leaves_the_runtimes_service_alone(self, runtime_deps):
+        """Another service of the same name is not the server's to stop."""
+        given = MagicMock()
+
+        def spawn(service, _policy, *, isolate):
+            given.services = {service.name: MagicMock()}
+            raise ValueError("a service of the same name is in the runtime")
+
+        given.spawn.side_effect = spawn
+        server = _subprocess_server(runtime=given)
+
+        with pytest.raises(ValueError):
+            server.start_subprocess()
+
+        given.stop_service.assert_not_called()
+
+    def test_a_stop_before_the_runner_is_known_stops_it(self, runtime_deps):
+        """stop() from another thread while spawn() runs finds no runner yet:
+        the start stops the runner once it has it, and fails."""
+        from appinfra.service import RunError
+
+        given = MagicMock()
+        given.services = {}
+        spawned = MagicMock()
+        server = _subprocess_server(runtime=given)
+
+        def spawn(_service, _policy, *, isolate):
+            server.stop()
+            return spawned
+
+        given.spawn.side_effect = spawn
+
+        with pytest.raises(RunError, match="stopped while starting"):
+            server.start_subprocess()
+
+        given.stop_service.assert_called_once_with(spawned, timeout=5.0)
+        given.ready.assert_not_called()
 
     def test_stop_stops_the_service_and_its_own_runtime(self, runtime_deps):
         server = _subprocess_server()
@@ -364,6 +425,40 @@ class TestServerSubprocessMode:
             server.stop()
 
         runtime.stop.assert_called_once()
+        assert server._runner is None  # it went with the runtime
+
+    def test_a_failed_stop_in_a_given_runtime_is_retried(self, runtime_deps):
+        """The child outlived its kill: the server keeps its runner, and a
+        later stop() asks the runtime to stop it again."""
+        given = MagicMock()
+        given.stop_service.side_effect = [TimeoutError("outlived its kill"), None]
+        server = _subprocess_server(runtime=given)
+        server.start_subprocess()
+
+        with pytest.raises(TimeoutError):
+            server.stop()
+        server.stop()
+
+        spawned = given.spawn.return_value
+        assert given.stop_service.call_args_list == [
+            call(spawned, timeout=5.0),
+            call(spawned, timeout=5.0),
+        ]
+        assert server._runner is None
+        given.stop.assert_not_called()
+
+    @pytest.mark.parametrize("given", [True, False])
+    def test_a_negative_stop_timeout_changes_nothing(self, runtime_deps, given):
+        runtime = MagicMock() if given else runtime_deps["runtime"]
+        server = _subprocess_server(runtime=runtime if given else None)
+        server.start_subprocess()
+
+        with pytest.raises(ValueError, match="negative"):
+            server.stop(timeout=-1.0)
+
+        runtime.stop_service.assert_not_called()
+        runtime.stop.assert_not_called()
+        assert server._runner is runtime.spawn.return_value
 
     def test_stop_does_nothing_if_not_started(self, runtime_deps):
         server = _subprocess_server()
@@ -506,21 +601,29 @@ class TestServerStart:
         stop.assert_called_once()
 
     def test_start_wakes_on_a_settling_transition(self, runtime_deps):
-        """The state hook ends the wait: here a STOPPED seen by the hook,
-        while the check after it still reads RUNNING."""
-        runner = MagicMock()
-        runner.can_restart = False
-        # The hook's read, then the check after registering it
-        type(runner).state = PropertyMock(side_effect=[State.STOPPED, State.RUNNING])
-
-        def register(hook):
-            hook("uvicorn-test", State.RUNNING, State.STOPPED)
-
-        runner.on_state_change.side_effect = register
+        """The state hook ends the wait: the runner settles while start()
+        waits, and the hook it registered sets the event the wait is on."""
+        runner = _runner(State.RUNNING)
+        hooks: list = []
+        runner.on_state_change.side_effect = hooks.append
         runtime_deps["runtime"].spawn.return_value = runner
+        waited: list[bool] = []
 
-        with patch("appinfra.app.fastapi.runtime.server.Event", _SetBeforeWait):
+        class SettlesOnWait(threading.Event):
+            """The runner stops once the wait begins; its hooks hear of it."""
+
+            def wait(self, timeout: float | None = None) -> bool:
+                waited.append(True)
+                runner.state = State.STOPPED
+                for hook in hooks:
+                    hook("uvicorn-test", State.RUNNING, State.STOPPED)
+                assert self.is_set(), "the hook did not wake the wait"
+                return True
+
+        with patch("appinfra.app.fastapi.runtime.server.Event", SettlesOnWait):
             _subprocess_server().start()
+
+        assert waited, "start() returned before it waited"
 
     def test_ctrl_c_while_blocking_stops_the_server(self, runtime_deps):
         server = _subprocess_server()

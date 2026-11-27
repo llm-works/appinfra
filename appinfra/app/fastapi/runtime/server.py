@@ -11,7 +11,7 @@ from threading import Event
 from typing import TYPE_CHECKING, Any
 
 from ....runtime import TaskProcess
-from ....service import Runner, State
+from ....service import RunError, Runner, State
 from ....service import Runtime as ServiceRuntime
 from ....service.state import RestartPolicy
 from ..config.api import ApiConfig
@@ -119,6 +119,8 @@ class Server:
         self._own_runtime: ServiceRuntime | None = None
         self._runner: Runner | None = None
         self._service: UvicornService | None = None
+        # Set by stop(): a start still spawning stops the runner it gets
+        self._stop_asked = False
         self._app: FastAPI | None = None
 
     @property
@@ -269,13 +271,22 @@ class Server:
             ConfigError: If the configuration cannot run in a subprocess
             SetupError, HealthTimeoutError: If it does not come up; the
                 server is stopped then
+            RunError: If stop() was called while it started
         """
         self._validate_subprocess_mode()
+        self._stop_asked = False
         runtime = self._start_runtime()
         try:
             service = self._make_service(runtime)  # ConfigError: a bad config
             self._service = service
             self._runner = runtime.spawn(service, self._restart_policy(), isolate=True)
+            # Its first run's transitions come after this: the child takes far
+            # longer to start than spawn() to return
+            self._runner.on_state_change(service.on_run_state)
+            # Set before stop() reads _runner, read after it is set: a stop()
+            # from another thread during spawn() is seen on one side or both
+            if self._stop_asked:
+                raise RunError(self._name, "stopped while starting")
             runtime.ready(self._runner, timeout=START_TIMEOUT)
         except BaseException:  # Ctrl-C included: nothing is left running
             self.stop()
@@ -303,20 +314,49 @@ class Server:
             timeout: Seconds to wait for graceful shutdown
 
         Raises:
-            TimeoutError: If the subprocess outlived its kill.
+            ValueError: If *timeout* is negative, before anything is stopped.
+            TimeoutError: If the subprocess outlived its kill. In a given
+                runtime the server keeps it, and a later stop() tries again.
         """
-        runner, self._runner = self._runner, None
+        if timeout < 0:
+            raise ValueError(f"timeout must not be negative, got {timeout}")
+        self._stop_asked = True
+        runtime = self._own_runtime if self._own_runtime is not None else self._runtime
+        runner = self._runner if self._runner is not None else self._spawned(runtime)
+        self._runner = None
         own, self._own_runtime = self._own_runtime, None
         try:
-            if runner is not None:
-                self._lg.debug("stopping server...", extra={"server": self._name})
-                runtime = own if own is not None else self._runtime
-                assert runtime is not None
-                runtime.stop_service(runner, timeout=timeout)
-                self._lg.info("server stopped", extra={"server": self._name})
+            # No runtime: a stop() during the start stopped the server's own,
+            # and the runner with it
+            if runner is not None and runtime is not None:
+                self._stop_runner(runtime, runner, timeout, keep=own is None)
         finally:
-            if own is not None:
+            if own is not None:  # it takes a runner it could not stop with it
                 own.stop(timeout=timeout)
+
+    def _stop_runner(
+        self, runtime: ServiceRuntime, runner: Runner, timeout: float, keep: bool
+    ) -> None:
+        """Stop *runner* in *runtime*; if that fails and *keep* is set, hold on
+        to it, so that a later stop() tries again."""
+        self._lg.debug("stopping server...", extra={"server": self._name})
+        try:
+            runtime.stop_service(runner, timeout=timeout)
+        except BaseException:
+            if keep:
+                self._runner = runner
+            raise
+        self._lg.info("server stopped", extra={"server": self._name})
+
+    def _spawned(self, runtime: ServiceRuntime | None) -> Runner | None:
+        """The runner of a spawn() that did not return: an interrupt ended its
+        wait for the reply after *runtime* took the service. None when the
+        runtime holds no runner of this server's service."""
+        service = self._service
+        if runtime is None or service is None:
+            return None
+        runner = runtime.services.get(service.name)
+        return runner if runner is not None and runner.service is service else None
 
     def _run_direct(self) -> None:
         """Run uvicorn directly in current process (blocking)."""

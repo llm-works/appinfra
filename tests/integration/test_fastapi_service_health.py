@@ -18,6 +18,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from appinfra.app.fastapi.config.api import ApiConfig
+from appinfra.service import State
 
 pytest.importorskip("uvicorn")
 
@@ -52,3 +53,22 @@ def test_teardown_clears_the_bound_port() -> None:
     service._bound_port.value = 8123  # as a child's server publishes it
     service.teardown()
     assert service.bound_port == 0
+
+
+@pytest.mark.parametrize(
+    ("state", "cleared"),
+    [
+        (State.FAILED, True),
+        (State.STOPPED, True),
+        (State.DONE, True),
+        (State.RUNNING, False),
+        (State.STOPPING, False),
+    ],
+)
+def test_a_run_that_ends_clears_the_bound_port(state: State, cleared: bool) -> None:
+    """In the parent, on the runner's transition: a run killed before its
+    teardown() leaves no port behind, and a live one keeps its port."""
+    service = UvicornService(MagicMock(), "api", MagicMock(), ApiConfig(), CONTEXT)
+    service._bound_port.value = 8123
+    service.on_run_state(service.name, State.RUNNING, state)
+    assert service.bound_port == (0 if cleared else 8123)

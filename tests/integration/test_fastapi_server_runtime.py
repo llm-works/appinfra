@@ -9,10 +9,13 @@ from rt.services and its transitions waited on through state hooks."""
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import gc
 import os
 import signal
 import socket
 import threading
+import weakref
 from collections.abc import Iterator
 from typing import Any
 
@@ -111,6 +114,27 @@ class TestSupervision:
         finally:
             server.stop(timeout=5.0)
 
+    def test_a_crashed_servers_port_reads_unbound_until_it_restarts(
+        self, rt: Runtime
+    ) -> None:
+        """Killed, its child skips teardown(): the server reads no bound port
+        while the runtime waits to restart it."""
+        server = _build_server(rt, restart_delay=30.0).build()
+        server.start_subprocess()
+        try:
+            runner = rt.services[f"uvicorn-{NAME}"]
+            failed = _on_state(runner, State.FAILED)
+            assert server.port != 0
+            process = server.process
+            assert process is not None
+
+            process.kill()
+
+            assert failed.wait(30.0)
+            assert server.port == 0, "the dead child's port is not the server's"
+        finally:
+            server.stop(timeout=5.0)
+
     def test_an_interrupted_server_ends_without_a_restart(self, rt: Runtime) -> None:
         """Ctrl-C reaching the child alone ends its server cleanly: DONE, and
         the runtime does not start it again."""
@@ -197,3 +221,30 @@ class TestFailedStart:
         assert f"uvicorn-{NAME}" in str(raised.value)
         assert not server.is_running
         assert f"uvicorn-{NAME}" not in rt.services
+
+    def test_a_failed_start_keeps_its_queues_in_no_cycle(self, rt: Runtime) -> None:
+        """Dropped after its start failed, the server's IPC queues are freed at
+        once, not whenever the cyclic GC next runs: their semaphores'
+        finalizers then run wherever that falls, inside the multiprocessing
+        resource tracker too, which refuses them there."""
+        gc.disable()
+        try:
+            freed = _fail_to_start(rt)
+            assert freed() is None, "the queues are held by a cycle"
+        finally:
+            gc.enable()
+
+
+def _fail_to_start(rt: Runtime) -> weakref.ReferenceType[Any]:
+    """Start a server on a taken port, its start failing, and drop it;
+    returns a weak reference to its request queue."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as taken:
+        taken.bind(("127.0.0.1", 0))
+        taken.listen()
+        server = _build_server(
+            rt, port=taken.getsockname()[1], auto_restart=False
+        ).build()
+        # The failure itself is tested above
+        with contextlib.suppress(Exception):
+            server.start_subprocess()
+    return weakref.ref(server.request_queue)

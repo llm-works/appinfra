@@ -156,6 +156,7 @@ def run_subprocess_demo() -> int:
             time.sleep(1)
     except KeyboardInterrupt:
         print("\nShutting down...")
+    finally:
         server.stop()
 
     return 0

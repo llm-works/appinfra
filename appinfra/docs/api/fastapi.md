@@ -42,26 +42,37 @@ computation:
 from appinfra.app.fastapi import ServerBuilder
 from appinfra.log import Logger
 
-lg = Logger("worker-api")
-server = (
-    ServerBuilder(lg, "worker-api")
-    .with_port(8000)
-    .routes.with_route("/health", health)
-    .done()
-    .subprocess.with_ipc()
-    .with_auto_restart(True)
-    .done()
-    .build()
-)
+# health and process at module scope: the server's process imports them
 
-server.start_subprocess()  # Non-blocking: returns once the server serves
-request_q, response_q = server.request_queue, server.response_queue
 
-# Main process handles requests
-while True:
-    request = request_q.get()
-    result = process(request)
-    response_q.put(result)
+def main() -> None:
+    lg = Logger("worker-api")
+    server = (
+        ServerBuilder(lg, "worker-api")
+        .with_port(8000)
+        .routes.with_route("/health", health)
+        .done()
+        .subprocess.with_ipc()
+        .with_auto_restart(True)
+        .done()
+        .build()
+    )
+
+    server.start_subprocess()  # Non-blocking: returns once the server serves
+    request_q, response_q = server.request_queue, server.response_queue
+
+    # Main process handles requests
+    try:
+        while True:
+            request = request_q.get()
+            result = process(request)
+            response_q.put(result)
+    finally:
+        server.stop()
+
+
+if __name__ == "__main__":  # the server's process imports this module again
+    main()
 ```
 
 **Note:** The Logger is required for queue-based subprocess logging. The subprocess inherits the
@@ -203,6 +214,11 @@ after a crash under the restart settings above, and `stop(timeout)` terminates, 
 process still running at the timeout. Without `with_runtime()`, `start_subprocess()` starts a
 runtime of the server's own, which `stop()` stops; with one, the server is one service among the
 application's and `stop()` leaves the runtime running.
+
+`spawn` imports the main module again in the server's process, so a script builds and starts the
+server under `if __name__ == "__main__":`; its handlers stay at module scope, where that import
+finds them. Unguarded, the import reaches `start_subprocess()` again and multiprocessing refuses
+it with `RuntimeError`.
 
 `with_ipc()` makes the queues from `appinfra.runtime.process_context()`, the context the
 process starts in. Anything else shared with the server's process, such as a `Value` read by a
@@ -725,28 +741,37 @@ def run_worker(request_q: mp.Queue, response_q: mp.Queue):
 from appinfra.app.fastapi import ServerBuilder
 from appinfra.log import Logger
 
-# Build server with IPC (the builder makes the queues)
-lg = Logger("worker-api")
-server = (
-    ServerBuilder(lg, "worker-api")
-    .with_port(8000)
-    .subprocess.with_ipc()
-    .with_response_timeout(60.0)
-    .with_auto_restart(True)
-    .done()
-    .routes.with_router(router)  # Router with /generate, /stream endpoints
-    .done()
-    .build()
-)
+# router and run_worker as above, at module scope: the server's process
+# imports them
 
-# Start server subprocess (non-blocking)
-server.start_subprocess()
 
-# Main process handles compute-intensive work
-try:
-    run_worker(server.request_queue, server.response_queue)
-finally:
-    server.stop()
+def main() -> None:
+    # Build server with IPC (the builder makes the queues)
+    lg = Logger("worker-api")
+    server = (
+        ServerBuilder(lg, "worker-api")
+        .with_port(8000)
+        .subprocess.with_ipc()
+        .with_response_timeout(60.0)
+        .with_auto_restart(True)
+        .done()
+        .routes.with_router(router)  # Router with /generate, /stream endpoints
+        .done()
+        .build()
+    )
+
+    # Start server subprocess (non-blocking)
+    server.start_subprocess()
+
+    # Main process handles compute-intensive work
+    try:
+        run_worker(server.request_queue, server.response_queue)
+    finally:
+        server.stop()
+
+
+if __name__ == "__main__":
+    main()
 ```
 
 See `examples/07_fastapi/fastapi_server.py` for a complete working implementation.
