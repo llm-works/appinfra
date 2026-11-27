@@ -79,6 +79,16 @@ class TestCall:
             asyncio.run(main())
         assert isinstance(raised.value.__cause__, TypeError)  # _BadError's rebuild
 
+    def test_an_error_whose_decoding_fails_unprintably_still_ends_the_call(
+        self, pair: Pair
+    ) -> None:
+        """The failure to rebuild the error cannot be printed: the call ends
+        with the RuntimeError, naming that failure by its type."""
+        with pytest.raises(
+            RuntimeError, match="cannot be decoded here: _UnprintableError$"
+        ):
+            pair.caller.call(pair.object_id, "send", (_RaisesRebuildsBadly(),), DUE)
+
     def test_a_call_awaited_on_the_loop(self, pair: Pair) -> None:
         async def main() -> Any:
             await pair.caller.acall(pair.object_id, "send", (7,), DUE)
@@ -152,6 +162,37 @@ class _RaisesBad:
 
     def __reduce__(self) -> tuple[Any, ...]:
         return (_raise_bad, ())
+
+
+class _UnprintableError(Exception):
+    """An error whose str() raises."""
+
+    def __str__(self) -> str:
+        raise ValueError("cannot be printed")
+
+
+def _raise_unprintable() -> Any:
+    """Decoding a _RebuildsBadlyError: raises an _UnprintableError."""
+    raise _UnprintableError()
+
+
+class _RebuildsBadlyError(Exception):
+    """An error that crosses, but whose decoding raises an _UnprintableError."""
+
+    def __reduce__(self) -> tuple[Any, ...]:
+        return (_raise_unprintable, ())
+
+
+def _raise_rebuilds_badly() -> Any:
+    """Decoding a _RaisesRebuildsBadly: raises a _RebuildsBadlyError."""
+    raise _RebuildsBadlyError()
+
+
+class _RaisesRebuildsBadly:
+    """Encodes, but its decoding raises a _RebuildsBadlyError."""
+
+    def __reduce__(self) -> tuple[Any, ...]:
+        return (_raise_rebuilds_badly, ())
 
 
 _rebuilding = threading.Event()

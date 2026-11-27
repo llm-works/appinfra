@@ -67,6 +67,32 @@ class _RaisesLocked:
         return (_raise_locked, ())
 
 
+class _UnprintableError(Exception):
+    """An error whose str() raises."""
+
+    def __str__(self) -> str:
+        raise ValueError("cannot be printed")
+
+
+class _UnsendableError(Exception):
+    """An error whose pickling raises an _UnprintableError."""
+
+    def __reduce__(self) -> tuple[Any, ...]:
+        raise _UnprintableError()
+
+
+def _raise_unsendable() -> Any:
+    """Decoding a _RaisesUnsendable: raises an _UnsendableError."""
+    raise _UnsendableError()
+
+
+class _RaisesUnsendable:
+    """Encodes, but its decoding raises an _UnsendableError."""
+
+    def __reduce__(self) -> tuple[Any, ...]:
+        return (_raise_unsendable, ())
+
+
 def _freed(kind: type) -> bool:
     """Whether every instance of *kind* in this process is freed before DUE.
     A poll: nothing signals the moment the last reference goes."""
@@ -445,6 +471,39 @@ class TestHome:
         assert "error not picklable: ValueError" in str(error)
         homed.call(2, "len", timeout=DUE)
         assert homed.result() == Result(2, value=0)
+
+    def test_a_failure_that_cannot_be_printed_leaves_the_pump_running(
+        self, homed: Homed
+    ) -> None:
+        """The error cannot be pickled, and the failure to pickle it cannot be
+        printed: the call is still answered, naming both by type, and the
+        results after it are still sent."""
+        homed.call(1, "send", _RaisesUnsendable(), timeout=DUE)
+        error = homed.result().error
+        assert isinstance(error, RuntimeError)
+        assert str(error) == "error not picklable: _UnsendableError: _UnprintableError"
+        homed.call(2, "len", timeout=DUE)
+        assert homed.result() == Result(2, value=0)
+
+    def test_a_result_that_cannot_be_sent_fails_its_call_alone(
+        self, homed: Homed
+    ) -> None:
+        """Whatever fails as a Result is made ready for the link: that call
+        gets an error, and the pump goes on with the rest."""
+        encoded = homed.home._encoded
+
+        def fails_first(result: Result) -> Result:
+            if result.call_id == 1:
+                raise OSError("no room")
+            return encoded(result)
+
+        with patch.object(homed.home, "_encoded", side_effect=fails_first):
+            homed.call(1, "len", timeout=DUE)
+            error = homed.result().error
+            homed.call(2, "len", timeout=DUE)
+            assert homed.result() == Result(2, value=0)
+        assert isinstance(error, RuntimeError)
+        assert str(error) == "result could not be sent: OSError: no room"
 
     def test_a_released_chan_is_closed_to_calls(self, homed: Homed) -> None:
         homed.proxy.send(Release(homed.object_id, 1))

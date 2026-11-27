@@ -138,6 +138,18 @@ class Codec:
         return pickle.loads(data)
 
 
+def describe(error: BaseException) -> str:
+    """*error* as "Type: message", or its type alone when it has no message
+    or str() of it raises: its code may be a payload's, run on a side that
+    must not fail for it."""
+    name = type(error).__name__
+    try:
+        message = str(error)
+    except Exception:
+        return name
+    return f"{name}: {message}" if message else name
+
+
 def link() -> tuple[LinkEnd, LinkEnd]:
     """A link between two processes: ``near, far = link()``. Each end goes to
     the process that uses it, which open()s it there; a process that hands

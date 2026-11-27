@@ -29,7 +29,7 @@ from typing import Any
 from ...log import Logger
 from .chan import Chan, _check_valid
 from .errors import ClosedError
-from .link import Call, Cancel, Codec, Link, Release, Result, Return
+from .link import Call, Cancel, Codec, Link, Release, Result, Return, describe
 from .waiter import Outcome, Waiter
 
 
@@ -281,12 +281,18 @@ class Home:
 
     def _deliver(self, result: Result) -> None:
         """Send *result* on the link, its payload encoded here, outside every
-        lock (encoding runs the payload's own code).
+        lock (encoding runs the payload's own code). Whatever fails in making
+        it ready fails its call alone: the pump goes on with the rest.
 
         Raises:
             ClosedError: If the link is closed.
         """
-        self._link.send(self._encoded(result))
+        try:
+            ready = self._encoded(result)
+        except Exception as e:
+            error = RuntimeError(f"result could not be sent: {describe(e)}")
+            ready = Result(result.call_id, error=self._codec.encode(error))
+        self._link.send(ready)
 
     def _encoded(self, result: Result) -> Result:
         """*result* with its value or its error encoded. A value that cannot
@@ -300,7 +306,7 @@ class Home:
             except Exception as e:  # pickle.dumps() raises what a reduce does
                 name = type(result.error).__qualname__
                 error: BaseException = RuntimeError(
-                    f"error not picklable: {name}: {type(e).__name__}: {e}"
+                    f"error not picklable: {name}: {describe(e)}"
                 )
         elif result.cancelled:
             return result
@@ -308,9 +314,7 @@ class Home:
             try:
                 return replace(result, value=self._codec.encode(result.value))
             except Exception as e:
-                error = pickle.PicklingError(
-                    f"result not picklable: {type(e).__name__}: {e}"
-                )
+                error = pickle.PicklingError(f"result not picklable: {describe(e)}")
         return Result(result.call_id, error=self._codec.encode(error))
 
 

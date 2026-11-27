@@ -27,7 +27,7 @@ from ...log import Logger
 from .chan import Chan
 from .errors import ClosedError
 from .home import Home
-from .link import Call, Cancel, Codec, Frame, LinkEnd, Push, Result, Return
+from .link import Call, Cancel, Codec, Frame, LinkEnd, Push, Result, Return, describe
 
 
 class _Pending:
@@ -159,7 +159,7 @@ class Endpoint:
                 error = self._codec.decode(result.error)
             except Exception as e:
                 raise RuntimeError(
-                    f"error at the home cannot be decoded here: {type(e).__name__}: {e}"
+                    f"error at the home cannot be decoded here: {describe(e)}"
                 ) from e
             raise error
         return self._codec.decode(result.value)
