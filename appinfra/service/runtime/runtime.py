@@ -10,6 +10,7 @@ import contextlib
 import functools
 import time
 from collections.abc import Callable
+from multiprocessing.context import BaseContext
 from types import TracebackType
 from typing import Any
 
@@ -73,6 +74,13 @@ class Runtime:
         self._own: Task | None = None
         self._started_runtime = False
         self._closing = False  # set by stop()'s caller: spawn() refuses at once
+
+    @property
+    def process_context(self) -> BaseContext:
+        """The multiprocessing context an isolated service's process starts
+        in: a queue, event or value the service shares with it is made from
+        it (appinfra.runtime.process_context())."""
+        return self._tasks.process_context
 
     @property
     def services(self) -> dict[str, Runner]:

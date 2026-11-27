@@ -5,10 +5,11 @@
 
 from __future__ import annotations
 
-import multiprocessing as mp
 from dataclasses import replace
-from typing import TYPE_CHECKING, Any, Generic, Self, TypeVar
+from typing import TYPE_CHECKING, Generic, Self, TypeVar
 
+from ....runtime import process_context
+from ....service import Runtime as ServiceRuntime
 from ..config.ipc import IPCConfig
 
 if TYPE_CHECKING:
@@ -31,15 +32,14 @@ class SubprocessConfigurer(Generic[P]):
     the server runs uvicorn directly in the current process.
 
     Example:
-        request_q, response_q = mp.Queue(), mp.Queue()
-
         server = (ServerBuilder("myapi")
             .subprocess
-                .with_ipc(request_q, response_q)
+                .with_ipc()
                 .with_log_file("/var/log/api.log")
                 .with_auto_restart(True).with_max_restarts(10)
                 .done()
             .build())
+        request_q, response_q = server.request_queue, server.response_queue
     """
 
     def __init__(self, parent: P) -> None:
@@ -61,23 +61,33 @@ class SubprocessConfigurer(Generic[P]):
             self._parent._api.ipc = IPCConfig()
         return self._parent._api.ipc
 
-    def with_ipc(
-        self,
-        request_q: mp.Queue[Any],
-        response_q: mp.Queue[Any],
-    ) -> Self:
+    def with_ipc(self) -> Self:
         """
         Enable subprocess mode with queue-based IPC.
 
-        Args:
-            request_q: Queue for API -> main process requests
-            response_q: Queue for main process -> API responses
+        Makes the request queue (API -> main process) and the response queue
+        (main process -> API), read back from the built server's
+        ``request_queue`` and ``response_queue``. They come from the context
+        the server's process starts in: a queue from another one fails there.
 
         Returns:
             Self for method chaining
         """
-        self._parent._request_q = request_q
-        self._parent._response_q = response_q
+        ctx = process_context()
+        self._parent._request_q = ctx.Queue()
+        self._parent._response_q = ctx.Queue()
+        return self
+
+    def with_runtime(self, runtime: ServiceRuntime) -> Self:
+        """Run the server as a service of *runtime*, a started service
+        Runtime the application owns, alongside its other services; the
+        server's stop() takes it out of the runtime and leaves the runtime
+        running. Without one, the server runs a runtime of its own.
+
+        Returns:
+            Self for method chaining
+        """
+        self._parent._runtime = runtime
         return self
 
     def with_log_file(self, path: str) -> Self:
@@ -170,16 +180,6 @@ class SubprocessConfigurer(Generic[P]):
     def with_max_restarts(self, count: int) -> Self:
         """Restart attempts before giving up; 0 means unlimited."""
         self._parent._api.max_restarts = count
-        return self
-
-    def with_start_method(self, method: str) -> Self:
-        """multiprocessing start method for the subprocess ("fork", "spawn", "forkserver").
-
-        Spawn or forkserver keeps restarts from forking off the monitor thread.
-        The queues given to with_ipc() must come from the same start method:
-        ``ctx = mp.get_context(method); request_q, response_q = ctx.Queue(), ctx.Queue()``.
-        """
-        self._parent._api.start_method = method
         return self
 
     def with_config(self, config: IPCConfig) -> Self:

@@ -10,7 +10,6 @@ from __future__ import annotations
 import contextlib
 import copy
 import functools
-import multiprocessing as mp
 import weakref
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -25,6 +24,7 @@ from ...runtime import (
     StopToken,
     Task,
     TaskDone,
+    process_context,
     stopping,
 )
 from ...runtime import Runtime as Tasks
@@ -412,7 +412,7 @@ class Owner:
         forwarded to the service's logger here. What it set up is undone if
         the spawn fails."""
         service = runner.service
-        ctx = mp.get_context("spawn")
+        ctx = process_context()
         queue = ctx.Queue()
         child = _Child(ctx.Event(), LogQueueListener(queue, service.lg))
         child.listener.start()

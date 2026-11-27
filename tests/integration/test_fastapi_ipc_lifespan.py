@@ -24,7 +24,6 @@ import pytest
 import requests
 from starlette.requests import Request
 
-from tests.helpers.fork import forks_in_xdist_worker
 from tests.helpers.http import wait_ready
 
 
@@ -161,7 +160,6 @@ async def _ipc_echo_handler(data: str, request: Request):
     return {"result": response.result}
 
 
-@forks_in_xdist_worker
 class TestFastAPIIPCWithLifecycleCallbacks:
     """Integration tests for IPC + lifecycle callback interaction."""
 
@@ -189,13 +187,10 @@ class TestFastAPIIPCWithLifecycleCallbacks:
         because FastAPI's on_event() handlers are ignored when a lifespan is present.
         """
         from appinfra.app.fastapi.builder.server import ServerBuilder
+        from appinfra.runtime import process_context
 
-        # Create IPC queues
-        request_q: mp.Queue = mp.Queue()
-        response_q: mp.Queue = mp.Queue()
-
-        # Track startup callback execution
-        startup_called = mp.Value("b", False)
+        # Track startup callback execution, from the context the child starts in
+        startup_called = process_context().Value("b", False)
 
         # Build server with startup callback AND IPC mode
         # This combination previously broke IPC polling
@@ -212,7 +207,7 @@ class TestFastAPIIPCWithLifecycleCallbacks:
             )
             .routes.with_route("/ping", _ping_handler, methods=["GET"])
             .done()
-            .subprocess.with_ipc(request_q, response_q)
+            .subprocess.with_ipc()
             .done()
             .build()
         )
@@ -221,12 +216,10 @@ class TestFastAPIIPCWithLifecycleCallbacks:
         stop_event = threading.Event()
         handler_thread = threading.Thread(
             target=_ipc_request_handler,
-            args=(request_q, response_q, stop_event),
+            args=(server.request_queue, server.response_queue, stop_event),
             daemon=True,
         )
         try:
-            # Start the subprocess, then the handler thread: forking while
-            # this process runs a thread can deadlock the child
             server.start_subprocess()
             handler_thread.start()
 
@@ -261,10 +254,6 @@ class TestFastAPIIPCWithLifecycleCallbacks:
         Depends = fastapi.Depends
         Request = fastapi.Request
 
-        # Create IPC queues
-        request_q: mp.Queue = mp.Queue()
-        response_q: mp.Queue = mp.Queue()
-
         # Build server
         from appinfra.log import Logger
 
@@ -277,7 +266,7 @@ class TestFastAPIIPCWithLifecycleCallbacks:
             .routes.with_route("/ping", _ping_handler, methods=["GET"])
             .with_route("/echo/{data}", _ipc_echo_handler, methods=["GET"])
             .done()
-            .subprocess.with_ipc(request_q, response_q)
+            .subprocess.with_ipc()
             .done()
             .build()
         )
@@ -286,12 +275,10 @@ class TestFastAPIIPCWithLifecycleCallbacks:
         stop_event = threading.Event()
         handler_thread = threading.Thread(
             target=_ipc_request_handler,
-            args=(request_q, response_q, stop_event),
+            args=(server.request_queue, server.response_queue, stop_event),
             daemon=True,
         )
         try:
-            # Start the subprocess, then the handler thread: forking while
-            # this process runs a thread can deadlock the child
             server.start_subprocess()
             handler_thread.start()
 
@@ -332,10 +319,6 @@ class TestFastAPIIPCWithLifecycleCallbacks:
         lg = Logger("test-handler")
         handler = _TestSubprocessErrorHandler(lg)
 
-        # Create IPC queues (required for subprocess mode)
-        request_q: mp.Queue = mp.Queue()
-        response_q: mp.Queue = mp.Queue()
-
         # Build server with exception handler in subprocess mode
         lg_server = Logger("test-exc-handler")
         server = (
@@ -346,7 +329,7 @@ class TestFastAPIIPCWithLifecycleCallbacks:
             .with_route("/raise", _raise_test_exception, methods=["GET"])
             .with_exception_handler(_TestSubprocessError, handler)
             .done()
-            .subprocess.with_ipc(request_q, response_q)
+            .subprocess.with_ipc()
             .done()
             .build()
         )

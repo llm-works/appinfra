@@ -111,8 +111,8 @@ class Runtime:
     def process_context(self) -> BaseContext:
         """The multiprocessing context a process task's child starts in. A
         queue, event or value shared with a child is made from it: one from
-        another context fails in the child."""
-        return mp.get_context(START_METHOD)
+        another context fails in the child. The same as process_context()."""
+        return process_context()
 
     # -- spawn --------------------------------------------------------------
 
@@ -473,6 +473,13 @@ def _escalate(late: list[_Task]) -> list[_Task]:
         grace = time.monotonic() + process_module._GRACE
         late = [t for t in late if not t.join(max(0.0, grace - time.monotonic()))]
     return late
+
+
+def process_context() -> BaseContext:
+    """The multiprocessing context every process task's child starts in, for
+    what is shared with a child before any Runtime exists: a queue, event or
+    value from another context fails in the child."""
+    return mp.get_context(START_METHOD)
 
 
 def _force_later(t: _Task, timeout: float) -> None:

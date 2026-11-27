@@ -7,19 +7,20 @@ from __future__ import annotations
 
 import multiprocessing as mp
 import sys
-import time
-from multiprocessing.process import BaseProcess
+from threading import Event
 from typing import TYPE_CHECKING, Any
 
+from ....runtime import TaskProcess
+from ....service import Runner, State
+from ....service import Runtime as ServiceRuntime
 from ....service.state import RestartPolicy
 from ..config.api import ApiConfig
 from ..config.ipc import IPCConfig
 from .adapter import LifecycleCallbackDefinition
-from .process import ProcessRunner
 from .service import UvicornService
 
-#: Default interval (seconds) for process health monitor checks
-PROCESS_MONITOR_INTERVAL = 1.0
+# Seconds start_subprocess() waits for the server to come up
+START_TIMEOUT = 30.0
 
 if TYPE_CHECKING:
     from ....log import Logger
@@ -57,7 +58,9 @@ class Server:
 
     Supports two modes:
     1. Direct mode: uvicorn.run() in current process (blocking)
-    2. Subprocess mode: uvicorn in child process with queue IPC (non-blocking)
+    2. Subprocess mode: uvicorn in a process of its own with queue IPC
+       (non-blocking), run as an isolated service of a service Runtime: the
+       runtime restarts it under its restart policy and escalates its stop.
 
     Mode is determined by whether IPC queues are provided during construction.
 
@@ -66,11 +69,9 @@ class Server:
         server.start()  # Blocking
 
     Example (subprocess mode):
-        request_q, response_q = mp.Queue(), mp.Queue()
-        server = (ServerBuilder("myapi")
-            .subprocess.with_ipc(request_q, response_q).done()
-            .build())
-        proc = server.start_subprocess()  # Non-blocking
+        server = ServerBuilder("myapi").subprocess.with_ipc().done().build()
+        server.start_subprocess()  # Non-blocking
+        request_q = server.request_queue
     """
 
     def __init__(
@@ -81,6 +82,7 @@ class Server:
         adapter: FastAPIAdapter,
         request_q: mp.Queue[Any] | None = None,
         response_q: mp.Queue[Any] | None = None,
+        runtime: ServiceRuntime | None = None,
     ) -> None:
         """
         Initialize server.
@@ -90,8 +92,13 @@ class Server:
             name: Server name (for logging)
             config: API configuration
             adapter: FastAPI adapter with route/middleware definitions
-            request_q: Request queue for IPC (enables subprocess mode)
-            response_q: Response queue for IPC (enables subprocess mode)
+            request_q: Request queue for IPC (enables subprocess mode), made
+                from appinfra.runtime.process_context()
+            response_q: Response queue for IPC (enables subprocess mode), made
+                from the same context
+            runtime: A started service Runtime to run the subprocess in, the
+                application's; None: start_subprocess() starts one of its
+                own, which stop() stops
 
         Raises:
             ImportError: If FastAPI is not installed
@@ -107,7 +114,10 @@ class Server:
         self._request_q = request_q
         self._response_q = response_q
         self._lg = lg
-        self._runner: ProcessRunner | None = None
+        self._runtime = runtime
+        # The runtime start_subprocess() started, when none was given
+        self._own_runtime: ServiceRuntime | None = None
+        self._runner: Runner | None = None
         self._service: UvicornService | None = None
         self._app: FastAPI | None = None
 
@@ -151,11 +161,26 @@ class Server:
         return self._request_q is not None and self._response_q is not None
 
     @property
+    def process(self) -> TaskProcess | None:
+        """The subprocess of the current run, or None while none runs (before
+        start_subprocess(), between a crash and its restart, after stop()).
+        A restart runs a new one: read it when needed. Held on to, it still
+        gives the ended child's detail, its exit code included."""
+        runner = self._runner
+        task = None if runner is None else runner.task
+        return None if task is None else task.process
+
+    @property
+    def pid(self) -> int | None:
+        """The pid of the current run's subprocess, or None while none runs."""
+        process = self.process
+        return None if process is None else process.detail().pid
+
+    @property
     def is_running(self) -> bool:
-        """Check if server is running."""
-        if self._runner:
-            return self._runner.is_alive()
-        return False
+        """True while the current run's subprocess is alive."""
+        process = self.process
+        return process is not None and process.detail().alive
 
     @property
     def request_queue(self) -> mp.Queue[Any] | None:
@@ -172,24 +197,20 @@ class Server:
         Start server (blocking).
 
         In direct mode: calls uvicorn.run() directly.
-        In subprocess mode: starts subprocess and blocks waiting.
+        In subprocess mode: starts the subprocess and blocks until it has
+        ended for good: stopped, ended cleanly, or failed with no restart
+        left.
         """
         if self.is_subprocess_mode:
             self.start_subprocess()
-            if self._runner:
-                self._wait_while_running(self._runner)
+            runner = self._runner
+            assert runner is not None
+            try:
+                _wait_settled(runner)
+            finally:  # Ctrl-C included; a runtime of its own stops too
+                self.stop()
         else:
             self._run_direct()
-
-    @staticmethod
-    def _wait_while_running(runner: ProcessRunner) -> None:
-        """Block while the server process runs or the monitor may still restart it.
-
-        The monitor thread is a daemon: returning between a crash and the restart
-        would end the interpreter and the restart with it.
-        """
-        while runner.is_alive() or (runner.monitoring and runner.restart_pending):
-            time.sleep(0.5)
 
     def _validate_subprocess_mode(self) -> None:
         """Validate that subprocess mode can be started."""
@@ -198,91 +219,103 @@ class Server:
                 "start_subprocess() requires subprocess mode. "
                 "Configure IPC with .subprocess.with_ipc() first."
             )
-        if self._runner and self._runner.is_alive():
+        if self._runner is not None and not _settled(self._runner):
             raise RuntimeError("Server subprocess is already running")
 
-    def _create_runner(self) -> ProcessRunner:
-        """Create ProcessRunner with UvicornService."""
+    def _start_runtime(self) -> ServiceRuntime:
+        """The runtime to run the subprocess in: the one given, else one of
+        the server's own, started on first use."""
+        if self._runtime is not None:
+            return self._runtime
+        if self._own_runtime is None:
+            runtime = ServiceRuntime(self._lg, name=f"{self._name}-server")
+            runtime.start()
+            self._own_runtime = runtime
+        return self._own_runtime
+
+    def _make_service(self, runtime: ServiceRuntime) -> UvicornService:
+        """A UvicornService for a new start, its shared port made from the
+        context *runtime*'s children start in."""
         if self._config.ipc is None:
             self._config.ipc = IPCConfig()
-
-        service = UvicornService(
+        return UvicornService(
             lg=self._lg,
             server_name=self._name,
             adapter=self._adapter,
             config=self._config,
-            context=mp.get_context(self._config.start_method),
+            context=runtime.process_context,
             request_q=self._request_q,
             response_q=self._response_q,
         )
-        self._service = service
 
-        # Map config to RestartPolicy
-        policy = RestartPolicy(
+    def _restart_policy(self) -> RestartPolicy:
+        """The configured restarts: a fixed delay between attempts."""
+        return RestartPolicy(
             # ApiConfig documents 0 as unlimited; RestartPolicy's 0 means no restarts
             max_retries=self._config.max_restarts or sys.maxsize,
             backoff=self._config.restart_delay,
-            backoff_multiplier=1.0,  # Linear backoff like SubprocessManager
+            backoff_multiplier=1.0,
             restart_on_failure=self._config.auto_restart,
         )
 
-        return ProcessRunner(
-            service,
-            policy=policy,
-            stop_timeout=5.0,
-            start_method=self._config.start_method,
-        )
-
-    def start_subprocess(self) -> BaseProcess:
+    def start_subprocess(self) -> None:
         """
-        Start server in subprocess (non-blocking).
-
-        Returns:
-            The subprocess Process object
+        Start the server in its subprocess (non-blocking): returns once it
+        serves. The runtime restarts it after a crash, as configured; read
+        ``port``, ``pid`` and ``process`` for the current run.
 
         Raises:
             RuntimeError: If not in subprocess mode or already running
+            SetupError, HealthTimeoutError: If it does not come up; the
+                server is stopped then
         """
         self._validate_subprocess_mode()
-
-        self._runner = self._create_runner()
-        self._runner.start()
-        self._runner.wait_healthy(timeout=30.0)
-
-        # Start monitor for auto-restart if enabled
-        if self._config.auto_restart:
-            self._runner.start_monitor(interval=PROCESS_MONITOR_INTERVAL)
-
+        runtime = self._start_runtime()
+        service = self._make_service(runtime)
+        self._service = service
+        self._runner = runtime.spawn(service, self._restart_policy(), isolate=True)
+        try:
+            runtime.ready(self._runner, timeout=START_TIMEOUT)
+        except BaseException:  # Ctrl-C included: nothing is left running
+            self.stop()
+            raise
         self._lg.info(
             "server started in subprocess",
             extra={
                 "server": self._name,
-                "pid": self._runner.pid,
+                "pid": self.pid,
                 "host": self._config.host,
                 "port": self.port,
             },
         )
 
-        # Return the process for compatibility with existing code
-        proc = self._runner.process
-        assert proc is not None
-        return proc
-
     def stop(self, timeout: float = 5.0) -> None:
         """
         Gracefully stop the server.
 
-        Sets the shutdown event and waits up to ``timeout`` for the subprocess
-        to exit, then escalates to SIGTERM and SIGKILL.
+        Stops the subprocess and waits up to ``timeout`` for it to exit; one
+        still running then is terminated, and killed if it outlives that,
+        the wait going on through both. A runtime of the server's own is
+        stopped too; a given one keeps running.
 
         Args:
             timeout: Seconds to wait for graceful shutdown
+
+        Raises:
+            TimeoutError: If the subprocess outlived its kill.
         """
-        if self._runner:
-            self._lg.debug("stopping server...", extra={"server": self._name})
-            self._runner.stop(timeout=timeout)
-            self._runner = None
-            self._lg.info("server stopped", extra={"server": self._name})
+        runner, self._runner = self._runner, None
+        own, self._own_runtime = self._own_runtime, None
+        try:
+            if runner is not None:
+                self._lg.debug("stopping server...", extra={"server": self._name})
+                runtime = own if own is not None else self._runtime
+                assert runtime is not None
+                runtime.stop_service(runner, timeout=timeout)
+                self._lg.info("server stopped", extra={"server": self._name})
+        finally:
+            if own is not None:
+                own.stop(timeout=timeout)
 
     def _run_direct(self) -> None:
         """Run uvicorn directly in current process (blocking)."""
@@ -321,3 +354,28 @@ class Server:
             )
 
         return LifecycleCallbackDefinition(log_server_started, "_server_started")
+
+
+def _settled(runner: Runner) -> bool:
+    """True once *runner* will not run again: stopped, ended cleanly, or
+    failed with no restart left."""
+    state = runner.state
+    if state in (State.STOPPED, State.DONE):
+        return True
+    return state == State.FAILED and not runner.can_restart
+
+
+def _wait_settled(runner: Runner) -> None:
+    """Block until *runner* has settled for good (see _settled()). The hook
+    sees every later transition; the check after it covers one made before
+    it was registered."""
+    settled = Event()
+
+    def on_change(_name: str, _old: State, _new: State) -> None:
+        if _settled(runner):
+            settled.set()
+
+    runner.on_state_change(on_change)
+    if _settled(runner):
+        return
+    settled.wait()
