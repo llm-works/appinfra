@@ -12,8 +12,12 @@ Frames:
     Result   home -> proxy   how a call ended: a value, an error, or cancelled
     Cancel   proxy -> home   the caller gave up: the home answers with the
                              result already decided, or cancelled, never both
+    Return   proxy -> home   a value received for a caller that left, given
+                             back to be received again in its send order
     Push     home -> proxy   the latest version of an object a proxy copies
-    Release  proxy -> home   a proxy is gone: its object may be dropped there
+    Release  proxy -> home   a proxy is gone, with the times its object was
+                             handed to it: dropped there once every handing
+                             over is released
 
 Internal: callers use the objects, never the link."""
 
@@ -50,12 +54,24 @@ class Call:
 @dataclass(frozen=True, slots=True)
 class Result:
     """How the call *call_id* ended: its *value*, the *error* it raised, or
-    *cancelled* after a Cancel came before any outcome."""
+    *cancelled* after a Cancel came before any outcome. A value received
+    carries its *seq*, its number in the send order, for a Return."""
 
     call_id: int
     value: Any = None
     error: BaseException | None = None
     cancelled: bool = False
+    seq: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class Return:
+    """*value*, number *seq* in the send order of the object *object_id*,
+    received for a caller that left: received again in its place."""
+
+    object_id: int
+    value: Any
+    seq: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,12 +92,14 @@ class Push:
 
 @dataclass(frozen=True, slots=True)
 class Release:
-    """The proxy of *object_id* on the sending side is gone."""
+    """The proxy of *object_id* on the sending side is gone, the object
+    handed to it *count* times."""
 
     object_id: int
+    count: int
 
 
-Frame = Call | Result | Cancel | Push | Release
+Frame = Call | Result | Cancel | Return | Push | Release
 
 
 def link() -> tuple[LinkEnd, LinkEnd]:

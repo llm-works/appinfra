@@ -257,7 +257,8 @@ def _try(case: Recv | Send, index: int) -> tuple[bool, Any]:
     its channel's lock."""
     try:
         if isinstance(case, Recv):
-            return case._target._take()
+            ready, value, _ = case._target._take()
+            return ready, value
         return case._target._put(case._payload), None
     except ClosedError as e:
         e.index = index

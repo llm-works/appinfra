@@ -68,7 +68,7 @@ class Chan(Generic[T]):
         "_lock",
         "_buffer",
         "_given_back",
-        "_handed",
+        "_sent",
         "_closed",
         "_senders",
         "_receivers",
@@ -86,13 +86,15 @@ class Chan(Generic[T]):
         self._process = process
         self._capacity = capacity
         self._lock = threading.Lock()
-        self._buffer: deque[T] = deque()
-        # Values handed to receivers that left before taking them, by the
-        # number of their hand-over: received before the buffer, in send order.
-        # A hand-over happens only while the buffer is empty, so every value
-        # given back was sent before all the buffer holds
+        # Each value with its number in the send order, as for the values
+        # given back
+        self._buffer: deque[tuple[int, T]] = deque()
+        # Values taken by receivers that left before having them, by their
+        # number: received before the buffer, in send order. A value is taken
+        # only from the front of the buffer, or handed over while it is empty,
+        # so every value given back was sent before all the buffer holds
         self._given_back: list[tuple[int, T]] = []
-        self._handed = 0  # hand-overs so far, numbering them
+        self._sent = 0  # values put so far, numbering them in send order
         self._closed = False
         # Waiters in the order they came. A waiter that leaves early (timeout,
         # stop, cancel) is removed in O(n); handing over pops the first
@@ -139,7 +141,7 @@ class Chan(Generic[T]):
         """
         _check_off_loop(timeout, "recv")
         with self._lock:
-            ready, value = self._take()
+            ready, value, _ = self._take()
             if ready:
                 return cast(T, value)
             _check_timeout(timeout)
@@ -166,7 +168,7 @@ class Chan(Generic[T]):
         Raises as recv(), except RuntimeError."""
         _check_valid(timeout)
         with self._lock:
-            ready, value = self._take()
+            ready, value, _ = self._take()
             if ready:
                 return cast(T, value)
             _check_timeout(timeout)
@@ -245,39 +247,46 @@ class Chan(Generic[T]):
             raise ClosedError("send on a closed channel")
         receiver = _first(self._receivers)
         if receiver is not None:
-            self._handed += 1
-            _hand(receiver, value, self._handed)
+            _hand(receiver, value, self._number())
             return True
         if self._capacity is None or len(self._buffer) < self._capacity:
-            self._buffer.append(value)
+            self._buffer.append((self._number(), value))
             return True
         return False
 
-    def _take(self) -> tuple[bool, Any]:
-        """The next value: one given back, then from the buffer, refilled from
-        the first waiting sender, or with no buffer from that sender directly;
-        (False, None) if the receiver has to wait. Under the lock."""
+    def _take(self) -> tuple[bool, Any, int]:
+        """The next value and its number in the send order: one given back,
+        then from the buffer, refilled from the first waiting sender, or with
+        no buffer from that sender directly; (False, None, 0) if the receiver
+        has to wait. Under the lock."""
         if self._given_back:
             # Frees no buffer slot: a waiting sender still waits
-            return True, self._given_back.pop(0)[1]
+            seq, value = self._given_back.pop(0)
+            return True, value, seq
         if self._buffer:
-            value = self._buffer.popleft()
+            seq, value = self._buffer.popleft()
             # Its slot is free now. The buffer never holds more than the
             # capacity; the refill relies on that, so it checks. Unbounded,
             # no sender ever waits
             if self._capacity is not None and len(self._buffer) < self._capacity:
                 sender = _first(self._senders)
                 if sender is not None:
-                    self._buffer.append(sender.value)
+                    self._buffer.append((self._number(), sender.value))
                     sender.settle(Outcome.DONE)
-            return True, value
+            return True, value, seq
         sender = _first(self._senders)
         if sender is not None:
             sender.settle(Outcome.DONE)
-            return True, sender.value
+            return True, sender.value, self._number()
         if self._closed:
             raise ClosedError("receive on a closed channel")
-        return False, None
+        return False, None, 0
+
+    def _number(self) -> int:
+        """The number of the value being put, in the send order. Under the
+        lock."""
+        self._sent += 1
+        return self._sent
 
     def _block(
         self, waiter: ThreadWaiter, queue: deque[Waiter], timeout: float | None
@@ -342,8 +351,8 @@ class Chan(Generic[T]):
                 self._return(waiter.value, waiter.seq)
 
     def _return(self, value: Any, seq: int) -> None:
-        """Put *value*, from hand-over *seq*, back to be received in its send
-        order. Under the lock."""
+        """Put *value*, number *seq* in the send order, back to be received
+        in that order. Under the lock."""
         receiver = _first(self._receivers)
         if receiver is not None:
             # Receivers wait only while nothing is given back: it is next
@@ -422,8 +431,8 @@ def _first(queue: deque[Waiter]) -> Waiter | None:
 
 
 def _hand(receiver: Waiter, value: Any, seq: int) -> None:
-    """Hand *value*, from hand-over *seq*, to a waiting *receiver*. Under the
-    channel's lock."""
+    """Hand *value*, number *seq* in the send order, to a waiting *receiver*.
+    Under the channel's lock."""
     receiver.value = value
     receiver.seq = seq
     receiver.settle(Outcome.DONE)
