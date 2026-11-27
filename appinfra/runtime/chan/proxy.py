@@ -7,12 +7,28 @@ every operation is a call to the home, over the link between the two."""
 from __future__ import annotations
 
 import asyncio
-from typing import TypeVar, cast
+from typing import Any, Protocol, TypeVar, cast
 
 from .chan import Chan, _check_valid
-from .endpoint import Endpoint
 
 T = TypeVar("T")
+
+
+class Caller(Protocol):
+    """What a proxy needs of this process's end of the link: an Endpoint."""
+
+    def call(
+        self, object_id: int, op: str, args: tuple[Any, ...], timeout: float | None
+    ) -> Any:
+        """Run *op* on the object homed across the link, and wait for it."""
+
+    async def acall(
+        self, object_id: int, op: str, args: tuple[Any, ...], timeout: float | None
+    ) -> Any:
+        """call(), awaited."""
+
+    def post(self, object_id: int, op: str, args: tuple[Any, ...]) -> None:
+        """Run *op* on the object homed across the link, without waiting."""
 
 
 class _ChanProxy(Chan[T]):
@@ -35,9 +51,10 @@ class _ChanProxy(Chan[T]):
     A select cannot wait on a proxy (TypeError there): its cases are decided
     at the home, and a select completes exactly one of its own."""
 
-    __slots__ = ("_endpoint", "_object_id")
+    # __weakref__: the link codec keeps one proxy per object while it lives
+    __slots__ = ("_endpoint", "_object_id", "__weakref__")
 
-    def __init__(self, endpoint: Endpoint, object_id: int) -> None:
+    def __init__(self, endpoint: Caller, object_id: int) -> None:
         """The proxy of the object *object_id* homed across *endpoint*'s
         link. Chan's own state is not made: it lives at the home, and any
         use of it here would fail at once, as a bug."""

@@ -10,7 +10,8 @@ and the cancels, returns and releases of its proxies) go through one outbox
 that never blocks, in the order posted, and one pump thread puts them on the
 link: a caller is never held by the link, on a thread or on the loop, and a
 frame posted after another by one thread never overtakes it. Each caller
-encodes its own payload, so a value that cannot cross fails there.
+encodes its own payload, so a value that cannot cross fails there; a process
+Chan in it crosses as a reference to its home (codec.py).
 
 A caller that leaves before its Result (a stop, a cancel) posts a Cancel;
 a Result that still comes, with a value received, goes back to the home as
@@ -25,9 +26,10 @@ from typing import Any
 
 from ...log import Logger
 from .chan import Chan
+from .codec import LinkCodec
 from .errors import ClosedError
 from .home import Home
-from .link import Call, Cancel, Codec, Frame, LinkEnd, Push, Result, Return, describe
+from .link import Call, Cancel, Frame, LinkEnd, Push, Result, Return, describe
 
 
 class _Pending:
@@ -53,7 +55,7 @@ class Endpoint:
     def __init__(self, lg: Logger, end: LinkEnd) -> None:
         """Open *end* and start the reader and the pump."""
         self._link = end.open()
-        self._codec = Codec()
+        self._codec = LinkCodec(self)  # process Chans in payloads as references
         self.home = Home(lg, self._link, self._codec)
         # Guards _pending and _closed; held only for table changes
         self._lock = threading.Lock()

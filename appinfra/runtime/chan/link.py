@@ -116,9 +116,9 @@ Frame = Call | Result | Cancel | Return | Push | Release
 
 
 class Codec:
-    """Encodes the payloads of frames, and decodes them: plain pickle here.
-    An endpoint's codec turns the process Chans in a payload into references
-    to their homes."""
+    """Encodes the payloads of frames, and decodes them: plain pickle here,
+    which refuses any Chan in a payload. An endpoint's link codec turns the
+    process Chans in a payload into references to their homes."""
 
     def encode(self, value: Any) -> bytes:
         """*value* as bytes for a frame.
@@ -136,6 +136,15 @@ class Codec:
                 here (a class this process cannot import).
         """
         return pickle.loads(data)
+
+    def decode_own(self, data: bytes) -> Any:
+        """The value *data* encodes, bytes this side encoded that come back
+        to it (a Return): as decode() here.
+
+        Raises:
+            Exception: As decode().
+        """
+        return self.decode(data)
 
 
 def describe(error: BaseException) -> str:

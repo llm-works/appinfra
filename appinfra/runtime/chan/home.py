@@ -147,7 +147,7 @@ class Home:
         except Exception as e:  # its arguments, undecodable here, fail the call alone
             self._post(_error(call, e))
             return
-        chan = self._object(call.object_id)
+        chan = self.exported(call.object_id)
         if chan is None:
             self._post(_error(call, ClosedError("channel released or closed")))
             return
@@ -202,7 +202,7 @@ class Home:
             queue.append(waiter)
         return waiter
 
-    def _object(self, object_id: int) -> Chan[Any] | None:
+    def exported(self, object_id: int) -> Chan[Any] | None:
         """The object *object_id*, or None once released or the link ended."""
         with self._lock:
             export = self._objects.get(object_id)
@@ -212,13 +212,19 @@ class Home:
         """Count *frame*'s handings over as released; drop the object once
         all are. A release counts only the handings over that reached its
         proxy: one still on its way keeps the object."""
+        self.release(frame.object_id, frame.count)
+
+    def release(self, object_id: int, count: int) -> None:
+        """Count *count* handings over of *object_id* as released, also for
+        ones that never reached a proxy (an encoding that failed, a value
+        given back); drop the object once all are."""
         with self._lock:
-            export = self._objects.get(frame.object_id)
+            export = self._objects.get(object_id)
             if export is None:
                 return
-            export.count -= frame.count
+            export.count -= count
             if export.count <= 0:
-                del self._objects[frame.object_id]
+                del self._objects[object_id]
                 del self._by_object[id(export.chan)]
 
     def _give_back(self, frame: Return) -> None:
@@ -230,11 +236,11 @@ class Home:
         can still fail to be rebuilt (a __reduce__ whose constructor raises).
         No receiver anywhere could have it, and the failure stays with it:
         raised here, it would end the reader, and the link with it."""
-        chan = self._object(frame.object_id)
+        chan = self.exported(frame.object_id)
         if chan is None:
             return
         try:
-            value = self._codec.decode(frame.value)
+            value = self._codec.decode_own(frame.value)  # the bytes of its Result
         except Exception as e:
             self._lg.warning(
                 "returned value dropped: cannot be decoded",
