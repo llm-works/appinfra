@@ -89,12 +89,14 @@ class _ProcessTask(_ThreadTask):
         """Run *fn*(*args*) in a child and return or raise its outcome."""
         ctx = mp.get_context(START_METHOD)
         with contextlib.ExitStack() as ends:
+            # Closed last: it waits for the child's end of the link, which the
+            # child closes as it ends, told to stop by then on an early exit
+            crossing = Crossing(self._lg, ctx)
+            ends.callback(crossing.close)
             # Each end is closed on any exit from the moment it is opened
             outcome_recv, outcome_send = _opened(ends, ctx.Pipe(duplex=False))
             stop_recv, stop_send = _opened(ends, ctx.Pipe(duplex=False))
             ends.callback(self.token._on_stop(functools.partial(_signal, stop_send)))
-            crossing = Crossing(self._lg, ctx)
-            ends.callback(crossing.close)  # after the outcome: the child is gone
             process = ctx.Process(
                 target=_child,
                 args=(self.id, self.name, fn, args, stop_recv, outcome_send),

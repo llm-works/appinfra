@@ -14,6 +14,7 @@ import pytest
 
 from appinfra.log import LogConfig, LoggerFactory
 from appinfra.runtime import Chan, ProcessExitError, Runtime
+from appinfra.runtime.chan import ClosedError
 
 # Seconds a call expected to end now may take: the failure path, not a wait
 DUE = 10.0
@@ -49,6 +50,10 @@ def ask(requests: Chan[tuple[str, Chan[str]]]) -> str:
 
 def wait_forever(inbox: Chan[Any]) -> None:
     inbox.recv()
+
+
+def close_it(chan: Chan[Any]) -> None:
+    chan.close()  # posted: the child returns without waiting for it
 
 
 def set_and_send(event: Any, out: Chan[int]) -> None:
@@ -109,6 +114,15 @@ class TestCrossing:
 
 
 class TestEnds:
+    def test_a_close_the_child_posts_last_reaches_the_chan(self, rt: Runtime) -> None:
+        """Posted, not waited for, then the child ends: the run's end here
+        still applies it before dropping what it handed the child."""
+        chan: Chan[int] = Chan(1, process=True)
+        t = rt.spawn(close_it, chan, process=True)
+        t.wait(timeout=DUE)
+        with pytest.raises(ClosedError):
+            chan.recv(timeout=0)
+
     def test_a_child_killed_leaves_the_chan_whole(self, rt: Runtime) -> None:
         """Its waiting receive goes with its link; a value sent after is
         kept for the next receiver."""

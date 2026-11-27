@@ -73,15 +73,17 @@ class Crossing:
             far.release()
 
     def close(self) -> None:
-        """End the run's link and the forwarding of the child's records. The
-        queue is closed and let go here: the crossing can outlive the run (a
-        task's error keeps the frame that holds it), and a queue left to the
-        cyclic collector frees its semaphores wherever that runs, inside the
-        resource tracker too, which refuses the reentrant call."""
+        """End the run's link and the forwarding of the child's records,
+        once the child has ended: every frame it sent (a close or a Release
+        it posted last) is handled first. The queue is closed and let go
+        here: the crossing can outlive the run (a task's error keeps the
+        frame that holds it), and a queue left to the cyclic collector frees
+        its semaphores wherever that runs, inside the resource tracker too,
+        which refuses the reentrant call."""
         try:
-            self.handed()  # a child that never started
+            self.handed()  # a child that never started: its end goes too
             if self._opened is not None:
-                self._opened[0].close()
+                self._opened[0].finish()
         finally:
             if self._listener is not None:
                 self._listener.stop()

@@ -120,11 +120,25 @@ class Endpoint:
         self._pumping = threading.Thread(
             target=self._pump, name="link-pump", daemon=True
         )
+        self._reading = threading.Thread(
+            target=self._read, name="link-read", daemon=True
+        )
         try:
-            threading.Thread(target=self._read, name="link-read", daemon=True).start()
-            self._pumping.start()
+            self._start_threads()
         except BaseException:
             self.home.close()  # its pump runs: ended, not left behind
+            raise
+
+    def _start_threads(self) -> None:
+        """Start the pump, then the reader: a reader that sees the link end
+        at once closes this side, which joins the pump. A reader that cannot
+        start ends the pump again."""
+        self._pumping.start()
+        try:
+            self._reading.start()
+        except BaseException:
+            self._outbox.put(None)  # the pump ends, not left behind
+            self._pumping.join()
             raise
 
     def proxy(self, object_id: int) -> Any:
@@ -202,6 +216,15 @@ class Endpoint:
         finalizer, at any point of any thread: takes no lock, and once the
         link is closed the frame goes nowhere."""
         self._post(Release(object_id, count))
+
+    def finish(self) -> None:
+        """End this side once the other side has ended: wait until its end
+        of the link closes, every frame it sent before handled (the reader
+        then closes this side), and close. For a side whose peer is gone or
+        ending, as a process task's child once reaped: nothing else is
+        waited for."""
+        self._reading.join()
+        self.close()
 
     def close(self) -> None:
         """End this side of the link: the waiting calls raise ClosedError,

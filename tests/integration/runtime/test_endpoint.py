@@ -225,6 +225,46 @@ class _SlowToEncode:
         return (_SlowToEncode, ())
 
 
+_decoding = threading.Event()
+_go_on = threading.Event()
+
+
+def _rebuilt_slowly() -> None:
+    """Decoding a _SlowToDecode: signals, then waits until let go."""
+    _decoding.set()
+    _go_on.wait(DUE)
+
+
+class _SlowToDecode:
+    """Encodes at once; its decoding holds the reader until let go."""
+
+    def __reduce__(self) -> tuple[Any, ...]:
+        return (_rebuilt_slowly, ())
+
+
+class TestEnd:
+    def test_what_the_other_side_posted_last_is_handled_before_the_end(
+        self, pair: Pair
+    ) -> None:
+        """The caller posts a close and ends; the home's reader is still on
+        an earlier frame as the home finishes its side of the run: the
+        close reaches the Chan all the same."""
+        _decoding.clear()
+        _go_on.clear()
+        pair.caller.post(pair.object_id, "send", (_SlowToDecode(),))
+        assert _decoding.wait(DUE)  # the reader holds the send
+        pair.caller.post(pair.object_id, "close", ())
+        pair.caller.close()  # its frames on the link, then its end closed
+        ender = threading.Thread(target=pair.home.finish)
+        ender.start()
+        _go_on.set()  # before or after finish() began: it waits either way
+        ender.join(DUE)
+        assert not ender.is_alive()
+        assert pair.chan.recv(timeout=0) is None  # the send, then the close
+        with pytest.raises(ClosedError):
+            pair.chan.recv(timeout=0)
+
+
 class TestOpen:
     def test_an_endpoint_that_fails_to_start_closes_its_link(
         self, monkeypatch: pytest.MonkeyPatch
@@ -248,6 +288,39 @@ class TestOpen:
         with pytest.raises(ClosedError):
             other.recv(timeout=DUE)  # the near side's close, seen here
         assert raised.value is not None
+        other.close()
+
+    @pytest.mark.parametrize("refused", ["link-read", "link-pump"])
+    def test_one_thread_that_cannot_start_leaves_none_behind(
+        self, monkeypatch: pytest.MonkeyPatch, refused: str
+    ) -> None:
+        """The home's pump and one of the endpoint's threads start, the
+        other cannot: the endpoint raises, its link closed, no thread of it
+        left running, and none failing as it ends."""
+        near, far = link()
+        other = far.open()
+        start = threading.Thread.start
+        failed: list[BaseException] = []
+
+        def refused_start(self: threading.Thread) -> None:
+            if self.name == refused:
+                raise RuntimeError("can't start new thread")
+            start(self)
+
+        monkeypatch.setattr(
+            threading, "excepthook", lambda args: failed.append(args.exc_value)
+        )
+        with monkeypatch.context() as patched:
+            patched.setattr(threading.Thread, "start", refused_start)
+            with pytest.raises(RuntimeError):
+                Endpoint(MagicMock(), near)
+        with pytest.raises(ClosedError):
+            other.recv(timeout=DUE)
+        for thread in threading.enumerate():
+            if thread.name in ("link-read", "link-pump", "link-home"):
+                thread.join(DUE)
+                assert not thread.is_alive(), thread.name
+        assert failed == []
         other.close()
 
 
