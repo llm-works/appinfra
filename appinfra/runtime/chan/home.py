@@ -23,11 +23,13 @@ import threading
 import time
 import weakref
 from collections import deque
+from dataclasses import replace
 from typing import Any
 
+from ...log import Logger
 from .chan import Chan, _check_valid
 from .errors import ClosedError
-from .link import Call, Cancel, Link, Release, Result, Return
+from .link import Call, Cancel, Codec, Link, Release, Result, Return, describe
 from .waiter import Outcome, Waiter
 
 
@@ -78,9 +80,12 @@ class Home:
     calls of that side parked in them. Made per link and process; handle()
     takes the frames meant for the home, in the order they arrive."""
 
-    def __init__(self, link: Link) -> None:
-        """The home side on *link*."""
+    def __init__(self, lg: Logger, link: Link, codec: Codec) -> None:
+        """The home side on *link*, the payloads of its frames encoded and
+        decoded with *codec*."""
+        self._lg = lg
         self._link = link
+        self._codec = codec
         self._ids = itertools.count(1)
         self._objects: dict[int, _Export] = {}
         self._by_object: dict[int, int] = {}  # id() of an object: its id here
@@ -138,7 +143,8 @@ class Home:
         parked until its object is ready, its deadline, or a Cancel."""
         try:
             _check_valid(call.timeout)  # as the Chan's own calls, before anything
-        except ValueError as e:
+            args = self._codec.decode(call.args)
+        except Exception as e:  # its arguments, undecodable here, fail the call alone
             self._post(_error(call, e))
             return
         chan = self._object(call.object_id)
@@ -149,17 +155,23 @@ class Home:
             chan.close()
             self._post(Result(call.call_id))
             return
+        if call.op == "len":
+            self._post(Result(call.call_id, value=len(chan)))
+            return
         try:
-            waiter = self._park(call, chan)
+            waiter = self._park(call, chan, args)
         except ClosedError as e:
             self._post(_error(call, e))
             return
         if waiter is not None and call.timeout is not None:
             self._deadlines.add(time.monotonic() + call.timeout, waiter)
 
-    def _park(self, call: Call, chan: Chan[Any]) -> _CallWaiter | None:
-        """Complete *call* on *chan* at once, answering it, or leave a waiter
-        for it there: returned, to be given its deadline. Both under one hold
+    def _park(
+        self, call: Call, chan: Chan[Any], args: tuple[Any, ...]
+    ) -> _CallWaiter | None:
+        """Complete *call*, with its decoded *args*, on *chan* at once,
+        answering it, or leave a waiter for it there: returned, to be given
+        its deadline. Both under one hold
         of *chan*'s lock, as Chan's own send() and recv(): a hand-over cannot
         slip between the call finding it not ready and its waiter queueing.
 
@@ -171,7 +183,7 @@ class Home:
         queue = chan._senders if sending else chan._receivers
         with chan._lock:
             if sending:
-                done, value, seq = chan._put(call.args[0]), None, 0
+                done, value, seq = chan._put(args[0]), None, 0
             else:
                 done, value, seq = chan._take()
             if done:
@@ -180,9 +192,7 @@ class Home:
             if call.timeout == 0:
                 self._post(_error(call, TimeoutError("channel not ready")))
                 return None
-            waiter = _CallWaiter(
-                self, call, chan, queue, call.args[0] if sending else None
-            )
+            waiter = _CallWaiter(self, call, chan, queue, args[0] if sending else None)
             with self._lock:
                 # A close since _call() found the Chan: parked, the call would
                 # take a value whose Result no one reads
@@ -214,11 +224,25 @@ class Home:
     def _give_back(self, frame: Return) -> None:
         """Put the value of *frame* back in its object, received again in its
         send order, as a local receive that left after the hand-over does.
-        Dropped with the object: released, no proxy is left to receive it."""
+        Dropped with the object: released, no proxy is left to receive it.
+
+        Dropped too if it cannot be decoded: encoded here, at its Result, it
+        can still fail to be rebuilt (a __reduce__ whose constructor raises).
+        No receiver anywhere could have it, and the failure stays with it:
+        raised here, it would end the reader, and the link with it."""
         chan = self._object(frame.object_id)
-        if chan is not None:
-            with chan._lock:
-                chan._return(frame.value, frame.seq)
+        if chan is None:
+            return
+        try:
+            value = self._codec.decode(frame.value)
+        except Exception as e:
+            self._lg.warning(
+                "returned value dropped: cannot be decoded",
+                extra={"object_id": frame.object_id, "exception": e},
+            )
+            return
+        with chan._lock:
+            chan._return(value, frame.seq)
 
     def _cancel(self, call_id: int) -> None:
         """End the parked call *call_id* as cancelled; nothing for one settled
@@ -256,22 +280,42 @@ class Home:
             pass  # the link closed: the other side is gone
 
     def _deliver(self, result: Result) -> None:
-        """Send *result* on the link; one that cannot be pickled fails its
-        call in its place, so the results after it still go. Its value is
-        lost: the call took it, and it could never cross the link.
+        """Send *result* on the link, its payload encoded here, outside every
+        lock (encoding runs the payload's own code). Whatever fails in making
+        it ready fails its call alone: the pump goes on with the rest.
 
         Raises:
             ClosedError: If the link is closed.
         """
         try:
-            self._link.send(result)
-        except ClosedError:
-            raise
-        except Exception as e:  # pickle.dumps() raises what a value's reduce does
-            error = pickle.PicklingError(
-                f"result not picklable: {type(e).__name__}: {e}"
-            )
-            self._link.send(Result(result.call_id, error=error))
+            ready = self._encoded(result)
+        except Exception as e:
+            error = RuntimeError(f"result could not be sent: {describe(e)}")
+            ready = Result(result.call_id, error=self._codec.encode(error))
+        self._link.send(ready)
+
+    def _encoded(self, result: Result) -> Result:
+        """*result* with its value or its error encoded. A value that cannot
+        be pickled fails its call in its place, so the results after it still
+        go; the value is lost: the call took it, and it could never cross the
+        link. An error that cannot be pickled crosses as a RuntimeError
+        naming it."""
+        if result.error is not None:
+            try:
+                return replace(result, error=self._codec.encode(result.error))
+            except Exception as e:  # pickle.dumps() raises what a reduce does
+                name = type(result.error).__qualname__
+                error: BaseException = RuntimeError(
+                    f"error not picklable: {name}: {describe(e)}"
+                )
+        elif result.cancelled:
+            return result
+        else:
+            try:
+                return replace(result, value=self._codec.encode(result.value))
+            except Exception as e:
+                error = pickle.PicklingError(f"result not picklable: {describe(e)}")
+        return Result(result.call_id, error=self._codec.encode(error))
 
 
 class _Deadlines:

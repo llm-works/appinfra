@@ -15,7 +15,7 @@ import threading
 import time
 import weakref
 from collections.abc import Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -28,6 +28,7 @@ from appinfra.runtime.chan.link import (
     CAPACITY,
     Call,
     Cancel,
+    Codec,
     Link,
     LinkEnd,
     Push,
@@ -50,6 +51,46 @@ class _Payload:
 
 class _Held:
     """A value only a home's parked call holds, watched for by its class."""
+
+
+def _raise_locked() -> Any:
+    """Decoding a _RaisesLocked: raises an error that cannot be pickled."""
+    error = ValueError("holds a lock")
+    error.lock = threading.Lock()  # type: ignore[attr-defined]
+    raise error
+
+
+class _RaisesLocked:
+    """Encodes, but its decoding raises an error holding a lock."""
+
+    def __reduce__(self) -> tuple[Any, ...]:
+        return (_raise_locked, ())
+
+
+class _UnprintableError(Exception):
+    """An error whose str() raises."""
+
+    def __str__(self) -> str:
+        raise ValueError("cannot be printed")
+
+
+class _UnsendableError(Exception):
+    """An error whose pickling raises an _UnprintableError."""
+
+    def __reduce__(self) -> tuple[Any, ...]:
+        raise _UnprintableError()
+
+
+def _raise_unsendable() -> Any:
+    """Decoding a _RaisesUnsendable: raises an _UnsendableError."""
+    raise _UnsendableError()
+
+
+class _RaisesUnsendable:
+    """Encodes, but its decoding raises an _UnsendableError."""
+
+    def __reduce__(self) -> tuple[Any, ...]:
+        return (_raise_unsendable, ())
 
 
 def _freed(kind: type) -> bool:
@@ -91,14 +132,27 @@ class Homed:
     object_id: int
 
     def call(self, call_id: int, op: str, *args: Any, timeout: float | None) -> None:
-        """Send a call on the homed Chan."""
-        self.proxy.send(Call(call_id, self.object_id, op, args, timeout))
+        """Send a call on the homed Chan, its arguments encoded."""
+        self.proxy.send(Call(call_id, self.object_id, op, CODEC.encode(args), timeout))
 
     def result(self) -> Result:
-        """The next Result from the home."""
-        frame = self.proxy.recv(timeout=DUE)
-        assert isinstance(frame, Result)
+        """The next Result from the home, its value decoded."""
+        return _decoded(self.proxy.recv(timeout=DUE))
+
+
+# Encodes and decodes the payloads, as an endpoint's codec does without
+# process Chans in them
+CODEC = Codec()
+
+
+def _decoded(frame: Any) -> Result:
+    """*frame*, a Result, with its value or its error decoded."""
+    assert isinstance(frame, Result)
+    if frame.error is not None:
+        return replace(frame, error=CODEC.decode(frame.error))
+    if frame.cancelled:
         return frame
+    return replace(frame, value=CODEC.decode(frame.value))
 
 
 def _serve(home: Home, home_link: Link) -> None:
@@ -112,7 +166,7 @@ def _serve(home: Home, home_link: Link) -> None:
 def homed() -> Iterator[Homed]:
     near, far = link()
     home_link, proxy = near.open(), far.open()
-    home = Home(home_link)
+    home = Home(MagicMock(), home_link, CODEC)
     threading.Thread(target=_serve, args=(home, home_link), daemon=True).start()
     chan: Chan[Any] = Chan(1)
     yield Homed(home, proxy, chan, home.register(chan))
@@ -126,11 +180,11 @@ class TestLink:
         near, far = link()
         a, b = near.open(), far.open()
         frames = [
-            Call(1, 2, "send", ({"x": [1, 2]},), 3.0),
-            Result(1, value=(4, 5)),
-            Result(2, error=ValueError("no")),
+            Call(1, 2, "send", CODEC.encode(({"x": [1, 2]},)), 3.0),
+            Result(1, value=CODEC.encode((4, 5))),
+            Result(2, error=CODEC.encode(ValueError("no"))),
             Cancel(3),
-            Push(2, 7, "latest"),
+            Push(2, 7, CODEC.encode("latest")),
             Release(2, 1),
         ]
         try:
@@ -142,9 +196,7 @@ class TestLink:
         finally:
             a.close()
             b.close()
-        assert got[:1] + got[3:] == frames[:1] + frames[3:]
-        assert got[1] == frames[1]
-        assert isinstance(got[2], Result) and str(got[2].error) == "no"
+        assert got == frames  # payloads as bytes: every frame compares whole
         assert back == Result(9, cancelled=True)
 
     def test_a_link_that_cannot_be_made_leaves_no_pipe_open(self) -> None:
@@ -357,24 +409,25 @@ class TestHome:
         received again as sent, before the rest of the buffer."""
         near, far = link()
         home_link, proxy = near.open(), far.open()
-        home = Home(home_link)
+        home = Home(MagicMock(), home_link, CODEC)
         threading.Thread(target=_serve, args=(home, home_link), daemon=True).start()
         chan: Chan[Any] = Chan(3)
         object_id = home.register(chan)
+        no_args = CODEC.encode(())
         try:
             for value in (1, 2, 3):
                 chan.send(value)
             taken = []
             for call_id in (1, 2):
-                proxy.send(Call(call_id, object_id, "recv", (), DUE))
+                proxy.send(Call(call_id, object_id, "recv", no_args, DUE))
                 result = proxy.recv(timeout=DUE)
                 assert isinstance(result, Result)
-                taken.append(result)
-            assert [(r.value, r.seq) for r in taken] == [(1, 1), (2, 2)]
+                taken.append(result)  # its value as encoded, as a Return sends it
+            assert [(_decoded(r).value, r.seq) for r in taken] == [(1, 1), (2, 2)]
             for result in reversed(taken):
                 proxy.send(Return(object_id, result.value, result.seq))
-            proxy.send(Call(3, object_id, "recv", (), 0))  # after both Returns
-            assert proxy.recv(timeout=DUE) == Result(3, value=1, seq=1)
+            proxy.send(Call(3, object_id, "recv", no_args, 0))  # after both Returns
+            assert _decoded(proxy.recv(timeout=DUE)) == Result(3, value=1, seq=1)
             assert [chan.recv(timeout=0) for _ in range(2)] == [2, 3]
         finally:
             home.close()
@@ -396,6 +449,61 @@ class TestHome:
         homed.proxy.send(Release(homed.object_id, 1))
         homed.call(2, "recv", timeout=0)
         assert isinstance(homed.result().error, ClosedError)
+
+    def test_arguments_that_cannot_be_decoded_fail_their_call_alone(
+        self, homed: Homed
+    ) -> None:
+        """The frame arrives, so the call is answered: with the error, and
+        the calls after it go on."""
+        homed.proxy.send(Call(1, homed.object_id, "send", b"not a pickle", DUE))
+        assert homed.result().error is not None
+        homed.call(2, "len", timeout=DUE)
+        assert homed.result() == Result(2, value=0)
+
+    def test_an_error_that_cannot_be_pickled_crosses_as_one_naming_it(
+        self, homed: Homed
+    ) -> None:
+        """The decoding of the arguments raises an error holding a lock: the
+        call is still answered, with a RuntimeError naming the error."""
+        homed.call(1, "send", _RaisesLocked(), timeout=DUE)
+        error = homed.result().error
+        assert isinstance(error, RuntimeError)
+        assert "error not picklable: ValueError" in str(error)
+        homed.call(2, "len", timeout=DUE)
+        assert homed.result() == Result(2, value=0)
+
+    def test_a_failure_that_cannot_be_printed_leaves_the_pump_running(
+        self, homed: Homed
+    ) -> None:
+        """The error cannot be pickled, and the failure to pickle it cannot be
+        printed: the call is still answered, naming both by type, and the
+        results after it are still sent."""
+        homed.call(1, "send", _RaisesUnsendable(), timeout=DUE)
+        error = homed.result().error
+        assert isinstance(error, RuntimeError)
+        assert str(error) == "error not picklable: _UnsendableError: _UnprintableError"
+        homed.call(2, "len", timeout=DUE)
+        assert homed.result() == Result(2, value=0)
+
+    def test_a_result_that_cannot_be_sent_fails_its_call_alone(
+        self, homed: Homed
+    ) -> None:
+        """Whatever fails as a Result is made ready for the link: that call
+        gets an error, and the pump goes on with the rest."""
+        encoded = homed.home._encoded
+
+        def fails_first(result: Result) -> Result:
+            if result.call_id == 1:
+                raise OSError("no room")
+            return encoded(result)
+
+        with patch.object(homed.home, "_encoded", side_effect=fails_first):
+            homed.call(1, "len", timeout=DUE)
+            error = homed.result().error
+            homed.call(2, "len", timeout=DUE)
+            assert homed.result() == Result(2, value=0)
+        assert isinstance(error, RuntimeError)
+        assert str(error) == "result could not be sent: OSError: no room"
 
     def test_a_released_chan_is_closed_to_calls(self, homed: Homed) -> None:
         homed.proxy.send(Release(homed.object_id, 1))
@@ -428,9 +536,9 @@ class TestHome:
         close there refuses the call, which would otherwise wait in the Chan
         for a value whose Result no one reads."""
         homed.home.close()
-        call = Call(1, homed.object_id, "recv", (), None)
+        call = Call(1, homed.object_id, "recv", CODEC.encode(()), None)
         with pytest.raises(ClosedError):
-            homed.home._park(call, homed.chan)  # Private: the park in that window
+            homed.home._park(call, homed.chan, ())  # Private: the park in that window
         homed.chan.send(7)
         assert homed.chan.recv(timeout=0) == 7
 

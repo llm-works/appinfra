@@ -19,10 +19,19 @@ Frames:
                              handed to it: dropped there once every handing
                              over is released
 
+A frame's payload (Call.args, Result.value and Result.error, Return.value,
+Push.value) crosses as bytes, encoded by the Codec of the side that sends
+it, and decoded by the side that uses it. Only the payload: a payload that
+cannot be decoded fails its own call, while the frame itself, with the call
+it answers, still arrives. Every other field is a plain int, str, float or
+bool, which any side can rebuild: a frame's own pickling never fails at the
+receiver, where the link would have to drop it, leaving its caller waiting.
+
 Internal: callers use the objects, never the link."""
 
 from __future__ import annotations
 
+import pickle
 from collections.abc import AsyncIterator, Iterator
 from dataclasses import dataclass
 from typing import Any, Self
@@ -40,37 +49,40 @@ CAPACITY = 64
 
 @dataclass(frozen=True, slots=True)
 class Call:
-    """An operation *op* on the object *object_id*, homed on the other side.
-    *timeout*, relative, becomes a deadline as the home receives the call:
-    the wait is kept there, so a call that timed out took nothing."""
+    """An operation *op* on the object *object_id*, homed on the other side,
+    with *args*, the encoded tuple of its arguments. *timeout*, relative,
+    becomes a deadline as the home receives the call: the wait is kept
+    there, so a call that timed out took nothing."""
 
     call_id: int
     object_id: int
     op: str
-    args: tuple[Any, ...]
+    args: bytes
     timeout: float | None
 
 
 @dataclass(frozen=True, slots=True)
 class Result:
     """How the call *call_id* ended: its *value*, the *error* it raised, or
-    *cancelled* after a Cancel came before any outcome. A value received
-    carries its *seq*, its number in the send order, for a Return."""
+    *cancelled* after a Cancel came before any outcome; value and error are
+    encoded once on the link. A value received carries its *seq*, its number
+    in the send order, for a Return."""
 
     call_id: int
     value: Any = None
-    error: BaseException | None = None
+    error: Any = None  # an exception at the home; its bytes on the link
     cancelled: bool = False
     seq: int = 0
 
 
 @dataclass(frozen=True, slots=True)
 class Return:
-    """*value*, number *seq* in the send order of the object *object_id*,
-    received for a caller that left: received again in its place."""
+    """*value*, encoded, number *seq* in the send order of the object
+    *object_id*, received for a caller that left: received again in its
+    place. The bytes of its Result, sent back as they came."""
 
     object_id: int
-    value: Any
+    value: bytes
     seq: int
 
 
@@ -83,11 +95,12 @@ class Cancel:
 
 @dataclass(frozen=True, slots=True)
 class Push:
-    """The latest *value* of the object *object_id*, its *version*-th."""
+    """The latest *value*, encoded, of the object *object_id*, its
+    *version*-th."""
 
     object_id: int
     version: int
-    value: Any
+    value: bytes
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,6 +113,41 @@ class Release:
 
 
 Frame = Call | Result | Cancel | Return | Push | Release
+
+
+class Codec:
+    """Encodes the payloads of frames, and decodes them: plain pickle here.
+    An endpoint's codec turns the process Chans in a payload into references
+    to their homes."""
+
+    def encode(self, value: Any) -> bytes:
+        """*value* as bytes for a frame.
+
+        Raises:
+            Exception: As pickle.dumps(), for a value that cannot be encoded.
+        """
+        return pickle.dumps(value, pickle.HIGHEST_PROTOCOL)
+
+    def decode(self, data: bytes) -> Any:
+        """The value *data* encodes.
+
+        Raises:
+            Exception: As pickle.loads(), for bytes that cannot be decoded
+                here (a class this process cannot import).
+        """
+        return pickle.loads(data)
+
+
+def describe(error: BaseException) -> str:
+    """*error* as "Type: message", or its type alone when it has no message
+    or str() of it raises: its code may be a payload's, run on a side that
+    must not fail for it."""
+    name = type(error).__name__
+    try:
+        message = str(error)
+    except Exception:
+        return name
+    return f"{name}: {message}" if message else name
 
 
 def link() -> tuple[LinkEnd, LinkEnd]:
