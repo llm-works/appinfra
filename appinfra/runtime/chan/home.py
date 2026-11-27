@@ -18,12 +18,14 @@ from __future__ import annotations
 import contextlib
 import heapq
 import itertools
+import pickle
 import threading
 import time
+import weakref
 from collections import deque
 from typing import Any
 
-from .chan import Chan
+from .chan import Chan, _check_valid
 from .errors import ClosedError
 from .link import Call, Cancel, Link, Release, Result
 from .waiter import Outcome, Waiter
@@ -33,7 +35,9 @@ class _CallWaiter(Waiter):
     """A call parked in a Chan, waiting there as a thread's waiter would. Its
     wake() answers the call: under the Chan's lock, so it only queues."""
 
-    __slots__ = ("call_id", "chan", "queue", "receiving", "_home")
+    # __weakref__: the deadline timer refers to it weakly, so a settled call
+    # is freed at once, not when its deadline would have passed
+    __slots__ = ("call_id", "chan", "queue", "receiving", "_home", "__weakref__")
 
     def __init__(
         self,
@@ -112,6 +116,11 @@ class Home:
     def _call(self, call: Call) -> None:
         """Run *call* on its object: answered at once if it completes, else
         parked until its object is ready, its deadline, or a Cancel."""
+        try:
+            _check_valid(call.timeout)  # as the Chan's own calls, before anything
+        except ValueError as e:
+            self._post(_error(call, e))
+            return
         with self._lock:
             chan = self._objects.get(call.object_id)
         if chan is None:
@@ -136,7 +145,8 @@ class Home:
         slip between the call finding it not ready and its waiter queueing.
 
         Raises:
-            ClosedError: If *chan* is closed (and, receiving, drained).
+            ClosedError: If *chan* is closed (and, receiving, drained), or the
+                home is, before the call would park.
         """
         sending = call.op == "send"
         queue = chan._senders if sending else chan._receivers
@@ -155,6 +165,10 @@ class Home:
                 self, call, chan, queue, call.args[0] if sending else None
             )
             with self._lock:
+                # A close since _call() found the Chan: parked, the call would
+                # take a value whose Result no one reads
+                if self._closed:
+                    raise ClosedError("home closed")
                 self._parked[call.call_id] = waiter
             queue.append(waiter)
         return waiter
@@ -174,6 +188,7 @@ class Home:
             self._parked.pop(waiter.call_id, None)
             if self._closed:
                 return
+        self._deadlines.settled()
         self._post(_result(waiter))
 
     def _post(self, result: Result) -> None:
@@ -188,18 +203,42 @@ class Home:
         outbox closes or the link does."""
         try:
             for result in self._outbox:
-                self._link.send(result)
+                self._deliver(result)
         except ClosedError:
             pass  # the link closed: the other side is gone
+
+    def _deliver(self, result: Result) -> None:
+        """Send *result* on the link; one that cannot be pickled fails its
+        call in its place, so the results after it still go. Its value is
+        lost: the call took it, and it could never cross the link.
+
+        Raises:
+            ClosedError: If the link is closed.
+        """
+        try:
+            self._link.send(result)
+        except ClosedError:
+            raise
+        except Exception as e:  # pickle.dumps() raises what a value's reduce does
+            error = pickle.PicklingError(
+                f"result not picklable: {type(e).__name__}: {e}"
+            )
+            self._link.send(Result(result.call_id, error=error))
 
 
 class _Deadlines:
     """One timer thread for the deadlines of all parked calls of a home: a
-    call still parked at its deadline leaves with TIMEOUT."""
+    call still parked at its deadline leaves with TIMEOUT.
+
+    The heap refers to its waiters weakly: a settled one is freed at once,
+    with its Chan and value, and its entry is dropped lazily. Once settled
+    calls are half the heap, it is rebuilt without their entries, so it
+    holds at most about twice the calls still parked."""
 
     def __init__(self) -> None:
-        self._heap: list[tuple[float, int, _CallWaiter]] = []
+        self._heap: list[tuple[float, int, weakref.ref[_CallWaiter]]] = []
         self._order = itertools.count()  # ties: waiters do not compare
+        self._settled = 0  # calls settled since the heap was last rebuilt
         self._cond = threading.Condition()
         self._closed = False
         threading.Thread(target=self._run, name="link-deadlines", daemon=True).start()
@@ -207,13 +246,26 @@ class _Deadlines:
     def add(self, deadline: float, waiter: _CallWaiter) -> None:
         """Time *waiter* out at *deadline*, a monotonic time."""
         with self._cond:
-            heapq.heappush(self._heap, (deadline, next(self._order), waiter))
+            entry = (deadline, next(self._order), weakref.ref(waiter))
+            heapq.heappush(self._heap, entry)
             self._cond.notify()
 
+    def settled(self) -> None:
+        """A parked call settled, with a deadline or without: rebuild the
+        heap once such calls are half of it. Under the Chan's lock, which the
+        timer thread never takes while holding the condition."""
+        with self._cond:
+            self._settled += 1
+            if self._settled * 2 >= len(self._heap):
+                self._heap = [e for e in self._heap if _pending(e[2]) is not None]
+                heapq.heapify(self._heap)
+                self._settled = 0
+
     def close(self) -> None:
-        """Stop the timer thread."""
+        """Stop the timer thread, and drop every entry."""
         with self._cond:
             self._closed = True
+            self._heap.clear()
             self._cond.notify()
 
     def _run(self) -> None:
@@ -223,12 +275,15 @@ class _Deadlines:
                 if not self._heap:
                     self._cond.wait()
                     continue
-                deadline, _, waiter = self._heap[0]
+                deadline, _, ref = self._heap[0]
                 left = deadline - time.monotonic()
                 if left > 0:
                     self._cond.wait(left)
                     continue
                 heapq.heappop(self._heap)
+                waiter = _pending(ref)
+                if waiter is None:
+                    continue  # settled before its deadline
                 # Outside the condition: _leave takes the Chan's lock, and a
                 # waker holding it may be adding a deadline
                 self._cond.release()
@@ -236,6 +291,16 @@ class _Deadlines:
                     waiter.chan._leave(waiter, waiter.queue, Outcome.TIMEOUT)
                 finally:
                     self._cond.acquire()
+
+
+def _pending(ref: weakref.ref[_CallWaiter]) -> _CallWaiter | None:
+    """The waiter *ref* refers to, if it is still pending. Read without the
+    Chan's lock: one seen settled stays settled, and one that settles after
+    this is left alone by _leave()."""
+    waiter = ref()
+    if waiter is None or waiter.outcome is not Outcome.PENDING:
+        return None
+    return waiter
 
 
 def _result(waiter: _CallWaiter) -> Result:

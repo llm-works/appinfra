@@ -199,17 +199,22 @@ class Link:
 
     def close(self) -> None:
         """Close both directions: the frames sent so far still reach the
-        other side, which then sees the link closed; frames on their way here
-        are dropped."""
+        other side while it reads, then it sees the link closed; frames on
+        their way here are dropped.
+
+        The receiving side closes first: the wait for the frames sent to be
+        on the pipe needs the other side to read, and a side closing its own
+        receiving end ends that wait for the other. Both closing at once with
+        frames unread, neither waits for the other."""
         try:
-            self._sender.close()
-        finally:
             self._receiver.close()
+        finally:
+            self._sender.close()
 
     async def aclose(self) -> None:
         """Close both directions, awaiting the frames sent so far onto the
         pipe; as close(), on the loop."""
         try:
-            await self._sender.aclose()
-        finally:
             self._receiver.close()
+        finally:
+            await self._sender.aclose()

@@ -6,9 +6,13 @@ on one side, sent by hand here as a proxy will send them."""
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
+import gc
 import os
+import pickle
 import threading
+import weakref
 from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any
@@ -20,6 +24,7 @@ from appinfra.runtime import Chan, Runtime
 from appinfra.runtime.chan import ClosedError, pipe
 from appinfra.runtime.chan.home import Home
 from appinfra.runtime.chan.link import (
+    CAPACITY,
     Call,
     Cancel,
     Link,
@@ -35,6 +40,10 @@ DUE = 5.0
 
 
 # The child imports these by name: module level, as the spawn method needs
+
+
+class _Payload:
+    """A value whose copy at the home a test can watch being freed."""
 
 
 def sends_then_closes(end: LinkEnd) -> None:
@@ -161,6 +170,41 @@ class TestLink:
             opened.close()
             rt.stop()
 
+    def test_both_sides_closing_with_frames_unread_do_not_wait_on_each_other(
+        self,
+    ) -> None:
+        """Each side sent past the link's capacity and read nothing: a close
+        drops what is on its way in, so neither waits for the other to read."""
+        a, b = _unread_both_ways()
+        closers = [threading.Thread(target=end.close, daemon=True) for end in (a, b)]
+        for closer in closers:
+            closer.start()
+        for closer in closers:
+            closer.join(DUE)
+        assert not any(closer.is_alive() for closer in closers)
+
+    def test_both_sides_aclosing_with_frames_unread_do_not_wait_on_each_other(
+        self,
+    ) -> None:
+        """As close(), awaited on the loop."""
+        a, b = _unread_both_ways()
+
+        async def both() -> None:
+            await asyncio.wait_for(asyncio.gather(a.aclose(), b.aclose()), DUE)
+
+        asyncio.run(both())
+
+
+def _unread_both_ways() -> tuple[Link, Link]:
+    """Both ends of a link, each having sent one frame more than the link
+    carries before the other side reads: their writers wait for room."""
+    near, far = link()
+    a, b = near.open(), far.open()
+    for end in (a, b):
+        for i in range(CAPACITY + 1):
+            end.send(Release(i), timeout=DUE)
+    return a, b
+
 
 class TestHome:
     def test_a_call_that_can_complete_is_answered_at_once(self, homed: Homed) -> None:
@@ -190,10 +234,34 @@ class TestHome:
         homed.chan.send(7)  # after the timeout: stays in the Chan
         assert homed.chan.recv(timeout=0) == 7
 
+    def test_a_settled_call_is_not_kept_until_its_deadline(self, homed: Homed) -> None:
+        """Its waiter, and the value it carried, go as it settles, not when
+        its deadline would have passed."""
+        homed.chan.send(1)  # full
+        homed.call(1, "send", _Payload(), timeout=3600)
+        homed.call(2, "recv", timeout=0)  # takes 1; the room goes to call 1
+        results = {r.call_id: r for r in (homed.result(), homed.result())}
+        assert results == {1: Result(1), 2: Result(2, value=1)}
+        received = homed.chan.recv(timeout=0)  # the home's copy of the payload
+        assert isinstance(received, _Payload)
+        gone = weakref.ref(received)
+        del received
+        gc.collect()
+        assert gone() is None
+
     def test_timeout_zero_does_not_park(self, homed: Homed) -> None:
         homed.call(1, "recv", timeout=0)
         assert isinstance(homed.result().error, TimeoutError)
         homed.chan.send(7)
+        assert homed.chan.recv(timeout=0) == 7
+
+    def test_a_negative_timeout_is_refused_before_anything_is_taken(
+        self, homed: Homed
+    ) -> None:
+        """As Chan.recv() refuses it: the value stays in the Chan."""
+        homed.chan.send(7)
+        homed.call(1, "recv", timeout=-1)
+        assert isinstance(homed.result().error, ValueError)
         assert homed.chan.recv(timeout=0) == 7
 
     def test_a_cancelled_call_takes_nothing(self, homed: Homed) -> None:
@@ -223,6 +291,20 @@ class TestHome:
         homed.call(2, "recv", timeout=0)
         assert homed.result() == Result(2, value=7)
 
+    def test_a_result_that_cannot_be_pickled_fails_its_call_alone(
+        self, homed: Homed
+    ) -> None:
+        """Its call gets an error in its place, and the results after it are
+        still sent: one bad value does not end the link."""
+        homed.chan.send(threading.Lock())
+        homed.call(1, "recv", timeout=DUE)
+        result = homed.result()
+        assert result.call_id == 1
+        assert isinstance(result.error, pickle.PicklingError)
+        homed.chan.send(7)
+        homed.call(2, "recv", timeout=DUE)
+        assert homed.result() == Result(2, value=7)
+
     def test_a_released_chan_is_closed_to_calls(self, homed: Homed) -> None:
         homed.proxy.send(Release(homed.object_id))
         homed.call(1, "recv", timeout=DUE)
@@ -244,6 +326,19 @@ class TestHome:
         homed.call(2, "recv", timeout=0)  # once answered, call 1 is parked
         assert homed.result().call_id == 2
         homed.home.close()
+        homed.chan.send(7)
+        assert homed.chan.recv(timeout=0) == 7
+
+    def test_a_call_parking_after_the_home_closed_takes_nothing(
+        self, homed: Homed
+    ) -> None:
+        """The window between a call finding its Chan and parking in it: a
+        close there refuses the call, which would otherwise wait in the Chan
+        for a value whose Result no one reads."""
+        homed.home.close()
+        call = Call(1, homed.object_id, "recv", (), None)
+        with pytest.raises(ClosedError):
+            homed.home._park(call, homed.chan)  # Private: the park in that window
         homed.chan.send(7)
         assert homed.chan.recv(timeout=0) == 7
 
