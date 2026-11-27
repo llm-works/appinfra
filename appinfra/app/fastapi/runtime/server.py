@@ -266,15 +266,16 @@ class Server:
 
         Raises:
             RuntimeError: If not in subprocess mode or already running
+            ConfigError: If the configuration cannot run in a subprocess
             SetupError, HealthTimeoutError: If it does not come up; the
                 server is stopped then
         """
         self._validate_subprocess_mode()
         runtime = self._start_runtime()
-        service = self._make_service(runtime)
-        self._service = service
-        self._runner = runtime.spawn(service, self._restart_policy(), isolate=True)
         try:
+            service = self._make_service(runtime)  # ConfigError: a bad config
+            self._service = service
+            self._runner = runtime.spawn(service, self._restart_policy(), isolate=True)
             runtime.ready(self._runner, timeout=START_TIMEOUT)
         except BaseException:  # Ctrl-C included: nothing is left running
             self.stop()

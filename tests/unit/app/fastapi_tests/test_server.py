@@ -310,6 +310,27 @@ class TestServerSubprocessMode:
         runtime.stop.assert_called_once()
         assert server._runner is None
 
+    @pytest.mark.parametrize("failing", ["service", "spawn"])
+    def test_a_start_that_cannot_spawn_stops_its_own_runtime(
+        self, runtime_deps, failing
+    ):
+        """The service cannot be made (a bad config) or spawned: the runtime
+        started for it is stopped, and the error raised."""
+        from appinfra.app.fastapi.errors import ConfigError
+
+        runtime = runtime_deps["runtime"]
+        if failing == "service":
+            runtime_deps["service_cls"].side_effect = ConfigError("Invalid port")
+        else:
+            runtime.spawn.side_effect = RuntimeError("cannot spawn")
+        server = _subprocess_server()
+
+        with pytest.raises((ConfigError, RuntimeError)):
+            server.start_subprocess()
+
+        runtime.stop.assert_called_once()
+        assert server._own_runtime is None
+
     def test_stop_stops_the_service_and_its_own_runtime(self, runtime_deps):
         server = _subprocess_server()
         server.start_subprocess()

@@ -7,7 +7,9 @@ from __future__ import annotations
 
 import asyncio
 import functools
+import logging
 import multiprocessing as mp
+import os
 import random
 import signal
 import threading
@@ -314,6 +316,52 @@ class CleansUpOnStop(AsyncService):
         scheduled on the loop."""
         assert self._loop is not None and self._gate is not None
         self._loop.call_soon_threadsafe(self._gate.set)
+
+
+class LogsFromItsProcess(Service):
+    """Logs one record in its subprocess, then waits for its stop."""
+
+    def __init__(self, lg: Logger) -> None:
+        self._lg = lg
+
+    @property
+    def name(self) -> str:
+        return "logs-from-its-process"
+
+    def run(self) -> None:
+        self._lg.warning("logged in the child", extra={"pid": os.getpid()})
+        self.stopping.wait()
+
+
+class _Captured(logging.Handler):
+    """Keeps the records it handles; *arrived* is set on the first."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.records: list[logging.LogRecord] = []
+        self.arrived = threading.Event()
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self.records.append(record)
+        self.arrived.set()
+
+
+class TestIsolatedLogging:
+    def test_an_isolated_services_records_reach_its_logger(self, rt):
+        """What an isolated service logs in its process reaches the handlers
+        of the logger it was given, here in the parent."""
+        lg = Logger(name="test-isolated-logging")
+        captured = _Captured()
+        lg.addHandler(captured)
+        runner = rt.spawn(LogsFromItsProcess(lg), isolate=True)
+        try:
+            assert captured.arrived.wait(30.0)
+        finally:
+            rt.stop_service(runner, timeout=30.0)
+
+        record = captured.records[0]
+        assert record.getMessage() == "logged in the child"
+        assert record.process != os.getpid()
 
 
 class TestStopEscalation:
