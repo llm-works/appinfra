@@ -98,7 +98,23 @@ if __name__ == "__main__":
 - a child that exits without an outcome (killed, crashed, `os._exit()`) fails the task with
   `ProcessExitError`, whose `exitcode` is negative for the signal that ended it; a task stopped
   that way raises `StoppedError` instead
-- `Runtime.stop()` terminates, then kills, a child still running after its timeout
+- `Runtime.stop()` terminates, then kills, a child still running after its timeout;
+  `t.stop(timeout)` does the same for one task
+- a queue, event or value shared with the child comes from `process_context()` (also
+  `rt.process_context`), the context children start in: one from another context, e.g. a default
+  `mp.Queue()` on Linux before Python 3.14, fails in the child
+
+`t.process` is the task's child (`TaskProcess`), and `None` for a task on the loop or a thread:
+
+| Member | Meaning |
+|--------|---------|
+| `t.process.detail()` | `ProcessDetail(pid, exitcode, alive)`, read anew on each call; once the child is reaped, as it ended |
+| `t.process.terminate()` | SIGTERM to the child, or to it once started |
+| `t.process.kill()` | SIGKILL, the same way |
+| `t.process.grace` | seconds past a stop's timeout that forcing the child can take |
+
+`detail()` reads the child at that moment: two calls can see it end in between, so keep one
+snapshot for the fields read together. Before the child has started, its `pid` is `None`.
 
 ### The Task handle
 
@@ -109,8 +125,11 @@ if __name__ == "__main__":
 | `t.wait(timeout=None)` | block until the task ends; return its result or raise its error |
 | `await t` | the same in a coroutine, on any event loop |
 | `t.cancel()` | stop the task's token; a loop task is also cancelled |
+| `t.stop(timeout)` | `cancel()`, and a process task's child still running *timeout* seconds on gets SIGTERM, then SIGKILL; returns at once |
 | `t.alive()` | `True` until the task has ended |
 | `t.detach()` | give up waiting: a failure is logged instead |
+| `t.kind` | what the task runs as: `TaskKind.LOOP`, `THREAD` or `PROCESS` |
+| `t.process` | the child of a process task (see [Processes](#processes)), else `None` |
 
 The outcome stays on the handle: `wait()` and `await` can be repeated, and each raises the
 task's error from the task's own traceback. The runtime drops a task as it ends.
@@ -312,8 +331,11 @@ if __name__ == "__main__":
 
 | Name | Kind |
 |------|------|
-| `Runtime` | runs tasks: `start`, `stop`, `spawn`, context manager |
+| `Runtime` | runs tasks: `start`, `stop`, `spawn`, `process_context`, context manager |
 | `Task` | the handle `spawn()` returns |
+| `TaskKind` | what a task runs as: `LOOP`, `THREAD`, `PROCESS` |
+| `TaskProcess`, `ProcessDetail` | a process task's child, and its `pid`, `exitcode`, `alive` |
+| `process_context()` | the multiprocessing context process tasks' children start in |
 | `TaskDone` | `(task_id, name, result, error)`, sent on `done` |
 | `stopping()`, `task_id()` | the current task's token and id |
 | `StopToken`, `StoppedError` | the stop signal, and the error a stop ends a wait with |
