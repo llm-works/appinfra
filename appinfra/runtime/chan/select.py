@@ -28,6 +28,7 @@ from .chan import (
 )
 from .errors import ClosedError
 from .pipe import Receiver, Sender
+from .proxy import _ChanProxy
 from .waiter import LoopWaiter, Outcome, ThreadWaiter, Waiter
 
 
@@ -40,7 +41,12 @@ class Recv:
     _target: Chan[Any] = field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
-        """Resolve a Receiver's case to its channel."""
+        """Resolve a Receiver's case to its channel.
+
+        Raises:
+            TypeError: If *chan* is a proxy of a process Chan homed elsewhere.
+        """
+        _check_local(self.chan)
         target = self.chan._chan if isinstance(self.chan, Receiver) else self.chan
         object.__setattr__(self, "_target", target)
 
@@ -61,7 +67,12 @@ class Send:
     _payload: Any = field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
-        """Resolve the case to its channel and what it sends there."""
+        """Resolve the case to its channel and what it sends there.
+
+        Raises:
+            TypeError: If *chan* is a proxy of a process Chan homed elsewhere.
+        """
+        _check_local(self.chan)
         payload: Any  # bytes for a Sender, a _Snapshot, or the value itself
         if isinstance(self.chan, Sender):
             target, payload = self.chan._chan, pickle.dumps(self.value)
@@ -77,6 +88,19 @@ class Send:
         each call, so a receiver changing one changes no later send."""
         payload = self._payload
         return payload.restore() if isinstance(payload, _Snapshot) else payload
+
+
+def _check_local(chan: Any) -> None:
+    """Refuse a case on a proxy: its operations are decided at the Chan's
+    home, in another process, where this select cannot take exactly one.
+
+    Raises:
+        TypeError: If *chan* is a proxy.
+    """
+    if isinstance(chan, _ChanProxy):
+        raise TypeError(
+            "select() cannot wait on a process Chan from a process other than its home"
+        )
 
 
 def select(*cases: Recv | Send, timeout: float | None = None) -> tuple[int, Any]:

@@ -98,6 +98,22 @@ class Endpoint:
             raise
         return self._outcome(result)
 
+    def post(self, object_id: int, op: str, args: tuple[Any, ...]) -> None:
+        """Run *op* with *args* on the object *object_id* homed on the other
+        side, without waiting: its Result is dropped as it comes. Posted in
+        order with this side's calls, so a call made after it runs after it.
+        Nothing once the link is closed.
+
+        Raises:
+            Exception: As the codec does for arguments that cannot be encoded.
+        """
+        data = self._codec.encode(args)
+        with self._lock:
+            if self._closed:
+                return
+            call_id = next(self._ids)  # no pending call: _settle() drops it
+        self._post(Call(call_id, object_id, op, data, None))
+
     def close(self) -> None:
         """End this side of the link: the waiting calls raise ClosedError,
         the home drops its objects; idempotent."""
