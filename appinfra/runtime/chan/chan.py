@@ -201,6 +201,12 @@ class Chan(Generic[T]):
         except ClosedError:
             raise StopAsyncIteration from None
 
+    # The internals below, with _lock, _senders and _receivers, are also used
+    # by home.py: a call from another process parks there as one more Waiter.
+    # It relies on _put() and _take() completing at once or reporting that the
+    # caller has to wait, on a Waiter being settled once under _lock, and on
+    # _leave() ending a pending waiter without giving a handed value back.
+
     def _put(self, value: T) -> bool:
         """Hand *value* to the first waiting receiver, or buffer it; False if
         the sender has to wait. Under the lock."""

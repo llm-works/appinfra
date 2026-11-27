@@ -6,17 +6,18 @@ on one side, sent by hand here as a proxy will send them."""
 
 from __future__ import annotations
 
+import contextlib
 import os
 import threading
 from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from appinfra.runtime import Chan, Runtime
-from appinfra.runtime.chan import ClosedError
+from appinfra.runtime.chan import ClosedError, pipe
 from appinfra.runtime.chan.home import Home
 from appinfra.runtime.chan.link import (
     Call,
@@ -119,6 +120,26 @@ class TestLink:
         assert isinstance(got[2], Result) and str(got[2].error) == "no"
         assert back == Result(9, cancelled=True)
 
+    def test_a_link_that_cannot_be_made_leaves_no_pipe_open(self) -> None:
+        """The second pipe failing: the first one's ends are released, not
+        left to the garbage collector."""
+        made: list[Any] = []
+
+        def second_fails(capacity: int) -> Any:
+            if made:
+                raise OSError("too many open files")
+            made.extend(pipe(capacity))
+            return tuple(made)
+
+        with (
+            patch("appinfra.runtime.chan.link.pipe", side_effect=second_fails),
+            pytest.raises(OSError, match="too many open files"),
+        ):
+            link()
+        for end in made:
+            with pytest.raises(RuntimeError, match="already opened or released"):
+                end.release()
+
     @pytest.mark.parametrize("child", [sends_then_closes, sends_then_exits])
     def test_the_other_process_ending_ends_the_iteration(self, child: Any) -> None:
         """Its frames are taken first; then the link reads as closed, whether
@@ -131,7 +152,10 @@ class TestLink:
             rt.spawn(child, far, process=True)
             assert opened.recv(timeout=30.0) == Release(1)  # the child has its end
             far.release()  # EOF needs every copy of the child's end closed
-            opened.send(Result(0))  # the ack sends_then_exits waits for
+            # The ack sends_then_exits waits for; sends_then_closes may have
+            # closed its end already, which refuses it
+            with contextlib.suppress(ClosedError):
+                opened.send(Result(0))
             assert list(opened) == []
         finally:
             opened.close()

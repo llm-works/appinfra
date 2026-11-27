@@ -68,7 +68,10 @@ class Home:
         self._ids = itertools.count(1)
         self._objects: dict[int, Chan[Any]] = {}
         self._parked: dict[int, _CallWaiter] = {}
-        self._lock = threading.Lock()  # guards _objects, _parked, _closed
+        # Guards _objects, _parked and _closed. Taken after a Chan's lock,
+        # never before: a waker holds the Chan's when it answers, so a path
+        # holding this one drops it before taking a Chan's (_cancel, close)
+        self._lock = threading.Lock()
         self._closed = False
         self._outbox: Chan[Result] = Chan(None)  # never blocks a waker
         self._deadlines = _Deadlines()
@@ -128,7 +131,9 @@ class Home:
 
     def _park(self, call: Call, chan: Chan[Any]) -> _CallWaiter | None:
         """Complete *call* on *chan* at once, answering it, or leave a waiter
-        for it there: returned, to be given its deadline.
+        for it there: returned, to be given its deadline. Both under one hold
+        of *chan*'s lock, as Chan's own send() and recv(): a hand-over cannot
+        slip between the call finding it not ready and its waiter queueing.
 
         Raises:
             ClosedError: If *chan* is closed (and, receiving, drained).

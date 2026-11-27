@@ -25,8 +25,12 @@ from typing import Any, Self
 
 from .pipe import PipeRecvEnd, PipeSendEnd, Receiver, Sender, pipe
 
-# Frames on their way in either direction, per side: a sender waits for room
-# past this, so the reader on the other side must keep taking them
+# Frames in transit in either direction, per side: past this, a writer thread
+# waits for the other side to read. A transport size, not a semantic one: the
+# readers on both sides never wait (a call parks at its home, a result goes to
+# its waiter), so this bounds no Chan's values; its own capacity does, as a
+# send that has to wait parks at the home. 64 lets a burst of calls from one
+# process be in flight without their writer waiting on room
 CAPACITY = 64
 
 
@@ -85,7 +89,14 @@ def link() -> tuple[LinkEnd, LinkEnd]:
     the process that uses it, which open()s it there; a process that hands
     an end to another release()s its own copy once the other has it."""
     near_out, far_in = pipe(CAPACITY)
-    far_out, near_in = pipe(CAPACITY)
+    try:
+        far_out, near_in = pipe(CAPACITY)
+    except BaseException:
+        # Released now, not left to the garbage collector: the second pipe
+        # failing is most likely the process running out of descriptors
+        near_out.release()
+        far_in.release()
+        raise
     return LinkEnd._of(near_out, near_in), LinkEnd._of(far_out, far_in)
 
 
