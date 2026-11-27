@@ -79,7 +79,8 @@ class Result:
 class Return:
     """*value*, encoded, number *seq* in the send order of the object
     *object_id*, received for a caller that left: received again in its
-    place. The bytes of its Result, sent back as they came."""
+    place. Encoded anew by the side giving it back, which decoded it, its
+    Chans with it, as it does every Result."""
 
     object_id: int
     value: bytes
@@ -116,9 +117,9 @@ Frame = Call | Result | Cancel | Return | Push | Release
 
 
 class Codec:
-    """Encodes the payloads of frames, and decodes them: plain pickle here.
-    An endpoint's codec turns the process Chans in a payload into references
-    to their homes."""
+    """Encodes the payloads of frames, and decodes them: plain pickle here,
+    which refuses any Chan in a payload. An endpoint's link codec turns the
+    process Chans in a payload into references to their homes."""
 
     def encode(self, value: Any) -> bytes:
         """*value* as bytes for a frame.

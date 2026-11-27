@@ -7,8 +7,9 @@ the calls on them that wait.
 A call that cannot complete at once is parked in the object as one more
 waiter, a _CallWaiter, beside the threads and coroutines of this process: no
 thread waits for it. Settled under the object's lock, exactly once, it puts
-its Result in an outbox that never blocks; a pump thread puts the outbox on
-the link. Its deadline, made as the call arrived, is kept by one timer thread
+its Result in an outbox that never blocks; a pump thread encodes each and
+posts it to the endpoint's outbox, in order with every other frame this side
+sends. Its deadline, made as the call arrived, is kept by one timer thread
 for all of them. A Cancel ends a pending call as cancelled and changes
 nothing for one already settled, whose Result is on its way: a call gets one
 Result, so no value is lost or delivered twice."""
@@ -23,13 +24,14 @@ import threading
 import time
 import weakref
 from collections import deque
+from collections.abc import Callable
 from dataclasses import replace
 from typing import Any
 
 from ...log import Logger
 from .chan import Chan, _check_valid
 from .errors import ClosedError
-from .link import Call, Cancel, Codec, Link, Release, Result, Return, describe
+from .link import Call, Cancel, Codec, Frame, Release, Result, Return, describe
 from .waiter import Outcome, Waiter
 
 
@@ -80,11 +82,11 @@ class Home:
     calls of that side parked in them. Made per link and process; handle()
     takes the frames meant for the home, in the order they arrive."""
 
-    def __init__(self, lg: Logger, link: Link, codec: Codec) -> None:
-        """The home side on *link*, the payloads of its frames encoded and
-        decoded with *codec*."""
+    def __init__(self, lg: Logger, post: Callable[[Frame], None], codec: Codec) -> None:
+        """The home side of a link: its Results go out through *post*, the
+        payloads of its frames encoded and decoded with *codec*."""
         self._lg = lg
-        self._link = link
+        self._post_frame = post
         self._codec = codec
         self._ids = itertools.count(1)
         self._objects: dict[int, _Export] = {}
@@ -147,7 +149,7 @@ class Home:
         except Exception as e:  # its arguments, undecodable here, fail the call alone
             self._post(_error(call, e))
             return
-        chan = self._object(call.object_id)
+        chan = self.exported(call.object_id)
         if chan is None:
             self._post(_error(call, ClosedError("channel released or closed")))
             return
@@ -202,7 +204,7 @@ class Home:
             queue.append(waiter)
         return waiter
 
-    def _object(self, object_id: int) -> Chan[Any] | None:
+    def exported(self, object_id: int) -> Chan[Any] | None:
         """The object *object_id*, or None once released or the link ended."""
         with self._lock:
             export = self._objects.get(object_id)
@@ -212,27 +214,31 @@ class Home:
         """Count *frame*'s handings over as released; drop the object once
         all are. A release counts only the handings over that reached its
         proxy: one still on its way keeps the object."""
+        self.release(frame.object_id, frame.count)
+
+    def release(self, object_id: int, count: int) -> None:
+        """Count *count* handings over of *object_id* as released, also for
+        ones that never reached a proxy (an encoding that failed); drop the
+        object once all are."""
         with self._lock:
-            export = self._objects.get(frame.object_id)
+            export = self._objects.get(object_id)
             if export is None:
                 return
-            export.count -= frame.count
+            export.count -= count
             if export.count <= 0:
-                del self._objects[frame.object_id]
+                del self._objects[object_id]
                 del self._by_object[id(export.chan)]
 
     def _give_back(self, frame: Return) -> None:
         """Put the value of *frame* back in its object, received again in its
         send order, as a local receive that left after the hand-over does.
         Dropped with the object: released, no proxy is left to receive it.
+        Decoded even then: the Chans the other side handed over in it are
+        released by the proxies decoding makes, once the value is dropped.
 
-        Dropped too if it cannot be decoded: encoded here, at its Result, it
-        can still fail to be rebuilt (a __reduce__ whose constructor raises).
-        No receiver anywhere could have it, and the failure stays with it:
+        Dropped too if it cannot be decoded: it can fail to be rebuilt (a
+        __reduce__ whose constructor raises), and the failure stays with it:
         raised here, it would end the reader, and the link with it."""
-        chan = self._object(frame.object_id)
-        if chan is None:
-            return
         try:
             value = self._codec.decode(frame.value)
         except Exception as e:
@@ -240,6 +246,9 @@ class Home:
                 "returned value dropped: cannot be decoded",
                 extra={"object_id": frame.object_id, "exception": e},
             )
+            return
+        chan = self.exported(frame.object_id)
+        if chan is None:
             return
         with chan._lock:
             chan._return(value, frame.seq)
@@ -271,18 +280,25 @@ class Home:
             self._outbox.send(result)
 
     def _send(self) -> None:
-        """Pump thread: each Result from the outbox onto the link, until the
-        outbox closes or the link does."""
+        """Pump thread: each Result from the outbox, encoded and posted, until
+        the outbox closes or the link does."""
         try:
             for result in self._outbox:
                 self._deliver(result)
+                # Not kept until the next one: a proxy in its value would live
+                # on, and its Chan with it, at the other side
+                del result
         except ClosedError:
             pass  # the link closed: the other side is gone
 
     def _deliver(self, result: Result) -> None:
-        """Send *result* on the link, its payload encoded here, outside every
-        lock (encoding runs the payload's own code). Whatever fails in making
-        it ready fails its call alone: the pump goes on with the rest.
+        """Post *result*, its payload encoded here, outside every lock
+        (encoding runs the payload's own code). Whatever fails in making it
+        ready fails its call alone: the pump goes on with the rest.
+
+        *result* holds its value until it is posted: a proxy in it lives on
+        at least until then, so its Release is posted after it, and the other
+        side decodes the reference before it releases the Chan.
 
         Raises:
             ClosedError: If the link is closed.
@@ -292,7 +308,7 @@ class Home:
         except Exception as e:
             error = RuntimeError(f"result could not be sent: {describe(e)}")
             ready = Result(result.call_id, error=self._codec.encode(error))
-        self._link.send(ready)
+        self._post_frame(ready)
 
     def _encoded(self, result: Result) -> Result:
         """*result* with its value or its error encoded. A value that cannot

@@ -166,7 +166,7 @@ def _serve(home: Home, home_link: Link) -> None:
 def homed() -> Iterator[Homed]:
     near, far = link()
     home_link, proxy = near.open(), far.open()
-    home = Home(MagicMock(), home_link, CODEC)
+    home = Home(MagicMock(), home_link.send, CODEC)
     threading.Thread(target=_serve, args=(home, home_link), daemon=True).start()
     chan: Chan[Any] = Chan(1)
     yield Homed(home, proxy, chan, home.register(chan))
@@ -409,7 +409,7 @@ class TestHome:
         received again as sent, before the rest of the buffer."""
         near, far = link()
         home_link, proxy = near.open(), far.open()
-        home = Home(MagicMock(), home_link, CODEC)
+        home = Home(MagicMock(), home_link.send, CODEC)
         threading.Thread(target=_serve, args=(home, home_link), daemon=True).start()
         chan: Chan[Any] = Chan(3)
         object_id = home.register(chan)

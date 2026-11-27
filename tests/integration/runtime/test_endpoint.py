@@ -32,16 +32,16 @@ class Pair:
     caller: Endpoint
     chan: Chan[Any]
     object_id: int
-    lg: MagicMock  # the home's
+    caller_lg: MagicMock
 
 
 @pytest.fixture
 def pair() -> Iterator[Pair]:
     near, far = link()
-    lg = MagicMock()
-    home, caller = Endpoint(lg, near), Endpoint(MagicMock(), far)
+    caller_lg = MagicMock()
+    home, caller = Endpoint(MagicMock(), near), Endpoint(caller_lg, far)
     chan: Chan[Any] = Chan(1)
-    yield Pair(home, caller, chan, home.home.register(chan), lg)
+    yield Pair(home, caller, chan, home.home.register(chan), caller_lg)
     caller.close()
     home.close()
 
@@ -116,11 +116,12 @@ class TestCall:
         asyncio.run(main())
         assert pair.chan.recv(timeout=DUE) == 7
 
-    def test_a_given_back_value_that_cannot_be_decoded_fails_alone(
+    def test_a_received_value_that_cannot_be_decoded_fails_alone(
         self, pair: Pair
     ) -> None:
-        """Encoded at the home, the value cannot be rebuilt there: dropped,
-        while the link and the calls after it go on."""
+        """Received for a caller that left, the value cannot be rebuilt on
+        the reader: dropped and logged, while the link and the calls after it
+        go on."""
 
         async def main() -> None:
             waiting = asyncio.create_task(
@@ -135,11 +136,10 @@ class TestCall:
 
         _rebuilding.clear()
         asyncio.run(main())
-        # The Return is posted by whichever thread saw the Result last: wait
-        # for its decoding; a call posted after it is read after it
+        # Decoded on the caller's reader: a Result read after it, settled after
         assert _rebuilding.wait(DUE)
         assert pair.caller.call(pair.object_id, "len", (), DUE) == 0
-        extra = pair.lg.warning.call_args.kwargs["extra"]
+        extra = pair.caller_lg.warning.call_args.kwargs["extra"]
         assert extra["object_id"] == pair.object_id
         assert isinstance(extra["exception"], ValueError)
 

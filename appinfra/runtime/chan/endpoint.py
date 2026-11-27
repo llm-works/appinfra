@@ -9,8 +9,11 @@ the caller waiting for it, the rest to the home. This side's frames (calls,
 and the cancels, returns and releases of its proxies) go through one outbox
 that never blocks, in the order posted, and one pump thread puts them on the
 link: a caller is never held by the link, on a thread or on the loop, and a
-frame posted after another by one thread never overtakes it. Each caller
-encodes its own payload, so a value that cannot cross fails there.
+frame posted after another by one thread never overtakes it. The home's
+Results go through the same outbox. Each caller encodes its own payload, so
+a value that cannot cross fails there; a process Chan in it crosses as a
+reference to its home (codec.py). Every frame from the other side is decoded
+on the reader, in the order frames come.
 
 A caller that leaves before its Result (a stop, a cancel) posts a Cancel;
 a Result that still comes, with a value received, goes back to the home as
@@ -20,14 +23,40 @@ from __future__ import annotations
 
 import contextlib
 import itertools
+import queue
 import threading
+from dataclasses import dataclass
 from typing import Any
 
 from ...log import Logger
 from .chan import Chan
+from .codec import LinkCodec
 from .errors import ClosedError
 from .home import Home
-from .link import Call, Cancel, Codec, Frame, LinkEnd, Push, Result, Return, describe
+from .link import (
+    Call,
+    Cancel,
+    Frame,
+    LinkEnd,
+    Push,
+    Release,
+    Result,
+    Return,
+    describe,
+)
+
+
+@dataclass(frozen=True, slots=True)
+class _Answer:
+    """A Result, decoded on the reader: the *value* received, or the *error*
+    its caller raises; *received* when a value was, numbered *seq*; *lost*
+    when one was but could not be decoded."""
+
+    value: Any = None
+    error: BaseException | None = None
+    received: bool = False
+    lost: bool = False
+    seq: int = 0
 
 
 class _Pending:
@@ -37,11 +66,11 @@ class _Pending:
     __slots__ = ("object_id", "op", "reply", "abandoned")
 
     def __init__(self, object_id: int, op: str) -> None:
-        """A call of *op* on *object_id*, its Result to be delivered on its
+        """A call of *op* on *object_id*, its answer to be delivered on its
         own reply Chan."""
         self.object_id = object_id
         self.op = op
-        self.reply: Chan[Result] = Chan(1)  # one Result: its send never waits
+        self.reply: Chan[_Answer] = Chan(1)  # one answer: its send never waits
         self.abandoned = False
 
 
@@ -52,15 +81,19 @@ class Endpoint:
 
     def __init__(self, lg: Logger, end: LinkEnd) -> None:
         """Open *end* and start the reader and the pump."""
+        self._lg = lg
         self._link = end.open()
-        self._codec = Codec()
-        self.home = Home(lg, self._link, self._codec)
+        # Every frame this side sends, the home's Results too, in the order
+        # posted; None ends the pump. Never blocks, and put() is safe from a
+        # finalizer at any point (a proxy's Release)
+        self._outbox: queue.SimpleQueue[Frame | None] = queue.SimpleQueue()
+        self._codec = LinkCodec(self)  # process Chans in payloads as references
+        self.home = Home(lg, self._post, self._codec)
         # Guards _pending and _closed; held only for table changes
         self._lock = threading.Lock()
         self._ids = itertools.count(1)
         self._pending: dict[int, _Pending] = {}
         self._closed = False
-        self._outbox: Chan[Frame] = Chan(None)  # never blocks a caller
         for target, name in ((self._read, "link-read"), (self._pump, "link-pump")):
             threading.Thread(target=target, name=name, daemon=True).start()
 
@@ -80,11 +113,11 @@ class Endpoint:
         """
         call_id, pending = self._start(object_id, op, args, timeout)
         try:
-            result = pending.reply.recv()
+            answer = pending.reply.recv()
         except BaseException:
             self._abandon(call_id, pending)
             raise
-        return self._outcome(result)
+        return _outcome(answer)
 
     async def acall(
         self, object_id: int, op: str, args: tuple[Any, ...], timeout: float | None
@@ -92,11 +125,11 @@ class Endpoint:
         """call(), awaited on the loop; a cancelled call is abandoned."""
         call_id, pending = self._start(object_id, op, args, timeout)
         try:
-            result = await pending.reply.arecv()
+            answer = await pending.reply.arecv()
         except BaseException:
             self._abandon(call_id, pending)
             raise
-        return self._outcome(result)
+        return _outcome(answer)
 
     def post(self, object_id: int, op: str, args: tuple[Any, ...]) -> None:
         """Run *op* with *args* on the object *object_id* homed on the other
@@ -114,6 +147,13 @@ class Endpoint:
             call_id = next(self._ids)  # no pending call: _settle() drops it
         self._post(Call(call_id, object_id, op, data, None))
 
+    def release(self, object_id: int, count: int) -> None:
+        """Post a Release of *count* handings over of *object_id*, homed on
+        the other side: its proxy here is gone. Called by the proxy's
+        finalizer, at any point of any thread: takes no lock, and once the
+        link is closed the frame goes nowhere."""
+        self._post(Release(object_id, count))
+
     def close(self) -> None:
         """End this side of the link: the waiting calls raise ClosedError,
         the home drops its objects; idempotent."""
@@ -126,7 +166,7 @@ class Endpoint:
         for call in pending:
             call.reply.close()
         self.home.close()
-        self._outbox.close()
+        self._outbox.put(None)
         self._link.close()
 
     def _start(
@@ -161,48 +201,72 @@ class Endpoint:
         with contextlib.suppress(ClosedError, TimeoutError):
             self._give_back(pending, pending.reply.recv(timeout=0))
 
-    def _outcome(self, result: Result) -> Any:
-        """The value of *result*, decoded here.
-
-        Raises:
-            Exception: The error the call raised at the home, or as the codec
-                does for a value that cannot be decoded.
-            RuntimeError: If the error raised at the home cannot be decoded
-                here (its class missing, its args not fitting its __init__).
-        """
+    def _decoded(self, result: Result) -> _Answer:
+        """Reader: *result* decoded, in the order frames come, so a Chan it
+        refers to is resolved before a Release behind it is read. A payload
+        that cannot be decoded is its caller's error."""
+        if result.cancelled:
+            return _Answer()
         if result.error is not None:
             try:
                 error = self._codec.decode(result.error)
             except Exception as e:
-                raise RuntimeError(
+                error = RuntimeError(
                     f"error at the home cannot be decoded here: {describe(e)}"
-                ) from e
-            raise error
-        return self._codec.decode(result.value)
+                )
+                error.__cause__ = e
+            return _Answer(error=error)
+        try:
+            value = self._codec.decode(result.value)
+        except Exception as e:
+            return _Answer(error=e, lost=True)
+        return _Answer(value, received=True, seq=result.seq)
 
     def _settle(self, result: Result) -> None:
-        """Reader: hand *result* to its caller; give back its value if the
-        caller left. Under the lock, so an abandon sees it delivered or not."""
+        """Reader: hand *result*, decoded, to its caller; give back its value
+        if the caller left. Under the lock, so an abandon sees it delivered
+        or not."""
+        answer = self._decoded(result)
         with self._lock:
             pending = self._pending.pop(result.call_id, None)
             if pending is None:
                 return
             if not pending.abandoned:
-                pending.reply.send(result, timeout=0)
+                pending.reply.send(answer, timeout=0)
                 return
-        self._give_back(pending, result)
+        self._give_back(pending, answer)
 
-    def _give_back(self, pending: _Pending, result: Result) -> None:
-        """Return the value *result* received for a caller that left, to be
-        received again at the home in its send order."""
-        if pending.op == "recv" and result.error is None and not result.cancelled:
-            self._post(Return(pending.object_id, result.value, result.seq))
+    def _give_back(self, pending: _Pending, answer: _Answer) -> None:
+        """Return the value *answer* received for a caller that left, to be
+        received again at the home in its send order: encoded anew, its
+        Chans as this side holds them. One that could not be decoded here,
+        or decoded but cannot be encoded again, is lost, and logged."""
+        if pending.op != "recv":
+            return
+        if answer.lost:
+            self._lg.warning(
+                "received value dropped: cannot be decoded",
+                extra={"object_id": pending.object_id, "exception": answer.error},
+            )
+            return
+        if not answer.received:
+            return
+        try:
+            data = self._codec.encode(answer.value)
+        except Exception as e:
+            self._lg.warning(
+                "given-back value dropped: cannot be encoded again",
+                extra={"object_id": pending.object_id, "exception": e},
+            )
+            return
+        self._post(Return(pending.object_id, data, answer.seq))
 
     def _post(self, frame: Frame) -> None:
-        """Queue *frame* for the pump; never waits. Closed, the link has
-        ended, and the waiting calls with it."""
-        with contextlib.suppress(ClosedError):
-            self._outbox.send(frame)
+        """Queue *frame* for the pump; never waits, never raises, and takes
+        no lock. Once the link is closed the frame goes nowhere (a plain read
+        of the flag: one posted as it closes is dropped with the queue)."""
+        if not self._closed:
+            self._outbox.put(frame)
 
     def _read(self) -> None:
         """Reader thread: each frame from the other side to its caller or the
@@ -219,7 +283,20 @@ class Endpoint:
 
     def _pump(self) -> None:
         """Pump thread: each frame from the outbox onto the link, until the
-        outbox closes or the link does."""
+        endpoint closes or the link does."""
         with contextlib.suppress(ClosedError):
-            for frame in self._outbox:
+            while (frame := self._outbox.get()) is not None:
                 self._link.send(frame)
+                del frame  # not kept, with its payload, until the next one
+
+
+def _outcome(answer: _Answer) -> Any:
+    """The value of *answer*.
+
+    Raises:
+        Exception: The error the call raised at the home, or the codec's for
+            a payload that cannot be decoded here.
+    """
+    if answer.error is not None:
+        raise answer.error
+    return answer.value
