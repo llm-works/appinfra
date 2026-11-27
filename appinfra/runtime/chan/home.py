@@ -27,8 +27,20 @@ from typing import Any
 
 from .chan import Chan, _check_valid
 from .errors import ClosedError
-from .link import Call, Cancel, Link, Release, Result
+from .link import Call, Cancel, Link, Release, Result, Return
 from .waiter import Outcome, Waiter
+
+
+class _Export:
+    """An object handed across the link, and how many times: a release
+    counts down the handings over its proxy received."""
+
+    __slots__ = ("chan", "count")
+
+    def __init__(self, chan: Chan[Any]) -> None:
+        """*chan*, handed over once."""
+        self.chan = chan
+        self.count = 1
 
 
 class _CallWaiter(Waiter):
@@ -70,9 +82,10 @@ class Home:
         """The home side on *link*."""
         self._link = link
         self._ids = itertools.count(1)
-        self._objects: dict[int, Chan[Any]] = {}
+        self._objects: dict[int, _Export] = {}
+        self._by_object: dict[int, int] = {}  # id() of an object: its id here
         self._parked: dict[int, _CallWaiter] = {}
-        # Guards _objects, _parked and _closed. Taken after a Chan's lock,
+        # Guards the tables and _closed. Taken after a Chan's lock,
         # never before: a waker holds the Chan's when it answers, so a path
         # holding this one drops it before taking a Chan's (_cancel, close)
         self._lock = threading.Lock()
@@ -83,23 +96,29 @@ class Home:
         self._pump.start()
 
     def register(self, obj: Chan[Any]) -> int:
-        """Hand *obj* across the link: its id, by which the other side's proxy
-        calls it. The home holds it until the proxy releases it or the link
-        ends."""
+        """Hand *obj* across the link: its id, the same each time, by which
+        the other side's proxy calls it. The home holds it until the proxy
+        has released every handing over, or the link ends."""
         with self._lock:
+            object_id = self._by_object.get(id(obj))
+            if object_id is not None:
+                self._objects[object_id].count += 1
+                return object_id
             object_id = next(self._ids)
-            self._objects[object_id] = obj
+            self._objects[object_id] = _Export(obj)
+            self._by_object[id(obj)] = object_id
             return object_id
 
-    def handle(self, frame: Call | Cancel | Release) -> None:
+    def handle(self, frame: Call | Cancel | Return | Release) -> None:
         """Act on a frame from the other side, without waiting."""
         if isinstance(frame, Call):
             self._call(frame)
         elif isinstance(frame, Cancel):
             self._cancel(frame.call_id)
+        elif isinstance(frame, Return):
+            self._give_back(frame)
         else:
-            with self._lock:
-                self._objects.pop(frame.object_id, None)
+            self._release(frame)
 
     def close(self) -> None:
         """The link ended: drop the objects, and end the parked calls without
@@ -107,6 +126,7 @@ class Home:
         with self._lock:
             self._closed = True
             self._objects.clear()
+            self._by_object.clear()
             parked = list(self._parked.values())
         for waiter in parked:
             waiter.chan._leave(waiter, waiter.queue, Outcome.GONE)
@@ -121,8 +141,7 @@ class Home:
         except ValueError as e:
             self._post(_error(call, e))
             return
-        with self._lock:
-            chan = self._objects.get(call.object_id)
+        chan = self._object(call.object_id)
         if chan is None:
             self._post(_error(call, ClosedError("channel released or closed")))
             return
@@ -152,11 +171,11 @@ class Home:
         queue = chan._senders if sending else chan._receivers
         with chan._lock:
             if sending:
-                done, value = chan._put(call.args[0]), None
+                done, value, seq = chan._put(call.args[0]), None, 0
             else:
-                done, value = chan._take()
+                done, value, seq = chan._take()
             if done:
-                self._post(Result(call.call_id, value=value))
+                self._post(Result(call.call_id, value=value, seq=seq))
                 return None
             if call.timeout == 0:
                 self._post(_error(call, TimeoutError("channel not ready")))
@@ -173,10 +192,39 @@ class Home:
             queue.append(waiter)
         return waiter
 
+    def _object(self, object_id: int) -> Chan[Any] | None:
+        """The object *object_id*, or None once released or the link ended."""
+        with self._lock:
+            export = self._objects.get(object_id)
+        return None if export is None else export.chan
+
+    def _release(self, frame: Release) -> None:
+        """Count *frame*'s handings over as released; drop the object once
+        all are. A release counts only the handings over that reached its
+        proxy: one still on its way keeps the object."""
+        with self._lock:
+            export = self._objects.get(frame.object_id)
+            if export is None:
+                return
+            export.count -= frame.count
+            if export.count <= 0:
+                del self._objects[frame.object_id]
+                del self._by_object[id(export.chan)]
+
+    def _give_back(self, frame: Return) -> None:
+        """Put the value of *frame* back in its object, received again in its
+        send order, as a local receive that left after the hand-over does.
+        Dropped with the object: released, no proxy is left to receive it."""
+        chan = self._object(frame.object_id)
+        if chan is not None:
+            with chan._lock:
+                chan._return(frame.value, frame.seq)
+
     def _cancel(self, call_id: int) -> None:
         """End the parked call *call_id* as cancelled; nothing for one settled
         or answered already. _leave(), not _gone(): a value handed to a
-        parked receive is in its Result, not to be given back as well."""
+        parked receive is in its Result; the proxy gives it back, with a
+        Return, if its caller left."""
         with self._lock:
             waiter = self._parked.get(call_id)
         if waiter is not None:
@@ -312,7 +360,9 @@ def _result(waiter: _CallWaiter) -> Result:
     """The Result of a settled waiter."""
     outcome = waiter.outcome
     if outcome is Outcome.DONE:
-        return Result(waiter.call_id, value=waiter.value if waiter.receiving else None)
+        if waiter.receiving:
+            return Result(waiter.call_id, value=waiter.value, seq=waiter.seq)
+        return Result(waiter.call_id)
     if outcome is Outcome.GONE:
         return Result(waiter.call_id, cancelled=True)
     if outcome is Outcome.CLOSED:

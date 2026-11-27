@@ -38,7 +38,7 @@ class Waiter(ABC):
     def __init__(self, value: Any = None) -> None:
         """A pending waiter, carrying *value* if it is a sender's."""
         self.value = value
-        # A receiver's: the number of the hand-over that gave it *value*
+        # A receiver's: the number of *value* in the send order
         self.seq = 0
         self.outcome = Outcome.PENDING
 

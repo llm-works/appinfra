@@ -33,6 +33,7 @@ from appinfra.runtime.chan.link import (
     Push,
     Release,
     Result,
+    Return,
     link,
 )
 
@@ -65,7 +66,7 @@ def _freed(kind: type) -> bool:
 def sends_then_closes(end: LinkEnd) -> None:
     """Open the link, send one frame, close it."""
     opened = end.open()
-    opened.send(Release(1))
+    opened.send(Release(1, 1))
     opened.close()
 
 
@@ -74,7 +75,7 @@ def sends_then_exits(end: LinkEnd) -> None:
     once the parent acked the frame: a process that exits before its frames
     are on the pipe may lose them, as pipe() says."""
     opened = end.open()
-    opened.send(Release(1))
+    opened.send(Release(1, 1))
     opened.recv(timeout=DUE)  # the ack
     os._exit(0)
 
@@ -100,18 +101,19 @@ class Homed:
         return frame
 
 
+def _serve(home: Home, home_link: Link) -> None:
+    """Reader thread: each frame for the home handled, in order."""
+    for frame in home_link:
+        assert isinstance(frame, Call | Cancel | Release | Return)
+        home.handle(frame)
+
+
 @pytest.fixture
 def homed() -> Iterator[Homed]:
     near, far = link()
     home_link, proxy = near.open(), far.open()
     home = Home(home_link)
-
-    def read() -> None:
-        for frame in home_link:
-            assert isinstance(frame, Call | Cancel | Release)
-            home.handle(frame)
-
-    threading.Thread(target=read, daemon=True).start()
+    threading.Thread(target=_serve, args=(home, home_link), daemon=True).start()
     chan: Chan[Any] = Chan(1)
     yield Homed(home, proxy, chan, home.register(chan))
     home.close()
@@ -129,7 +131,7 @@ class TestLink:
             Result(2, error=ValueError("no")),
             Cancel(3),
             Push(2, 7, "latest"),
-            Release(2),
+            Release(2, 1),
         ]
         try:
             for frame in frames:
@@ -175,7 +177,7 @@ class TestLink:
         rt.start()
         try:
             rt.spawn(child, far, process=True)
-            assert opened.recv(timeout=30.0) == Release(1)  # the child has its end
+            assert opened.recv(timeout=30.0) == Release(1, 1)  # the child has its end
             far.release()  # EOF needs every copy of the child's end closed
             # The ack sends_then_exits waits for; sends_then_closes may have
             # closed its end already, which refuses it
@@ -218,7 +220,7 @@ def _unread_both_ways() -> tuple[Link, Link]:
     a, b = near.open(), far.open()
     for end in (a, b):
         for i in range(CAPACITY + 1):
-            end.send(Release(i), timeout=DUE)
+            end.send(Release(i, 1), timeout=DUE)
     return a, b
 
 
@@ -226,7 +228,7 @@ class TestHome:
     def test_a_call_that_can_complete_is_answered_at_once(self, homed: Homed) -> None:
         homed.chan.send(7)
         homed.call(1, "recv", timeout=DUE)
-        assert homed.result() == Result(1, value=7)
+        assert homed.result() == Result(1, value=7, seq=1)
         homed.call(2, "send", 8, timeout=DUE)
         assert homed.result() == Result(2)
         assert homed.chan.recv(timeout=0) == 8
@@ -234,7 +236,7 @@ class TestHome:
     def test_a_parked_recv_takes_the_next_local_send(self, homed: Homed) -> None:
         homed.call(1, "recv", timeout=DUE)
         homed.chan.send(7)
-        assert homed.result() == Result(1, value=7)
+        assert homed.result() == Result(1, value=7, seq=1)
 
     def test_a_parked_send_completes_as_room_is_made(self, homed: Homed) -> None:
         homed.chan.send(1)  # full
@@ -257,7 +259,7 @@ class TestHome:
         homed.call(1, "send", _Payload(), timeout=3600)
         homed.call(2, "recv", timeout=0)  # takes 1; the room goes to call 1
         results = {r.call_id: r for r in (homed.result(), homed.result())}
-        assert results == {1: Result(1), 2: Result(2, value=1)}
+        assert results == {1: Result(1), 2: Result(2, value=1, seq=1)}
         received = homed.chan.recv(timeout=0)  # the home's copy of the payload
         assert isinstance(received, _Payload)
         gone = weakref.ref(received)
@@ -292,7 +294,7 @@ class TestHome:
             assert result.call_id == call_id
             assert isinstance(result.error, TimeoutError)
         homed.chan.send(7)  # call 1 is still parked
-        assert homed.result() == Result(1, value=7)
+        assert homed.result() == Result(1, value=7, seq=1)
 
     def test_timeout_zero_does_not_park(self, homed: Homed) -> None:
         homed.call(1, "recv", timeout=0)
@@ -322,7 +324,7 @@ class TestHome:
         answered in order, so there was none in between."""
         homed.call(1, "recv", timeout=None)
         homed.chan.send(7)
-        assert homed.result() == Result(1, value=7)
+        assert homed.result() == Result(1, value=7, seq=1)
         homed.proxy.send(Cancel(1))
         homed.call(2, "recv", timeout=0)  # the sentinel
         assert homed.result().call_id == 2
@@ -334,7 +336,7 @@ class TestHome:
         assert homed.result() == Result(1, cancelled=True)
         homed.chan.send(7)
         homed.call(2, "recv", timeout=0)
-        assert homed.result() == Result(2, value=7)
+        assert homed.result() == Result(2, value=7, seq=1)
 
     def test_a_result_that_cannot_be_pickled_fails_its_call_alone(
         self, homed: Homed
@@ -348,10 +350,55 @@ class TestHome:
         assert isinstance(result.error, pickle.PicklingError)
         homed.chan.send(7)
         homed.call(2, "recv", timeout=DUE)
-        assert homed.result() == Result(2, value=7)
+        assert homed.result() == Result(2, value=7, seq=2)  # the lock was 1
+
+    def test_values_given_back_are_received_in_their_send_order(self) -> None:
+        """Taken by calls whose callers left, and given back out of order:
+        received again as sent, before the rest of the buffer."""
+        near, far = link()
+        home_link, proxy = near.open(), far.open()
+        home = Home(home_link)
+        threading.Thread(target=_serve, args=(home, home_link), daemon=True).start()
+        chan: Chan[Any] = Chan(3)
+        object_id = home.register(chan)
+        try:
+            for value in (1, 2, 3):
+                chan.send(value)
+            taken = []
+            for call_id in (1, 2):
+                proxy.send(Call(call_id, object_id, "recv", (), DUE))
+                result = proxy.recv(timeout=DUE)
+                assert isinstance(result, Result)
+                taken.append(result)
+            assert [(r.value, r.seq) for r in taken] == [(1, 1), (2, 2)]
+            for result in reversed(taken):
+                proxy.send(Return(object_id, result.value, result.seq))
+            proxy.send(Call(3, object_id, "recv", (), 0))  # after both Returns
+            assert proxy.recv(timeout=DUE) == Result(3, value=1, seq=1)
+            assert [chan.recv(timeout=0) for _ in range(2)] == [2, 3]
+        finally:
+            home.close()
+            proxy.close()
+            home_link.close()
+
+    def test_a_chan_handed_over_twice_has_one_id(self, homed: Homed) -> None:
+        assert homed.home.register(homed.chan) == homed.object_id
+
+    def test_a_chan_is_dropped_once_every_handing_over_is_released(
+        self, homed: Homed
+    ) -> None:
+        """Handed over twice, released once: a release can cross a second
+        handing over still on its way, so the Chan stays until both are."""
+        homed.home.register(homed.chan)
+        homed.proxy.send(Release(homed.object_id, 1))
+        homed.call(1, "recv", timeout=0)
+        assert isinstance(homed.result().error, TimeoutError)  # still there
+        homed.proxy.send(Release(homed.object_id, 1))
+        homed.call(2, "recv", timeout=0)
+        assert isinstance(homed.result().error, ClosedError)
 
     def test_a_released_chan_is_closed_to_calls(self, homed: Homed) -> None:
-        homed.proxy.send(Release(homed.object_id))
+        homed.proxy.send(Release(homed.object_id, 1))
         homed.call(1, "recv", timeout=DUE)
         assert isinstance(homed.result().error, ClosedError)
 
