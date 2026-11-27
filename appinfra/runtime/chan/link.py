@@ -79,7 +79,8 @@ class Result:
 class Return:
     """*value*, encoded, number *seq* in the send order of the object
     *object_id*, received for a caller that left: received again in its
-    place. The bytes of its Result, sent back as they came."""
+    place. Encoded anew by the side giving it back, which decoded it, its
+    Chans with it, as it does every Result."""
 
     object_id: int
     value: bytes
@@ -136,15 +137,6 @@ class Codec:
                 here (a class this process cannot import).
         """
         return pickle.loads(data)
-
-    def decode_own(self, data: bytes) -> Any:
-        """The value *data* encodes, bytes this side encoded that come back
-        to it (a Return): as decode() here.
-
-        Raises:
-            Exception: As decode().
-        """
-        return self.decode(data)
 
 
 def describe(error: BaseException) -> str:

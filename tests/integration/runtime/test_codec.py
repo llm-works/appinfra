@@ -8,7 +8,9 @@ one process; a Chan homed at each."""
 from __future__ import annotations
 
 import asyncio
+import gc
 import threading
+import time
 from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any
@@ -52,6 +54,20 @@ def _exported(endpoint: Endpoint, chan: Chan[Any]) -> bool:
     return id(chan) in endpoint.home._by_object
 
 
+def _released(endpoint: Endpoint, chan: Chan[Any]) -> bool:
+    """Whether *endpoint*'s home drops *chan* before DUE, its proxies across
+    the link collected: the Release is posted by a finalizer, and read by
+    the home's reader thread, so nothing signals it here. The deadline is
+    the failure path."""
+    deadline = time.monotonic() + DUE
+    while _exported(endpoint, chan):
+        if time.monotonic() > deadline:
+            return False
+        gc.collect()
+        time.sleep(0.01)
+    return True
+
+
 class TestReferences:
     def test_a_reply_chan_in_a_request_is_answered_in_its_home(
         self, linked: Linked
@@ -81,12 +97,12 @@ class TestReferences:
         assert isinstance(first, _ChanProxy)
         assert second is first
 
-    def test_a_chan_given_back_arrives_as_itself_and_is_counted_back(
+    def test_a_chan_given_back_arrives_as_itself_and_is_released(
         self, linked: Linked
     ) -> None:
         """A receive cancelled after the hand-over gives its value back: the
-        Chan in it is the home's own again, and its handing over, which no
-        proxy received, no longer holds it there."""
+        Chan in it is the home's own again, and once the proxy the caller's
+        side decoded is gone, it is no longer held there."""
         extra: Chan[Any] = Chan(1, process=True)
         object_id = linked.a.home.register(linked.requests)  # its own id again
 
@@ -101,7 +117,48 @@ class TestReferences:
 
         asyncio.run(main())
         assert linked.requests.recv(timeout=DUE)["x"] is extra
-        assert not _exported(linked.a, extra)
+        assert _released(linked.a, extra)
+
+
+class TestRelease:
+    def test_a_proxy_gone_releases_its_chan_at_the_home(self, linked: Linked) -> None:
+        extra: Chan[Any] = Chan(1, process=True)
+        linked.requests.send({"x": extra})
+        received = linked.proxy.recv(timeout=DUE)
+        assert _exported(linked.a, extra)
+        del received
+        assert _released(linked.a, extra)
+
+    def test_a_proxy_alive_keeps_its_chan_however_often_handed_over(
+        self, linked: Linked
+    ) -> None:
+        """Two handings over to one proxy: dropping one value keeps it, as the
+        proxy lives on in the other; the release counts both."""
+        extra: Chan[Any] = Chan(1, process=True)
+        linked.requests.send({"x": extra})
+        linked.requests.send({"x": extra})
+        first = linked.proxy.recv(timeout=DUE)
+        second = linked.proxy.recv(timeout=DUE)
+        del first
+        gc.collect()
+        linked.proxy.send(None, timeout=DUE)  # a round trip after any release
+        assert linked.requests.recv(timeout=0) is None
+        assert _exported(linked.a, extra)
+        del second
+        assert _released(linked.a, extra)
+
+    def test_a_chan_sent_back_home_arrives_after_its_proxy_is_gone(
+        self, linked: Linked
+    ) -> None:
+        """B's reply Chan reaches A as a proxy, and comes back to B in a
+        value: A's proxy is collected as soon as A has encoded it, and its
+        Release follows the Result, so B still finds the Chan; then B drops
+        it, no proxy of it left."""
+        reply: Chan[Any] = Chan(1, process=True)
+        linked.proxy.send({"reply": reply}, timeout=DUE)  # held at A as a proxy
+        back = linked.proxy.recv(timeout=DUE)
+        assert back["reply"] is reply
+        assert _released(linked.b, reply)
 
 
 class TestRefused:
