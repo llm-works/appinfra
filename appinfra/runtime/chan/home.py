@@ -278,7 +278,9 @@ class _Deadlines:
                 deadline, _, ref = self._heap[0]
                 left = deadline - time.monotonic()
                 if left > 0:
-                    self._cond.wait(left)
+                    # In slices of at most TIMEOUT_MAX, which a longer wait
+                    # (an unbounded timeout) overflows; left is recomputed
+                    self._cond.wait(min(left, threading.TIMEOUT_MAX))
                     continue
                 heapq.heappop(self._heap)
                 waiter = _pending(ref)
@@ -290,6 +292,9 @@ class _Deadlines:
                 try:
                     waiter.chan._leave(waiter, waiter.queue, Outcome.TIMEOUT)
                 finally:
+                    # Not kept while the timer waits for the next deadline: a
+                    # send's waiter holds its value
+                    del waiter
                     self._cond.acquire()
 
 

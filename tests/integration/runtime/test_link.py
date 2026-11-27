@@ -12,6 +12,7 @@ import gc
 import os
 import pickle
 import threading
+import time
 import weakref
 from collections.abc import Iterator
 from dataclasses import dataclass
@@ -44,6 +45,21 @@ DUE = 5.0
 
 class _Payload:
     """A value whose copy at the home a test can watch being freed."""
+
+
+class _Held:
+    """A value only a home's parked call holds, watched for by its class."""
+
+
+def _freed(kind: type) -> bool:
+    """Whether every instance of *kind* in this process is freed before DUE.
+    A poll: nothing signals the moment the last reference goes."""
+    deadline = time.monotonic() + DUE
+    while time.monotonic() < deadline:
+        gc.collect()
+        if not any(isinstance(o, kind) for o in gc.get_objects()):
+            return True
+    return False
 
 
 def sends_then_closes(end: LinkEnd) -> None:
@@ -248,6 +264,35 @@ class TestHome:
         del received
         gc.collect()
         assert gone() is None
+
+    def test_an_expired_call_is_not_kept_after_its_deadline(self, homed: Homed) -> None:
+        """Its waiter, and the value a send carried, go as it times out: the
+        timer keeps nothing of it while it waits for the next deadline."""
+        homed.chan.send(1)  # full
+        homed.call(1, "send", _Held(), timeout=0.05)
+        result = homed.result()
+        assert result.call_id == 1
+        assert isinstance(result.error, TimeoutError)
+        # A frame after it: the fixture's reader holds the last frame it read,
+        # which here would be the call, its value in args. No deadline: the
+        # timer goes on waiting, with whatever it still holds
+        homed.call(2, "recv", timeout=0)
+        assert homed.result().call_id == 2
+        assert _freed(_Held)
+
+    def test_an_unbounded_timeout_leaves_the_other_deadlines_kept(
+        self, homed: Homed
+    ) -> None:
+        """A deadline past what a wait can take (inf here) is waited out in
+        slices: the timer goes on, and the calls after it still time out."""
+        homed.call(1, "recv", timeout=float("inf"))
+        for call_id in (2, 3):  # 3 comes once the timer is back at call 1's
+            homed.call(call_id, "recv", timeout=0.05)
+            result = homed.result()
+            assert result.call_id == call_id
+            assert isinstance(result.error, TimeoutError)
+        homed.chan.send(7)  # call 1 is still parked
+        assert homed.result() == Result(1, value=7)
 
     def test_timeout_zero_does_not_park(self, homed: Homed) -> None:
         homed.call(1, "recv", timeout=0)
