@@ -109,7 +109,7 @@ class LockChecking:
 
 def process_task() -> Any:
     """A process task not launched."""
-    return _ProcessTask(lambda _: None, 1, None, abs, (), StopToken())
+    return _ProcessTask(MagicMock(), lambda _: None, 1, None, abs, (), StopToken())
 
 
 def test_a_published_child_is_signalled_under_the_lock() -> None:

@@ -315,7 +315,9 @@ def reported(report: tuple[Any, ...]) -> tuple[Any, Any]:
 
 def process_task() -> Any:
     """A process task not launched: _outcome() is called on it directly."""
-    return process_module._ProcessTask(lambda _: None, 1, None, double, (), StopToken())
+    return process_module._ProcessTask(
+        MagicMock(), lambda _: None, 1, None, double, (), StopToken()
+    )
 
 
 class TestReport:
@@ -342,6 +344,14 @@ class TestReport:
 
 async def returns_on_the_loop() -> int:
     return 1
+
+
+# A test that hands a process task a multiprocessing Event, and catches the
+# task's error from wait(), deletes the Event once done. The error, kept on the
+# task, has the test's frame in its traceback, and the frame holds the task:
+# a cycle, holding the Event. Left to the cyclic collector, the Event's
+# semaphores are freed wherever that runs, inside multiprocessing's resource
+# tracker too, which refuses the reentrant call and fails whatever test runs.
 
 
 def ignores_its_stop(started: Any) -> None:
@@ -374,6 +384,7 @@ class TestStopWithTimeout:
         with pytest.raises(StoppedError):
             task.wait(timeout=30.0)
         assert task.process.detail().exitcode == -signal.SIGTERM
+        del started  # freed here: the error caught keeps this frame in a cycle
 
     def test_a_child_ignoring_sigterm_is_killed(
         self, rt: Runtime, monkeypatch: pytest.MonkeyPatch
@@ -388,6 +399,7 @@ class TestStopWithTimeout:
         with pytest.raises(StoppedError):
             task.wait(timeout=30.0)
         assert task.process.detail().exitcode == -signal.SIGKILL
+        del started  # freed here: the error caught keeps this frame in a cycle
 
     def test_a_thread_task_is_stopped_as_cancel_stops_it(self, rt: Runtime) -> None:
         """Stopped once its call runs: stopped before, the call is skipped."""
@@ -462,6 +474,7 @@ class TestKindAndDetail:
         with pytest.raises(ProcessExitError):
             task.wait(timeout=30.0)
         assert task.process.detail().exitcode == -signum
+        del started  # freed here: the error caught keeps this frame in a cycle
 
     def test_children_start_in_the_runtimes_context(self, rt: Runtime) -> None:
         assert rt.process_context.get_start_method() == "spawn"
@@ -484,6 +497,7 @@ class TestStop:
         t.cancel()
         with pytest.raises(StoppedError):
             t.wait(timeout=30.0)
+        del started  # freed here: the error caught keeps this frame in a cycle
 
     def test_the_runtimes_stop_kills_a_child_that_ignores_it(
         self, monkeypatch: pytest.MonkeyPatch
@@ -500,6 +514,7 @@ class TestStop:
         assert not t.alive()
         with pytest.raises(StoppedError):
             t.wait(timeout=0)
+        del started  # freed here: the error caught keeps this frame in a cycle
 
     def test_a_stop_forced_before_the_child_is_published_still_kills_it(
         self, monkeypatch: pytest.MonkeyPatch
@@ -536,6 +551,7 @@ class TestStop:
             release.set()
             for child in mp.active_children():  # a failing run leaves it running
                 child.kill()
+            del started  # freed here: the error caught keeps this frame in a cycle
 
     def test_a_child_still_starting_when_the_stop_gives_up_is_killed_once_started(
         self, monkeypatch: pytest.MonkeyPatch

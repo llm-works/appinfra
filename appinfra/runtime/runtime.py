@@ -197,7 +197,9 @@ class Runtime:
         """The task that calls *fn*: in a process if asked, on the loop if it
         is an async function, else on a thread."""
         if process:
-            return _ProcessTask(self._end_hook, task_id, name, fn, args, token)
+            return _ProcessTask(
+                self._lg, self._end_hook, task_id, name, fn, args, token
+            )
         if inspect.iscoroutinefunction(fn):
             return _LoopTask(self._end_hook, self._host, task_id, name, fn, args, token)
         return _ThreadTask(self._end_hook, task_id, name, fn, args, token)

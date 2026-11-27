@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import threading
+import time
 from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any
@@ -211,7 +212,46 @@ class _Undecodable:
         return (_rebuild, ())
 
 
+_encoding = threading.Event()
+_proceed = threading.Event()
+
+
+class _SlowToEncode:
+    """Its encoding signals, then waits until let go."""
+
+    def __reduce__(self) -> tuple[Any, ...]:
+        _encoding.set()
+        _proceed.wait(DUE)
+        return (_SlowToEncode, ())
+
+
 class TestClose:
+    def test_an_answer_decided_before_the_close_still_goes_out(
+        self, pair: Pair
+    ) -> None:
+        """The home's Result is being encoded as its side closes: the close
+        lets it out first, so the caller gets the value it took."""
+        _encoding.clear()
+        _proceed.clear()
+        pair.chan.send(_SlowToEncode())
+        receiver = threading.Thread(
+            target=lambda: got.append(pair.caller.call(pair.object_id, "recv", (), DUE))
+        )
+        got: list[Any] = []
+        receiver.start()
+        assert _encoding.wait(DUE)  # taken at the home, its Result held
+        closer = threading.Thread(target=pair.home.close)
+        closer.start()
+        deadline = time.monotonic() + DUE  # nothing signals the close begun
+        while not pair.home._closed:  # Private
+            assert time.monotonic() < deadline
+            time.sleep(0.01)
+        _proceed.set()
+        closer.join(DUE)
+        receiver.join(DUE)
+        assert len(got) == 1
+        assert isinstance(got[0], _SlowToEncode)
+
     def test_a_call_waiting_when_the_link_ends_raises_closed(self, pair: Pair) -> None:
         raised: list[BaseException] = []
 

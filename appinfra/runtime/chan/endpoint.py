@@ -104,8 +104,20 @@ class Endpoint:
         self._ids = itertools.count(1)
         self._pending: dict[int, _Pending] = {}
         self._closed = False
-        for target, name in ((self._read, "link-read"), (self._pump, "link-pump")):
-            threading.Thread(target=target, name=name, daemon=True).start()
+        # Set once the outbox is ended, after the home's last Results: a
+        # frame posted later goes nowhere
+        self._ended = False
+        self._pumping = threading.Thread(
+            target=self._pump, name="link-pump", daemon=True
+        )
+        threading.Thread(target=self._read, name="link-read", daemon=True).start()
+        self._pumping.start()
+
+    def proxy(self, object_id: int) -> Any:
+        """The proxy of *object_id*, homed on the other side and handed over
+        once more, as a message carrying it would make it: the same proxy
+        while it lives, its handings over released once it is gone."""
+        return self._codec._proxy(object_id)
 
     def call(
         self, object_id: int, op: str, args: tuple[Any, ...], timeout: float | None
@@ -179,7 +191,8 @@ class Endpoint:
 
     def close(self) -> None:
         """End this side of the link: the waiting calls raise ClosedError,
-        the home drops its objects; idempotent."""
+        the home drops its objects, and the frames posted so far (a proxy's
+        close(), a Release) are put on the link before it closes; idempotent."""
         with self._lock:
             if self._closed:
                 return
@@ -189,8 +202,12 @@ class Endpoint:
             for call in pending:
                 call.answer = _Answer(error=ClosedError("link closed"))
                 call.waiter.settle(Outcome.DONE)
-        self.home.close()
+        self.home.close()  # its decided Results posted
+        self._ended = True
         self._outbox.put(None)
+        # The pump ends at the None, or at the link closed under it; never
+        # this thread: the pump does not close the endpoint
+        self._pumping.join()
         self._link.close()
 
     def _start(
@@ -303,9 +320,10 @@ class Endpoint:
 
     def _post(self, frame: Frame) -> None:
         """Queue *frame* for the pump; never waits, never raises, and takes
-        no lock. Once the link is closed the frame goes nowhere (a plain read
-        of the flag: one posted as it closes is dropped with the queue)."""
-        if not self._closed:
+        no lock. Once the outbox is ended the frame goes nowhere (a plain
+        read of the flag: one posted as it ends lands behind the pump's end,
+        and is dropped with the queue)."""
+        if not self._ended:
             self._outbox.put(frame)
 
     def _read(self) -> None:
