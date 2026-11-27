@@ -26,6 +26,7 @@ from collections import deque
 from dataclasses import replace
 from typing import Any
 
+from ...log import Logger
 from .chan import Chan, _check_valid
 from .errors import ClosedError
 from .link import Call, Cancel, Codec, Link, Release, Result, Return
@@ -79,9 +80,10 @@ class Home:
     calls of that side parked in them. Made per link and process; handle()
     takes the frames meant for the home, in the order they arrive."""
 
-    def __init__(self, link: Link, codec: Codec) -> None:
+    def __init__(self, lg: Logger, link: Link, codec: Codec) -> None:
         """The home side on *link*, the payloads of its frames encoded and
         decoded with *codec*."""
+        self._lg = lg
         self._link = link
         self._codec = codec
         self._ids = itertools.count(1)
@@ -222,12 +224,25 @@ class Home:
     def _give_back(self, frame: Return) -> None:
         """Put the value of *frame* back in its object, received again in its
         send order, as a local receive that left after the hand-over does.
-        Dropped with the object: released, no proxy is left to receive it."""
+        Dropped with the object: released, no proxy is left to receive it.
+
+        Dropped too if it cannot be decoded: encoded here, at its Result, it
+        can still fail to be rebuilt (a __reduce__ whose constructor raises).
+        No receiver anywhere could have it, and the failure stays with it:
+        raised here, it would end the reader, and the link with it."""
         chan = self._object(frame.object_id)
-        if chan is not None:
-            value = self._codec.decode(frame.value)  # encoded here, at its Result
-            with chan._lock:
-                chan._return(value, frame.seq)
+        if chan is None:
+            return
+        try:
+            value = self._codec.decode(frame.value)
+        except Exception as e:
+            self._lg.warning(
+                "returned value dropped: cannot be decoded",
+                extra={"object_id": frame.object_id, "exception": e},
+            )
+            return
+        with chan._lock:
+            chan._return(value, frame.seq)
 
     def _cancel(self, call_id: int) -> None:
         """End the parked call *call_id* as cancelled; nothing for one settled

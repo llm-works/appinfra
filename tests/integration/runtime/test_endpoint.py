@@ -11,6 +11,7 @@ import threading
 from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -31,14 +32,16 @@ class Pair:
     caller: Endpoint
     chan: Chan[Any]
     object_id: int
+    lg: MagicMock  # the home's
 
 
 @pytest.fixture
 def pair() -> Iterator[Pair]:
     near, far = link()
-    home, caller = Endpoint(near), Endpoint(far)
+    lg = MagicMock()
+    home, caller = Endpoint(lg, near), Endpoint(MagicMock(), far)
     chan: Chan[Any] = Chan(1)
-    yield Pair(home, caller, chan, home.home.register(chan))
+    yield Pair(home, caller, chan, home.home.register(chan), lg)
     caller.close()
     home.close()
 
@@ -87,6 +90,49 @@ class TestCall:
 
         asyncio.run(main())
         assert pair.chan.recv(timeout=DUE) == 7
+
+    def test_a_given_back_value_that_cannot_be_decoded_fails_alone(
+        self, pair: Pair
+    ) -> None:
+        """Encoded at the home, the value cannot be rebuilt there: dropped,
+        while the link and the calls after it go on."""
+
+        async def main() -> None:
+            waiting = asyncio.create_task(
+                pair.caller.acall(pair.object_id, "recv", (), None)
+            )
+            await asyncio.sleep(0)  # the task posts its call
+            await pair.caller.acall(pair.object_id, "len", (), DUE)  # parked now
+            pair.chan.send(_Undecodable(), timeout=0)
+            waiting.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await waiting
+
+        _rebuilding.clear()
+        asyncio.run(main())
+        # The Return is posted by whichever thread saw the Result last: wait
+        # for its decoding; a call posted after it is read after it
+        assert _rebuilding.wait(DUE)
+        assert pair.caller.call(pair.object_id, "len", (), DUE) == 0
+        extra = pair.lg.warning.call_args.kwargs["extra"]
+        assert extra["object_id"] == pair.object_id
+        assert isinstance(extra["exception"], ValueError)
+
+
+_rebuilding = threading.Event()
+
+
+def _rebuild() -> Any:
+    """Decoding an _Undecodable: signals, then fails."""
+    _rebuilding.set()
+    raise ValueError("cannot be rebuilt")
+
+
+class _Undecodable:
+    """Encodes, but its decoding raises."""
+
+    def __reduce__(self) -> tuple[Any, ...]:
+        return (_rebuild, ())
 
 
 class TestClose:

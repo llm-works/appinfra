@@ -23,6 +23,7 @@ import itertools
 import threading
 from typing import Any
 
+from ...log import Logger
 from .chan import Chan
 from .errors import ClosedError
 from .home import Home
@@ -49,11 +50,11 @@ class Endpoint:
     across, and the calls on objects homed on the other side. Made per link
     and process, from the end of the link this process uses."""
 
-    def __init__(self, end: LinkEnd) -> None:
+    def __init__(self, lg: Logger, end: LinkEnd) -> None:
         """Open *end* and start the reader and the pump."""
         self._link = end.open()
         self._codec = Codec()
-        self.home = Home(self._link, self._codec)
+        self.home = Home(lg, self._link, self._codec)
         # Guards _pending and _closed; held only for table changes
         self._lock = threading.Lock()
         self._ids = itertools.count(1)
