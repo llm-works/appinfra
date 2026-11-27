@@ -39,10 +39,14 @@ class _ChanProxy(Chan[T]):
 
     A send's value is encoded here, so a value that cannot cross fails here,
     and the home stores a copy. A timeout is kept at the home: a call that
-    timed out took nothing. A call left before its answer (a stop, a cancel)
-    is cancelled at the home, and a value it had received is given back, to
-    be received again in its send order. A link that ends closes every proxy
-    on it: their calls raise ClosedError.
+    timed out took nothing. A stop of the task ends only a wait, as on a
+    local Chan, so a stopped task can still drain: a call the home completes
+    at once does, one that waits there raises StoppedError. A call left
+    before its answer (a cancel, an interrupt) is cancelled at the home, and
+    a value it had received is given back, to be received again in its send
+    order. A loop task cancelled thus leaves every call through a proxy at
+    once: unlike a local Chan's, a proxy's arecv() always awaits the home.
+    A link that ends closes every proxy on it: their calls raise ClosedError.
 
     On an event loop's thread, ``send()``, ``recv()`` and ``len()`` are
     refused, timeout=0 too: each waits for the home's answer on the link.
