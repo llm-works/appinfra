@@ -22,7 +22,7 @@ Example:
         .routes
         .with_exception_handler(TimeoutError, TimeoutHandler(lg))
         .done()
-        .subprocess.with_ipc(req_q, resp_q).done()
+        .subprocess.with_ipc().done()
         .build())
 """
 
