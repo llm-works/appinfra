@@ -77,6 +77,7 @@ class GiveUp:
 class StopService:
     runner: Runner
     reply: Chan[Any]
+    timeout: float  # how long its run gets before it is forced
 
 
 @dataclass(frozen=True, slots=True)
@@ -237,7 +238,7 @@ class Owner:
             _reply(reply, DependencyNotRunningError(runner.name, missing))
             return
         if runner.state == State.STARTING:
-            self._end_run(runner)
+            self._end_run(runner, runner.policy.stop_timeout)
         elif _in_setup(runner):
             self._expired.add(runner)  # once set up, it fails (_on_setup())
         _reply(reply, None)
@@ -262,7 +263,7 @@ class Owner:
             _reply(m.reply, None)
             return
         self._stops.setdefault(m.runner, []).append(m.reply)
-        self._halt(m.runner)
+        self._halt(m.runner, m.timeout)
 
     def _on_stop(self, m: Stop) -> None:
         """stop(): refuse the waiting, end the backoffs, then stop the started
@@ -540,7 +541,7 @@ class Owner:
         if m.error is not None or self._closing or runner in self._stops:
             self._restarting.discard(runner.name)
             if runner in self._stops:
-                self._halt(runner)
+                self._halt(runner, runner.policy.stop_timeout)  # no run to end
             return
         runner._retries += 1
         down = self._deps.down(runner.service)
@@ -581,7 +582,7 @@ class Owner:
                 extra={"service": runner.name, "exception": m.error},
             )
             runner._error = m.error
-            self._end_run(runner)
+            self._end_run(runner, runner.policy.stop_timeout)
         elif m.result is True:
             runner._retries = 0
             self._restarting.discard(runner.name)
@@ -605,27 +606,37 @@ class Owner:
 
     # -- stopping --------------------------------------------------------------------
 
-    def _halt(self, runner: Runner) -> None:
-        """Begin to stop *runner*; its stops are answered once it has settled."""
+    def _halt(self, runner: Runner, timeout: float) -> None:
+        """Begin to stop *runner*, its run given *timeout* seconds before it is
+        forced; its stops are answered once it has settled."""
         if self._deps.is_waiting(runner.name):
             self._refuse(runner)
         elif _in_setup(runner):
             self._stop_asked.add(runner)  # stopped once its setup ends
         elif runner.state in (State.STARTING, State.RUNNING, State.IDLE):
             runner._move(State.STOPPING)
-            self._end_run(runner)
+            self._end_run(runner, timeout)
         elif runner.name in self._backoffs:
             self._backoffs[runner.name].cancel()
         elif runner._teardown == TEARING:
             # A setup that ended expired or with a dependency down, being torn
             # down: stopped once its teardown settles
             self._stop_asked.add(runner)
-        elif runner.state != State.STOPPING:
+        elif runner.state == State.STOPPING:
+            # Stopping already, maybe under a longer timeout: this stop forces
+            # an isolated run within its own. Nothing more for one on the loop
+            # or a thread: cancelling an async run again would interrupt its
+            # cleanup, and its token is stopped already
+            task = runner._task
+            if task is not None and task.process is not None:
+                task.stop(timeout)
+        else:
             self._let_go(runner)
 
-    def _end_run(self, runner: Runner) -> None:
-        """Stop *runner*'s run: its token, and its task; on a stop, a failed
-        health check and a ready() given up on alike.
+    def _end_run(self, runner: Runner, timeout: float) -> None:
+        """Stop *runner*'s run: its token, and its task, which a process task
+        must end within *timeout* seconds before the runtime forces it; on a
+        stop, a failed health check and a ready() given up on alike.
 
         A plain service's run() on a thread may block elsewhere than on its
         token, and its teardown can release it: that teardown runs now. An
@@ -633,7 +644,7 @@ class Owner:
         isolated one ends with its process: theirs follows the run."""
         runner.service.stopping.stop()
         if runner._task is not None:
-            runner._task.cancel()
+            runner._task.stop(timeout)
         tears = runner not in self._isolated and not isinstance(
             runner.service, (ScheduledService, AsyncService)
         )
@@ -653,9 +664,10 @@ class Owner:
                 continue
             sd.current = runner
             self._stops.setdefault(runner, [])
-            self._halt(runner)
+            self._halt(runner, sd.timeout)
             if sd.current is runner:
-                sd.deadline = self._step(runner, "deadline", _back_off, sd.timeout)
+                span = runner._stop_span(sd.timeout)
+                sd.deadline = self._step(runner, "deadline", _back_off, span)
         sd.walking = False
         if sd.current is None and not sd.queue:
             self._shutdown = None

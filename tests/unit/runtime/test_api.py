@@ -10,13 +10,21 @@ import pytest
 
 import appinfra.runtime
 import appinfra.runtime.chan
-from appinfra.runtime import PipeReceiver, PipeRecvEnd, PipeSendEnd, PipeSender, Task
+from appinfra.runtime import (
+    PipeReceiver,
+    PipeRecvEnd,
+    PipeSendEnd,
+    PipeSender,
+    Task,
+    TaskProcess,
+)
 
 
 @pytest.mark.parametrize(
     ("cls", "maker"),
     [
         (Task, "spawn"),
+        (TaskProcess, "Task.process"),
         (PipeSendEnd, "pipe"),
         (PipeRecvEnd, "pipe"),
         (PipeSender, "open"),
@@ -41,12 +49,15 @@ def test_the_runtime_exports_its_api() -> None:
         "PipeRecvEnd",
         "PipeSendEnd",
         "PipeSender",
+        "ProcessDetail",
         "ProcessExitError",
         "Runtime",
         "StopToken",
         "StoppedError",
         "Task",
         "TaskDone",
+        "TaskKind",
+        "TaskProcess",
         "aselect",
         "pipe",
         "select",

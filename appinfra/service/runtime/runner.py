@@ -83,7 +83,7 @@ class Runner:
         # Created by the first on_state_change(): most runners have no hooks
         self._hooks: list[StateHook] | None = None
         self._retries = 0
-        self._task: Task | None = None  # the current step: setup, run or teardown
+        self._task: Task | None = None  # the current step: setup or run
         self._error: BaseException | None = None
         self._teardown = TORN
         # The runtime task that admitted it, which alone moves it; set there
@@ -118,6 +118,21 @@ class Runner:
     def exception(self) -> BaseException | None:
         """What the service's last run raised, if anything."""
         return self._error
+
+    @property
+    def task(self) -> Task | None:
+        """The runtime task of the service's current step, its setup() or its
+        run(); None between steps. A restart replaces it, so read it when
+        needed rather than once. Its kind says what the service runs as, and
+        an isolated one's task.process gives its child."""
+        return self._task
+
+    def _stop_span(self, timeout: float) -> float:
+        """How long a stop that gives the run *timeout* seconds can take: an
+        isolated run's includes the forcing of its process."""
+        task = self._task
+        process = None if task is None else task.process
+        return timeout if process is None else timeout + process.grace
 
     def is_alive(self) -> bool:
         """True while a step of the service runs: its setup, run or teardown.

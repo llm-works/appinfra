@@ -148,23 +148,33 @@ class Runtime:
 
     def stop_service(self, runner: Runner, timeout: float = 5.0) -> None:
         """Stop one service and wait up to *timeout* seconds until it has ended
-        and been torn down; then it leaves the runtime.
+        and been torn down; then it leaves the runtime. An isolated service's
+        process still running then is terminated, and killed if it outlives
+        that: the wait goes on through both (task.process.grace).
 
         Raises:
+            ValueError: If *timeout* is negative.
             TimeoutError: If it has not ended in time: STOPPING until it does.
         """
+        _check_timeout(timeout)
         with contextlib.suppress(ChanClosedError):
-            self._ask(functools.partial(StopService, runner), timeout=timeout)
+            self._ask(
+                functools.partial(StopService, runner, timeout=timeout),
+                timeout=runner._stop_span(timeout),
+            )
 
     def stop(self, timeout: float = 5.0) -> None:
         """Stop every service, last started first, each given up to *timeout*
-        seconds to end; one still running then is logged and the rest stop
-        regardless. A service still waiting for its dependencies never starts.
-        Then stop the runtime's tasks: see appinfra.runtime Runtime.stop().
+        seconds to end, an isolated one's forcing on top (as stop_service());
+        one still running then is logged and the rest stop regardless. A
+        service still waiting for its dependencies never starts. Then stop the
+        runtime's tasks: see appinfra.runtime Runtime.stop().
 
         Raises:
+            ValueError: If *timeout* is negative.
             RuntimeError: If called from a state hook, before anything changes.
         """
+        _check_timeout(timeout)
         self._refuse_own_task()
         if not self._started_runtime or self._closing:
             return
@@ -269,6 +279,17 @@ class Runtime:
                 f"runtime '{self.name}' called from a state hook: hooks run on the "
                 "runtime's own task and cannot call spawn(), ready() or stop()"
             )
+
+
+def _check_timeout(timeout: float) -> None:
+    """Refuse a negative stop timeout here, before it reaches the runtime's
+    task, whose Task.stop() would raise there.
+
+    Raises:
+        ValueError: If *timeout* is negative.
+    """
+    if timeout < 0:
+        raise ValueError(f"timeout must not be negative: {timeout}")
 
 
 def _check_isolable(service: Service) -> None:

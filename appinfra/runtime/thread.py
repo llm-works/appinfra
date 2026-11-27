@@ -10,7 +10,7 @@ from collections.abc import Callable
 from typing import Any
 
 from .stop import StopToken
-from .task import _label, _Task
+from .task import TaskKind, _label, _Task
 
 
 class _ThreadTask(_Task):
@@ -18,6 +18,8 @@ class _ThreadTask(_Task):
     interrupted: the function sees its token (``stopping()``) and returns."""
 
     __slots__ = ("_thread", "_finished")
+
+    kind = TaskKind.THREAD
 
     def __init__(
         self,

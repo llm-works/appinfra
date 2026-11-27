@@ -8,6 +8,7 @@ by where the call runs, are in thread.py, loop.py and process.py."""
 from __future__ import annotations
 
 import contextvars
+import enum
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Coroutine, Generator
 from dataclasses import dataclass
@@ -72,16 +73,39 @@ class TaskDone:
     error: BaseException | None
 
 
-class _Waits(Protocol):
-    """What a Task needs of the runtime that runs it: its waits, which take
-    the runtime's lock and table of tasks. A protocol, so this module need
-    not import the runtime, which imports it."""
+class TaskKind(enum.Enum):
+    """What a task runs as, fixed when it is spawned: a coroutine on the
+    runtime's loop, a call on a thread of its own, or a call in a child
+    process (spawn(process=True))."""
+
+    LOOP = "loop"
+    THREAD = "thread"
+    PROCESS = "process"
+
+
+@dataclass(frozen=True, slots=True)
+class ProcessDetail:
+    """A process task's child as last seen: its pid (None until it has
+    started), its exit code (None while it runs; negative, the signal's
+    number, for one a signal ended) and whether it is alive."""
+
+    pid: int | None
+    exitcode: int | None
+    alive: bool
+
+
+class _TaskOps(Protocol):
+    """What a Task needs of the runtime that runs it: its waits, detach and
+    stop, which take the runtime's lock and table of tasks. A protocol, so
+    this module need not import the runtime, which imports it."""
 
     def _wait(self, t: _Task, timeout: float | None) -> Any: ...
 
     def _await(self, t: _Task) -> Coroutine[Any, Any, Any]: ...
 
     def _detach(self, t: _Task) -> None: ...
+
+    def _stop(self, t: _Task, timeout: float) -> None: ...
 
 
 @final
@@ -93,7 +117,7 @@ class Task:
     keeps the outcome as long as it is held. Not to be subclassed."""
 
     __slots__ = ("_rt", "_t")
-    _rt: _Waits
+    _rt: _TaskOps
     _t: _Task
 
     def __init__(self) -> None:
@@ -106,7 +130,7 @@ class Task:
         raise TypeError("a Task comes from Runtime.spawn()")
 
     @classmethod
-    def _of(cls, rt: _Waits, t: _Task) -> Task:
+    def _of(cls, rt: _TaskOps, t: _Task) -> Task:
         """The handle to *t*, run by *rt*; for Runtime.spawn()."""
         task = object.__new__(cls)
         task._rt = rt
@@ -152,9 +176,35 @@ class Task:
         A task on a thread sees its token and returns."""
         self._t.cancel()
 
+    def stop(self, timeout: float) -> None:
+        """cancel(), and for a process task, an end within *timeout* seconds:
+        a child still running then gets SIGTERM, and SIGKILL a grace later.
+        A task on the loop or a thread cannot be forced: its token is all a
+        stop has. Returns at once.
+
+        Raises:
+            ValueError: If *timeout* is negative.
+        """
+        if timeout < 0:
+            raise ValueError(f"timeout must not be negative: {timeout}")
+        self._rt._stop(self._t, timeout)
+
     def alive(self) -> bool:
         """True while the task has not ended."""
         return not self._t.ended
+
+    @property
+    def kind(self) -> TaskKind:
+        """What the task runs as: on the loop, on a thread, or in a process."""
+        return self._t.kind
+
+    @property
+    def process(self) -> TaskProcess | None:
+        """The child process of a task spawned with process=True: its detail,
+        and the signals that end it; None for a task on the loop or a thread."""
+        if self._t.kind is not TaskKind.PROCESS:
+            return None
+        return TaskProcess._of(self._t)
 
     def detach(self) -> None:
         """Give up waiting for the task: its failure is logged, as nobody
@@ -165,6 +215,50 @@ class Task:
         """``<Task 7 running>``, or ``<Task 7 db running>`` with its name."""
         who = self.id if self.name is None else f"{self.id} {self.name}"
         return f"<Task {who} {'running' if self.alive() else 'ended'}>"
+
+
+@final
+class TaskProcess:
+    """A process task's child, as Task.process gives it: what it is, and the
+    signals that end it. A signal sent before the child has started reaches
+    it once it has. Not to be subclassed."""
+
+    __slots__ = ("_t",)
+    _t: _Task
+
+    def __init__(self) -> None:
+        """Refused: a TaskProcess comes from Task.process.
+
+        Raises:
+            TypeError: Always.
+        """
+        raise TypeError("a TaskProcess comes from Task.process")
+
+    @classmethod
+    def _of(cls, t: _Task) -> TaskProcess:
+        """The process of the process task *t*; for Task.process."""
+        process = object.__new__(cls)
+        process._t = t
+        return process
+
+    def detail(self) -> ProcessDetail:
+        """The child as it is now, or as it ended: read anew on each call."""
+        return self._t.process_detail()
+
+    @property
+    def grace(self) -> float:
+        """Seconds past a stop's timeout that forcing the child can take:
+        SIGTERM, SIGKILL a grace later, and a grace more for the reap. A stop
+        with *timeout* has run its course *timeout* + grace seconds on."""
+        return self._t.grace()
+
+    def terminate(self) -> None:
+        """Send the child SIGTERM, now or once it has started; returns at once."""
+        self._t.terminate()
+
+    def kill(self) -> None:
+        """Send the child SIGKILL, now or once it has started; returns at once."""
+        self._t.kill()
 
 
 def _label(task_id: int, name: str | None) -> str:
@@ -220,6 +314,9 @@ class _Task(ABC):
     # Whether terminate() and kill() can end a call this kind of task runs: a
     # thread and the loop cannot be killed, a process can
     killable = False
+
+    # What this kind of task runs as; each kind sets its own
+    kind: TaskKind
 
     def __init__(
         self,
@@ -301,6 +398,23 @@ class _Task(ABC):
     def kill(self) -> None:
         """End a call that outlived terminate(), if this kind of task is
         killable; returns at once."""
+
+    def process_detail(self) -> ProcessDetail:
+        """The child of a process task, which overrides this; reached through
+        Task.process, which only a process task has.
+
+        Raises:
+            TypeError: For a task of another kind.
+        """
+        raise TypeError(f"task {self.id} runs as {self.kind.value}, not a process")
+
+    def grace(self) -> float:
+        """The forcing grace of a process task, which overrides this.
+
+        Raises:
+            TypeError: For a task of another kind.
+        """
+        raise TypeError(f"task {self.id} runs as {self.kind.value}, not a process")
 
     def _raised(self, e: BaseException) -> None:
         """Record how the call ended on *e*: a stop if it is the stop's own

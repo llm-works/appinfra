@@ -21,17 +21,18 @@ import pytest
 
 from appinfra.runtime import (
     Chan,
+    ProcessDetail,
     ProcessExitError,
     Runtime,
     StoppedError,
     StopToken,
     TaskDone,
+    TaskKind,
     pipe,
     stopping,
     task_id,
 )
 from appinfra.runtime import process as process_module
-from appinfra.runtime import runtime as runtime_module
 from appinfra.runtime.process import _stop_on_signal
 
 # The child imports these by name: module level, as the spawn method needs
@@ -297,6 +298,133 @@ class TestReport:
         assert isinstance(task.exception, StoppedError)
 
 
+async def returns_on_the_loop() -> int:
+    return 1
+
+
+def ignores_its_stop(started: Any) -> None:
+    """Ignores its stop, not SIGTERM: a terminate() ends it."""
+    started.set()
+    threading.Event().wait()
+
+
+class TestStopWithTimeout:
+    """task.stop(timeout): the token stops at once; a process task still
+    running *timeout* seconds on gets SIGTERM, then SIGKILL."""
+
+    def test_a_child_ending_on_its_stop_is_not_signalled(self, rt: Runtime) -> None:
+        started = rt.process_context.Event()
+        task = rt.spawn(returns_on_stop, started, process=True)
+        assert task.process is not None
+        assert started.wait(30.0)
+
+        task.stop(timeout=30.0)
+        task.wait(timeout=30.0)  # returns: it ended on its stop
+        assert task.process.detail().exitcode == 0
+
+    def test_a_child_ignoring_its_stop_is_terminated(self, rt: Runtime) -> None:
+        started = rt.process_context.Event()
+        task = rt.spawn(ignores_its_stop, started, process=True)
+        assert task.process is not None
+        assert started.wait(30.0)
+
+        task.stop(timeout=0.1)
+        with pytest.raises(StoppedError):
+            task.wait(timeout=30.0)
+        assert task.process.detail().exitcode == -signal.SIGTERM
+
+    def test_a_child_ignoring_sigterm_is_killed(
+        self, rt: Runtime, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(process_module, "_GRACE", 0.1)
+        started = rt.process_context.Event()
+        task = rt.spawn(ignores_everything, started, process=True)
+        assert task.process is not None
+        assert started.wait(30.0)
+
+        task.stop(timeout=0.1)
+        with pytest.raises(StoppedError):
+            task.wait(timeout=30.0)
+        assert task.process.detail().exitcode == -signal.SIGKILL
+
+    def test_a_thread_task_is_stopped_as_cancel_stops_it(self, rt: Runtime) -> None:
+        """Stopped once its call runs: stopped before, the call is skipped."""
+        started = threading.Event()
+
+        def waits_on_its_stop() -> None:
+            started.set()
+            stopping().wait()
+
+        task = rt.spawn(waits_on_its_stop)
+        assert started.wait(30.0)
+        task.stop(timeout=0.1)
+        task.wait(timeout=30.0)
+        assert task.process is None
+
+
+class TestKindAndDetail:
+    """What a task tells about how it runs: its kind, and for a process task
+    the child's pid, exit code and liveness."""
+
+    @pytest.mark.parametrize(
+        ("fn", "process", "kind"),
+        [
+            (double, False, TaskKind.THREAD),
+            (returns_on_the_loop, False, TaskKind.LOOP),
+            (double, True, TaskKind.PROCESS),
+        ],
+        ids=["thread", "loop", "process"],
+    )
+    def test_a_task_tells_its_kind(
+        self, rt: Runtime, fn: Any, process: bool, kind: TaskKind
+    ) -> None:
+        args = () if fn is returns_on_the_loop else (1,)
+        task = rt.spawn(fn, *args, process=process)
+        task.wait(timeout=30.0)
+        assert task.kind is kind
+        assert (task.process is not None) is (kind is TaskKind.PROCESS)
+
+    def test_the_detail_follows_the_child(self, rt: Runtime) -> None:
+        """While the child runs: its pid, alive, no exit code; once it has
+        ended and been reaped: the same pid and its exit code."""
+        started = rt.process_context.Event()
+        task = rt.spawn(returns_on_stop, started, process=True)
+        assert task.process is not None
+        assert started.wait(30.0)
+
+        running = task.process.detail()
+        assert running.pid is not None and running.pid != os.getpid()
+        assert running.alive
+        assert running.exitcode is None
+
+        task.cancel()
+        task.wait(timeout=30.0)
+        ended = task.process.detail()
+        assert ended == ProcessDetail(pid=running.pid, exitcode=0, alive=False)
+
+    @pytest.mark.parametrize(
+        ("end", "signum"),
+        [("terminate", signal.SIGTERM), ("kill", signal.SIGKILL)],
+    )
+    def test_the_handle_ends_the_child(
+        self, rt: Runtime, end: str, signum: int
+    ) -> None:
+        """terminate() and kill() reach the child; its exit code names the
+        signal."""
+        started = rt.process_context.Event()
+        task = rt.spawn(returns_on_stop, started, process=True)
+        assert task.process is not None
+        assert started.wait(30.0)
+
+        getattr(task.process, end)()
+        with pytest.raises(ProcessExitError):
+            task.wait(timeout=30.0)
+        assert task.process.detail().exitcode == -signum
+
+    def test_children_start_in_the_runtimes_context(self, rt: Runtime) -> None:
+        assert rt.process_context.get_start_method() == "spawn"
+
+
 class TestStop:
     def test_cancel_stops_the_childs_token(self, rt: Runtime) -> None:
         """The child sees its stop and returns: the task's result, with the
@@ -320,7 +448,7 @@ class TestStop:
     ) -> None:
         """Past the stop's timeout the child is terminated, then killed: it
         ignores SIGTERM too. Without an outcome, the stopped task is stopped."""
-        monkeypatch.setattr(runtime_module, "_GRACE", 0.2)
+        monkeypatch.setattr(process_module, "_GRACE", 0.2)
         rt = Runtime(MagicMock())
         rt.start()
         started = mp.get_context("spawn").Event()
@@ -337,7 +465,7 @@ class TestStop:
         """The child is running its call, ignoring its stop, but the parent
         thread has not published it yet when the runtime's stop forces the
         task: the force is recorded, and applied as the child is published."""
-        monkeypatch.setattr(runtime_module, "_GRACE", 0.1)
+        monkeypatch.setattr(process_module, "_GRACE", 0.1)
         real = mp.get_context("spawn")
         held, release = HeldAfterStart.held, HeldAfterStart.release
         held.clear()
@@ -372,7 +500,7 @@ class TestStop:
     ) -> None:
         """The runtime's stop forces a child whose start() is still pickling
         its arguments: once it starts, it is killed, not left running."""
-        monkeypatch.setattr(runtime_module, "_GRACE", 0.1)
+        monkeypatch.setattr(process_module, "_GRACE", 0.1)
         slow = SlowToPickle()
         rt = Runtime(MagicMock())
         rt.start()

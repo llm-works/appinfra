@@ -14,7 +14,7 @@ from typing import Any
 
 from .errors import StoppedError
 from .stop import StopToken
-from .task import _label, _Task
+from .task import TaskKind, _label, _Task
 
 # Prefixed, as the stdlib names the threads it creates: a thread dump shows whose it is
 THREAD_NAME = "appinfra-loop"
@@ -148,6 +148,8 @@ class _LoopTask(_Task):
     __slots__ = ("_host", "_aio", "_finished", "_waiters")
 
     stop_signals = (asyncio.CancelledError, StoppedError)
+
+    kind = TaskKind.LOOP
 
     def __init__(
         self,

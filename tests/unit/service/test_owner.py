@@ -168,7 +168,7 @@ def test_a_stop_during_the_teardown_of_an_expired_setup_waits_for_it(
     owner._tearing[runner.name] = 11
     reply: Chan[Any] = Chan(1)
 
-    owner._on_stop_service(StopService(runner, reply))
+    owner._on_stop_service(StopService(runner, reply, timeout=5.0))
     with pytest.raises(TimeoutError):
         reply.recv(timeout=0)  # not before the teardown settles
     assert owner._runners.get(runner.name) is runner
@@ -193,7 +193,7 @@ def test_a_stop_queued_before_a_finished_backoff_ends_the_restart() -> None:
     reply: Chan[Any] = Chan(1)
 
     with patch.object(owner, "_begin") as begin:
-        owner._on_stop_service(StopService(runner, reply))
+        owner._on_stop_service(StopService(runner, reply, timeout=5.0))
         owner._on_backoff(runner, TaskDone(7, "restarting/backoff", None, None))
 
     backoff.cancel.assert_called_once()

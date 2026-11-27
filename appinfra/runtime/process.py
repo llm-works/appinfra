@@ -14,15 +14,23 @@ import traceback
 from collections.abc import Callable
 from multiprocessing.connection import Connection, wait
 from multiprocessing.process import BaseProcess
-from typing import Any
+from typing import Any, Final
 
 from .errors import ProcessExitError, StoppedError
 from .stop import StopToken
-from .task import _label, _Task
+from .task import ProcessDetail, TaskKind, _label, _Task
 from .thread import _ThreadTask
+
+# How every child starts: a fresh interpreter. Forking a process that runs the
+# runtime's loop and threads is unsafe
+START_METHOD: Final = "spawn"
 
 # What terminate() and kill() ask of a child, the stronger one winning
 _TERMINATE, _KILL = 1, 2
+
+# Seconds a child forced to end gets after SIGTERM, and then after SIGKILL:
+# on top of the timeout of the stop that forces it
+_GRACE = 2.0
 
 
 class _ProcessTask(_ThreadTask):
@@ -41,9 +49,11 @@ class _ProcessTask(_ThreadTask):
     ProcessExitError, unless the task was stopped.
     """
 
-    __slots__ = ("_process", "_lock", "_forced")
+    __slots__ = ("_process", "_lock", "_forced", "_ended")
 
     killable = True
+
+    kind = TaskKind.PROCESS
 
     def __init__(
         self,
@@ -63,10 +73,12 @@ class _ProcessTask(_ThreadTask):
         self._process: BaseProcess | None = None
         self._lock = threading.Lock()
         self._forced = 0  # _TERMINATE or _KILL once forced
+        # The reaped child, as it ended: a closed Process answers nothing
+        self._ended: ProcessDetail | None = None
 
     def _call(self, fn: Callable[..., Any], args: tuple[Any, ...]) -> Any:
         """Run *fn*(*args*) in a child and return or raise its outcome."""
-        ctx = mp.get_context("spawn")
+        ctx = mp.get_context(START_METHOD)
         with contextlib.ExitStack() as ends:
             # Each end is closed on any exit from the moment it is opened
             outcome_recv, outcome_send = _opened(ends, ctx.Pipe(duplex=False))
@@ -157,8 +169,29 @@ class _ProcessTask(_ThreadTask):
         too: Process.close() clears its handle before it marks itself closed,
         so a signal sent across a close fails with AttributeError."""
         with self._lock:
+            self._ended = ProcessDetail(process.pid, process.exitcode, alive=False)
             self._process = None
             process.close()
+
+    def grace(self) -> float:
+        """Seconds past a stop's timeout by which a forced child has been
+        terminated, killed _GRACE later, and given _GRACE more to be reaped.
+        Read on each call, so a test can shorten _GRACE."""
+        return 2 * _GRACE
+
+    def process_detail(self) -> ProcessDetail:
+        """The child as it is now: running, or ended and not yet reaped; as
+        it ended once reaped; no pid before it has started."""
+        with self._lock:
+            if self._ended is not None:
+                return self._ended
+            process = self._process
+            if process is None:
+                return ProcessDetail(pid=None, exitcode=None, alive=False)
+            # One poll of the child: a second could see it end after the first
+            # did not. Published only once started, so no exit code means alive
+            exitcode = process.exitcode
+            return ProcessDetail(process.pid, exitcode, alive=exitcode is None)
 
 
 def _send(process: BaseProcess | None, level: int) -> None:

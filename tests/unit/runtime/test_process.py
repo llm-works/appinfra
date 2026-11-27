@@ -87,6 +87,8 @@ class LockChecking:
     def __init__(self, task: Any) -> None:
         self._task = task
         self.held: dict[str, bool] = {}
+        self.pid = 4321  # as a started child's
+        self.exitcode = 0
 
     def _note(self, call: str) -> None:
         self.held[call] = self._task._lock.locked()
