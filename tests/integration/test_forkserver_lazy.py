@@ -98,10 +98,10 @@ def _child_verify_lifecycle(adapter: FastAPIAdapter, result_q: mp.Queue[str]) ->
 def _child_verify(adapter: FastAPIAdapter, result_q: mp.Queue[str]) -> None:
     """Child-process entry: adapter arrives already-unpickled by ForkingPickler.
 
-    Mirrors production: ``ProcessRunner`` passes ``self.service`` (which
-    holds the adapter) as an arg to ``mp.Process(target=_process_entry,
-    args=(self.service, ...))``. ForkingPickler pickles the args on
-    ``.start()`` and the child receives them via its own unpickle.
+    Mirrors production: the service Runtime passes an isolated service
+    (which holds the adapter) to its child as a ``Process`` argument.
+    ForkingPickler pickles the args on ``.start()`` and the child receives
+    them via its own unpickle.
     """
     try:
         assert isinstance(adapter._defs.routes[0].handler, Lazy), (

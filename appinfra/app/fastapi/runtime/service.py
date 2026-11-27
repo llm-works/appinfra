@@ -166,7 +166,12 @@ class UvicornService(Service):
             config = self._build_uvicorn_config(app)
             server = WatchedServer(config, self.stopping, ipc_channel, bound_port)
             self._server = server
-            server.run()
+            try:
+                server.run()
+            except KeyboardInterrupt:
+                # uvicorn shuts down on SIGINT, then raises it again: an
+                # interrupt asked the server to end, it did not crash
+                return
             if not server.started:
                 raise SystemExit(_UVICORN_STARTUP_FAILURE)
 
