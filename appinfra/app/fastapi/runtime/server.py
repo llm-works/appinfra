@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import multiprocessing as mp
 import sys
+import weakref
 from threading import Event
 from typing import TYPE_CHECKING, Any
 
@@ -409,11 +410,14 @@ def _settled(runner: Runner) -> bool:
 def _wait_settled(runner: Runner) -> None:
     """Block until *runner* has settled for good (see _settled()). The hook
     sees every later transition; the check after it covers one made before
-    it was registered."""
+    it was registered. It holds the runner weakly: the runner keeps its hooks,
+    and a strong one would keep both in a cycle."""
     settled = Event()
+    ref = weakref.ref(runner)
 
     def on_change(_name: str, _old: State, _new: State) -> None:
-        if _settled(runner):
+        current = ref()
+        if current is not None and _settled(current):
             settled.set()
 
     runner.on_state_change(on_change)

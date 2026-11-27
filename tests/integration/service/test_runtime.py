@@ -254,6 +254,21 @@ class SetupFails(Service):
         raise AssertionError("never run")
 
 
+def _moves_of(runner: Runner) -> tuple[list[tuple[State, State]], threading.Event]:
+    """The transitions *runner* makes from now on, and an event set once one
+    moves it to FAILED."""
+    moves: list[tuple[State, State]] = []
+    failed = threading.Event()
+
+    def hook(_name: str, old: State, new: State) -> None:
+        moves.append((old, new))
+        if new == State.FAILED:
+            failed.set()
+
+    runner.on_state_change(hook)
+    return moves, failed
+
+
 class HealthFails(Service):
     """Runs until stopping is set; is_healthy() raises. Module level, so the
     spawn start method can pickle it."""
@@ -800,6 +815,46 @@ class TestSupervision:
         svc.release()  # and so does the second
 
         assert _wait_until(lambda: svc.runs == 3 and runner.state == State.RUNNING)
+
+    def test_a_service_stopped_in_its_restart_backoff_ends_stopped(self, rt):
+        """Its run failed and its restart waits out the backoff: stop_service()
+        ends the wait, and the runner moves to STOPPED, its hooks seeing it,
+        instead of leaving the runtime FAILED with a restart pending."""
+        svc = FailsOnRelease(fails=1)
+        runner = rt.spawn(svc, RestartPolicy(backoff=30.0))
+        rt.ready(runner)
+        assert svc.parked.wait(5.0)
+        moves, failed = _moves_of(runner)
+
+        svc.release()
+        assert failed.wait(5.0)  # the timeout is the failure path
+        rt.stop_service(runner, timeout=5.0)
+
+        assert runner.state == State.STOPPED
+        assert moves[-1] == (State.FAILED, State.STOPPED)
+        assert "fails" not in rt.services
+
+    def test_a_runtime_stop_ends_a_restart_backoff_as_a_stop(self):
+        """Runtime.stop() with a service waiting out its restart backoff: the
+        service ends STOPPED, and the stop does not wait for it until its
+        timeout runs out."""
+        lg = MagicMock()
+        rt = Runtime(lg, name="test-runtime")
+        rt.start()
+        svc = FailsOnRelease(fails=1)
+        runner = rt.spawn(svc, RestartPolicy(backoff=30.0))
+        rt.ready(runner)
+        assert svc.parked.wait(5.0)
+        moves, failed = _moves_of(runner)
+        svc.release()
+        assert failed.wait(5.0)  # the timeout is the failure path
+
+        rt.stop(timeout=5.0)
+
+        assert runner.state == State.STOPPED
+        assert moves[-1] == (State.FAILED, State.STOPPED)
+        warned = [c.args[0] for c in lg.warning.call_args_list]
+        assert "service did not stop in time" not in warned
 
     def test_a_service_with_no_restart_left_leaves_the_runtime(self, rt):
         svc = FailsOnRelease(fails=1)

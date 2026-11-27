@@ -537,15 +537,18 @@ class Owner:
     def _on_backoff(self, runner: Runner, m: TaskDone) -> None:
         """The backoff ended: make the restart attempt, unless a stop ended it.
         A stop_service() handled after the backoff finished, its end still
-        queued, cancelled nothing: its recorded stop ends the restart too."""
+        queued, cancelled nothing: its recorded stop ends the restart too. A
+        service stopped while it waited, by stop_service() or stop(), ends
+        STOPPED, its hooks told, and leaves the runtime: no run is left to end."""
         task = self._backoffs.get(runner.name)
         if task is None or task.id != m.task_id:
             return
         del self._backoffs[runner.name]
         if m.error is not None or self._closing or runner in self._stops:
             self._restarting.discard(runner.name)
-            if runner in self._stops:
-                self._halt(runner, runner.policy.stop_timeout)  # no run to end
+            if runner in self._stops or self._closing:
+                runner._move(State.STOPPED)
+                self._let_go(runner)
             return
         runner._retries += 1
         down = self._deps.down(runner.service)

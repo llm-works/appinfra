@@ -3,9 +3,11 @@
 
 """Tests for Server runtime."""
 
+import gc
 import multiprocessing as mp
 import sys
 import threading
+import weakref
 from unittest.mock import MagicMock, call, patch
 
 import pytest
@@ -549,6 +551,30 @@ class TestSettled:
         from appinfra.app.fastapi.runtime.server import _settled
 
         assert _settled(_runner(state, can_restart)) is settled
+
+    def test_the_settle_wait_keeps_its_runner_in_no_cycle(self):
+        """The hook _wait_settled() leaves on the runner holds it weakly: once
+        dropped, the runner, its service and what that holds are freed at
+        once, not whenever the cyclic GC next runs."""
+        from appinfra.app.fastapi.runtime.server import _wait_settled
+        from appinfra.service import Runner, Service
+
+        class Idle(Service):
+            name = "idle"
+
+            def run(self) -> None:
+                """Never run: the runner is made settled."""
+
+        runner = Runner(Idle())
+        runner._state = State.STOPPED  # Private: settled, so the wait returns
+        freed = weakref.ref(runner)
+        gc.disable()
+        try:
+            _wait_settled(runner)
+            del runner
+            assert freed() is None, "held by a cycle through its hook"
+        finally:
+            gc.enable()
 
 
 class TestBuildUvicornLogConfig:

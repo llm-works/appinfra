@@ -15,6 +15,7 @@ import os
 import signal
 import socket
 import threading
+import time
 import weakref
 from collections.abc import Iterator
 from typing import Any
@@ -80,6 +81,17 @@ def _build_server(rt: Runtime, port: int = 0, **subprocess: Any) -> Any:
 
 def _wait_ready(server: Any) -> None:
     wait_ready(f"http://127.0.0.1:{server.port}/ping", deadline_secs=10.0)
+
+
+def _until(condition: Any, timeout: float = 30.0) -> bool:
+    """Poll *condition* until it holds; False once *timeout* passes. For a
+    change no event signals: a child process starting."""
+    deadline = time.monotonic() + timeout
+    while not condition():
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.05)
+    return True
 
 
 def _on_state(runner: Runner, state: State) -> threading.Event:
@@ -176,6 +188,30 @@ class TestStop:
         detail = process.detail()
         assert not detail.alive
         assert detail.exitcode in (-signal.SIGTERM, -signal.SIGKILL)
+
+    def test_a_blocking_start_returns_when_stopped_in_a_restart_backoff(
+        self, rt: Runtime
+    ) -> None:
+        """start() blocks until the server will not run again: killed, its
+        child waits out the restart delay, and a stop() then ends the wait."""
+        server = _build_server(rt, restart_delay=30.0).build()
+        starter = threading.Thread(target=server.start, daemon=True)
+        starter.start()
+        name = f"uvicorn-{NAME}"
+        assert _until(
+            lambda: name in rt.services and rt.services[name].state == State.RUNNING
+        ), "the server never came up"
+        runner = rt.services[name]
+        failed = _on_state(runner, State.FAILED)
+        process = server.process
+        assert process is not None
+
+        process.kill()
+        assert failed.wait(30.0)
+        server.stop(timeout=5.0)
+
+        starter.join(30.0)  # the timeout is the failure path
+        assert not starter.is_alive(), "start() still blocks"
 
     def test_a_stop_during_start_leaves_no_child(self, rt: Runtime) -> None:
         """stop() from another thread while start_subprocess() waits for the
