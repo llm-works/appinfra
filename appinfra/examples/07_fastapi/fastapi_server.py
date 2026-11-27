@@ -27,12 +27,10 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import multiprocessing as mp
 import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 # Allow running from a source checkout without installing the package.
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
@@ -103,16 +101,13 @@ class WorkResponse:
     error: str | None = None
 
 
-def create_subprocess_server(
-    request_q: mp.Queue[Any],
-    response_q: mp.Queue[Any],
-    port: int = 25443,
-) -> Server:
+def create_subprocess_server(port: int = 25443) -> Server:
     """
     Create a server running in subprocess mode with IPC.
 
     Subprocess mode runs uvicorn in a separate process, communicating
-    via multiprocessing queues. This isolates the HTTP server from the
+    via multiprocessing queues the builder makes (server.request_queue,
+    server.response_queue). This isolates the HTTP server from the
     main application logic.
 
     Features:
@@ -126,7 +121,7 @@ def create_subprocess_server(
         ServerBuilder(lg, "worker-api")
         .with_port(port)
         .with_title("Worker API")
-        .subprocess.with_ipc(request_q, response_q)
+        .subprocess.with_ipc()
         .with_auto_restart(True)
         .with_max_restarts(3)
         .done()
@@ -141,32 +136,27 @@ def run_subprocess_demo() -> int:
     Demo subprocess mode with IPC communication.
 
     Shows the typical pattern:
-    1. Create queues for IPC
-    2. Build server with subprocess config
-    3. Start server (non-blocking)
-    4. Main process handles queue messages
+    1. Build server with subprocess config (it makes the IPC queues)
+    2. Start server (non-blocking)
+    3. Main process handles queue messages (server.request_queue)
     """
     print("Starting subprocess mode demo...")
 
-    # Create IPC queues
-    request_q: mp.Queue[Any] = mp.Queue()
-    response_q: mp.Queue[Any] = mp.Queue()
+    server = create_subprocess_server()
+    server.start_subprocess()
 
-    # Create and start server
-    server = create_subprocess_server(request_q, response_q)
-    proc = server.start_subprocess()
-
-    print(f"Server started in subprocess (pid={proc.pid})")
-    print(f"Listening on http://localhost:{server.config.port}")
+    print(f"Server started in subprocess (pid={server.pid})")
+    print(f"Listening on http://localhost:{server.port}")
     print("Press Ctrl+C to stop")
 
     try:
         # Main process would typically process requests here
         # For demo, we just wait
-        while proc.is_alive():
+        while server.is_running:
             time.sleep(1)
     except KeyboardInterrupt:
         print("\nShutting down...")
+    finally:
         server.stop()
 
     return 0

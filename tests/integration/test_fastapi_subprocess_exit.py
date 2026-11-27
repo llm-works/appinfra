@@ -32,7 +32,6 @@ import pytest
 import requests
 from starlette.requests import Request
 
-from tests.helpers.fork import forks_in_xdist_worker
 from tests.helpers.http import wait_ready
 
 
@@ -82,7 +81,7 @@ def _build_server() -> Any:
         .routes.with_route("/ping", _ping_handler, methods=["GET"])
         .with_route("/wait", _wait_on_ipc, methods=["GET"])
         .done()
-        .subprocess.with_ipc(mp.Queue(), mp.Queue())
+        .subprocess.with_ipc()
         .done()
         .build()
     )
@@ -154,13 +153,11 @@ def _port_bindable(port: int) -> bool:
     return True
 
 
-def _run_parent(method: str, started_q: mp.Queue[tuple[int, int]]) -> None:
-    """Start the server subprocess with the given start method, report its pid and
-    port, then idle."""
-    mp.set_start_method(method, force=True)
+def _run_parent(started_q: mp.Queue[tuple[int | None, int]]) -> None:
+    """Start the server subprocess, report its pid and port, then idle."""
     server = _build_server()
-    proc = server.start_subprocess()
-    started_q.put((proc.pid, server.port))
+    server.start_subprocess()
+    started_q.put((server.pid, server.port))
     time.sleep(120)
 
 
@@ -197,7 +194,7 @@ def _build_server_with_shutdown_callback(marker_path: Path) -> Any:
                 str(marker_path),
             )
         )
-        .subprocess.with_ipc(mp.Queue(), mp.Queue())
+        .subprocess.with_ipc()
         .done()
         .build()
     )
@@ -206,43 +203,45 @@ def _build_server_with_shutdown_callback(marker_path: Path) -> Any:
 class TestSubprocessExit:
     """The uvicorn subprocess exits promptly when told to or orphaned."""
 
-    @forks_in_xdist_worker
     def test_stop_does_not_escalate(self) -> None:
         """stop() returns well before its timeout and the child exits cleanly."""
         server = _build_server()
-        proc = server.start_subprocess()
+        server.start_subprocess()
+        process = server.process
+        assert process is not None
         _wait_ready(server.port)
 
         started = time.monotonic()
         server.stop(timeout=5.0)
 
         assert time.monotonic() - started < 2.0
-        assert proc.exitcode == 0
+        assert process.detail().exitcode == 0
 
-    @forks_in_xdist_worker
     def test_shutdown_callback_executes_on_stop(self) -> None:
         """Shutdown callbacks registered via the builder run when stop() is called."""
         with tempfile.TemporaryDirectory() as tmp:
             marker = Path(tmp) / "shutdown_marker"
             server = _build_server_with_shutdown_callback(marker)
-            proc = server.start_subprocess()
+            server.start_subprocess()
+            process = server.process
+            assert process is not None
             try:
                 _wait_ready(server.port)
                 assert not marker.exists(), "marker should not exist before shutdown"
 
                 server.stop(timeout=5.0)
-                assert proc.exitcode == 0
+                assert process.detail().exitcode == 0
                 assert marker.exists(), "shutdown callback did not write marker"
                 assert marker.read_text() == "shutdown"
             finally:
-                if proc.is_alive():
-                    proc.kill()
+                process.kill()  # nothing to signal once it has ended
 
-    @forks_in_xdist_worker
     def test_stop_fails_request_waiting_on_ipc(self) -> None:
         """A request waiting on IPC fails at once instead of blocking stop()."""
         server = _build_server()
-        proc = server.start_subprocess()
+        server.start_subprocess()
+        process = server.process
+        assert process is not None
         try:
             _wait_ready(server.port)
             thread, result = _start_pending_request(server.port)
@@ -252,24 +251,20 @@ class TestSubprocessExit:
             stopped_in = time.monotonic() - started
             thread.join(timeout=5.0)
         finally:
-            if proc.is_alive():
-                proc.kill()
+            process.kill()  # nothing to signal once it has ended
 
         assert stopped_in < 2.0
         assert result["outcome"] == 500
         assert result["done_at"] - started < 2.0
 
-    @pytest.mark.parametrize(
-        "method",
-        [m for m in ("fork", "spawn", "forkserver") if m in mp.get_all_start_methods()],
-    )
-    def test_child_exits_when_parent_is_killed(self, method: str) -> None:
+    def test_child_exits_when_parent_is_killed(self) -> None:
         """SIGKILL of the parent frees the port and ends the child within seconds."""
         ctx = mp.get_context("spawn")
-        started_q: mp.Queue[tuple[int, int]] = ctx.Queue()
-        parent = ctx.Process(target=_run_parent, args=(method, started_q))
+        started_q: mp.Queue[tuple[int | None, int]] = ctx.Queue()
+        parent = ctx.Process(target=_run_parent, args=(started_q,))
         parent.start()
         child_pid, port = started_q.get(timeout=30.0)
+        assert child_pid is not None
         try:
             _wait_ready(port)
             thread, result = _start_pending_request(port)

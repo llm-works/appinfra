@@ -3,7 +3,6 @@
 
 """Tests for FastAPI ServerBuilder."""
 
-import multiprocessing as mp
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -323,15 +322,21 @@ class TestSubprocessConfigurer:
             mock.return_value = MagicMock()
             yield mock
 
-    def test_ipc_configuration(self, mock_fastapi, mock_lg):
-        """Test IPC queue configuration."""
+    @pytest.fixture(autouse=True)
+    def context(self):
+        """The context with_ipc() makes its queues from, mocked: no queue."""
+        with patch("appinfra.app.fastapi.builder.subprocess.process_context") as ctx:
+            yield ctx.return_value
+
+    def test_ipc_configuration(self, mock_fastapi, mock_lg, context):
+        """with_ipc() makes both queues from the context the child starts in."""
         from appinfra.app.fastapi.builder.server import ServerBuilder
 
-        request_q: mp.Queue = mp.Queue()
-        response_q: mp.Queue = mp.Queue()
+        request_q, response_q = MagicMock(), MagicMock()
+        context.Queue.side_effect = [request_q, response_q]
 
         builder = ServerBuilder(mock_lg, "test-api")
-        builder.subprocess.with_ipc(request_q, response_q).done()
+        builder.subprocess.with_ipc().done()
 
         assert builder._request_q is request_q
         assert builder._response_q is response_q
@@ -349,15 +354,27 @@ class TestSubprocessConfigurer:
         assert builder._api.restart_delay == 2.0
         assert builder._api.max_restarts == 10
 
-    def test_start_method_configuration(self, mock_fastapi, mock_lg):
-        """with_start_method() sets the subprocess's multiprocessing start method."""
+    def test_with_runtime_reaches_the_server(self, mock_fastapi, mock_lg):
+        """The runtime given is the one the built server spawns into."""
         from appinfra.app.fastapi.builder.server import ServerBuilder
 
-        builder = ServerBuilder(mock_lg, "test-api")
-        assert builder._api.start_method is None
-        builder.subprocess.with_start_method("forkserver").done()
+        runtime = MagicMock()
+        server = (
+            ServerBuilder(mock_lg, "test-api")
+            .subprocess.with_ipc()
+            .with_runtime(runtime)
+            .done()
+            .build()
+        )
 
-        assert builder._api.start_method == "forkserver"
+        assert server._runtime is runtime
+
+    def test_no_runtime_by_default(self, mock_fastapi, mock_lg):
+        from appinfra.app.fastapi.builder.server import ServerBuilder
+
+        server = ServerBuilder(mock_lg, "test-api").subprocess.with_ipc().done().build()
+
+        assert server._runtime is None
 
     def test_toggling_auto_restart_keeps_delay_and_limit(self, mock_fastapi, mock_lg):
         """Each restart setting is its own setter; toggling one leaves the others."""
@@ -398,15 +415,11 @@ class TestSubprocessConfigurer:
         """Test IPCConfig configuration."""
         from appinfra.app.fastapi.builder.server import ServerBuilder
 
-        request_q: mp.Queue = mp.Queue()
-        response_q: mp.Queue = mp.Queue()
         ipc_config = IPCConfig(max_pending=500, response_timeout=120.0)
 
         builder = ServerBuilder(mock_lg, "test-api")
         # Must enable subprocess mode with_ipc() before with_config() takes effect
-        builder.subprocess.with_ipc(request_q, response_q).with_config(
-            ipc_config
-        ).done()
+        builder.subprocess.with_ipc().with_config(ipc_config).done()
 
         assert builder._api.ipc == ipc_config
         assert builder._api.ipc is not ipc_config
@@ -416,13 +429,8 @@ class TestSubprocessConfigurer:
         """Test poll interval configuration."""
         from appinfra.app.fastapi.builder.server import ServerBuilder
 
-        request_q: mp.Queue = mp.Queue()
-        response_q: mp.Queue = mp.Queue()
-
         builder = ServerBuilder(mock_lg, "test-api")
-        builder.subprocess.with_ipc(request_q, response_q).with_poll_interval(
-            0.05
-        ).done()
+        builder.subprocess.with_ipc().with_poll_interval(0.05).done()
 
         assert builder._api.ipc.poll_interval == 0.05
 
@@ -442,13 +450,8 @@ class TestSubprocessConfigurer:
         """Test response timeout configuration."""
         from appinfra.app.fastapi.builder.server import ServerBuilder
 
-        request_q: mp.Queue = mp.Queue()
-        response_q: mp.Queue = mp.Queue()
-
         builder = ServerBuilder(mock_lg, "test-api")
-        builder.subprocess.with_ipc(request_q, response_q).with_response_timeout(
-            30.0
-        ).done()
+        builder.subprocess.with_ipc().with_response_timeout(30.0).done()
 
         assert builder._api.ipc.response_timeout == 30.0
 
@@ -456,11 +459,8 @@ class TestSubprocessConfigurer:
         """Test max pending configuration."""
         from appinfra.app.fastapi.builder.server import ServerBuilder
 
-        request_q: mp.Queue = mp.Queue()
-        response_q: mp.Queue = mp.Queue()
-
         builder = ServerBuilder(mock_lg, "test-api")
-        builder.subprocess.with_ipc(request_q, response_q).with_max_pending(200).done()
+        builder.subprocess.with_ipc().with_max_pending(200).done()
 
         assert builder._api.ipc.max_pending == 200
 
@@ -468,13 +468,8 @@ class TestSubprocessConfigurer:
         """Test health reporting configuration."""
         from appinfra.app.fastapi.builder.server import ServerBuilder
 
-        request_q: mp.Queue = mp.Queue()
-        response_q: mp.Queue = mp.Queue()
-
         builder = ServerBuilder(mock_lg, "test-api")
-        builder.subprocess.with_ipc(request_q, response_q).with_health_reporting(
-            False
-        ).done()
+        builder.subprocess.with_ipc().with_health_reporting(False).done()
 
         assert builder._api.ipc.enable_health_reporting is False
 

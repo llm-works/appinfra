@@ -5,14 +5,17 @@
 
 from __future__ import annotations
 
+import gc
 import multiprocessing as mp
 import os
 import pickle
 import signal
 import sys
 import threading
+import time
 import types
-from collections.abc import Iterator
+import weakref
+from collections.abc import Callable, Iterator
 from multiprocessing.context import SpawnProcess
 from typing import Any
 from unittest.mock import MagicMock
@@ -61,6 +64,14 @@ def returns_a_child_only_class() -> Any:
 
 def exits_hard(code: int) -> None:
     os._exit(code)
+
+
+class Held:
+    """A call's argument, its release in the parent seen through a weakref."""
+
+
+def exits_hard_holding(_held: Held) -> None:
+    os._exit(3)
 
 
 def killed() -> None:
@@ -136,6 +147,17 @@ def rt() -> Iterator[Runtime]:
     runtime.stop()
 
 
+def _until(condition: Callable[[], bool], timeout: float = 5.0) -> bool:
+    """Poll *condition* until it holds; False once *timeout* passes. For a
+    change no event signals: an object's release."""
+    deadline = time.monotonic() + timeout
+    while not condition():
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.01)
+    return True
+
+
 class TestOutcome:
     def test_the_result_comes_back(self, rt: Runtime) -> None:
         assert rt.spawn(double, 21, process=True).wait(timeout=30.0) == 42
@@ -186,6 +208,26 @@ class TestOutcome:
         with pytest.raises(ProcessExitError) as caught:
             t.wait(timeout=30.0)
         assert caught.value.exitcode == -signal.SIGKILL
+
+    def test_an_exit_leaves_the_arguments_in_no_cycle(self, rt: Runtime) -> None:
+        """The ProcessExitError the task keeps refers to none of the runtime's
+        own frames, which hold the task: with its end taken, the call's
+        arguments are freed at once in the parent, not whenever the cyclic GC
+        next runs. Held by a cycle, a queue among them would be finalized at
+        that moment, wherever it falls."""
+        held = Held()
+        freed = weakref.ref(held)
+        done: Chan[TaskDone] = Chan(1)
+        gc.disable()
+        try:
+            rt.spawn(exits_hard_holding, held, done=done, process=True)
+            del held
+            end = done.recv(timeout=30.0)
+            assert isinstance(end.error, ProcessExitError)
+            del end
+            assert _until(lambda: freed() is None), "held by a cycle"
+        finally:
+            gc.enable()
 
     def test_an_exit_without_an_outcome_reaches_a_done_pipe_as_itself(
         self, rt: Runtime

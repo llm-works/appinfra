@@ -60,6 +60,7 @@ def test_the_runtime_exports_its_api() -> None:
         "TaskProcess",
         "aselect",
         "pipe",
+        "process_context",
         "select",
         "stopping",
         "task_id",

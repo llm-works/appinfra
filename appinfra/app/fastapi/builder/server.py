@@ -22,6 +22,7 @@ if TYPE_CHECKING:
 
 from dataclasses import replace
 
+from ....service import Runtime as ServiceRuntime
 from ....subprocess import Lazy
 from ..config.api import ApiConfig
 from ..runtime.adapter import (
@@ -75,29 +76,24 @@ class ServerBuilder:
         server.start()  # Blocking
 
     Example (subprocess mode with IPC):
-        request_q, response_q = mp.Queue(), mp.Queue()
-
         server = (ServerBuilder("worker-api")
             .with_port(8000)
             .routes
                 .with_route("/process", process_handler, methods=["POST"])
                 .done()
             .subprocess
-                .with_ipc(request_q, response_q)
+                .with_ipc()
                 .with_auto_restart(True).with_max_restarts(10)
-                .done()
-            .uvicorn
-                .with_workers(4)
                 .done()
             .build())
 
-        proc = server.start_subprocess()  # Non-blocking
+        server.start_subprocess()  # Non-blocking
 
         # Main process handles requests via queues
         while True:
-            request = request_q.get()
+            request = server.request_queue.get()
             result = process(request)
-            response_q.put(result)
+            server.response_queue.put(result)
     """
 
     def __init__(self, lg: Logger, name: str) -> None:
@@ -115,6 +111,8 @@ class ServerBuilder:
         self._api = ApiConfig()
         self._request_q: mp.Queue[Any] | None = None
         self._response_q: mp.Queue[Any] | None = None
+        # The service Runtime the server spawns into; None: one of its own
+        self._runtime: ServiceRuntime | None = None
         self._defs = ServerDefinitions()
 
     # Direct configuration methods
@@ -537,4 +535,5 @@ class ServerBuilder:
             adapter=adapter,
             request_q=self._request_q,
             response_q=self._response_q,
+            runtime=self._runtime,
         )

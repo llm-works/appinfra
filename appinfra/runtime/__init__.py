@@ -16,7 +16,7 @@ from .chan import Recv as ChanRecv
 from .chan import Send as ChanSend
 from .chan import Sender as PipeSender
 from .errors import ProcessExitError, StoppedError
-from .runtime import Runtime
+from .runtime import Runtime, process_context
 from .stop import StopToken
 from .task import (
     ProcessDetail,
@@ -48,6 +48,7 @@ __all__ = [
     "TaskProcess",
     "aselect",
     "pipe",
+    "process_context",
     "select",
     "stopping",
     "task_id",

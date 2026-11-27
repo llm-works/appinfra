@@ -39,31 +39,40 @@ For CPU-intensive work, run the API server in a subprocess while the main proces
 computation:
 
 ```python
-import multiprocessing as mp
 from appinfra.app.fastapi import ServerBuilder
 from appinfra.log import Logger
 
-request_q, response_q = mp.Queue(), mp.Queue()
+# health and process at module scope: the server's process imports them
 
-lg = Logger("worker-api")
-server = (
-    ServerBuilder(lg, "worker-api")
-    .with_port(8000)
-    .routes.with_route("/health", health)
-    .done()
-    .subprocess.with_ipc(request_q, response_q)
-    .with_auto_restart(True)
-    .done()
-    .build()
-)
 
-proc = server.start_subprocess()  # Non-blocking
+def main() -> None:
+    lg = Logger("worker-api")
+    server = (
+        ServerBuilder(lg, "worker-api")
+        .with_port(8000)
+        .routes.with_route("/health", health)
+        .done()
+        .subprocess.with_ipc()
+        .with_auto_restart(True)
+        .done()
+        .build()
+    )
 
-# Main process handles requests
-while True:
-    request = request_q.get()
-    result = process(request)
-    response_q.put(result)
+    server.start_subprocess()  # Non-blocking: returns once the server serves
+    request_q, response_q = server.request_queue, server.response_queue
+
+    # Main process handles requests
+    try:
+        while True:
+            request = request_q.get()
+            result = process(request)
+            response_q.put(result)
+    finally:
+        server.stop()
+
+
+if __name__ == "__main__":  # the server's process imports this module again
+    main()
 ```
 
 **Note:** The Logger is required for queue-based subprocess logging. The subprocess inherits the
@@ -175,8 +184,10 @@ from appinfra.app.fastapi.config import IPCConfig
 server = (
     ServerBuilder(lg, "myapi")
     .subprocess
-    # IPC queues (required for subprocess mode)
-    .with_ipc(request_q, response_q)
+    # IPC queues (required for subprocess mode): server.request_queue, .response_queue
+    .with_ipc()
+    # Run as a service of the application's started service Runtime (optional)
+    .with_runtime(rt)
     # Auto-restart on crash
     .with_auto_restart(True)
     .with_restart_delay(2.0)
@@ -195,31 +206,30 @@ server = (
 )
 ```
 
-#### Start method
+#### The runtime the server runs in
 
-A restart runs on the monitor thread. Under the fork start method, the default on Linux before
-Python 3.14, the new server process is forked from that thread, which Python 3.12+ warns may
-deadlock the child. `with_start_method("forkserver")` or `"spawn"` avoids it. The IPC queues must
-come from the same start method:
+In subprocess mode the server runs uvicorn as an isolated service of a service `Runtime`
+(see [service](service.md)): its process starts with the `spawn` method, the runtime restarts it
+after a crash under the restart settings above, and `stop(timeout)` terminates, then kills, a
+process still running at the timeout. Without `with_runtime()`, `start_subprocess()` starts a
+runtime of the server's own, which `stop()` stops; with one, the server is one service among the
+application's and `stop()` leaves the runtime running.
 
-```python
-import multiprocessing as mp
+`spawn` imports the main module again in the server's process, so a script builds and starts the
+server under `if __name__ == "__main__":`; its handlers stay at module scope, where that import
+finds them. Unguarded, the import reaches `start_subprocess()` again and multiprocessing refuses
+it with `RuntimeError`.
 
-ctx = mp.get_context("forkserver")
-request_q, response_q = ctx.Queue(), ctx.Queue()
+`with_ipc()` makes the queues from `appinfra.runtime.process_context()`, the context the
+process starts in. Anything else shared with the server's process, such as a `Value` read by a
+lifecycle callback, must come from that context too: one from another context fails in the child
+with `RuntimeError: A SemLock created in a fork context is being shared with a process in a spawn
+context`.
 
-server = (
-    ServerBuilder(lg, "myapi")
-    .subprocess.with_ipc(request_q, response_q)
-    .with_start_method("forkserver")
-    .done()
-    .build()
-)
-```
-
-Queues from another start method fail at `start_subprocess()` with multiprocessing's
-`RuntimeError: A SemLock created in a fork context is being shared with a process in a spawn
-context`. Without `with_start_method()`, the server uses multiprocessing's default.
+The current run is read live: `server.port` (with port 0, the one the OS picked), `server.pid`,
+`server.is_running`, and `server.process`, the run's `TaskProcess` (see [runtime](runtime.md)). A
+restart runs a new process, so read them when needed. An interrupt (SIGINT) reaching the server's
+process ends it cleanly, without a restart.
 
 ### Rate Limiting
 
@@ -445,7 +455,7 @@ server = (
     ServerBuilder(lg, "api")
     .routes.with_exception_handler(TimeoutError, TimeoutHandler(lg))
     .done()
-    .subprocess.with_ipc(request_q, response_q)
+    .subprocess.with_ipc()
     .done()
     .build()
 )
@@ -464,10 +474,10 @@ handle `__getstate__`/`__setstate__` yourself.
 
 ### Nested Closures in Subprocess Mode
 
-On Python 3.14+ the `forkserver` start method (now the default) pickles the target's args at
-spawn. Route handlers, routers, middleware, callbacks — anything constructed via a nested
-function or local class — cannot cross that boundary: the pickle protocol rejects any
-callable whose qualname contains `<locals>`.
+The server's process starts with the `spawn` method, which pickles the service, and the
+definitions it holds, when the process starts. Route handlers, routers, middleware, callbacks —
+anything constructed via a nested function or local class — cannot cross that boundary: the
+pickle protocol rejects any callable whose qualname contains `<locals>`.
 
 Wrap such values in [`Lazy`](subprocess.md#lazy) to defer construction to the child process:
 
@@ -488,7 +498,7 @@ server = (
     ServerBuilder(lg, "api")
     .routes.with_route("/health", Lazy("myapp.routes:build_health", HealthConfig(...)))
     .done()
-    .subprocess.with_ipc(request_q, response_q)
+    .subprocess.with_ipc()
     .done()
     .build()
 )
@@ -500,7 +510,7 @@ Every FastAPI definition accepts `Callable | Lazy` (including `with_router`, `wi
 child during `FastAPIAdapter.build()`, so the closure never pickles.
 
 **Unsupported:** parent state created *after* subprocess spawn (e.g. an `mp.Value` shared
-post-spawn) cannot cross `forkserver` at all — `Lazy` is not a workaround for that. See
+post-spawn) cannot cross `spawn` at all — `Lazy` is not a workaround for that. See
 [`appinfra.subprocess.Lazy`](subprocess.md#lazy) for the full contract.
 
 ### Uvicorn Configuration
@@ -527,7 +537,7 @@ server = (
 
 Subprocess mode requires `workers=1`: uvicorn runs multiple workers only from an import string,
 and the subprocess passes it the built app. Other values make `start_subprocess()` raise
-`SetupError`.
+`ConfigError` before any process starts.
 
 ## Server
 
@@ -541,13 +551,16 @@ server.name  # Server name
 server.config  # ApiConfig
 server.app  # FastAPI instance (built on first access)
 server.is_subprocess_mode  # True if IPC queues configured
-server.is_running  # True if subprocess is alive
 server.request_queue  # Request queue (subprocess mode)
 server.response_queue  # Response queue (subprocess mode)
+server.port  # Port served on; in subprocess mode, the one the current run bound
+server.process  # Current run's TaskProcess, or None (subprocess mode)
+server.pid  # Current run's pid, or None (subprocess mode)
+server.is_running  # True while the current run's subprocess is alive
 
 # Methods
-server.start()  # Run server (blocking)
-server.start_subprocess()  # Start in subprocess (non-blocking, returns Process)
+server.start()  # Run server (blocking; in subprocess mode, until it ends for good)
+server.start_subprocess()  # Start in subprocess (non-blocking, returns once serving)
 server.stop()  # Stop subprocess
 ```
 
@@ -555,11 +568,12 @@ server.stop()  # Stop subprocess
 
 The server subprocess exits when:
 
-- `server.stop()` sets its shutdown event. `stop()` escalates to SIGTERM, then SIGKILL, only if the
-  subprocess is still running after `timeout` (default 5s).
+- `server.stop()` stops its service, which sets its shutdown event. A subprocess still running
+  after `timeout` (default 5s) gets SIGTERM, then SIGKILL; `stop()` waits through both.
 - The parent process exits, including by SIGKILL. The subprocess checks for this every 0.1s, so an
   orphaned server releases its port instead of running on.
-- It receives SIGTERM or SIGINT (uvicorn's own signal handling).
+- It receives SIGTERM or SIGINT (uvicorn's own signal handling). After SIGINT it ends cleanly and
+  is not restarted.
 
 In the first two cases the IPC channel closes before uvicorn drains in-flight requests: handlers
 waiting in `ipc.submit()` or `ipc.stream()` raise `ChannelClosedError` (from
@@ -724,36 +738,40 @@ def run_worker(request_q: mp.Queue, response_q: mp.Queue):
 ### Complete Example
 
 ```python
-import multiprocessing as mp
 from appinfra.app.fastapi import ServerBuilder
 from appinfra.log import Logger
 
-# Create IPC queues
-request_q: mp.Queue = mp.Queue()
-response_q: mp.Queue = mp.Queue()
+# router and run_worker as above, at module scope: the server's process
+# imports them
 
-# Build server with IPC
-lg = Logger("worker-api")
-server = (
-    ServerBuilder(lg, "worker-api")
-    .with_port(8000)
-    .subprocess.with_ipc(request_q, response_q)
-    .with_response_timeout(60.0)
-    .with_auto_restart(True)
-    .done()
-    .routes.with_router(router)  # Router with /generate, /stream endpoints
-    .done()
-    .build()
-)
 
-# Start server subprocess (non-blocking)
-proc = server.start_subprocess()
+def main() -> None:
+    # Build server with IPC (the builder makes the queues)
+    lg = Logger("worker-api")
+    server = (
+        ServerBuilder(lg, "worker-api")
+        .with_port(8000)
+        .subprocess.with_ipc()
+        .with_response_timeout(60.0)
+        .with_auto_restart(True)
+        .done()
+        .routes.with_router(router)  # Router with /generate, /stream endpoints
+        .done()
+        .build()
+    )
 
-# Main process handles compute-intensive work
-try:
-    run_worker(request_q, response_q)
-finally:
-    server.stop()
+    # Start server subprocess (non-blocking)
+    server.start_subprocess()
+
+    # Main process handles compute-intensive work
+    try:
+        run_worker(server.request_queue, server.response_queue)
+    finally:
+        server.stop()
+
+
+if __name__ == "__main__":
+    main()
 ```
 
 See `examples/07_fastapi/fastapi_server.py` for a complete working implementation.

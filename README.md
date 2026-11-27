@@ -452,13 +452,14 @@ from appinfra.app.fastapi import ServerBuilder
 server = (
     ServerBuilder(lg, "api")
     .with_port(8000)
-    .subprocess.with_ipc(request_q, response_q)
+    .subprocess.with_ipc()
     .with_auto_restart(enabled=True)
     .done()
     .build()
 )
 
-server.start()  # Non-blocking, runs in subprocess
+server.start_subprocess()  # Non-blocking, runs in subprocess
+request_q, response_q = server.request_queue, server.response_queue
 ```
 
 ## Completeness

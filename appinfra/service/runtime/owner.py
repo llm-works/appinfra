@@ -10,7 +10,6 @@ from __future__ import annotations
 import contextlib
 import copy
 import functools
-import multiprocessing as mp
 import weakref
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -25,6 +24,7 @@ from ...runtime import (
     StopToken,
     Task,
     TaskDone,
+    process_context,
     stopping,
 )
 from ...runtime import Runtime as Tasks
@@ -180,6 +180,10 @@ class Owner:
                     reply = getattr(message, "reply", None)
                     if reply is not None:
                         _reply(reply, e)
+                    del reply
+                # The next message can be long in coming: meanwhile this frame
+                # holds nothing of this one, the runner a stop let go of least
+                del message
 
     # -- requests --------------------------------------------------------------------
 
@@ -412,7 +416,7 @@ class Owner:
         forwarded to the service's logger here. What it set up is undone if
         the spawn fails."""
         service = runner.service
-        ctx = mp.get_context("spawn")
+        ctx = process_context()
         queue = ctx.Queue()
         child = _Child(ctx.Event(), LogQueueListener(queue, service.lg))
         child.listener.start()
@@ -533,15 +537,18 @@ class Owner:
     def _on_backoff(self, runner: Runner, m: TaskDone) -> None:
         """The backoff ended: make the restart attempt, unless a stop ended it.
         A stop_service() handled after the backoff finished, its end still
-        queued, cancelled nothing: its recorded stop ends the restart too."""
+        queued, cancelled nothing: its recorded stop ends the restart too. A
+        service stopped while it waited, by stop_service() or stop(), ends
+        STOPPED, its hooks told, and leaves the runtime: no run is left to end."""
         task = self._backoffs.get(runner.name)
         if task is None or task.id != m.task_id:
             return
         del self._backoffs[runner.name]
         if m.error is not None or self._closing or runner in self._stops:
             self._restarting.discard(runner.name)
-            if runner in self._stops:
-                self._halt(runner, runner.policy.stop_timeout)  # no run to end
+            if runner in self._stops or self._closing:
+                runner._move(State.STOPPED)
+                self._let_go(runner)
             return
         runner._retries += 1
         down = self._deps.down(runner.service)

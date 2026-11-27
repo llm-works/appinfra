@@ -5,9 +5,11 @@
 
 import asyncio
 import contextvars
+import gc
 import threading
 import time
 import traceback
+import weakref
 from collections.abc import Callable, Iterator
 from unittest.mock import MagicMock
 
@@ -134,6 +136,10 @@ class IgnoresItsToken:
 
 def _boom() -> None:
     raise ValueError("boom")
+
+
+class _Held:
+    """A call's argument, its release seen through a weakref."""
 
 
 class _UndecodableError(Exception):
@@ -671,6 +677,32 @@ class TestOutcomes:
                 t.wait(timeout=5.0)
             depths.append(len(traceback.extract_tb(caught.value.__traceback__)))
         assert depths[0] == depths[1] == depths[2]
+
+    @pytest.mark.parametrize("on_loop", [True, False], ids=["loop", "thread"])
+    def test_a_failed_task_leaves_its_arguments_in_no_cycle(self, rt, on_loop):
+        """The failure a task keeps refers to none of the runtime's own frames,
+        which hold the task: with its end taken, the call's arguments are freed
+        at once, not whenever the cyclic GC next runs."""
+
+        async def async_fails(_held: _Held) -> None:
+            raise ValueError("boom")
+
+        def fails(_held: _Held) -> None:
+            raise ValueError("boom")
+
+        held = _Held()
+        freed = weakref.ref(held)
+        done: Chan[TaskDone] = Chan(1)
+        gc.disable()
+        try:
+            rt.spawn(async_fails if on_loop else fails, held, done=done)
+            del held
+            end = done.recv(timeout=5.0)
+            assert isinstance(end.error, ValueError)
+            del end
+            assert _wait_until(lambda: freed() is None), "held by a cycle"
+        finally:
+            gc.enable()
 
     @pytest.mark.parametrize("on_loop", [True, False], ids=["loop", "thread"])
     def test_a_stop_iteration_is_one_runtime_error_however_waited_for(

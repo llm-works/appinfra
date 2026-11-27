@@ -13,7 +13,8 @@ For API stability guarantees and deprecation policy, see
 ### Added
 - `appinfra.runtime`: `Task.kind` tells what a task runs as (`TaskKind`: loop, thread, process).
   A process task's `Task.process` gives its child's `detail()` (pid, exit code, liveness) and
-  `terminate()`/`kill()`; `Runtime.process_context` is the context its children start in.
+  `terminate()`/`kill()`; `Runtime.process_context` and `process_context()` give the context its
+  children start in.
 - `Task.stop(timeout)`: a process task still running *timeout* seconds on is terminated, then
   killed. The service `Runtime` stops an isolated service this way, waiting through it;
   `RestartPolicy.stop_timeout` applies when it stops one on its own. `Runner.task` is the task of
@@ -63,6 +64,10 @@ For API stability guarantees and deprecation policy, see
   each end is opened in the process that uses it, and the other process exiting closes it.
 
 ### Changed
+- **Breaking:** the FastAPI server's subprocess runs as an isolated service of a service `Runtime`
+  (its own, or one given with `.subprocess.with_runtime()`). `.subprocess.with_ipc()` takes no
+  queues and makes them (`server.request_queue`, `server.response_queue`); `start_subprocess()`
+  returns `None`, with `server.process`, `pid` and `is_running` for the current run.
 - **Breaking:** `submit_stream()` is renamed `stream()` on `AsyncChannel`, `AsyncBufferedChannel`
   and `IPCChannel`. The sync `Channel` protocol gains `stream()`, so a class implementing it
   directly must add the method.
@@ -102,6 +107,8 @@ For API stability guarantees and deprecation policy, see
   expressions with it.
 
 ### Removed
+- **Breaking:** the FastAPI server's start method (`ApiConfig.start_method`,
+  `.subprocess.with_start_method()`): its subprocess always starts with `spawn`.
 - **Breaking:** `ThreadRunner`, `ProcessRunner`, `RunnerFactory` and `RunnerWithChannel` from
   `appinfra.service`: `Runtime.spawn()` runs every service, `isolate=True` in a process of its own.
 - **Breaking:** `ServiceFactory` and `ServiceRegistration`: construct the service and pass
@@ -133,6 +140,8 @@ For API stability guarantees and deprecation policy, see
   once, no longer next to a placeholder of the same name.
 - Service errors (`SetupError`, `RunError`, …) can be pickled, so they reach the parent intact
   from a process of their own.
+- An ended `appinfra.runtime` task, a failed `ready()` and a stopped service no longer keep their
+  arguments in a reference cycle: they are freed once dropped, not at the next garbage collection.
 
 ## [0.15.0] - 2026-11-11
 

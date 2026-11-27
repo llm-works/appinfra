@@ -7,7 +7,9 @@ from __future__ import annotations
 
 import asyncio
 import functools
+import logging
 import multiprocessing as mp
+import os
 import random
 import signal
 import threading
@@ -252,6 +254,21 @@ class SetupFails(Service):
         raise AssertionError("never run")
 
 
+def _moves_of(runner: Runner) -> tuple[list[tuple[State, State]], threading.Event]:
+    """The transitions *runner* makes from now on, and an event set once one
+    moves it to FAILED."""
+    moves: list[tuple[State, State]] = []
+    failed = threading.Event()
+
+    def hook(_name: str, old: State, new: State) -> None:
+        moves.append((old, new))
+        if new == State.FAILED:
+            failed.set()
+
+    runner.on_state_change(hook)
+    return moves, failed
+
+
 class HealthFails(Service):
     """Runs until stopping is set; is_healthy() raises. Module level, so the
     spawn start method can pickle it."""
@@ -314,6 +331,52 @@ class CleansUpOnStop(AsyncService):
         scheduled on the loop."""
         assert self._loop is not None and self._gate is not None
         self._loop.call_soon_threadsafe(self._gate.set)
+
+
+class LogsFromItsProcess(Service):
+    """Logs one record in its subprocess, then waits for its stop."""
+
+    def __init__(self, lg: Logger) -> None:
+        self._lg = lg
+
+    @property
+    def name(self) -> str:
+        return "logs-from-its-process"
+
+    def run(self) -> None:
+        self._lg.warning("logged in the child", extra={"pid": os.getpid()})
+        self.stopping.wait()
+
+
+class _Captured(logging.Handler):
+    """Keeps the records it handles; *arrived* is set on the first."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.records: list[logging.LogRecord] = []
+        self.arrived = threading.Event()
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self.records.append(record)
+        self.arrived.set()
+
+
+class TestIsolatedLogging:
+    def test_an_isolated_services_records_reach_its_logger(self, rt):
+        """What an isolated service logs in its process reaches the handlers
+        of the logger it was given, here in the parent."""
+        lg = Logger(name="test-isolated-logging")
+        captured = _Captured()
+        lg.addHandler(captured)
+        runner = rt.spawn(LogsFromItsProcess(lg), isolate=True)
+        try:
+            assert captured.arrived.wait(30.0)
+        finally:
+            rt.stop_service(runner, timeout=30.0)
+
+        record = captured.records[0]
+        assert record.getMessage() == "logged in the child"
+        assert record.process != os.getpid()
 
 
 class TestStopEscalation:
@@ -752,6 +815,46 @@ class TestSupervision:
         svc.release()  # and so does the second
 
         assert _wait_until(lambda: svc.runs == 3 and runner.state == State.RUNNING)
+
+    def test_a_service_stopped_in_its_restart_backoff_ends_stopped(self, rt):
+        """Its run failed and its restart waits out the backoff: stop_service()
+        ends the wait, and the runner moves to STOPPED, its hooks seeing it,
+        instead of leaving the runtime FAILED with a restart pending."""
+        svc = FailsOnRelease(fails=1)
+        runner = rt.spawn(svc, RestartPolicy(backoff=30.0))
+        rt.ready(runner)
+        assert svc.parked.wait(5.0)
+        moves, failed = _moves_of(runner)
+
+        svc.release()
+        assert failed.wait(5.0)  # the timeout is the failure path
+        rt.stop_service(runner, timeout=5.0)
+
+        assert runner.state == State.STOPPED
+        assert moves[-1] == (State.FAILED, State.STOPPED)
+        assert "fails" not in rt.services
+
+    def test_a_runtime_stop_ends_a_restart_backoff_as_a_stop(self):
+        """Runtime.stop() with a service waiting out its restart backoff: the
+        service ends STOPPED, and the stop does not wait for it until its
+        timeout runs out."""
+        lg = MagicMock()
+        rt = Runtime(lg, name="test-runtime")
+        rt.start()
+        svc = FailsOnRelease(fails=1)
+        runner = rt.spawn(svc, RestartPolicy(backoff=30.0))
+        rt.ready(runner)
+        assert svc.parked.wait(5.0)
+        moves, failed = _moves_of(runner)
+        svc.release()
+        assert failed.wait(5.0)  # the timeout is the failure path
+
+        rt.stop(timeout=5.0)
+
+        assert runner.state == State.STOPPED
+        assert moves[-1] == (State.FAILED, State.STOPPED)
+        warned = [c.args[0] for c in lg.warning.call_args_list]
+        assert "service did not stop in time" not in warned
 
     def test_a_service_with_no_restart_left_leaves_the_runtime(self, rt):
         svc = FailsOnRelease(fails=1)

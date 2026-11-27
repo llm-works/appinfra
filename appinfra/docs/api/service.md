@@ -250,9 +250,11 @@ with Runtime(lg) as rt:
 
 `Runtime(lg)` is started by `start()` or by entering the `with` block, once; `stop()` or leaving
 the block stops it. `spawn()` returns the service's `Runner`, its record in the runtime: `state`,
-`retries`, `exception`, `on_state_change()`. `rt.services` maps the names of the services in the
-runtime to their runners. `stop_service(runner, timeout=5.0)` stops one service and waits until it
-has ended and been torn down; it then leaves the runtime.
+`retries`, `exception`, `on_state_change()`, and `task`, the runtime `Task` of its current step
+(its `setup()` or its run; `None` between steps). A restart replaces the task, so read it when
+needed. `rt.services` maps the names of the services in the runtime to their runners.
+`stop_service(runner, timeout=5.0)` stops one service and waits until it has ended and been torn
+down; it then leaves the runtime.
 
 ### Isolated services
 
@@ -260,6 +262,14 @@ has ended and been torn down; it then leaves the runtime.
 `run()` and `teardown()` all run there. The service must be picklable; its logger is not pickled,
 the child makes one that forwards its records to the service's logger in the parent. The child
 reports health to the parent, and its `self.stopping` is stopped when the parent stops the service.
+
+- While it runs, `runner.task.kind` is `TaskKind.PROCESS` and `runner.task.process` gives the
+  child: `detail()` (pid, exit code, liveness), `terminate()`, `kill()` (see
+  [runtime](runtime.md#processes)).
+- A queue, event or value the service shares with its child is made from `rt.process_context`
+  before `spawn()` and handed to the service, e.g. in its constructor.
+- A child that has not ended when a stop's timeout runs out is terminated, then killed: see
+  [Restarts and stop](#restarts-and-stop).
 
 ### Dependencies
 
@@ -297,6 +307,12 @@ class Api(Service):
   start order, each within *timeout*: dependents before what they depend on. A service that does
   not end in time is logged and the rest stop regardless. A service still waiting for its
   dependencies never starts; `ready()` on it raises `RunError`.
+- An isolated service's process still running when its stop's *timeout* runs out gets SIGTERM,
+  then SIGKILL `task.process.grace` seconds later: `stop_service()` and `stop()` give the timeout
+  they were called with and wait through the forcing; a stop the runtime makes on its own (a
+  failed health check, a `ready()` given up on) gives the policy's `stop_timeout`. A second stop
+  of a service already stopping forces it within its own, shorter timeout.
+- A negative timeout is refused with `ValueError`, before anything is stopped.
 
 ## Scheduled Services
 
@@ -337,6 +353,7 @@ policy = RestartPolicy(
     backoff_multiplier=2.0,  # Exponential backoff
     max_backoff=60.0,  # Maximum backoff cap
     restart_on_failure=True,
+    stop_timeout=5.0,  # Seconds an isolated run gets when the runtime stops it on its own
 )
 
 rt.spawn(service, policy=policy)

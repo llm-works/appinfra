@@ -53,15 +53,10 @@ server.start()  # Blocking
 Runs uvicorn in a separate process with queue-based IPC.
 
 ```python
-import multiprocessing as mp
-
-request_q: mp.Queue = mp.Queue()
-response_q: mp.Queue = mp.Queue()
-
 server = (
     ServerBuilder(lg, "worker-api")
     .with_port(25443)
-    .subprocess.with_ipc(request_q, response_q)
+    .subprocess.with_ipc()  # makes server.request_queue, server.response_queue
     .with_auto_restart(True)
     .with_max_restarts(3)
     .done()
@@ -70,7 +65,7 @@ server = (
     .build()
 )
 
-proc = server.start_subprocess()  # Non-blocking
+server.start_subprocess()  # Non-blocking: returns once serving
 ```
 
 ## Features

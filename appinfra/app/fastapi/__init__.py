@@ -24,27 +24,24 @@ Example (Simple Server - Direct Mode):
     server.start()  # Blocking
 
 Example (Subprocess Mode with IPC):
-    import multiprocessing as mp
     from . import ServerBuilder
-
-    request_q, response_q = mp.Queue(), mp.Queue()
 
     server = (ServerBuilder("worker-api")
         .with_port(8000)
         .routes.with_route("/health", health).done()
         .subprocess
-            .with_ipc(request_q, response_q)
+            .with_ipc()
             .with_auto_restart(True)
             .done()
         .build())
 
-    proc = server.start_subprocess()  # Non-blocking
+    server.start_subprocess()  # Non-blocking
 
     # Main process handles requests
     while True:
-        request = request_q.get()
+        request = server.request_queue.get()
         result = process(request)
-        response_q.put(result)
+        server.response_queue.put(result)
 """
 
 from __future__ import annotations
