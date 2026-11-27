@@ -224,7 +224,10 @@ class Runtime:
         except ChanClosedError:  # stopped: what its task left
             failure = self._owner.take_failure(runner)
             if failure is not None:
-                raise failure from None
+                try:
+                    raise failure from None
+                finally:
+                    del failure  # as in _ask_on(): no cycle through this frame
             if runner.state not in UP:
                 raise RunError(runner.name, "the runtime stopped") from None
         except TimeoutError:
@@ -267,7 +270,12 @@ class Runtime:
         self._inbox.send(request)
         outcome = reply.recv(timeout=timeout)
         if isinstance(outcome, BaseException):
-            raise outcome
+            try:
+                raise outcome
+            finally:
+                # Its traceback holds this frame: holding it in turn, the
+                # frame would keep it and the caller's frames in a cycle
+                del outcome
         return outcome
 
     def _refuse_own_task(self) -> None:

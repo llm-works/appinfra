@@ -7,24 +7,41 @@ by where the call runs, are in thread.py, loop.py and process.py."""
 
 from __future__ import annotations
 
+import contextlib
 import contextvars
 import enum
+import functools
+import weakref
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Coroutine, Generator
 from dataclasses import dataclass
-from types import TracebackType
+from types import CodeType, FunctionType, TracebackType
 from typing import Any, Protocol, final
 
 from .errors import StoppedError
 from .stop import StopToken
 
+
+@dataclass(frozen=True, slots=True)
+class _Running:
+    """The task the code runs in, as its context holds it: its id and token,
+    and the task itself only weakly. The context is the task's own
+    (_Task._context): holding the task, it would make a cycle with it, and
+    what the task keeps, its error and the frames on that, would wait for
+    the cyclic GC."""
+
+    id: int
+    token: StopToken
+    task: weakref.ReferenceType[_Task]
+
+
 # The task the code runs in: set in the task's own context (_Task.__init__)
-_current: contextvars.ContextVar[_Task] = contextvars.ContextVar(
+_current: contextvars.ContextVar[_Running] = contextvars.ContextVar(
     "appinfra_runtime_task"
 )
 
 
-def _running(caller: str) -> _Task:
+def _running(caller: str) -> _Running:
     """The task the caller runs in.
 
     Raises:
@@ -55,9 +72,48 @@ def task_id() -> int:
     return _running("task_id").id
 
 
-def _current_task() -> _Task | None:
-    """The task the caller runs in, or None outside a task."""
-    return _current.get(None)
+def _current_token() -> StopToken | None:
+    """The token of the task the caller runs in, or None outside a task."""
+    running = _current.get(None)
+    return None if running is None else running.token
+
+
+def _in_task(t: _Task) -> bool:
+    """True if the caller runs in *t*: on its thread, or in work handed its
+    context."""
+    running = _current.get(None)
+    return running is not None and running.task() is t
+
+
+def _past_own_frames(e: BaseException, task: _Task) -> TracebackType | None:
+    """*e*'s traceback from its first frame that is not one of *task*'s own
+    methods, set on *e* as well; the frames left out are cleared, but for
+    the one still running. Those frames hold the task (``self``) and the
+    call's arguments: kept with the task's error, directly or through the
+    call's frame linking back to them (f_back), they would make a cycle that
+    holds the arguments until the cyclic GC runs."""
+    own = _own_codes(type(task))
+    tb = e.__traceback__
+    while tb is not None and tb.tb_frame.f_code in own:
+        with contextlib.suppress(RuntimeError):  # still running: _run()
+            tb.tb_frame.clear()
+        tb = tb.tb_next
+    e.__traceback__ = tb
+    return tb
+
+
+@functools.cache
+def _own_codes(cls: type[_Task]) -> frozenset[CodeType]:
+    """The code of the methods a task of class *cls* runs its call through.
+    Told apart by code, not by the frame's ``self``: reading the locals of a
+    running frame (f_locals) keeps a copy of them in it, before 3.13."""
+    return frozenset(
+        f.__code__
+        for k in cls.__mro__
+        if issubclass(k, _Task)
+        for f in vars(k).values()
+        if isinstance(f, FunctionType)
+    )
 
 
 @dataclass(frozen=True)
@@ -306,6 +362,7 @@ class _Task(ABC):
         "detached",
         "wakes",
         "done_chan",
+        "__weakref__",  # its context's _Running holds it weakly
     )
 
     # What a stop ends a call with, on this kind of task
@@ -346,7 +403,7 @@ class _Task(ABC):
         self._args = args
         # The context the call runs in, with the task current in it
         self._context = contextvars.copy_context()
-        self._context.run(_current.set, self)
+        self._context.run(_current.set, _Running(task_id, token, weakref.ref(self)))
         # The outcome
         self.result: Any = None
         self.exception: BaseException | None = None
@@ -420,16 +477,18 @@ class _Task(ABC):
         """Record how the call ended on *e*: a stop if it is the stop's own
         signal and the token is stopped, a failure otherwise. StopIteration
         becomes a RuntimeError caused by it, as a coroutine's does (PEP 479):
-        wait() and await raise the same, from either kind of task."""
+        wait() and await raise the same, from either kind of task. The
+        traceback kept leaves out the task's own frames (_past_own_frames())."""
         if isinstance(e, self.stop_signals) and self.token.is_set():
             self.stopped = True
         elif isinstance(e, StopIteration):
+            _past_own_frames(e, self)
             error = RuntimeError(f"task {self.id} raised StopIteration")
             error.__cause__ = e
             self.exception = error
         else:
             self.exception = e
-            self.exception_tb = e.__traceback__
+            self.exception_tb = _past_own_frames(e, self)
 
     def _end(self) -> None:
         """Once the call has ended: stop the token, so work derived from it is

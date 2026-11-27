@@ -140,6 +140,8 @@ For API stability guarantees and deprecation policy, see
   once, no longer next to a placeholder of the same name.
 - Service errors (`SetupError`, `RunError`, …) can be pickled, so they reach the parent intact
   from a process of their own.
+- An ended `appinfra.runtime` task, a failed `ready()` and a stopped service no longer keep their
+  arguments in a reference cycle: they are freed once dropped, not at the next garbage collection.
 
 ## [0.15.0] - 2026-11-11
 

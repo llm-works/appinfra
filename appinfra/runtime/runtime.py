@@ -28,7 +28,7 @@ from .errors import StoppedError
 from .loop import LoopHost, _LoopTask
 from .process import START_METHOD, _ProcessTask
 from .stop import StopToken
-from .task import Task, TaskDone, _current_task, _Task
+from .task import Task, TaskDone, _current_token, _in_task, _Task
 from .thread import _ThreadTask
 
 
@@ -168,8 +168,8 @@ class Runtime:
         if process and _async_callable(fn):
             raise TypeError("an async function runs on the loop, not in a process")
         if token is None:
-            parent = _current_task()
-            token = self._root if parent is None else parent.token
+            parent = _current_token()
+            token = self._root if parent is None else parent
         token = token.child()
         with self._lock:
             if not self._started_runtime or self._closing:
@@ -219,7 +219,7 @@ class Runtime:
         """Task.wait(): block until *t* has ended, then its outcome. Refused in
         *t*'s own context: its own thread, or a worker it handed its context
         to (asyncio.to_thread()), which *t* waits for in turn."""
-        if _current_task() is t:
+        if _in_task(t):
             raise RuntimeError(f"task {t.id} cannot wait for itself")
         with self._lock:
             if t.detached:
@@ -238,7 +238,7 @@ class Runtime:
     async def _await(self, t: _Task) -> Any:
         """``await task``: as _wait(), on the caller's loop, which a wake from
         _on_end() resumes. Cancelled, it leaves no wake behind."""
-        if _current_task() is t:
+        if _in_task(t):
             raise RuntimeError(f"task {t.id} cannot wait for itself")
         loop = asyncio.get_running_loop()
         ended: asyncio.Future[None] = loop.create_future()
@@ -401,10 +401,9 @@ class Runtime:
         waited for until then; a loop task only checked, as the loop's stop had
         its time already. A task stopping the runtime does not wait for
         itself."""
-        caller = _current_task()
         late = []
         for t in tasks:
-            if t is caller:
+            if _in_task(t):
                 continue
             if isinstance(t, _LoopTask):
                 ended = not t.is_running()

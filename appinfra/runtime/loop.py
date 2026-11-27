@@ -14,7 +14,7 @@ from typing import Any
 
 from .errors import StoppedError
 from .stop import StopToken
-from .task import TaskKind, _label, _Task
+from .task import TaskKind, _label, _past_own_frames, _Task
 
 # Prefixed, as the stdlib names the threads it creates: a thread dump shows whose it is
 THREAD_NAME = "appinfra-loop"
@@ -245,7 +245,7 @@ class _LoopTask(_Task):
             try:
                 aio.result()
             except asyncio.CancelledError as e:
-                self.exception, self.exception_tb = e, e.__traceback__
+                self.exception, self.exception_tb = e, _past_own_frames(e, self)
             return
         error = aio.exception()
         if error is None:

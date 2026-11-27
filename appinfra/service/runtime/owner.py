@@ -180,6 +180,10 @@ class Owner:
                     reply = getattr(message, "reply", None)
                     if reply is not None:
                         _reply(reply, e)
+                    del reply
+                # The next message can be long in coming: meanwhile this frame
+                # holds nothing of this one, the runner a stop let go of least
+                del message
 
     # -- requests --------------------------------------------------------------------
 

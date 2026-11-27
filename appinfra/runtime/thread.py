@@ -51,6 +51,8 @@ class _ThreadTask(_Task):
     def _run(self) -> None:
         """Thread target, in the task's context: call the function, unless
         its token was stopped before the thread got here, as on the loop."""
+        fn: Callable[..., Any] | None = None
+        args: tuple[Any, ...] = ()
         try:
             if self.token.is_set():
                 self.stopped = True
@@ -65,6 +67,9 @@ class _ThreadTask(_Task):
             # Last, so the outcome is settled before is_running() reports the
             # end
             self._finished = True
+            # A failure's traceback reaches this frame, its callee's linking
+            # back to it: it keeps nothing of the task or the call
+            del self, fn, args
 
     def _call(self, fn: Callable[..., Any], args: tuple[Any, ...]) -> Any:
         """The call itself: *fn*(*args*) on this thread."""
