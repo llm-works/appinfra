@@ -376,11 +376,36 @@ def _copied(value: Any) -> Any:
         TypeError: If *value* holds a local channel; and as pickle.dumps()
             for a value it cannot pickle.
     """
+    return _snapshot(value).restore()
+
+
+def _snapshot(value: Any) -> _Snapshot:
+    """*value* pickled, the process channels in it kept aside, from which a
+    copy is restored as often as needed.
+
+    Raises:
+        TypeError: If *value* holds a local channel; and as pickle.dumps()
+            for a value it cannot pickle.
+    """
     refs: list[Chan[Any]] = []
     buffer = io.BytesIO()
     _Copier(buffer, refs).dump(value)
-    buffer.seek(0)
-    return _Restorer(buffer, refs).load()
+    return _Snapshot(buffer.getvalue(), refs)
+
+
+class _Snapshot:
+    """A value pickled for copies, and the process channels it holds."""
+
+    __slots__ = ("_data", "_refs")
+
+    def __init__(self, data: bytes, refs: list[Chan[Any]]) -> None:
+        """The pickled *data*, its channels in *refs*."""
+        self._data = data
+        self._refs = refs
+
+    def restore(self) -> Any:
+        """A copy of the value, a new one each call, its channels themselves."""
+        return _Restorer(io.BytesIO(self._data), self._refs).load()
 
 
 class _Copier(pickle.Pickler):
@@ -388,7 +413,7 @@ class _Copier(pickle.Pickler):
     in *refs*, which the unpickling side resolves back to the channel."""
 
     def __init__(self, file: io.BytesIO, refs: list[Chan[Any]]) -> None:
-        """Pickle into *file*, the channels met appended to *refs*."""
+        """Pickle into *file*, the channels found appended to *refs*."""
         super().__init__(file, pickle.HIGHEST_PROTOCOL)
         self._refs = refs
 

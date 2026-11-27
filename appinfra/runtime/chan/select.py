@@ -22,8 +22,9 @@ from .chan import (
     _check_off_loop,
     _check_timeout,
     _check_valid,
-    _copied,
     _on_stop,
+    _Snapshot,
+    _snapshot,
 )
 from .errors import ClosedError
 from .pipe import Receiver, Sender
@@ -47,26 +48,35 @@ class Recv:
 @dataclass(frozen=True)
 class Send:
     """A select case: send *value* on *chan*, a Chan or a pipe's Sender. On
-    a Sender, the value is pickled here, and on a process Chan copied here,
-    as its send() does: one that cannot be raises here."""
+    a Sender, the value is pickled here, and on a process Chan snapshotted
+    here, each select of the case sending a copy of its own, as send()
+    does: a value that cannot be pickled raises here."""
 
     chan: Chan[Any] | Sender[Any]
     value: Any
     # The channel the select waits on, and what it sends there: a Sender's
-    # own channel to its writer, and the pickled value, out of reach
+    # own channel to its writer, and the pickled value, out of reach; a
+    # process Chan's snapshot of the value
     _target: Chan[Any] = field(init=False, repr=False, compare=False)
     _payload: Any = field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
-        """Resolve a Sender's case to its channel and the pickled value."""
+        """Resolve the case to its channel and what it sends there."""
+        payload: Any  # bytes for a Sender, a _Snapshot, or the value itself
         if isinstance(self.chan, Sender):
             target, payload = self.chan._chan, pickle.dumps(self.value)
         elif self.chan._process:
-            target, payload = self.chan, _copied(self.value)
+            target, payload = self.chan, _snapshot(self.value)
         else:
             target, payload = self.chan, self.value
         object.__setattr__(self, "_target", target)
         object.__setattr__(self, "_payload", payload)
+
+    def _value(self) -> Any:
+        """What the case sends in one select: on a process Chan a new copy
+        each call, so a receiver changing one changes no later send."""
+        payload = self._payload
+        return payload.restore() if isinstance(payload, _Snapshot) else payload
 
 
 def select(*cases: Recv | Send, timeout: float | None = None) -> tuple[int, Any]:
@@ -108,7 +118,7 @@ class _Entry(Waiter):
 
     def __init__(self, select: _Select, index: int, case: Recv | Send) -> None:
         """The entry of case *index* of *select*."""
-        super().__init__(case._payload if isinstance(case, Send) else None)
+        super().__init__(select.payloads[index])
         self.select = select
         self.index = index
         self.chan = _chan(case)
@@ -127,7 +137,7 @@ class _Entry(Waiter):
 class _Select:
     """One select: who completed it, its entries, and the waiter they share."""
 
-    __slots__ = ("_lock", "waiter", "cases", "entries", "fired")
+    __slots__ = ("_lock", "waiter", "cases", "payloads", "entries", "fired")
 
     def __init__(self, waiter: Waiter, cases: Sequence[Recv | Send]) -> None:
         """A select of *cases*, waiting with *waiter*."""
@@ -136,6 +146,10 @@ class _Select:
         self._lock = threading.Lock()  # taken under a channel's lock, or alone
         self.waiter = waiter
         self.cases = cases
+        # What each send case sends in this select, None for a receive.
+        # Made before any channel is locked: restoring a copy unpickles,
+        # which runs the value's own code
+        self.payloads = [c._value() if isinstance(c, Send) else None for c in cases]
         self.entries: list[_Entry] = []
         # The entry whose channel completed it, or how it ended otherwise
         self.fired: _Entry | Outcome | None = None
@@ -160,7 +174,7 @@ class _Select:
             order = list(range(len(self.cases)))
             random.shuffle(order)
             for index in order:
-                ready, value = _try(self.cases[index], index)
+                ready, value = _try(self.cases[index], index, self.payloads[index])
                 if ready:
                     return index, value
             _check_timeout(timeout)
@@ -252,14 +266,14 @@ class _Select:
         return entry.index, entry.value if received else None
 
 
-def _try(case: Recv | Send, index: int) -> tuple[bool, Any]:
-    """Complete *case*, case *index* of a select, if it can be at once; under
-    its channel's lock."""
+def _try(case: Recv | Send, index: int, payload: Any) -> tuple[bool, Any]:
+    """Complete *case*, case *index* of a select, if it can be at once,
+    sending *payload* if it is a send; under its channel's lock."""
     try:
         if isinstance(case, Recv):
             ready, value, _ = case._target._take()
             return ready, value
-        return case._target._put(case._payload), None
+        return case._target._put(payload), None
     except ClosedError as e:
         e.index = index
         raise

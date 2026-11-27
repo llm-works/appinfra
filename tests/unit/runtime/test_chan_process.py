@@ -33,6 +33,19 @@ class TestCopy:
         assert got == sent
         assert got is not sent
 
+    def test_a_send_case_reused_stores_a_copy_each_time(self) -> None:
+        """One copy per select, not one per case: a receiver changing what
+        it got does not change what the case sends next."""
+        ch: Chan[Any] = Chan(1, process=True)
+        case = Send(ch, {"items": []})
+        select(case, timeout=0)
+        first = ch.recv(timeout=0)
+        first["items"].append(1)
+        select(case, timeout=0)
+        second = ch.recv(timeout=0)
+        assert second is not first
+        assert second == {"items": []}
+
     def test_a_local_chan_stores_the_value_itself(self) -> None:
         sent = {"a": [1, 2]}
         ch: Chan[Any] = Chan(1)
