@@ -224,7 +224,8 @@ def _cell(value: float | None, unit: str) -> str:
         return "—"
     if unit == "B":
         size = round(value)  # A mean per item: a fraction of a byte says nothing
-        return f"-{size_str(-size)}" if size < 0 else size_str(size)
+        shown = size_str(abs(size), precise=True)
+        return f"-{shown}" if size < 0 else shown
     return f"{value:,.0f} {unit}"
 
 

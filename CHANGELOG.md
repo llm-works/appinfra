@@ -137,6 +137,8 @@ For API stability guarantees and deprecation policy, see
   `PYDANTIC_AVAILABLE`. `appinfra.config.schemas` needs pydantic to import.
 
 ### Fixed
+- `size_str()` shows a size below a kilobyte as whole bytes, a fraction rounded: `precise=True`
+  printed `815.000B`, and a fraction showed as `500.7B`.
 - `make pg.server.up.repl` starts from any project, not only from the appinfra repo: the
   primary mounted its `pg_hba.conf` from a path under the project directory.
 - `pg.sh reboot` and the `pg.*` waits find the server however many other containers the runtime

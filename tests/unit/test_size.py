@@ -96,6 +96,20 @@ class TestSizeStrOptions:
         """Test precise mode with SI units."""
         assert size_str(1500, precise=True, binary=False) == "1.500KB"
 
+    @pytest.mark.parametrize("precise", [False, True], ids=["compact", "precise"])
+    @pytest.mark.parametrize("binary", [True, False], ids=["binary", "si"])
+    def test_bytes_are_whole(self, precise: bool, binary: bool) -> None:
+        """There is no part of a byte: below the first unit, a size is a whole
+        number of bytes, a fraction rounded."""
+        assert size_str(815, precise=precise, binary=binary) == "815B"
+        assert size_str(500.7, precise=precise, binary=binary) == "501B"
+        assert size_str(0.4, precise=precise, binary=binary) == "0B"
+
+    def test_a_size_rounding_up_to_a_unit_takes_it(self) -> None:
+        """Rounded to whole bytes first, 1023.6 bytes is 1KB, not 1024B."""
+        assert size_str(1023.6) == "1KB"
+        assert size_str(999.6, binary=False) == "1KB"
+
 
 # =============================================================================
 # Test size_str Validation

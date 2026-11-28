@@ -404,8 +404,9 @@ size_str(1536)  # "1.5KB"
 size_str(1048576)  # "1MB"
 size_str(500)  # "500B"
 
-# Precise mode (3 decimal places)
+# Precise mode (3 decimal places of a unit above bytes)
 size_str(1536, precise=True)  # "1.500KB"
+size_str(815, precise=True)  # "815B": no part of a byte, a fraction rounded
 
 # SI units (1000-based instead of 1024)
 size_str(1500, binary=False)  # "1.5KB"
