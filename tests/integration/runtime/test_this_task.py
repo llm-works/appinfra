@@ -88,6 +88,15 @@ def echoes(*args: Any) -> tuple[Any, ...]:
     return args
 
 
+def spawns_a_logging_child(message: str) -> str:
+    """In a child: a runtime of its own on this task's logger, and a process
+    task on it that logs *message* under a derived name; returns that name."""
+    with Runtime(this_task().lg) as rt:
+        task = rt.spawn(logs, message, derive_lg="grand", process=True)
+        name: str = task.wait(timeout=DUE)
+        return name
+
+
 class TestThisTask:
     def test_a_thread_task_knows_itself(self, rt: Runtime, lg: Logger) -> None:
         task = rt.spawn(who_am_i, name="thread")
@@ -166,6 +175,18 @@ class TestDeriveLg:
         assert out.recv(timeout=DUE) == "both"
         assert captured(lg).arrived.wait(DUE)
         assert captured(lg).records[0].name == f"{lg.name.rstrip('/')}/chan"
+
+    def test_a_grandchilds_records_reach_the_first_parents_handlers(
+        self, rt: Runtime, lg: Logger
+    ) -> None:
+        """A process task's runtime, built on its task's logger, carries that
+        logger on: the grandchild's records cross both processes."""
+        task = rt.spawn(spawns_a_logging_child, "two hops", process=True)
+        name = task.wait(timeout=DUE)
+        assert name == f"{lg.name.rstrip('/')}/grand"
+        assert captured(lg).arrived.wait(DUE)
+        record = captured(lg).records[0]
+        assert (record.name, record.getMessage()) == (name, "two hops")
 
     def test_without_it_the_arguments_are_unchanged(self, rt: Runtime) -> None:
         assert rt.spawn(echoes, 1, "two").wait(timeout=DUE) == (1, "two")
