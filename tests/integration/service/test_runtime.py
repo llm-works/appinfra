@@ -302,11 +302,12 @@ class IgnoresItsStop(Service):
 
 
 class CleansUpOnStop(AsyncService):
-    """Cancelled, awaits a gate in its cleanup: notes when the cleanup starts
-    and when it has run to its end."""
+    """Cancelled, awaits a gate in its cleanup: notes when run() has started,
+    when the cleanup starts and when it has run to its end."""
 
     def __init__(self) -> None:
         self._lg = MagicMock()
+        self.entered = threading.Event()
         self.cleaning = threading.Event()
         self.cleaned = threading.Event()
         self._loop: asyncio.AbstractEventLoop | None = None
@@ -319,6 +320,7 @@ class CleansUpOnStop(AsyncService):
     async def run(self) -> None:
         self._loop = asyncio.get_running_loop()
         self._gate = asyncio.Event()
+        self.entered.set()
         try:
             await asyncio.Event().wait()
         finally:
@@ -386,6 +388,9 @@ class TestStopEscalation:
         svc = CleansUpOnStop()
         runner = rt.spawn(svc)
         rt.ready(runner, timeout=30.0)
+        # Healthy is not started: a stop before run()'s first step cancels it
+        # before its body, and the cleanup this test waits for never runs
+        assert svc.entered.wait(30.0)
         first = threading.Thread(target=rt.stop_service, args=(runner, 30.0))
         first.start()
         assert svc.cleaning.wait(30.0)
