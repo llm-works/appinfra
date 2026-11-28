@@ -416,8 +416,8 @@ class _Task(ABC):
         # Wakes the awaits waiting for the end; created by the first, as
         # most tasks are not awaited
         self.wakes: list[Callable[[], None]] | None = None
-        # spawn()'s done, a Chan or a pipe's Sender: typed in Runtime.spawn(),
-        # as chan imports this module
+        # spawn()'s done Chan: typed in Runtime.spawn(), as chan imports this
+        # module
         self.done_chan: Any = None
 
     def _take_call(self) -> tuple[Callable[..., Any], tuple[Any, ...]]:

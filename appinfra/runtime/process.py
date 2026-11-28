@@ -47,7 +47,7 @@ class _ProcessTask(_ThreadTask):
     child outliving its parent stops. The outcome comes back over a second
     connection: the result, the exception with the child's traceback as a
     note (PEP 678), which, unlike a cause, survives any later pickling, as a
-    done pipe's, or the stop. A child that exits without one fails the task with
+    done process channel's, or the stop. A child that exits without one fails the task with
     ProcessExitError, unless the task was stopped.
 
     A process Chan in the arguments pickles, as the child starts, as a

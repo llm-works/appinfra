@@ -14,7 +14,7 @@ from typing import Any
 import pytest
 
 from appinfra.log import LogConfig, LoggerFactory
-from appinfra.runtime import Chan, ProcessExitError, Runtime
+from appinfra.runtime import Chan, ProcessExitError, Runtime, TaskDone
 from appinfra.runtime.chan import ClosedError
 
 # Seconds a call expected to end now may take: the failure path, not a wait
@@ -81,6 +81,22 @@ def home_and_wait(out: Chan[Chan[int]], parked: Chan[bool]) -> None:
     mine.recv()
 
 
+async def doubled(x: int) -> int:
+    return 2 * x
+
+
+def report_ends(done: Chan[TaskDone], quit_: Chan[bool]) -> None:
+    """Run a loop task and a thread task on a runtime of this child's own,
+    each reporting its end on *done*; stay until told to go, so the runtime
+    does not stop them first."""
+    with Runtime(
+        LoggerFactory.create_root(LogConfig.from_params(level="warning"))
+    ) as rt:
+        rt.spawn(doubled, 21, name="loop", done=done)
+        rt.spawn(abs, -5, name="thread", done=done)
+        quit_.recv(timeout=DUE)
+
+
 def _parked(chan: Chan[Any], receivers: int) -> bool:
     """Whether *receivers* receives wait at *chan* before DUE: a child's call
     parks here after its frame crosses, which signals nothing. The deadline
@@ -121,6 +137,20 @@ class TestCrossing:
         message, reply = requests.recv(timeout=DUE)
         reply.send(message + "-pong", timeout=DUE)
         assert t.wait(timeout=DUE) == "ping-pong"
+
+    def test_a_childs_runtime_reports_its_task_ends_on_a_chan_of_the_parent(
+        self, rt: Runtime
+    ) -> None:
+        """done= takes the child's proxy of a process Chan: a loop task's end
+        is sent from the loop, where a proxy cannot send without waiting."""
+        done: Chan[TaskDone] = Chan(2, process=True)
+        quit_: Chan[bool] = Chan(1, process=True)
+        t = rt.spawn(report_ends, done, quit_, process=True)
+        ends = {end.name: end for end in (done.recv(timeout=DUE) for _ in range(2))}
+        quit_.send(True, timeout=DUE)
+        t.wait(timeout=DUE)
+        assert (ends["loop"].result, ends["loop"].error) == (42, None)
+        assert (ends["thread"].result, ends["thread"].error) == (5, None)
 
     def test_a_shared_event_crosses_next_to_a_chan(self, rt: Runtime) -> None:
         """Made from the children's context, it pickles only as the child

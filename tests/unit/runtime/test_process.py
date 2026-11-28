@@ -139,7 +139,8 @@ def test_a_reaped_child_is_released_under_the_lock() -> None:
 
 
 def test_a_process_exit_error_survives_a_pickle_round_trip() -> None:
-    """A done pipe pickles the end again: the error comes back whole."""
+    """A done process channel pickles the end again: the error comes back
+    whole."""
     error = pickle.loads(pickle.dumps(ProcessExitError(7, -9)))
     assert (error.task_id, error.exitcode) == (7, -9)
     assert str(error) == "task 7's process exited with code -9"

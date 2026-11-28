@@ -9,3 +9,12 @@ class ClosedError(Exception):
     From select(), *index* is the position of the case whose channel it is."""
 
     index: int | None = None
+
+
+class ResponseError(Exception):
+    """A Correlator's reply that its *failed* function calls a failure; the
+    reply is *response*."""
+
+    def __init__(self, response: object) -> None:
+        super().__init__(f"failed response: {response!r}")
+        self.response = response

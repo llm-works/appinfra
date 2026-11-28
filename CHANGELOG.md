@@ -45,7 +45,7 @@ For API stability guarantees and deprecation policy, see
   `contextvars`.
 - `Runtime.spawn(..., name=, token=, done=)`: the task's name, on its thread and log records; its
   token derives from the given one; its end (`TaskDone`: its name, result, or error as `wait()`
-  would raise it) is sent on a channel or pipe.
+  would raise it) is sent on a channel, a process Chan too.
 - `Runtime.spawn(fn, *args, process=True)`: the call runs in a child process, with the same `Task`;
   the child's token stops with the task's. A child that exits without an outcome fails the task
   with `ProcessExitError`.
@@ -58,8 +58,12 @@ For API stability guarantees and deprecation policy, see
   with `StoppedError` when the task's token stops.
 - `appinfra.runtime.select()` / `aselect()`: wait on several channel cases (`ChanRecv`,
   `ChanSend`) and complete exactly one, chosen at random among those ready, like Go's `select`.
-- `appinfra.runtime.pipe()`: a channel between two processes, `send, recv = pipe(capacity)`;
-  each end is opened in the process that uses it, and the other process exiting closes it.
+- `Chan(n, process=True)`: a channel process tasks can use. Handed to one, in its arguments or
+  inside a value sent on a process Chan, it arrives in the child as the same channel; each send
+  stores a pickled copy, and `select` works on it in the process that made it.
+- `appinfra.runtime.Correlator`: request and reply over a message stream the caller owns, each
+  reply routed by a key it shares with its request; `submit()`, `stream()`, and `recv()` for the
+  rest. Takes the place of the removed `BufferedChannel`; a failed reply raises `ChanResponseError`.
 
 ### Changed
 - **Breaking:** the FastAPI server's subprocess runs as an isolated service of a service `Runtime`
@@ -114,7 +118,7 @@ For API stability guarantees and deprecation policy, see
 - **Breaking:** `appinfra.service`'s channels: `Channel`, `AsyncChannel`, `BufferedChannel`,
   `AsyncBufferedChannel`, `Message`, the transports, channel pairs and their factories,
   `ChannelConfig` and the `Channel*Error`s. Services talk over `appinfra.runtime` Chans, each
-  request with the Chan its reply comes back on.
+  request with the Chan its reply comes back on; over a transport of the caller's, `Correlator`.
 - **Breaking:** `appinfra.service.Manager`: `Runtime` replaces it. `rt.spawn(service)` takes the
   place of `add_service()`/`add()`: a service whose dependency is not running yet waits for it
   instead of being refused. `rt.services[name].state` replaces `is_running(name)`; a stopped

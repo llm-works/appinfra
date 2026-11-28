@@ -96,10 +96,10 @@ Version and commit tracking:
 - `standalone_tracker.py` - Using VersionTracker independently
 
 ### 13. Runtime → [13_runtime/](13_runtime/)
-Concurrency patterns on tasks, channels and pipes:
+Concurrency patterns on tasks and channels, within a process and across processes:
 - `tasks.py` - Spawn and join, error group, cancellation tree, deadline, heartbeat
 - `channels.py` - Pipeline, fan-out/fan-in, worker pool, semaphore, timeout, rate limiting
-- `pipe.py` - A channel from one process to another
+- `processes.py` - Process Chans between a process and its process tasks
 
 ## Running Examples
 
