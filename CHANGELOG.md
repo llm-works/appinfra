@@ -61,6 +61,9 @@ For API stability guarantees and deprecation policy, see
 - `Chan(n, process=True)`: a channel process tasks can use. Handed to one, in its arguments or
   inside a value sent on a process Chan, it arrives in the child as the same channel; each send
   stores a pickled copy, and `select` works on it in the process that made it.
+- `appinfra.runtime.Correlator`: request and reply over a message stream the caller owns, each
+  reply routed by a key it shares with its request; `submit()`, `stream()`, and `recv()` for the
+  rest. Takes the place of the removed `BufferedChannel`; a failed reply raises `ChanResponseError`.
 
 ### Changed
 - **Breaking:** the FastAPI server's subprocess runs as an isolated service of a service `Runtime`
@@ -115,7 +118,7 @@ For API stability guarantees and deprecation policy, see
 - **Breaking:** `appinfra.service`'s channels: `Channel`, `AsyncChannel`, `BufferedChannel`,
   `AsyncBufferedChannel`, `Message`, the transports, channel pairs and their factories,
   `ChannelConfig` and the `Channel*Error`s. Services talk over `appinfra.runtime` Chans, each
-  request with the Chan its reply comes back on.
+  request with the Chan its reply comes back on; over a transport of the caller's, `Correlator`.
 - **Breaking:** `appinfra.service.Manager`: `Runtime` replaces it. `rt.spawn(service)` takes the
   place of `add_service()`/`add()`: a service whose dependency is not running yet waits for it
   instead of being refused. `rt.services[name].state` replaces `is_running(name)`; a stopped

@@ -340,6 +340,43 @@ result = reply.recv(timeout=5.0)
 - `select` works on a process Chan in its home; on a proxy, in another process, it raises
   `TypeError`: a select must complete exactly one case, and a proxy's are decided in its home
 
+## Correlator
+
+A reply Chan in the request is the reply's return address, and it works wherever both ends can
+hold Chans. Over a transport that carries something else, a socket to a peer written in any
+language, the reply is found by a key it shares with its request instead: a correlation
+identifier. `Correlator` does that matching over a message stream the caller owns.
+
+```python
+from appinfra.runtime import Correlator
+
+c: Correlator[Envelope] = Correlator(
+    transport.send,  # send(message, timeout)
+    key=lambda m: m.id,
+    failed=lambda m: m.error is not None,
+    final=lambda m: m.is_final,
+)
+# the thread that reads the transport hands each arrival over:
+#     c.deliver(message)
+reply = c.submit(Envelope(id=new_id(), body=...), timeout=5.0)
+for chunk in c.stream(Envelope(id=new_id(), body=...), timeout=5.0):
+    ...
+request = c.recv(timeout=1.0)  # a message no call waits on: the peer's own request
+c.send(answer_to(request))
+```
+
+- a message whose key a `submit()` or `stream()` waits on goes to that call; any other, and a
+  reply arriving after its call timed out, goes to the inbox `recv()` reads
+- the call's route exists before the request is sent, so a reply arriving during the send finds
+  it; two calls cannot wait on one key (`ValueError`)
+- `deliver()` never waits, so the reading thread never stalls; the inbox has no bound
+- `submit()`'s timeout bounds the send and the wait together, `stream()`'s each chunk; a reply
+  for which `failed` is true raises `ChanResponseError`, its `response` the reply
+- `stream()` sends when its first chunk is asked for; leaving the loop early ends the call
+- `close()` fails the waiting calls and any after with `ChanClosedError`, drops later arrivals,
+  and lets `recv()` drain the inbox first; the transport stays the caller's
+- the waits are Chan waits: they end with `StoppedError` when the task's token stops
+
 ## API Reference
 
 | Name | Kind |
@@ -355,6 +392,7 @@ result = reply.recv(timeout=5.0)
 | `ProcessExitError` | a process task's child exited without an outcome; `exitcode` |
 | `Chan`, `ChanClosedError` | a channel, local or `process=True`, and the error a closed one raises |
 | `select`, `aselect`, `ChanRecv`, `ChanSend` | select and its cases |
+| `Correlator`, `ChanResponseError` | request and reply by key over a caller's message stream, and a failed reply's error |
 
 ## See Also
 

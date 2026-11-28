@@ -5,13 +5,16 @@
 between processes."""
 
 from .chan import Chan
-from .errors import ClosedError
+from .correlator import Correlator
+from .errors import ClosedError, ResponseError
 from .pipe import PipeRecvEnd, PipeSendEnd, Receiver, Sender, pipe
 from .select import Recv, Send, aselect, select
 
 __all__ = [
     "Chan",
     "ClosedError",
+    "Correlator",
+    "ResponseError",
     "PipeRecvEnd",
     "PipeSendEnd",
     "Receiver",

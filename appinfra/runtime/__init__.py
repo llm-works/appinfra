@@ -9,9 +9,10 @@ Built on, not extended: what is exported here is the whole API. Runtime and
 Task are final, and the kinds of task are the runtime's own; layers above
 compose spawn(), Chan and StopToken."""
 
-from .chan import Chan, aselect, select
+from .chan import Chan, Correlator, aselect, select
 from .chan import ClosedError as ChanClosedError
 from .chan import Recv as ChanRecv
+from .chan import ResponseError as ChanResponseError
 from .chan import Send as ChanSend
 from .errors import ProcessExitError, StoppedError
 from .runtime import Runtime, process_context
@@ -30,7 +31,9 @@ __all__ = [
     "Chan",
     "ChanClosedError",
     "ChanRecv",
+    "ChanResponseError",
     "ChanSend",
+    "Correlator",
     "ProcessDetail",
     "Runtime",
     "StopToken",
