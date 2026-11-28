@@ -72,11 +72,7 @@ class Correlator(Generic[M]):
         key, route = self._enter(request)
         try:
             self._send(request, timeout)
-            return self._checked(route.recv(_left(deadline)))
-        except TimeoutError:
-            if len(route) == 0:
-                raise
-            return self._checked(route.recv(timeout=0))  # came as the wait ended
+            return self._wait(key, route, _left(deadline))
         finally:
             self._leave(key)
 
@@ -91,7 +87,7 @@ class Correlator(Generic[M]):
         try:
             self._send(request, timeout)
             while True:
-                chunk = self._checked(route.recv(timeout))
+                chunk = self._wait(key, route, timeout)
                 yield chunk
                 if self._final(chunk):
                     return
@@ -133,9 +129,20 @@ class Correlator(Generic[M]):
             self._routes[key] = route
             return key, route
 
+    def _wait(self, key: Hashable, route: Chan[M], timeout: float | None) -> M:
+        """The next message on *route*. On a timeout the route leaves first,
+        so no delivery lands on it after the look at what is there."""
+        try:
+            return self._checked(route.recv(timeout))
+        except TimeoutError:
+            self._leave(key)
+            if len(route) == 0:
+                raise
+            return self._checked(route.recv(timeout=0))  # came as the wait ended
+
     def _leave(self, key: Hashable) -> None:
         with self._lock:
-            del self._routes[key]
+            self._routes.pop(key, None)
 
     def _checked(self, reply: M) -> M:
         if self._failed(reply):

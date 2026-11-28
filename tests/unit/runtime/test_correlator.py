@@ -13,7 +13,8 @@ from typing import Any
 
 import pytest
 
-from appinfra.runtime import ChanClosedError, ChanResponseError, Correlator
+import appinfra.runtime.chan.correlator as correlator_module
+from appinfra.runtime import Chan, ChanClosedError, ChanResponseError, Correlator
 
 
 @dataclass(frozen=True)
@@ -165,6 +166,39 @@ class TestClose:
         assert c.recv(timeout=0) == Msg("x")
         with pytest.raises(ChanClosedError):
             c.recv(timeout=0)
+
+
+class _ArrivesAsTheWaitEnds(Chan[Any]):
+    """A route whose wait times out just as *late* lands on it."""
+
+    late: list[Any] = []
+
+    def recv(self, timeout: float | None = None) -> Any:
+        if timeout != 0 and self.late:
+            self.send(self.late.pop(), timeout=0)
+            raise TimeoutError("channel not ready")
+        return super().recv(timeout)
+
+
+@pytest.fixture
+def late(monkeypatch: pytest.MonkeyPatch) -> list[Any]:
+    monkeypatch.setattr(correlator_module, "Chan", _ArrivesAsTheWaitEnds)
+    monkeypatch.setattr(_ArrivesAsTheWaitEnds, "late", [])
+    return _ArrivesAsTheWaitEnds.late
+
+
+class TestArrivingAsTheWaitEnds:
+    """A message on the route as its wait times out is the call's, not lost."""
+
+    def test_a_reply_is_returned(self, peer: Peer, late: list[Any]) -> None:
+        c = _correlator(peer)
+        late.append(Msg("a", "just"))
+        assert c.submit(Msg("a"), timeout=1.0) == Msg("a", "just")
+
+    def test_a_chunk_is_yielded(self, peer: Peer, late: list[Any]) -> None:
+        c = _correlator(peer)
+        late.append(Msg("s", "just"))
+        assert list(c.stream(Msg("s"), timeout=1.0)) == [Msg("s", "just")]
 
 
 def test_send_goes_straight_through(peer: Peer) -> None:
