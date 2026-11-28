@@ -91,7 +91,7 @@ _NOTES = [
     ("base", "a plain asyncio task, or a plain thread, parked the same way"),
     ("", "a thread's stack, mapped by the OS, is not counted"),
     ("start", "spawn() of a task or a service, until each runs"),
-    ("stop", "cancel() and wait() of a task, stop_service() of a service"),
+    ("stop", "cancel() of each task, then wait(); stop_service() of a service"),
     ("Runtime spawn", "spawn() into a runtime of its own, until each runs"),
     ("Runtime stop", "one stop() of that runtime"),
     ("request/reply", "round trips over Chans between two tasks, or two services"),

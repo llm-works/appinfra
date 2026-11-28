@@ -7,7 +7,6 @@ and end at."""
 
 from __future__ import annotations
 
-import contextlib
 import gc
 import threading
 import time
@@ -92,11 +91,21 @@ class ThreadArrivals(Arrivals):
 
 
 def cancel_all(spawned: list[Task]) -> None:
-    """Cancel *spawned* and wait until each has ended."""
+    """Cancel every task of *spawned*, then wait until each has ended. A wait
+    that raises does not keep the others from running: the first error is
+    raised once all have."""
     for task in spawned:
         task.cancel()
-        with contextlib.suppress(StoppedError):  # Its stop ended it: no result
+    first: BaseException | None = None
+    for task in spawned:
+        try:
             task.wait(timeout=60.0)
+        except StoppedError:  # Its stop ended it: no result
+            pass
+        except BaseException as e:
+            first = first or e
+    if first is not None:
+        raise first
 
 
 def spawn_parked(
@@ -126,8 +135,8 @@ def spawn_and_cancel_rates(
     tasks: Runtime, count: int, spawn_parked: SpawnParked
 ) -> tuple[float, float]:
     """Tasks per second spawned and running, over *count* that *spawn_parked*
-    parks on *tasks*, and tasks per second that cancel() and wait() then end,
-    one task after the other.
+    parks on *tasks*, and tasks per second that cancel_all() ends: a cancel()
+    of each, then a wait() of each.
 
     Raises:
         ValueError: If *count* is less than 1.

@@ -107,7 +107,7 @@ class TestTaskCost:
         assert cost.runtime <= CEILING, f"{cost.runtime:,.0f} B per task"
 
     def test_spawn_and_cancel_rate(self, rt):
-        """spawn() until each runs, then cancel() and wait() one at a time."""
+        """spawn() until each runs, then a cancel() of each and a wait() of each."""
         floor = 5_000 * RATE_SHARE
         spawn, cancel = rates_over(floor, lambda: loop_rates(rt, TASKS))
 
@@ -158,7 +158,7 @@ class TestThreadCost:
         assert cost.runtime <= THREAD_CEILING, f"{cost.runtime:,.0f} B per task"
 
     def test_spawn_and_cancel_rate(self, rt):
-        """spawn() until each runs, then cancel() and wait() one at a time."""
+        """spawn() until each runs, then a cancel() of each and a wait() of each."""
         floor = 2_000 * RATE_SHARE
         spawn, cancel = rates_over(floor, lambda: thread_rates(rt, THREADS))
 

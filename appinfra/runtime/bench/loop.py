@@ -165,8 +165,8 @@ def parked(tasks: Runtime, count: int, *, receiving: bool = False) -> Iterator[N
 
 def loop_rates(tasks: Runtime, count: int) -> tuple[float, float]:
     """Tasks per second spawned and running, over *count* parked tasks on the
-    loop of *tasks*, and tasks per second that cancel() and wait() then end,
-    one task after the other.
+    loop of *tasks*, and tasks per second that a cancel() of each, then a
+    wait() of each, ends.
 
     Raises:
         ValueError: If *count* is less than 1.

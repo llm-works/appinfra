@@ -15,7 +15,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from appinfra.log import LogConfig, LoggerFactory
-from appinfra.runtime import Runtime, Task
+from appinfra.runtime import Chan, Runtime, Task
 from appinfra.runtime.bench import loop as bench_loop
 from appinfra.runtime.bench import process as bench_process
 from appinfra.runtime.bench import thread as bench_thread
@@ -40,9 +40,17 @@ class _Late(Arrivals):
         self.all = _NeverAll()
 
 
-def _timed_out(*_: object) -> None:
-    """In place of the thread bench's _arrived(): not all started in time."""
+def _timed_out(*_: object, **__: object) -> None:
+    """In place of an arrival wait: not all started in time."""
     raise TimeoutError("did not all start")
+
+
+class _NoArrivals(Chan[Any]):
+    """The parent's arrivals Chan, its receive failing whatever the children
+    send; they get the Chan itself, by reference, as any process Chan."""
+
+    def recv(self, timeout: float | None = None) -> Any:
+        raise TimeoutError("did not all start")
 
 
 def _recording(rt: Runtime, monkeypatch: pytest.MonkeyPatch) -> list[Task]:
@@ -101,10 +109,9 @@ class TestStartTimingOut:
     def test_process_tasks_are_ended(
         self, prt: Runtime, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """No wait for an arrival: the receive times out before any child
-        could have started. The children import the module anew, with the
-        real DUE."""
-        monkeypatch.setattr(bench_process, "DUE", 0.0)
+        """The parent's receive of the arrivals fails whatever the children
+        do: no timing decides it."""
+        monkeypatch.setattr(bench_process, "Chan", _NoArrivals)
         spawned = _recording(prt, monkeypatch)
         with pytest.raises(TimeoutError):
             bench_process._spawn_parked(prt, COUNT)

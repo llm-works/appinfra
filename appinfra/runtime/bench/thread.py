@@ -138,8 +138,8 @@ def thread_cost(tasks: Runtime, count: int) -> TaskCost:
 
 def thread_rates(tasks: Runtime, count: int) -> tuple[float, float]:
     """Thread tasks per second spawned and running, over *count* parked on
-    *tasks*, and tasks per second that cancel() and wait() then end, one task
-    after the other.
+    *tasks*, and tasks per second that a cancel() of each, then a wait() of
+    each, ends.
 
     Raises:
         ValueError: If *count* is less than 1.
