@@ -1,121 +1,116 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright 2026 The appinfra Authors
 
-"""Tests for IPCChannel."""
+"""IPCChannel over a requests Chan in this process: a task on the same loop
+plays the parent."""
 
-import multiprocessing as mp
+import asyncio
 
 import pytest
 
 from appinfra.app.fastapi.config.ipc import IPCConfig
 from appinfra.app.fastapi.runtime.ipc import IPCChannel
-from tests.helpers.ipc import MockRequest
+from appinfra.runtime import Chan
+from appinfra.runtime.chan import ClosedError
 
 
-@pytest.fixture
-def queues():
-    """Create and cleanup multiprocessing queues."""
-    request_q: mp.Queue = mp.Queue()
-    response_q: mp.Queue = mp.Queue()
-    yield request_q, response_q
-    request_q.close()
-    response_q.close()
-    request_q.join_thread()
-    response_q.join_thread()
+def _channel(capacity: int = 1, **config: object) -> tuple[IPCChannel, Chan]:
+    requests: Chan = Chan(capacity, process=True)
+    return IPCChannel(requests, IPCConfig(**config)), requests  # type: ignore[arg-type]
 
 
-class TestIPCChannel:
-    """Tests for IPCChannel initialization and properties."""
-
-    def test_initialization(self, queues):
-        """Test channel initialization."""
-        request_q, response_q = queues
-        config = IPCConfig(max_pending=50)
-
-        channel = IPCChannel(request_q, response_q, config)
-
+class TestHealth:
+    def test_an_idle_channel_reports_healthy(self) -> None:
+        channel, _ = _channel(max_pending=50)
         assert channel.pending_count == 0
-        assert channel.health_status["max_pending"] == 50
+        assert channel.health_status == {
+            "pending_requests": 0,
+            "max_pending": 50,
+            "is_healthy": True,
+        }
 
-    def test_pending_count_empty(self, queues):
-        """Test pending_count with no pending requests."""
-        request_q, response_q = queues
-        channel = IPCChannel(request_q, response_q, IPCConfig())
+
+class TestSubmit:
+    @pytest.mark.asyncio
+    async def test_the_reply_is_returned(self) -> None:
+        channel, requests = _channel()
+
+        async def parent() -> None:
+            data, reply = await requests.arecv()
+            await reply.asend(data * 2)
+
+        answering = asyncio.create_task(parent())
+        assert await channel.submit("ab", timeout=5.0) == "abab"
+        await answering
+
+    @pytest.mark.asyncio
+    async def test_a_request_in_flight_is_counted(self) -> None:
+        channel, requests = _channel()
+        submitting = asyncio.create_task(channel.submit("x", timeout=5.0))
+        _, reply = await requests.arecv()  # the request is out: it waits
+        assert channel.pending_count == 1
+        await reply.asend("done")
+        assert await submitting == "done"
         assert channel.pending_count == 0
 
-    def test_health_status_healthy(self, queues):
-        """Test health_status when under capacity."""
-        request_q, response_q = queues
-        channel = IPCChannel(request_q, response_q, IPCConfig(max_pending=100))
-
-        status = channel.health_status
-
-        assert status["pending_requests"] == 0
-        assert status["max_pending"] == 100
-        assert status["is_healthy"] is True
-
-
-class TestIPCChannelSubmit:
-    """Tests for IPCChannel submit method."""
-
     @pytest.mark.asyncio
-    async def test_submit_exceeds_max_pending(self, queues):
-        """Test submit raises when max_pending exceeded."""
-        request_q, response_q = queues
-        channel = IPCChannel(request_q, response_q, IPCConfig(max_pending=0))
-
+    async def test_a_request_over_max_pending_is_refused(self) -> None:
+        channel, requests = _channel(max_pending=0)
         with pytest.raises(RuntimeError, match="Max pending requests exceeded"):
-            await channel.submit(MockRequest(id="req1", data="test"))
+            await channel.submit("x")
+        assert len(requests) == 0
 
     @pytest.mark.asyncio
-    async def test_submit_requires_id_attribute(self, queues):
-        """Test submit raises if request has no id."""
-        request_q, response_q = queues
-        channel = IPCChannel(request_q, response_q, IPCConfig())
-
-        with pytest.raises(ValueError, match="id"):
-            await channel.submit({"no_id": True})
-
-
-class TestIPCChannelStreaming:
-    """Tests for streaming functionality."""
+    async def test_the_timeout_covers_sending_the_request(self) -> None:
+        """Nobody receives and the Chan has no room: the send times out."""
+        channel, _ = _channel(capacity=0)
+        with pytest.raises(TimeoutError):
+            await channel.submit("x", timeout=0)
+        assert channel.pending_count == 0
 
     @pytest.mark.asyncio
-    async def test_stream_exceeds_max_pending(self, queues):
-        """Test stream raises when max_pending exceeded."""
-        request_q, response_q = queues
-        channel = IPCChannel(request_q, response_q, IPCConfig(max_pending=0))
+    async def test_a_reply_after_a_timeout_is_refused(self) -> None:
+        channel, requests = _channel()
+        with pytest.raises(TimeoutError):
+            await channel.submit("x", timeout=0)
+        _, reply = await requests.arecv()
+        with pytest.raises(ClosedError):
+            await reply.asend("late")
 
+
+class TestStream:
+    @pytest.mark.asyncio
+    async def test_values_until_the_reply_is_closed(self) -> None:
+        channel, requests = _channel()
+
+        async def parent() -> None:
+            data, reply = await requests.arecv()
+            for letter in data:
+                await reply.asend(letter)
+            reply.close()
+
+        answering = asyncio.create_task(parent())
+        assert [v async for v in channel.stream("abc", timeout=5.0)] == list("abc")
+        await answering
+        assert channel.pending_count == 0
+
+    @pytest.mark.asyncio
+    async def test_a_stream_over_max_pending_is_refused(self) -> None:
+        channel, _ = _channel(max_pending=0)
         with pytest.raises(RuntimeError, match="Max pending requests exceeded"):
-            async for _ in channel.stream(MockRequest(id="s1", data="test")):
+            async for _ in channel.stream("x"):
                 pass
 
-
-class TestIPCChannelLifecycle:
-    """Tests for lifecycle methods."""
-
     @pytest.mark.asyncio
-    async def test_start_polling_is_noop(self, queues):
-        """Test start_polling completes without error (no-op for this impl)."""
-        request_q, response_q = queues
-        channel = IPCChannel(request_q, response_q, IPCConfig())
-        await channel.start_polling()
-        # No error = success
-
-    @pytest.mark.asyncio
-    async def test_stop_polling_closes_channel(self, queues):
-        """Test stop_polling closes the underlying channel."""
-        request_q, response_q = queues
-        channel = IPCChannel(request_q, response_q, IPCConfig())
-        await channel.start_polling()
-        await channel.stop_polling()
-
-        assert channel._closed is True
-
-    @pytest.mark.asyncio
-    async def test_stop_polling_idempotent(self, queues):
-        """Test stop_polling can be called multiple times."""
-        request_q, response_q = queues
-        channel = IPCChannel(request_q, response_q, IPCConfig())
-        await channel.stop_polling()
-        await channel.stop_polling()  # Should not error
+    async def test_a_stream_left_early_closes_its_reply(self) -> None:
+        """The route stops reading: the parent's next value is refused."""
+        channel, requests = _channel()
+        stream = channel.stream("x", timeout=5.0)
+        reading = asyncio.create_task(anext(stream))
+        _, reply = await requests.arecv()
+        await reply.asend("first")
+        assert await reading == "first"
+        await stream.aclose()
+        with pytest.raises(ClosedError):
+            await reply.asend("second")
+        assert channel.pending_count == 0

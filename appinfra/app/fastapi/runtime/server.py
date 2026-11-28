@@ -5,19 +5,19 @@
 
 from __future__ import annotations
 
-import multiprocessing as mp
 import sys
 import weakref
 from threading import Event
 from typing import TYPE_CHECKING, Any
 
-from ....runtime import TaskProcess
+from ....runtime import Chan, TaskProcess
 from ....service import RunError, Runner, State
 from ....service import Runtime as ServiceRuntime
 from ....service.state import RestartPolicy
 from ..config.api import ApiConfig
 from ..config.ipc import IPCConfig
 from .adapter import LifecycleCallbackDefinition
+from .ipc import Request
 from .service import UvicornService
 
 # Seconds start_subprocess() waits for the server to come up
@@ -59,20 +59,25 @@ class Server:
 
     Supports two modes:
     1. Direct mode: uvicorn.run() in current process (blocking)
-    2. Subprocess mode: uvicorn in a process of its own with queue IPC
+    2. Subprocess mode: uvicorn in a process of its own with Chan IPC
        (non-blocking), run as an isolated service of a service Runtime: the
        runtime restarts it under its restart policy and escalates its stop.
 
-    Mode is determined by whether IPC queues are provided during construction.
+    Mode is determined by whether a requests Chan is given at construction.
 
     Example (direct mode):
-        server = ServerBuilder("myapi").with_port(8000).build()
+        server = ServerBuilder(lg, "myapi").with_port(8000).build()
         server.start()  # Blocking
 
     Example (subprocess mode):
-        server = ServerBuilder("myapi").subprocess.with_ipc().done().build()
+        server = ServerBuilder(lg, "myapi").subprocess.with_ipc().done().build()
         server.start_subprocess()  # Non-blocking
-        request_q = server.request_queue
+        for request, reply in server.requests:
+            response = handle(request)
+            try:
+                reply.send(response)
+            except ChanClosedError:
+                pass  # the route stopped waiting for it
     """
 
     def __init__(
@@ -81,8 +86,7 @@ class Server:
         name: str,
         config: ApiConfig,
         adapter: FastAPIAdapter,
-        request_q: mp.Queue[Any] | None = None,
-        response_q: mp.Queue[Any] | None = None,
+        requests: Chan[Request] | None = None,
         runtime: ServiceRuntime | None = None,
     ) -> None:
         """
@@ -93,10 +97,8 @@ class Server:
             name: Server name (for logging)
             config: API configuration
             adapter: FastAPI adapter with route/middleware definitions
-            request_q: Request queue for IPC (enables subprocess mode), made
-                from appinfra.runtime.process_context()
-            response_q: Response queue for IPC (enables subprocess mode), made
-                from the same context
+            requests: The process Chan the subprocess's IPC requests arrive
+                on (enables subprocess mode)
             runtime: A started service Runtime to run the subprocess in, the
                 application's; None: start_subprocess() starts one of its
                 own, which stop() stops
@@ -112,8 +114,7 @@ class Server:
         self._name = name
         self._config = config
         self._adapter = adapter
-        self._request_q = request_q
-        self._response_q = response_q
+        self._requests = requests
         self._lg = lg
         self._runtime = runtime
         # The runtime start_subprocess() started, when none was given
@@ -161,7 +162,7 @@ class Server:
     @property
     def is_subprocess_mode(self) -> bool:
         """Check if configured for subprocess mode."""
-        return self._request_q is not None and self._response_q is not None
+        return self._requests is not None
 
     @property
     def process(self) -> TaskProcess | None:
@@ -186,14 +187,11 @@ class Server:
         return process is not None and process.detail().alive
 
     @property
-    def request_queue(self) -> mp.Queue[Any] | None:
-        """Request queue for IPC (main process side)."""
-        return self._request_q
-
-    @property
-    def response_queue(self) -> mp.Queue[Any] | None:
-        """Response queue for IPC (main process side)."""
-        return self._response_q
+    def requests(self) -> Chan[Request] | None:
+        """The subprocess's IPC requests, each with the Chan to reply on
+        (None without IPC). Homed here: every run of the subprocess sends to
+        the same Chan, so a restart leaves the parent's side as it was."""
+        return self._requests
 
     def start(self) -> None:
         """
@@ -247,8 +245,7 @@ class Server:
             adapter=self._adapter,
             config=self._config,
             context=runtime.process_context,
-            request_q=self._request_q,
-            response_q=self._response_q,
+            requests=self._requests,
         )
 
     def _restart_policy(self) -> RestartPolicy:

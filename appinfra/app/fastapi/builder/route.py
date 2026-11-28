@@ -34,7 +34,7 @@ class RouteConfigurer(Generic[P]):
     - done() returns parent builder
 
     Example:
-        server = (ServerBuilder("myapi")
+        server = (ServerBuilder(lg, "myapi")
             .routes
                 .with_route("/health", health_handler)
                 .with_route("/api/users", get_users, methods=["GET"])

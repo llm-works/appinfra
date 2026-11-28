@@ -4,21 +4,15 @@
 """
 Integration test for FastAPI IPC + lifecycle callbacks.
 
-This test validates the fix for a bug where using with_on_startup() with
-subprocess mode (.subprocess.with_ipc()) caused the response queue to stop
-delivering messages. The root cause was that FastAPI ignores on_event()
-handlers when a lifespan is present, so IPC polling never started.
-
-The fix integrates IPC lifecycle (start_polling/stop_polling) directly into
-the adapter's lifespan context manager instead of using deprecated on_event().
+A subprocess-mode server with startup callbacks (with_on_startup()) still
+runs them and answers IPC requests: the callbacks make the app's lifespan,
+which FastAPI runs instead of on_event() handlers.
 """
 
 import importlib
-import multiprocessing as mp
 import threading
 from dataclasses import dataclass
 from functools import partial
-from queue import Empty
 
 import pytest
 import requests
@@ -64,7 +58,6 @@ if not _check_module_requirements():
 class IPCRequest:
     """Test request message for IPC."""
 
-    id: str
     data: str
 
 
@@ -72,9 +65,7 @@ class IPCRequest:
 class IPCResponse:
     """Test response message for IPC."""
 
-    id: str
     result: str
-    error: str | None = None
 
 
 # Exception and handler for subprocess exception handler test
@@ -100,27 +91,11 @@ class _TestSubprocessErrorHandler(ExceptionHandler):
         )
 
 
-def _ipc_request_handler(
-    request_q: mp.Queue, response_q: mp.Queue, stop_event: threading.Event
-) -> None:
-    """
-    Simulates main process handling IPC requests.
-
-    Reads requests from request_q, processes them, and puts responses in response_q.
-    """
-    while not stop_event.is_set():
-        try:
-            request = request_q.get(timeout=0.1)
-            # Echo the data back as response
-            response = IPCResponse(
-                id=request.id,
-                result=f"processed:{request.data}",
-            )
-            response_q.put(response)
-        except Empty:
-            continue
-        except Exception:
-            break
+def _ipc_request_handler(requests) -> None:
+    """The main process's side: each request answered on its reply Chan,
+    until the requests Chan is closed."""
+    for request, reply in requests:
+        reply.send(IPCResponse(result=f"processed:{request.data}"), timeout=5.0)
 
 
 def _ping_handler() -> dict:
@@ -150,13 +125,10 @@ def _get_ipc(request: Request):
 
 async def _ipc_echo_handler(data: str, request: Request):
     """Route handler that uses IPC. Module-level for macOS spawn."""
-    import uuid
-
     from appinfra.app.fastapi.runtime.ipc import IPCChannel
 
     ipc: IPCChannel = request.app.state.ipc_channel
-    ipc_request = IPCRequest(id=str(uuid.uuid4()), data=data)
-    response = await ipc.submit(ipc_request, timeout=5.0)
+    response = await ipc.submit(IPCRequest(data=data), timeout=5.0)
     return {"result": response.result}
 
 
@@ -180,12 +152,7 @@ class TestFastAPIIPCWithLifecycleCallbacks:
             pytest.skip(f"FastAPI import failed: {e}")
 
     def test_ipc_works_with_startup_callback(self):
-        """
-        Test that IPC responses are delivered when startup callbacks are registered.
-
-        This is a regression test for the bug where with_on_startup() broke IPC
-        because FastAPI's on_event() handlers are ignored when a lifespan is present.
-        """
+        """A subprocess-mode server runs its startup callbacks and serves."""
         from appinfra.app.fastapi.builder.server import ServerBuilder
         from appinfra.runtime import process_context
 
@@ -193,7 +160,6 @@ class TestFastAPIIPCWithLifecycleCallbacks:
         startup_called = process_context().Value("b", False)
 
         # Build server with startup callback AND IPC mode
-        # This combination previously broke IPC polling
         from appinfra.log import Logger
 
         lg = Logger("test-ipc-lifespan")
@@ -212,40 +178,17 @@ class TestFastAPIIPCWithLifecycleCallbacks:
             .build()
         )
 
-        # Start the "main process" handler thread
-        stop_event = threading.Event()
-        handler_thread = threading.Thread(
-            target=_ipc_request_handler,
-            args=(server.request_queue, server.response_queue, stop_event),
-            daemon=True,
-        )
         try:
             server.start_subprocess()
-            handler_thread.start()
 
             wait_ready("http://127.0.0.1:18765/ping", deadline_secs=10.0)
             assert startup_called.value, "Startup callback was not executed"
-
-            # The server is running with startup callback executed
-            # In a full test, we'd make an IPC request here
-            # For now, we've proven that:
-            # 1. Server starts with startup callback
-            # 2. Startup callback executes
-            # 3. Server accepts HTTP requests (meaning lifespan completed startup)
-
+            # Serving HTTP: the lifespan completed its startup
         finally:
-            stop_event.set()
             server.stop(timeout=2.0)
-            if handler_thread.is_alive():  # not started if start_subprocess() raised
-                handler_thread.join(timeout=1.0)
 
-    def test_ipc_polling_receives_responses_with_startup_callback(self):
-        """
-        Full integration test: verify IPC responses flow through with startup callbacks.
-
-        This test creates a route that uses IPC, makes an HTTP request,
-        and verifies the response comes back through the IPC channel.
-        """
+    def test_ipc_receives_responses_with_startup_callback(self):
+        """A route's IPC request is answered with a startup callback registered."""
 
         from appinfra.app.fastapi.builder.server import ServerBuilder
 
@@ -272,11 +215,8 @@ class TestFastAPIIPCWithLifecycleCallbacks:
         )
 
         # Start the "main process" handler thread
-        stop_event = threading.Event()
         handler_thread = threading.Thread(
-            target=_ipc_request_handler,
-            args=(server.request_queue, server.response_queue, stop_event),
-            daemon=True,
+            target=_ipc_request_handler, args=(server.requests,), daemon=True
         )
         try:
             server.start_subprocess()
@@ -284,8 +224,6 @@ class TestFastAPIIPCWithLifecycleCallbacks:
 
             wait_ready("http://127.0.0.1:18766/ping", deadline_secs=10.0)
 
-            # Make IPC request - this is the critical test
-            # If IPC polling isn't running, this will timeout
             resp = requests.get("http://127.0.0.1:18766/echo/testdata", timeout=5.0)
 
             assert resp.status_code == 200, (
@@ -298,8 +236,8 @@ class TestFastAPIIPCWithLifecycleCallbacks:
             )
 
         finally:
-            stop_event.set()
             server.stop(timeout=2.0)
+            server.requests.close()  # ends the handler thread's iteration
             if handler_thread.is_alive():  # not started if start_subprocess() raised
                 handler_thread.join(timeout=1.0)
 

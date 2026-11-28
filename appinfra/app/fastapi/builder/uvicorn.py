@@ -45,7 +45,7 @@ class UvicornConfigurer(Generic[P]):
     - calling the block with keywords sets fields and returns the parent
 
     Example:
-        server = (ServerBuilder("myapi")
+        server = (ServerBuilder(lg, "myapi")
             .uvicorn
                 .with_workers(4)
                 .with_log_level("info")
@@ -53,7 +53,7 @@ class UvicornConfigurer(Generic[P]):
                 .done()
             .build())
 
-        server = ServerBuilder("myapi").uvicorn(workers=4, access_log=True).build()
+        server = ServerBuilder(lg, "myapi").uvicorn(workers=4, access_log=True).build()
     """
 
     def __init__(self, parent: P) -> None:

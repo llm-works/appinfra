@@ -1,72 +1,58 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright 2026 The appinfra Authors
 
-"""Queue-based IPC channel using service package infrastructure.
+"""The FastAPI subprocess's side of its IPC with the parent.
 
-This module provides IPCChannel, a thin wrapper around AsyncChannel
-that adds application-specific features:
-- max_pending enforcement
-- health_status reporting
-- Lifecycle methods compatible with FastAPI lifespan
+Requests go to the parent on server.requests, a process Chan homed there;
+each carries the Chan its reply comes back on, made here. IPCChannel adds
+what the routes need on top: a bound on the requests in flight, the health
+it reports, and the configured response timeout.
 """
 
 from __future__ import annotations
 
-import multiprocessing as mp
+import time
 from collections.abc import AsyncIterator
 from typing import Any
 
-from ....service.channel import AsyncBufferedChannel, AsyncProcessQueueTransport
+from ....runtime import Chan
+from ....runtime.chan import ClosedError
 from ..config.ipc import IPCConfig
+
+#: What server.requests carries: a request, and the Chan its reply comes back on
+Request = tuple[Any, Chan[Any]]
 
 
 class IPCChannel:
     """
-    Bidirectional IPC channel for FastAPI subprocess communication.
+    Request/reply from the FastAPI subprocess to the parent.
 
-    Wraps AsyncChannel to provide:
-    - max_pending request limiting
-    - Health status reporting for /_health endpoint
-    - start_polling/stop_polling lifecycle for FastAPI lifespan compatibility
-
-    Message Protocol:
-    - Messages MUST have an `.id` attribute for routing
-    - Streaming messages MUST have an `.is_final` attribute
-    - Framework is agnostic about message types; users define their own
-      Request/Response/StreamChunk dataclasses
+    The parent answers each request on the reply Chan it came with: one
+    value for submit(), any number for stream(), which ends when the parent
+    closes the reply Chan. A reply Chan is closed here once its route stops
+    waiting (answered, timed out or gone), so a parent sending to it after
+    that gets ClosedError rather than a value nobody reads.
 
     Example usage in FastAPI handler:
         async def inference(request: InferenceRequest, ipc: IPCChannel = Depends(get_ipc)):
-            internal = InternalRequest(id=str(uuid4()), data=request.data)
-            response = await ipc.submit(internal, timeout=60.0)
-            return response.result
+            return await ipc.submit(request.data, timeout=60.0)
     """
 
-    def __init__(
-        self,
-        request_q: mp.Queue[Any],
-        response_q: mp.Queue[Any],
-        config: IPCConfig,
-    ) -> None:
+    def __init__(self, requests: Chan[Request], config: IPCConfig) -> None:
         """
         Initialize IPC channel.
 
         Args:
-            request_q: Queue for sending requests to main process
-            response_q: Queue for receiving responses from main process
+            requests: The parent's requests Chan, as this process holds it
             config: IPC configuration
         """
-        self._channel: AsyncBufferedChannel[Any, Any] = AsyncBufferedChannel(
-            AsyncProcessQueueTransport(outbound=request_q, inbound=response_q),
-            response_timeout=config.response_timeout,
-        )
+        self._requests = requests
         self._config = config
         self._pending_count = 0
-        self._closed = False
 
     @property
     def pending_count(self) -> int:
-        """Number of requests currently awaiting response."""
+        """Number of requests currently awaiting a reply."""
         return self._pending_count
 
     @property
@@ -85,85 +71,81 @@ class IPCChannel:
             "is_healthy": self._pending_count < self._config.max_pending,
         }
 
-    async def submit(
-        self,
-        request: Any,
-        timeout: float | None = None,
-    ) -> Any:
+    async def submit(self, request: Any, timeout: float | None = None) -> Any:
         """
-        Submit request and wait for response.
+        Send *request* to the parent and wait for its reply.
 
         Args:
-            request: Request object with `.id` attribute
-            timeout: Override default response timeout (seconds)
+            request: Any value that pickles
+            timeout: Seconds for the whole exchange (None = the configured
+                response timeout)
 
         Returns:
-            Response object from main process
+            The parent's reply
 
         Raises:
-            RuntimeError: If max_pending exceeded
-            ChannelTimeoutError: If response not received within timeout
-            ValueError: If request has no `.id` attribute
+            RuntimeError: If max_pending requests are already in flight
+            TimeoutError: If no reply came within *timeout*
+            ClosedError: If the parent closed its requests Chan, or the reply
+                Chan without a reply
         """
-        if self._pending_count >= self._config.max_pending:
-            raise RuntimeError(
-                f"Max pending requests exceeded ({self._config.max_pending})"
-            )
-
-        self._pending_count += 1
+        reply: Chan[Any] = Chan(1, process=True)
+        self._admit()
         try:
-            return await self._channel.submit(request, timeout)
+            deadline = time.monotonic() + self._timeout(timeout)
+            await self._requests.asend((request, reply), timeout=_left(deadline))
+            return await reply.arecv(timeout=_left(deadline))
         finally:
+            reply.close()
             self._pending_count -= 1
 
     async def stream(
-        self,
-        request: Any,
-        timeout: float | None = None,
+        self, request: Any, timeout: float | None = None
     ) -> AsyncIterator[Any]:
         """
-        Submit streaming request and yield response chunks.
-
-        Yields chunks until one with is_final=True is received.
+        Send *request* to the parent and yield each value it replies with,
+        until it closes the reply Chan.
 
         Args:
-            request: Request object with `.id` attribute
-            timeout: Timeout for each chunk (None = use default)
+            request: Any value that pickles
+            timeout: Seconds for the request to go out, and for each value
+                (None = the configured response timeout)
 
         Yields:
-            Response chunks until is_final=True
+            The parent's reply values, in order
 
         Raises:
-            RuntimeError: If max_pending exceeded
-            ChannelTimeoutError: If a chunk is not received within timeout
-            ValueError: If request has no `.id` attribute
+            RuntimeError: If max_pending requests are already in flight
+            TimeoutError: If a value did not come within *timeout*
+            ClosedError: If the parent closed its requests Chan
         """
+        reply: Chan[Any] = Chan(1, process=True)
+        self._admit()
+        try:
+            wait = self._timeout(timeout)
+            await self._requests.asend((request, reply), timeout=wait)
+            while True:
+                try:
+                    value = await reply.arecv(timeout=wait)
+                except ClosedError:
+                    return
+                yield value
+        finally:
+            reply.close()
+            self._pending_count -= 1
+
+    def _admit(self) -> None:
+        """Count one more request in flight, or refuse it over max_pending."""
         if self._pending_count >= self._config.max_pending:
             raise RuntimeError(
                 f"Max pending requests exceeded ({self._config.max_pending})"
             )
-
         self._pending_count += 1
-        try:
-            async for chunk in self._channel.stream(request, timeout):
-                yield chunk
-        finally:
-            self._pending_count -= 1
 
-    async def start_polling(self) -> None:
-        """
-        Start the channel (FastAPI lifespan compatibility).
+    def _timeout(self, timeout: float | None) -> float:
+        return self._config.response_timeout if timeout is None else timeout
 
-        AsyncChannel polls on-demand, so this is a no-op.
-        Kept for API compatibility with FastAPI adapter lifespan.
-        """
 
-    async def stop_polling(self) -> None:
-        """
-        Stop the channel and clean up resources.
-
-        Called during FastAPI shutdown to close underlying queues.
-        """
-        if not self._closed:
-            self._closed = True
-            await self._channel.close()
+def _left(deadline: float) -> float:
+    """Seconds left until *deadline*; 0 once it has passed (do not wait)."""
+    return max(0.0, deadline - time.monotonic())

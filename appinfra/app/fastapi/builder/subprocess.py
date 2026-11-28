@@ -8,7 +8,6 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import TYPE_CHECKING, Generic, Self, TypeVar
 
-from ....runtime import process_context
 from ....service import Runtime as ServiceRuntime
 from ..config.ipc import IPCConfig
 
@@ -32,14 +31,20 @@ class SubprocessConfigurer(Generic[P]):
     the server runs uvicorn directly in the current process.
 
     Example:
-        server = (ServerBuilder("myapi")
+        server = (ServerBuilder(lg, "myapi")
             .subprocess
                 .with_ipc()
                 .with_log_file("/var/log/api.log")
                 .with_auto_restart(True).with_max_restarts(10)
                 .done()
             .build())
-        request_q, response_q = server.request_queue, server.response_queue
+        server.start_subprocess()  # Non-blocking
+        for request, reply in server.requests:
+            response = handle(request)
+            try:
+                reply.send(response)
+            except ChanClosedError:
+                pass  # the route stopped waiting for it
     """
 
     def __init__(self, parent: P) -> None:
@@ -63,19 +68,16 @@ class SubprocessConfigurer(Generic[P]):
 
     def with_ipc(self) -> Self:
         """
-        Enable subprocess mode with queue-based IPC.
+        Enable subprocess mode with Chan-based IPC.
 
-        Makes the request queue (API -> main process) and the response queue
-        (main process -> API), read back from the built server's
-        ``request_queue`` and ``response_queue``. They come from the context
-        the server's process starts in: a queue from another one fails there.
+        The built server's ``requests`` is a process Chan homed in this
+        process: the subprocess's routes send each request on it with a
+        Chan to reply on, and this process answers there.
 
         Returns:
             Self for method chaining
         """
-        ctx = process_context()
-        self._parent._request_q = ctx.Queue()
-        self._parent._response_q = ctx.Queue()
+        self._parent._ipc_enabled = True
         return self
 
     def with_runtime(self, runtime: ServiceRuntime) -> Self:
@@ -104,22 +106,6 @@ class SubprocessConfigurer(Generic[P]):
             Self for method chaining
         """
         self._parent._api.log_file = path
-        return self
-
-    def with_poll_interval(self, interval: float) -> Self:
-        """
-        Set response queue polling interval.
-
-        Lower values reduce latency but increase CPU usage.
-        Default: 0.01 (10ms = 100 polls/second)
-
-        Args:
-            interval: Polling interval in seconds
-
-        Returns:
-            Self for method chaining
-        """
-        self._ipc().poll_interval = interval
         return self
 
     def with_response_timeout(self, timeout: float) -> Self:

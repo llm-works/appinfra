@@ -5,7 +5,6 @@
 
 from __future__ import annotations
 
-import multiprocessing as mp
 import pickle
 from collections.abc import Awaitable, Callable
 from contextlib import AbstractAsyncContextManager
@@ -22,9 +21,11 @@ if TYPE_CHECKING:
 
 from dataclasses import replace
 
+from ....runtime import Chan
 from ....service import Runtime as ServiceRuntime
 from ....subprocess import Lazy
 from ..config.api import ApiConfig
+from ..config.ipc import IPCConfig
 from ..runtime.adapter import (
     ExceptionCallbackDefinition,
     FastAPIAdapter,
@@ -54,6 +55,13 @@ def _copy_api(config: ApiConfig) -> ApiConfig:
     )
 
 
+def _requests(config: IPCConfig) -> Chan[Any]:
+    """The server's requests Chan, holding up to max_pending: as many as
+    the subprocess lets be in flight, so a request it admits does not wait
+    for room."""
+    return Chan(config.max_pending, process=True)
+
+
 class ServerBuilder:
     """
     Fluent builder for FastAPI servers with optional subprocess isolation.
@@ -65,7 +73,7 @@ class ServerBuilder:
     - .build() creates runtime instance
 
     Example (simple server):
-        server = (ServerBuilder("myapi")
+        server = (ServerBuilder(lg, "myapi")
             .with_port(8000)
             .routes
                 .with_route("/health", health_handler)
@@ -76,7 +84,7 @@ class ServerBuilder:
         server.start()  # Blocking
 
     Example (subprocess mode with IPC):
-        server = (ServerBuilder("worker-api")
+        server = (ServerBuilder(lg, "worker-api")
             .with_port(8000)
             .routes
                 .with_route("/process", process_handler, methods=["POST"])
@@ -89,11 +97,13 @@ class ServerBuilder:
 
         server.start_subprocess()  # Non-blocking
 
-        # Main process handles requests via queues
-        while True:
-            request = server.request_queue.get()
-            result = process(request)
-            server.response_queue.put(result)
+        # Main process answers each request on the Chan it came with
+        for request, reply in server.requests:
+            response = process(request)
+            try:
+                reply.send(response)
+            except ChanClosedError:
+                pass  # the route stopped waiting for it
     """
 
     def __init__(self, lg: Logger, name: str) -> None:
@@ -109,8 +119,8 @@ class ServerBuilder:
         # The builder's state is the config it will build; the facets are
         # views on it, so defaults live in the config dataclasses only.
         self._api = ApiConfig()
-        self._request_q: mp.Queue[Any] | None = None
-        self._response_q: mp.Queue[Any] | None = None
+        # Set by subprocess.with_ipc(): build() makes the requests Chan
+        self._ipc_enabled = False
         # The service Runtime the server spawns into; None: one of its own
         self._runtime: ServiceRuntime | None = None
         self._defs = ServerDefinitions()
@@ -444,7 +454,7 @@ class ServerBuilder:
 
     def _is_subprocess_mode(self) -> bool:
         """Check if subprocess mode is configured."""
-        return self._request_q is not None and self._response_q is not None
+        return self._ipc_enabled
 
     def _validate_handler_pickling(self, handler: Any, exc_class_name: str) -> bool:
         """Validate a single handler can be pickled.
@@ -528,12 +538,17 @@ class ServerBuilder:
         if self._is_subprocess_mode():
             self._validate_subprocess_handlers()
 
+        requests: Chan[Any] | None = None
+        if self._ipc_enabled:
+            # The one IPCConfig both ends read: it sizes requests here and
+            # bounds the requests in flight in the subprocess
+            config.ipc = config.ipc or IPCConfig()
+            requests = _requests(config.ipc)
         return Server(
             lg=self._lg,
             name=self._name,
             config=config,
             adapter=adapter,
-            request_q=self._request_q,
-            response_q=self._response_q,
+            requests=requests,
             runtime=self._runtime,
         )

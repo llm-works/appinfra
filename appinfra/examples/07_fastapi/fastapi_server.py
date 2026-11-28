@@ -14,7 +14,7 @@ FastAPI Server Framework Examples.
 
 This example demonstrates two modes of the FastAPI server framework:
 1. Direct mode - Simple server running in current process (blocking)
-2. Subprocess mode - Server in separate process with queue-based IPC
+2. Subprocess mode - Server in separate process with Chan-based IPC
 
 Usage:
     # Direct mode (default)
@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -35,9 +36,12 @@ from pathlib import Path
 # Allow running from a source checkout without installing the package.
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
+from fastapi import Request
+
 from appinfra.app.fastapi import ServerBuilder
 from appinfra.app.fastapi.runtime.server import Server
 from appinfra.log import Logger
+from appinfra.runtime import ChanClosedError
 
 # -----------------------------------------------------------------------------
 # Route handlers
@@ -88,7 +92,6 @@ def create_simple_server(port: int = 25442) -> Server:
 class WorkRequest:
     """Request message for IPC."""
 
-    id: str
     data: str
 
 
@@ -96,24 +99,29 @@ class WorkRequest:
 class WorkResponse:
     """Response message for IPC."""
 
-    id: str
     result: str
-    error: str | None = None
+
+
+async def work_handler(data: str, request: Request) -> dict[str, str]:
+    """Hands the work to the main process and returns its answer."""
+    ipc = request.app.state.ipc_channel
+    response: WorkResponse = await ipc.submit(WorkRequest(data), timeout=10.0)
+    return {"result": response.result}
 
 
 def create_subprocess_server(port: int = 25443) -> Server:
     """
     Create a server running in subprocess mode with IPC.
 
-    Subprocess mode runs uvicorn in a separate process, communicating
-    via multiprocessing queues the builder makes (server.request_queue,
-    server.response_queue). This isolates the HTTP server from the
+    Subprocess mode runs uvicorn in a separate process. Its routes send
+    requests to the main process on server.requests, a Chan homed there,
+    each with a Chan to reply on. This isolates the HTTP server from the
     main application logic.
 
     Features:
     - Non-blocking start (returns immediately)
-    - Auto-restart on crash
-    - Queue-based request/response pattern
+    - Auto-restart on crash; a restarted server sends to the same Chan
+    - Request/reply over Chans: no ids, no polling
     - Subprocess log isolation
     """
     lg = Logger("worker-api")
@@ -126,9 +134,22 @@ def create_subprocess_server(port: int = 25443) -> Server:
         .with_max_restarts(3)
         .done()
         .routes.with_route("/health", health_handler)
+        .with_route("/work/{data}", work_handler)
         .done()
         .build()
     )
+
+
+def serve_requests(server: Server) -> None:
+    """Answer the server's requests, each on the Chan it came with, until
+    the requests Chan is closed. A restarted server sends to the same Chan,
+    so this goes on across a crash."""
+    assert server.requests is not None
+    for request, reply in server.requests:
+        try:
+            reply.send(WorkResponse(result=request.data.upper()), timeout=1.0)
+        except ChanClosedError:
+            pass  # the route stopped waiting for it
 
 
 def run_subprocess_demo() -> int:
@@ -136,28 +157,26 @@ def run_subprocess_demo() -> int:
     Demo subprocess mode with IPC communication.
 
     Shows the typical pattern:
-    1. Build server with subprocess config (it makes the IPC queues)
-    2. Start server (non-blocking)
-    3. Main process handles queue messages (server.request_queue)
+    1. Build server with subprocess config (it makes server.requests)
+    2. Answer its requests on a thread (try GET /work/hello)
+    3. Run the server: start() blocks until it is stopped, or has ended
+       with no restart left, and stops it on Ctrl+C
     """
-    print("Starting subprocess mode demo...")
-
     server = create_subprocess_server()
-    server.start_subprocess()
-
-    print(f"Server started in subprocess (pid={server.pid})")
-    print(f"Listening on http://localhost:{server.port}")
+    assert server.requests is not None
+    print("Starting subprocess mode demo...")
+    print(f"Listening on http://localhost:{server.config.port}")
     print("Press Ctrl+C to stop")
 
+    serving = threading.Thread(target=serve_requests, args=(server,))
+    serving.start()
     try:
-        # Main process would typically process requests here
-        # For demo, we just wait
-        while server.is_running:
-            time.sleep(1)
+        server.start()
     except KeyboardInterrupt:
         print("\nShutting down...")
     finally:
-        server.stop()
+        server.requests.close()  # ends serve_requests()
+        serving.join()
 
     return 0
 

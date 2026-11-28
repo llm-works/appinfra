@@ -5,18 +5,19 @@
 FastAPI server framework for appinfra.
 
 Provides production-ready FastAPI + Uvicorn server framework with subprocess
-isolation and queue-based IPC.
+isolation and Chan-based IPC.
 
 Installation:
     pip install appinfra[fastapi]
 
 Example (Simple Server - Direct Mode):
-    from . import ServerBuilder
+    from appinfra.app.fastapi import ServerBuilder
+    from appinfra.log import Logger
 
     async def health():
         return {"status": "ok"}
 
-    server = (ServerBuilder("myapi")
+    server = (ServerBuilder(Logger("myapi"), "myapi")
         .with_port(8000)
         .routes.with_route("/health", health).done()
         .build())
@@ -24,24 +25,43 @@ Example (Simple Server - Direct Mode):
     server.start()  # Blocking
 
 Example (Subprocess Mode with IPC):
-    from . import ServerBuilder
+    import threading
 
-    server = (ServerBuilder("worker-api")
+    from fastapi import Request
+
+    from appinfra.app.fastapi import ServerBuilder
+    from appinfra.log import Logger
+    from appinfra.runtime import ChanClosedError
+
+    async def work(data: str, request: Request):
+        ipc = request.app.state.ipc_channel
+        return {"result": await ipc.submit(data, timeout=10.0)}
+
+    server = (ServerBuilder(Logger("worker-api"), "worker-api")
         .with_port(8000)
-        .routes.with_route("/health", health).done()
+        .routes.with_route("/work/{data}", work).done()
         .subprocess
             .with_ipc()
             .with_auto_restart(True)
             .done()
         .build())
 
-    server.start_subprocess()  # Non-blocking
+    # The main process answers each request on the Chan it came with, until
+    # the requests Chan is closed; a restarted server sends to the same one
+    def answer():
+        for data, reply in server.requests:
+            try:
+                reply.send(data.upper())
+            except ChanClosedError:
+                pass  # the route stopped waiting for it
 
-    # Main process handles requests
-    while True:
-        request = server.request_queue.get()
-        result = process(request)
-        server.response_queue.put(result)
+    serving = threading.Thread(target=answer)
+    serving.start()
+    try:
+        server.start()  # Blocking; start_subprocess() returns once it serves
+    finally:
+        server.requests.close()
+        serving.join()
 """
 
 from __future__ import annotations

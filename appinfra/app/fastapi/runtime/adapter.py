@@ -402,7 +402,7 @@ class FastAPIAdapter:
             Configured FastAPI application
         """
         self._resolve_lazy()
-        lifespan = self._build_lifespan(ipc_channel)
+        lifespan = self._build_lifespan()
         app = FastAPI(
             title=self._config.title,
             description=self._config.description,
@@ -460,15 +460,12 @@ class FastAPIAdapter:
             request.state.lg = lg
             return await call_next(request)
 
-    def _build_lifespan(
-        self, ipc_channel: IPCChannel | None = None
-    ) -> LifespanCallable | None:
+    def _build_lifespan(self) -> LifespanCallable | None:
         """
-        Build lifespan context manager from user callbacks and IPC lifecycle.
+        Build lifespan context manager from user callbacks.
 
         If both lifespan and callbacks are provided, callbacks wrap the lifespan.
-        If ipc_channel is provided, wrap the result with IPC start/stop.
-        Returns None if no lifecycle callbacks configured and no IPC channel.
+        Returns None if no lifecycle callbacks are configured.
         """
         # Start with user-provided lifespan (may be None).
         # Post-``_resolve_lazy`` invariant: ``.lifespan`` is a real callable.
@@ -479,10 +476,6 @@ class FastAPIAdapter:
         # Wrap with startup/shutdown callbacks if any
         if self._defs.startup_callbacks or self._defs.shutdown_callbacks:
             result = self._wrap_lifespan_with_callbacks(result)
-
-        # Wrap with IPC lifecycle if channel provided
-        if ipc_channel is not None:
-            result = self._wrap_lifespan_with_ipc(result, ipc_channel)
 
         return result
 
@@ -518,34 +511,6 @@ class FastAPIAdapter:
                 await _run_shutdown_callbacks(shutdown_callbacks, app, lg)
 
         return lifespan
-
-    def _wrap_lifespan_with_ipc(
-        self,
-        user_lifespan: LifespanCallable | None,
-        ipc_channel: IPCChannel,
-    ) -> LifespanCallable:
-        """
-        Wrap a lifespan with IPC channel start/stop.
-
-        IPC polling is started before user startup so it's available during
-        user callbacks. IPC is stopped after user shutdown completes.
-        """
-
-        @asynccontextmanager
-        async def ipc_lifespan(app: Any) -> AsyncIterator[None]:
-            # Start IPC polling first so it's available during user callbacks
-            await ipc_channel.start_polling()
-            try:
-                if user_lifespan is not None:
-                    async with user_lifespan(app):
-                        yield
-                else:
-                    yield
-            finally:
-                # Stop IPC polling after user shutdown completes
-                await ipc_channel.stop_polling()
-
-        return ipc_lifespan
 
     def _configure_request_response_middleware(self, app: FastAPI) -> None:
         """Configure request/response/exception callback middleware."""

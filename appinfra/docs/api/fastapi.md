@@ -1,6 +1,6 @@
 # FastAPI Server Framework
 
-Production-ready FastAPI + Uvicorn server framework with subprocess isolation and queue-based IPC.
+Production-ready FastAPI + Uvicorn server framework with subprocess isolation and Chan-based IPC.
 
 ## Installation
 
@@ -41,6 +41,7 @@ computation:
 ```python
 from appinfra.app.fastapi import ServerBuilder
 from appinfra.log import Logger
+from appinfra.runtime.chan import ClosedError
 
 # health and process at module scope: the server's process imports them
 
@@ -59,14 +60,15 @@ def main() -> None:
     )
 
     server.start_subprocess()  # Non-blocking: returns once the server serves
-    request_q, response_q = server.request_queue, server.response_queue
 
-    # Main process handles requests
+    # Main process answers each request on the Chan it came with
     try:
-        while True:
-            request = request_q.get()
-            result = process(request)
-            response_q.put(result)
+        for request, reply in server.requests:
+            response = process(request)
+            try:
+                reply.send(response)
+            except ClosedError:
+                pass  # the route stopped waiting for it
     finally:
         server.stop()
 
@@ -184,7 +186,7 @@ from appinfra.app.fastapi.config import IPCConfig
 server = (
     ServerBuilder(lg, "myapi")
     .subprocess
-    # IPC queues (required for subprocess mode): server.request_queue, .response_queue
+    # IPC (required for subprocess mode): server.requests
     .with_ipc()
     # Run as a service of the application's started service Runtime (optional)
     .with_runtime(rt)
@@ -195,9 +197,8 @@ server = (
     # Log isolation
     .with_log_file("/var/log/api.log")
     # IPC tuning
-    .with_poll_interval(0.01)  # Response polling (10ms)
     .with_response_timeout(30.0)  # Per-request timeout
-    .with_max_pending(200)  # Max concurrent requests
+    .with_max_pending(200)  # Max concurrent requests; the requests Chan's capacity
     .with_health_reporting(True)  # Include IPC in health endpoint
     # Or bulk config
     .with_config(IPCConfig(...))
@@ -550,9 +551,8 @@ server = ServerBuilder(lg, "myapi").build()
 server.name  # Server name
 server.config  # ApiConfig
 server.app  # FastAPI instance (built on first access)
-server.is_subprocess_mode  # True if IPC queues configured
-server.request_queue  # Request queue (subprocess mode)
-server.response_queue  # Response queue (subprocess mode)
+server.is_subprocess_mode  # True if IPC is configured
+server.requests  # Chan of (request, reply Chan), homed here (subprocess mode)
 server.port  # Port served on; in subprocess mode, the one the current run bound
 server.process  # Current run's TaskProcess, or None (subprocess mode)
 server.pid  # Current run's pid, or None (subprocess mode)
@@ -575,15 +575,17 @@ The server subprocess exits when:
 - It receives SIGTERM or SIGINT (uvicorn's own signal handling). After SIGINT it ends cleanly and
   is not restarted.
 
-In the first two cases the IPC channel closes before uvicorn drains in-flight requests: handlers
-waiting in `ipc.submit()` or `ipc.stream()` raise `ChannelClosedError` (from
-`appinfra.service`) at once instead of holding the shutdown for the response timeout. Unhandled,
-it becomes a 500; an exception handler can map it to another status such as 503.
+Handlers waiting in `ipc.submit()` or `ipc.stream()` do not hold the shutdown for the response
+timeout. A stop and the parent's death both stop the subprocess's run, failing their wait at once
+with `StoppedError` (from `appinfra.runtime`); a call still out on a dead parent's link fails with
+`ClosedError` (from `appinfra.runtime.chan`). Unhandled, either becomes a 500; an exception
+handler can map it to another status such as 503.
 
 ## IPCChannel
 
-Async IPC for FastAPI route handlers to communicate with the main process. Wraps
-`AsyncChannel` with an `AsyncProcessQueueTransport` from the service package.
+Async IPC for FastAPI route handlers to communicate with the main process. Each request goes to
+the main process on `server.requests`, a process Chan homed there, together with a reply Chan made
+in the subprocess; the main process answers on that reply Chan. No ids, no polling.
 
 ```python
 from fastapi import Request
@@ -592,17 +594,22 @@ from fastapi import Request
 async def process_handler(request: Request):
     ipc: IPCChannel = request.app.state.ipc_channel
 
-    # Submit request and wait for response
-    # Request object must have an `id` attribute for routing
-    response = await ipc.submit(
-        request=WorkRequest(id="unique-id", data="..."),
+    # Any value that pickles; the reply is whatever the main process sends back
+    return await ipc.submit(
+        WorkRequest(data="..."),
         timeout=30.0,  # Optional, defaults to config
     )
-
-    return response
 ```
 
+`submit()` raises `TimeoutError` when no reply comes within the timeout, which covers sending the
+request too, and `RuntimeError` when `max_pending` requests are already in flight. A reply Chan is
+closed once its handler stops waiting, so the main process replying after that gets `ClosedError`
+instead of sending a value nobody reads.
+
 ### Streaming Responses
+
+`stream()` yields each value the main process sends on the reply Chan, until the main process closes
+it:
 
 ```python
 from fastapi.responses import StreamingResponse
@@ -612,10 +619,8 @@ async def stream_handler(request: Request):
     ipc: IPCChannel = request.app.state.ipc_channel
 
     async def generate():
-        async for chunk in ipc.stream(WorkRequest(id="req-id", prompt="...")):
-            yield chunk.data
-            if chunk.is_final:
-                break
+        async for chunk in ipc.stream(WorkRequest(prompt="...")):
+            yield chunk
 
     return StreamingResponse(generate())
 ```
@@ -626,7 +631,8 @@ Complete guide to implementing the subprocess IPC pattern.
 
 ### Message Protocol
 
-Request and response messages **must have an `id` attribute** for routing:
+Messages are plain picklable values, with no fields required by the framework: the reply Chan that
+travels with each request is what routes its answer back.
 
 ```python
 from dataclasses import dataclass
@@ -634,35 +640,21 @@ from dataclasses import dataclass
 
 @dataclass
 class WorkRequest:
-    id: str  # Required: unique identifier for routing
-    prompt: str  # Your data fields
+    prompt: str
     max_tokens: int
 
 
 @dataclass
 class WorkResponse:
-    id: str  # Required: must match request.id
-    result: str  # Your data fields
+    result: str
     error: str | None = None
-
-
-# For streaming responses
-@dataclass
-class StreamChunk:
-    id: str  # Required: must match request.id
-    data: str
-    is_final: bool  # Required: True on last chunk
 ```
-
-The `id` field is how IPCChannel routes responses back to the correct waiting handler. Without it,
-responses are logged as warnings and discarded.
 
 ### Handler Pattern
 
 Handlers access IPCChannel via `request.app.state.ipc_channel`:
 
 ```python
-from uuid import uuid4
 from fastapi import APIRouter, Request, HTTPException
 
 router = APIRouter()
@@ -671,11 +663,7 @@ router = APIRouter()
 @router.post("/generate")
 async def generate(body: GenerateRequest, request: Request):
     ipc = request.app.state.ipc_channel
-
-    # Create request with unique ID (id attribute required for routing)
-    work_request = WorkRequest(
-        id=str(uuid4()), prompt=body.prompt, max_tokens=body.max_tokens
-    )
+    work_request = WorkRequest(prompt=body.prompt, max_tokens=body.max_tokens)
 
     # Submit and wait for response
     response = await ipc.submit(work_request, timeout=60.0)
@@ -694,46 +682,53 @@ from fastapi.responses import StreamingResponse
 @router.post("/stream")
 async def stream(body: GenerateRequest, request: Request):
     ipc = request.app.state.ipc_channel
-    work_request = WorkRequest(
-        id=str(uuid4()), prompt=body.prompt, max_tokens=body.max_tokens
-    )
+    work_request = WorkRequest(prompt=body.prompt, max_tokens=body.max_tokens)
 
     async def generate():
         async for chunk in ipc.stream(work_request):
-            yield chunk.data
-            if chunk.is_final:
-                break
+            yield chunk
 
     return StreamingResponse(generate(), media_type="text/plain")
 ```
 
 ### Main Process Loop
 
-The main process reads requests, processes them, and sends responses:
+The main process receives each request with its reply Chan, and answers there:
 
 ```python
-import multiprocessing as mp
-from queue import Empty
+from appinfra.runtime import Chan
+from appinfra.runtime.chan import ClosedError
 
 
-def run_worker(request_q: mp.Queue, response_q: mp.Queue):
-    """Main process worker loop."""
-    while True:
+def run_worker(requests: Chan) -> None:
+    """Main process worker loop: ends once the requests Chan is closed."""
+    for request, reply in requests:
         try:
-            request = request_q.get(timeout=0.1)
-        except Empty:
-            continue
-
-        # Process the request (your logic here)
-        try:
-            result = do_inference(request.prompt, request.max_tokens)
-            response = WorkResponse(id=request.id, result=result)
+            response = WorkResponse(
+                result=do_inference(request.prompt, request.max_tokens)
+            )
         except Exception as e:
-            response = WorkResponse(id=request.id, result="", error=str(e))
+            response = WorkResponse(result="", error=str(e))
+        try:
+            reply.send(response, timeout=5.0)
+        except ClosedError:
+            pass  # the handler stopped waiting: timed out, or its server ended
 
-        # Response id MUST match request.id for routing
-        response_q.put(response)
+
+def run_stream_worker(requests: Chan) -> None:
+    """For stream(): any number of values, then close() ends the stream."""
+    for request, reply in requests:
+        try:
+            for token in generate_tokens(request.prompt):
+                reply.send(token, timeout=5.0)
+        except ClosedError:
+            pass  # the route stopped reading: stop generating
+        finally:
+            reply.close()  # ends the stream; a no-op once closed
 ```
+
+Every run of the subprocess sends to the same `server.requests`: after a restart the loop goes on
+as it was, and a reply to a request from a run that died raises `ClosedError`.
 
 ### Complete Example
 
@@ -746,7 +741,7 @@ from appinfra.log import Logger
 
 
 def main() -> None:
-    # Build server with IPC (the builder makes the queues)
+    # Build server with IPC (the builder makes server.requests)
     lg = Logger("worker-api")
     server = (
         ServerBuilder(lg, "worker-api")
@@ -765,7 +760,7 @@ def main() -> None:
 
     # Main process handles compute-intensive work
     try:
-        run_worker(server.request_queue, server.response_queue)
+        run_worker(server.requests)
     finally:
         server.stop()
 
@@ -833,9 +828,8 @@ IPC behavior settings:
 from appinfra.app.fastapi import IPCConfig
 
 config = IPCConfig(
-    poll_interval=0.01,  # Response polling (10ms = 100 polls/sec)
     response_timeout=60.0,  # Default request timeout
-    max_pending=100,  # Max pending requests
+    max_pending=100,  # Max pending requests; the requests Chan's capacity
     enable_health_reporting=True,  # IPC status in health endpoint
 )
 ```
@@ -843,11 +837,11 @@ config = IPCConfig(
 ## Architecture
 
 ```
-┌─────────────────┐     mp.Queue      ┌──────────────────┐
-│   Main Process  │ ◄───────────────► │   FastAPI        │
-│                 │    request_q       │   Subprocess     │
-│  - Heavy compute│    response_q     │                  │
-│  - ML inference │                   │  - HTTP handling │
+┌─────────────────┐  server.requests  ┌──────────────────┐
+│   Main Process  │ ◄──────────────── │   FastAPI        │
+│                 │ (request, reply)  │   Subprocess     │
+│  - Heavy compute│ ────────────────► │                  │
+│  - ML inference │   reply.send()    │  - HTTP handling │
 │  - Data loading │                   │  - Routing       │
 └─────────────────┘                   │  - Validation    │
                                       └──────────────────┘

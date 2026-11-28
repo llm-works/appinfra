@@ -288,8 +288,6 @@ class TestServerBuilderValidation:
 
     def test_build_validates_in_subprocess_mode(self, mock_fastapi):
         """Test build() validates handlers when subprocess mode is enabled."""
-        import multiprocessing as mp
-
         from appinfra.app.fastapi.builder.server import ServerBuilder
 
         # Create unpicklable handler (with a lambda that can't be pickled)
@@ -304,16 +302,13 @@ class TestServerBuilderValidation:
         builder._defs.exception_handlers.append(
             ExceptionHandlerDefinition(ValueError, handler)
         )
-        builder._request_q = mp.Queue()
-        builder._response_q = mp.Queue()
+        builder.subprocess.with_ipc()
 
         with pytest.raises(ConfigError, match="cannot be pickled"):
             builder.build()
 
     def test_build_allows_picklable_handlers(self, mock_fastapi):
         """Test build() allows picklable handlers in subprocess mode."""
-        import multiprocessing as mp
-
         from appinfra.app.fastapi.builder.server import ServerBuilder
 
         mock_lg = MagicMock()
@@ -323,8 +318,7 @@ class TestServerBuilderValidation:
         builder._defs.exception_handlers.append(
             ExceptionHandlerDefinition(ValueError, handler)
         )
-        builder._request_q = mp.Queue()
-        builder._response_q = mp.Queue()
+        builder.subprocess.with_ipc()
 
         # Should not raise
         server = builder.build()

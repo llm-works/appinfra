@@ -322,24 +322,45 @@ class TestSubprocessConfigurer:
             mock.return_value = MagicMock()
             yield mock
 
-    @pytest.fixture(autouse=True)
-    def context(self):
-        """The context with_ipc() makes its queues from, mocked: no queue."""
-        with patch("appinfra.app.fastapi.builder.subprocess.process_context") as ctx:
-            yield ctx.return_value
-
-    def test_ipc_configuration(self, mock_fastapi, mock_lg, context):
-        """with_ipc() makes both queues from the context the child starts in."""
+    def test_with_ipc_gives_the_server_a_process_chan(self, mock_fastapi, mock_lg):
+        """Holding max_pending as set when the server is built."""
         from appinfra.app.fastapi.builder.server import ServerBuilder
 
-        request_q, response_q = MagicMock(), MagicMock()
-        context.Queue.side_effect = [request_q, response_q]
+        builder = ServerBuilder(mock_lg, "test-api")
+        builder.subprocess.with_ipc().with_max_pending(7).done()
+        requests = builder.build().requests
+
+        assert requests is not None
+        for i in range(7):
+            requests.send((i, None), timeout=0)
+        with pytest.raises(TimeoutError):
+            requests.send((7, None), timeout=0)
+
+    def test_with_ipc_alone_sizes_requests_from_the_servers_config(
+        self, mock_fastapi, mock_lg
+    ):
+        """One IPCConfig, the server's, sizes the requests Chan and is what
+        its subprocess bounds requests in flight by."""
+        from appinfra.app.fastapi.builder.server import ServerBuilder
+        from appinfra.app.fastapi.config.ipc import IPCConfig
 
         builder = ServerBuilder(mock_lg, "test-api")
         builder.subprocess.with_ipc().done()
+        server = builder.build()
 
-        assert builder._request_q is request_q
-        assert builder._response_q is response_q
+        ipc = server.config.ipc
+        assert isinstance(ipc, IPCConfig)
+        requests = server.requests
+        assert requests is not None
+        for i in range(ipc.max_pending):
+            requests.send((i, None), timeout=0)
+        with pytest.raises(TimeoutError):
+            requests.send((ipc.max_pending, None), timeout=0)
+
+    def test_without_ipc_the_server_has_no_requests(self, mock_fastapi, mock_lg):
+        from appinfra.app.fastapi.builder.server import ServerBuilder
+
+        assert ServerBuilder(mock_lg, "test-api").build().requests is None
 
     def test_auto_restart_configuration(self, mock_fastapi, mock_lg):
         """Test auto-restart configuration."""
@@ -406,10 +427,10 @@ class TestSubprocessConfigurer:
 
         assert builder._api.ipc is None
 
-        builder.subprocess.with_poll_interval(0.05).done()
+        builder.subprocess.with_response_timeout(5.0).done()
 
         assert builder._api.ipc is not None
-        assert builder._api.ipc.poll_interval == 0.05
+        assert builder._api.ipc.response_timeout == 5.0
 
     def test_ipc_config(self, mock_fastapi, mock_lg):
         """Test IPCConfig configuration."""
@@ -424,15 +445,6 @@ class TestSubprocessConfigurer:
         assert builder._api.ipc == ipc_config
         assert builder._api.ipc is not ipc_config
         assert builder._api.ipc.max_pending == 500
-
-    def test_poll_interval(self, mock_fastapi, mock_lg):
-        """Test poll interval configuration."""
-        from appinfra.app.fastapi.builder.server import ServerBuilder
-
-        builder = ServerBuilder(mock_lg, "test-api")
-        builder.subprocess.with_ipc().with_poll_interval(0.05).done()
-
-        assert builder._api.ipc.poll_interval == 0.05
 
     def test_reopening_facet_keeps_earlier_settings(self, mock_fastapi, mock_lg):
         """Log file set in one opening survives auto-restart set in another."""

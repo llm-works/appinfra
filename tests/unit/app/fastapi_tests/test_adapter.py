@@ -3,13 +3,15 @@
 
 """Tests for FastAPIAdapter."""
 
+import asyncio
 import pickle
 from contextlib import asynccontextmanager
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from appinfra.app.fastapi.config.api import ApiConfig
+from appinfra.app.fastapi.config.ipc import IPCConfig
 from appinfra.app.fastapi.runtime.adapter import (
     CORSDefinition,
     ExceptionCallbackDefinition,
@@ -24,6 +26,8 @@ from appinfra.app.fastapi.runtime.adapter import (
     RouteDefinition,
     RouterDefinition,
 )
+from appinfra.app.fastapi.runtime.ipc import IPCChannel
+from appinfra.runtime import Chan
 from appinfra.subprocess import Lazy
 
 # Module-level factories used by Lazy tests. Must be importable via qualname
@@ -1211,64 +1215,20 @@ class TestSubprocessLoggerInjection:
         assert middleware_decorator.call_count == 0
 
 
-class TestIPCLifespanIntegration:
-    """Tests for IPC lifecycle integration with lifespan."""
-
+class TestLifespan:
     @pytest.mark.asyncio
-    async def test_ipc_lifespan_starts_and_stops_polling(self):
-        """Test that IPC polling is started and stopped via lifespan."""
-        from appinfra.app.fastapi.runtime.adapter import FastAPIAdapter
+    async def test_a_user_lifespan_alone_is_returned_unchanged(self):
+        """Nothing wraps it: IPC has no lifecycle of its own."""
+        from contextlib import asynccontextmanager
 
-        mock_ipc_channel = MagicMock()
-        mock_ipc_channel.start_polling = AsyncMock()
-        mock_ipc_channel.stop_polling = AsyncMock()
-
-        with (
-            patch("appinfra.app.fastapi.runtime.adapter.FASTAPI_AVAILABLE", True),
-            patch("appinfra.app.fastapi.runtime.adapter.FastAPI"),
-            patch("appinfra.app.fastapi.runtime.adapter.CORSMiddleware"),
-        ):
-            adapter = FastAPIAdapter(ApiConfig())
-            lifespan = adapter._build_lifespan(ipc_channel=mock_ipc_channel)
-
-            assert lifespan is not None
-
-            # Run the lifespan
-            mock_app = MagicMock()
-            async with lifespan(mock_app):
-                # During lifespan, polling should have started
-                mock_ipc_channel.start_polling.assert_called_once()
-                mock_ipc_channel.stop_polling.assert_not_called()
-
-            # After lifespan exits, polling should have stopped
-            mock_ipc_channel.stop_polling.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_ipc_lifespan_with_user_startup_callbacks(self):
-        """Test that IPC + user startup callbacks work together (bug fix test)."""
         from appinfra.app.fastapi.runtime.adapter import (
             FastAPIAdapter,
-            LifecycleCallbackDefinition,
+            LifespanDefinition,
         )
 
-        call_order = []
-
-        async def user_startup(app):
-            call_order.append("user_startup")
-
-        async def user_shutdown(app):
-            call_order.append("user_shutdown")
-
-        mock_ipc_channel = MagicMock()
-
-        async def mock_start_polling():
-            call_order.append("ipc_start")
-
-        async def mock_stop_polling():
-            call_order.append("ipc_stop")
-
-        mock_ipc_channel.start_polling = mock_start_polling
-        mock_ipc_channel.stop_polling = mock_stop_polling
+        @asynccontextmanager
+        async def user_lifespan(app):
+            yield
 
         with (
             patch("appinfra.app.fastapi.runtime.adapter.FASTAPI_AVAILABLE", True),
@@ -1276,132 +1236,85 @@ class TestIPCLifespanIntegration:
             patch("appinfra.app.fastapi.runtime.adapter.CORSMiddleware"),
         ):
             adapter = FastAPIAdapter(ApiConfig())
-            adapter.add_startup_callback(
-                LifecycleCallbackDefinition(callback=user_startup, name="user_startup")
-            )
+            adapter.set_lifespan(LifespanDefinition(lifespan=user_lifespan))
+
+            assert adapter._build_lifespan() is user_lifespan
+
+    @pytest.mark.asyncio
+    async def test_lifecycle_callbacks_reach_the_parent_over_ipc(self):
+        """The IPC channel is on app.state before the lifespan starts, and
+        still answers in the shutdown callbacks."""
+        got = []
+
+        async def startup(app):
+            got.append(await app.state.ipc_channel.submit("up", timeout=5.0))
+
+        async def shutdown(app):
+            got.append(await app.state.ipc_channel.submit("down", timeout=5.0))
+
+        def configure(adapter):
+            adapter.add_startup_callback(LifecycleCallbackDefinition(callback=startup))
             adapter.add_shutdown_callback(
-                LifecycleCallbackDefinition(
-                    callback=user_shutdown, name="user_shutdown"
-                )
+                LifecycleCallbackDefinition(callback=shutdown)
             )
 
-            lifespan = adapter._build_lifespan(ipc_channel=mock_ipc_channel)
-
-            mock_app = MagicMock()
-            async with lifespan(mock_app):
-                pass
-
-            # Verify order: IPC starts first, then user startup
-            # On shutdown: user shutdown first, then IPC stops
-            assert call_order == [
-                "ipc_start",
-                "user_startup",
-                "user_shutdown",
-                "ipc_stop",
-            ]
+        async with _parent() as ipc:
+            app, lifespan = _built(configure, ipc)
+            async with lifespan(app):
+                assert got == ["upup"]
+        assert got == ["upup", "downdown"]
 
     @pytest.mark.asyncio
-    async def test_ipc_lifespan_with_explicit_user_lifespan(self):
-        """Test that IPC wraps user-provided lifespan correctly."""
-        from contextlib import asynccontextmanager
-
-        from appinfra.app.fastapi.runtime.adapter import (
-            FastAPIAdapter,
-            LifespanDefinition,
-        )
-
-        call_order = []
+    async def test_a_user_lifespan_reaches_the_parent_over_ipc(self):
+        """Before its yield and after it."""
+        got = []
 
         @asynccontextmanager
         async def user_lifespan(app):
-            call_order.append("user_startup")
+            got.append(await app.state.ipc_channel.submit("up", timeout=5.0))
             yield
-            call_order.append("user_shutdown")
+            got.append(await app.state.ipc_channel.submit("down", timeout=5.0))
 
-        mock_ipc_channel = MagicMock()
-
-        async def mock_start_polling():
-            call_order.append("ipc_start")
-
-        async def mock_stop_polling():
-            call_order.append("ipc_stop")
-
-        mock_ipc_channel.start_polling = mock_start_polling
-        mock_ipc_channel.stop_polling = mock_stop_polling
-
-        with (
-            patch("appinfra.app.fastapi.runtime.adapter.FASTAPI_AVAILABLE", True),
-            patch("appinfra.app.fastapi.runtime.adapter.FastAPI"),
-            patch("appinfra.app.fastapi.runtime.adapter.CORSMiddleware"),
-        ):
-            adapter = FastAPIAdapter(ApiConfig())
+        def configure(adapter):
             adapter.set_lifespan(LifespanDefinition(lifespan=user_lifespan))
 
-            lifespan = adapter._build_lifespan(ipc_channel=mock_ipc_channel)
+        async with _parent() as ipc:
+            app, lifespan = _built(configure, ipc)
+            async with lifespan(app):
+                assert got == ["upup"]
+        assert got == ["upup", "downdown"]
 
-            mock_app = MagicMock()
-            async with lifespan(mock_app):
-                pass
 
-            # IPC wraps user lifespan
-            assert call_order == [
-                "ipc_start",
-                "user_startup",
-                "user_shutdown",
-                "ipc_stop",
-            ]
+@asynccontextmanager
+async def _parent():
+    """An IPC channel whose parent, a task on this loop, answers each request
+    with its value doubled until the requests Chan is closed."""
+    requests = Chan(1, process=True)
 
-    @pytest.mark.asyncio
-    async def test_no_ipc_returns_user_lifespan_unchanged(self):
-        """Test that without IPC, user lifespan is returned unchanged."""
-        from contextlib import asynccontextmanager
+    async def answer():
+        async for data, reply in requests:
+            await reply.asend(data * 2)
 
-        from appinfra.app.fastapi.runtime.adapter import (
-            FastAPIAdapter,
-            LifespanDefinition,
-        )
+    answering = asyncio.create_task(answer())
+    try:
+        yield IPCChannel(requests, IPCConfig())
+    finally:
+        requests.close()
+        await answering
 
-        @asynccontextmanager
-        async def user_lifespan(app):
-            yield
 
-        with (
-            patch("appinfra.app.fastapi.runtime.adapter.FASTAPI_AVAILABLE", True),
-            patch("appinfra.app.fastapi.runtime.adapter.FastAPI"),
-            patch("appinfra.app.fastapi.runtime.adapter.CORSMiddleware"),
-        ):
-            adapter = FastAPIAdapter(ApiConfig())
-            adapter.set_lifespan(LifespanDefinition(lifespan=user_lifespan))
-
-            # Without IPC channel, should return user lifespan directly
-            lifespan = adapter._build_lifespan(ipc_channel=None)
-            assert lifespan is user_lifespan
-
-    @pytest.mark.asyncio
-    async def test_ipc_only_no_user_callbacks(self):
-        """Test IPC lifespan when no user callbacks are provided."""
-        from appinfra.app.fastapi.runtime.adapter import FastAPIAdapter
-
-        mock_ipc_channel = MagicMock()
-        mock_ipc_channel.start_polling = AsyncMock()
-        mock_ipc_channel.stop_polling = AsyncMock()
-
-        with (
-            patch("appinfra.app.fastapi.runtime.adapter.FASTAPI_AVAILABLE", True),
-            patch("appinfra.app.fastapi.runtime.adapter.FastAPI"),
-            patch("appinfra.app.fastapi.runtime.adapter.CORSMiddleware"),
-        ):
-            adapter = FastAPIAdapter(ApiConfig())
-            # No user callbacks added
-
-            lifespan = adapter._build_lifespan(ipc_channel=mock_ipc_channel)
-            assert lifespan is not None
-
-            mock_app = MagicMock()
-            async with lifespan(mock_app):
-                mock_ipc_channel.start_polling.assert_called_once()
-
-            mock_ipc_channel.stop_polling.assert_called_once()
+def _built(configure, ipc):
+    """The app an adapter that *configure* set up builds with *ipc*, and the
+    lifespan it handed FastAPI."""
+    with (
+        patch("appinfra.app.fastapi.runtime.adapter.FASTAPI_AVAILABLE", True),
+        patch("appinfra.app.fastapi.runtime.adapter.FastAPI") as fastapi,
+        patch("appinfra.app.fastapi.runtime.adapter.CORSMiddleware"),
+    ):
+        adapter = FastAPIAdapter(ApiConfig())
+        configure(adapter)
+        app = adapter.build(ipc_channel=ipc)
+    return app, fastapi.call_args.kwargs["lifespan"]
 
 
 class TestLazy:

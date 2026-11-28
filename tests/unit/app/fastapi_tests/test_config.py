@@ -91,7 +91,6 @@ class TestIPCConfig:
     def test_default_values(self):
         """Test default configuration values."""
         config = IPCConfig()
-        assert config.poll_interval == 0.01
         assert config.response_timeout == 60.0
         assert config.max_pending == 100
         assert config.enable_health_reporting is True
@@ -99,12 +98,10 @@ class TestIPCConfig:
     def test_custom_values(self):
         """Test custom configuration values."""
         config = IPCConfig(
-            poll_interval=0.05,
             response_timeout=30.0,
             max_pending=50,
             enable_health_reporting=False,
         )
-        assert config.poll_interval == 0.05
         assert config.response_timeout == 30.0
         assert config.max_pending == 50
         assert config.enable_health_reporting is False

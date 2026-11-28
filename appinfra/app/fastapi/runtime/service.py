@@ -5,13 +5,14 @@
 
 from __future__ import annotations
 
-import multiprocessing as mp
 from ctypes import c_int
 from multiprocessing.context import BaseContext
 from typing import TYPE_CHECKING, Any
 
+from ....runtime import Chan
 from ....service import Service, State
 from ..errors import ConfigError
+from .ipc import IPCChannel, Request
 
 if TYPE_CHECKING:
     from ....log import Logger
@@ -33,9 +34,9 @@ class UvicornService(Service):
     teardown run there, its log records are forwarded to the parent's logger.
 
     The configuration is checked here, in the parent, when the service is made.
-    What the child shares with the parent, the port it bound and the IPC
-    queues, is made from the context children start in
-    (``Runtime.process_context``) and handed to the child with the service.
+    The port the child bound is shared through a value made from the context
+    children start in (``Runtime.process_context``); the requests Chan, homed
+    in the parent, crosses into each run's child with the service.
 
     Example:
         service = UvicornService(lg, "myapi", adapter, config, rt.process_context)
@@ -51,8 +52,7 @@ class UvicornService(Service):
         adapter: FastAPIAdapter,
         config: ApiConfig,
         context: BaseContext,
-        request_q: mp.Queue[Any] | None = None,
-        response_q: mp.Queue[Any] | None = None,
+        requests: Chan[Request] | None = None,
     ) -> None:
         """Initialize uvicorn service.
 
@@ -63,8 +63,8 @@ class UvicornService(Service):
             config: API configuration; port 0 lets the OS pick the port
             context: The multiprocessing context its process starts in, which
                 makes the value the child writes its bound port to
-            request_q: IPC request queue (optional, for subprocess mode)
-            response_q: IPC response queue (optional, for subprocess mode)
+            requests: The process Chan the routes' IPC requests go to; None
+                for a server without IPC
 
         Raises:
             ConfigError: If the configuration cannot run in a subprocess.
@@ -76,8 +76,7 @@ class UvicornService(Service):
         self._config = config
         # Written by the child once its server is up; 0 while none is
         self._bound_port: c_int = context.RawValue("i", 0)
-        self._request_q = request_q
-        self._response_q = response_q
+        self._requests = requests
         # Set by run() in the subprocess
         self._server: WatchedServer | None = None
 
@@ -105,18 +104,16 @@ class UvicornService(Service):
         )
         self._adapter.inject_subprocess_logger(self._lg)
 
-    def _create_ipc_channel(self) -> Any:
-        """Create IPC channel if queues are configured."""
-        from .ipc import IPCChannel
-
-        if self._request_q is None or self._response_q is None:
+    def _create_ipc_channel(self) -> IPCChannel | None:
+        """The routes' IPC channel, over the requests Chan if there is one."""
+        if self._requests is None:
             return None
 
         if self._config.ipc is None:
             from ..config.ipc import IPCConfig
 
             self._config.ipc = IPCConfig()
-        return IPCChannel(self._request_q, self._response_q, self._config.ipc)
+        return IPCChannel(self._requests, self._config.ipc)
 
     def _get_config_files_for_watcher(self) -> list[str]:
         """Get config files for hot-reload watcher.
@@ -167,7 +164,7 @@ class UvicornService(Service):
             ipc_channel = self._create_ipc_channel()
             app = self._adapter.build(ipc_channel=ipc_channel)
             config = self._build_uvicorn_config(app)
-            server = WatchedServer(config, self.stopping, ipc_channel, bound_port)
+            server = WatchedServer(config, self.stopping, bound_port)
             self._server = server
             try:
                 server.run()
