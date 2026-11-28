@@ -110,10 +110,11 @@ memory (Linux), not its resident set, which counts the shared pages in every chi
 
 - before its first child, the runtime sets the server's preload to the main module and every
   `appinfra` module the process has imported by then
-- the server imports the main module only when Python hands it the module's file path: recent
-  3.14 releases do for a script run by path (`python app.py`), 3.12 and earlier do not, and no
-  version does for `python -m pkg`. Where it does not, each child imports the main module itself,
-  running its module-level code, but what it imports from appinfra is already shared
+- the server imports the main module only when Python hands it the module's file path: 3.13.8
+  and later, and 3.14.1 and later, do for a script run by path (`python app.py`); earlier
+  releases, 3.12 included, do not, and no version does for `python -m pkg`. Where it does not,
+  each child imports the main module itself, running its module-level code, but what it imports
+  from appinfra is already shared
 - the preload list is process-wide: it replaces one the application set with
   `set_forkserver_preload()`. Where the main module is not preloaded, a module it imports from
   outside appinfra, a large dependency say, is still imported by each child on its own

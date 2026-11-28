@@ -236,9 +236,9 @@ def _preload(ctx: Any) -> None:
     """Have the fork server import, before it forks a child, the main module
     and every module of _PRELOADED this process has imported by now; once per
     process. Each child then shares them with the others instead of importing
-    its own copy: Python before 3.14 never hands the server the main module's
-    path, nor does any for a main module run with -m, so a child would import
-    the main module, and all it imports, alone.
+    its own copy: Python before 3.13.8, and 3.14.0, never hands the server the
+    main module's path, nor does any version for a main module run with -m, so
+    a child would import the main module, and all it imports, alone.
     Process-wide, and replacing a preload the application set; it takes
     effect only before the server starts."""
     root = _PRELOADED
