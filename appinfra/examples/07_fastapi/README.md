@@ -98,9 +98,11 @@ kill -9 <PID>
 - Check if uvicorn is installed: `pip install uvicorn`
 - Verify multiprocessing spawn method is compatible
 
-### IPC messages not received
-- Ensure queues are created before server start
-- Check queue timeouts in your message handlers
+### IPC requests not answered
+- Check the server was built with `.subprocess.with_ipc()`: without it, `server.requests` is `None`
+- Check the main process reads `server.requests` and answers each request on its reply Chan
+- Check it replies before the route's timeout (`submit(..., timeout=...)`, default
+  `IPCConfig.response_timeout`); a reply after that raises `ChanClosedError`
 
 ## Related Documentation
 

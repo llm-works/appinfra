@@ -41,6 +41,7 @@ computation:
 ```python
 from appinfra.app.fastapi import ServerBuilder
 from appinfra.log import Logger
+from appinfra.runtime.chan import ClosedError
 
 # health and process at module scope: the server's process imports them
 
@@ -63,7 +64,11 @@ def main() -> None:
     # Main process answers each request on the Chan it came with
     try:
         for request, reply in server.requests:
-            reply.send(process(request))
+            response = process(request)
+            try:
+                reply.send(response)
+            except ClosedError:
+                pass  # the route stopped waiting for it
     finally:
         server.stop()
 
@@ -571,9 +576,10 @@ The server subprocess exits when:
   is not restarted.
 
 Handlers waiting in `ipc.submit()` or `ipc.stream()` do not hold the shutdown for the response
-timeout. A stop fails their wait at once with `StoppedError` (from `appinfra.runtime`); a dead
-parent fails every call on its Chans with `ClosedError` (from `appinfra.runtime.chan`). Unhandled,
-either becomes a 500; an exception handler can map it to another status such as 503.
+timeout. A stop and the parent's death both stop the subprocess's run, failing their wait at once
+with `StoppedError` (from `appinfra.runtime`); a call still out on a dead parent's link fails with
+`ClosedError` (from `appinfra.runtime.chan`). Unhandled, either becomes a 500; an exception
+handler can map it to another status such as 503.
 
 ## IPCChannel
 
@@ -712,9 +718,13 @@ def run_worker(requests: Chan) -> None:
 def run_stream_worker(requests: Chan) -> None:
     """For stream(): any number of values, then close() ends the stream."""
     for request, reply in requests:
-        for token in generate_tokens(request.prompt):
-            reply.send(token, timeout=5.0)
-        reply.close()
+        try:
+            for token in generate_tokens(request.prompt):
+                reply.send(token, timeout=5.0)
+        except ClosedError:
+            pass  # the route stopped reading: stop generating
+        finally:
+            reply.close()  # ends the stream; a no-op once closed
 ```
 
 Every run of the subprocess sends to the same `server.requests`: after a restart the loop goes on

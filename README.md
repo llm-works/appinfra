@@ -448,6 +448,7 @@ stays responsive while workers handle requests, with automatic restart on failur
 
 ```python
 from appinfra.app.fastapi import ServerBuilder
+from appinfra.runtime import ChanClosedError
 
 server = (
     ServerBuilder(lg, "api")
@@ -459,11 +460,13 @@ server = (
 )
 
 server.start_subprocess()  # Non-blocking, runs in subprocess
-for (
-    request,
-    reply,
-) in server.requests:  # each route's request, with the Chan to reply on
-    reply.send(handle(request))
+# Each route's request comes with the Chan to reply on
+for request, reply in server.requests:
+    response = handle(request)
+    try:
+        reply.send(response)
+    except ChanClosedError:
+        pass  # the route stopped waiting for it
 ```
 
 ## Completeness

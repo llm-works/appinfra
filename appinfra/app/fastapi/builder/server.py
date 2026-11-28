@@ -99,7 +99,11 @@ class ServerBuilder:
 
         # Main process answers each request on the Chan it came with
         for request, reply in server.requests:
-            reply.send(process(request))
+            response = process(request)
+            try:
+                reply.send(response)
+            except ChanClosedError:
+                pass  # the route stopped waiting for it
     """
 
     def __init__(self, lg: Logger, name: str) -> None:

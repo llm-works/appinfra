@@ -25,6 +25,14 @@ Example (Simple Server - Direct Mode):
     server.start()  # Blocking
 
 Example (Subprocess Mode with IPC):
+    import threading
+
+    from fastapi import Request
+
+    from appinfra.app.fastapi import ServerBuilder
+    from appinfra.log import Logger
+    from appinfra.runtime import ChanClosedError
+
     async def work(data: str, request: Request):
         ipc = request.app.state.ipc_channel
         return {"result": await ipc.submit(data, timeout=10.0)}
@@ -42,7 +50,10 @@ Example (Subprocess Mode with IPC):
     # the requests Chan is closed; a restarted server sends to the same one
     def answer():
         for data, reply in server.requests:
-            reply.send(data.upper())
+            try:
+                reply.send(data.upper())
+            except ChanClosedError:
+                pass  # the route stopped waiting for it
 
     serving = threading.Thread(target=answer)
     serving.start()

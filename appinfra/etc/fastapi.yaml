@@ -66,4 +66,8 @@ ipc:
 #       .build())
 #   server.start_subprocess()
 #   for request, reply in server.requests:
-#       reply.send(handle(request))
+#       response = handle(request)
+#       try:
+#           reply.send(response)
+#       except ChanClosedError:
+#           pass  # the route stopped waiting for it

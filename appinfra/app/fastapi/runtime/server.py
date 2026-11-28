@@ -73,7 +73,11 @@ class Server:
         server = ServerBuilder(lg, "myapi").subprocess.with_ipc().done().build()
         server.start_subprocess()  # Non-blocking
         for request, reply in server.requests:
-            reply.send(handle(request))
+            response = handle(request)
+            try:
+                reply.send(response)
+            except ChanClosedError:
+                pass  # the route stopped waiting for it
     """
 
     def __init__(
