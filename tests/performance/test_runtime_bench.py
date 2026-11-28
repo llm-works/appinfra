@@ -29,15 +29,15 @@ import pytest
 from appinfra.log import LogConfig, LoggerFactory
 from appinfra.runtime import Runtime
 from appinfra.runtime.bench import (
+    loop_cost,
+    loop_rates,
+    loop_round_trip_rate,
+    loop_runtime_rates,
     parked,
     process_cost,
     process_rates,
     process_round_trip_rate,
     process_runtime_rates,
-    round_trip_rate,
-    runtime_rates,
-    task_cost,
-    task_rates,
     thread_cost,
     thread_rates,
     thread_round_trip_rate,
@@ -98,7 +98,7 @@ def _idle_cpu(window: float) -> float:
 
 class TestTaskCost:
     def test_memory_per_parked_task(self, rt):
-        cost = task_cost(rt, TASKS)
+        cost = loop_cost(rt, TASKS)
 
         print(
             f"\nnet cost of a parked loop task ({TASKS:,}): {cost.net:,.0f} B each: "
@@ -109,7 +109,7 @@ class TestTaskCost:
     def test_spawn_and_cancel_rate(self, rt):
         """spawn() until each runs, then cancel() and wait() one at a time."""
         floor = 5_000 * RATE_SHARE
-        spawn, cancel = rates_over(floor, lambda: task_rates(rt, TASKS))
+        spawn, cancel = rates_over(floor, lambda: loop_rates(rt, TASKS))
 
         print(f"\nspawn: {spawn:,.0f}/s  cancel: {cancel:,.0f}/s ({TASKS:,})")
         assert spawn > floor, f"spawn: {spawn:,.0f}/s"
@@ -118,7 +118,7 @@ class TestTaskCost:
     def test_runtime_spawn_and_stop_rate(self):
         """spawn() into a runtime of its own, then one stop() of it."""
         floor = 5_000 * RATE_SHARE
-        spawn, stop = rates_over(floor, lambda: runtime_rates(LG, TASKS))
+        spawn, stop = rates_over(floor, lambda: loop_runtime_rates(LG, TASKS))
 
         print(f"\nruntime spawn: {spawn:,.0f}/s  stop: {stop:,.0f}/s ({TASKS:,})")
         assert spawn > floor, f"spawn: {spawn:,.0f}/s"
@@ -141,7 +141,7 @@ class TestTaskCost:
     )
     def test_round_trip_rate(self, rt):
         """Round trips from a task to a doubler task and back, over channels."""
-        trips = round_trip_rate(rt, TASKS)
+        trips = loop_round_trip_rate(rt, TASKS)
 
         print(f"\nround trips: {trips:,.0f}/s")
         assert trips > 10_000, f"{trips:,.0f} round trips/s"

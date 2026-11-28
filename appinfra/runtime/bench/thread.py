@@ -66,23 +66,34 @@ def _arrived(arrivals: ThreadArrivals, count: int, what: str) -> None:
 
 
 def _start_plain(count: int) -> _Parked:
-    """*count* plain threads, each parked by the time this returns."""
+    """*count* plain threads, each parked by the time this returns. If they do
+    not all start, those that did are released: nothing else sets their event."""
     arrivals, event = ThreadArrivals(count), threading.Event()
     plain = [
         threading.Thread(target=_parked, args=(arrivals, event), daemon=True)
         for _ in range(count)
     ]
-    for thread in plain:
-        thread.start()
-    _arrived(arrivals, count, "threads")
+    try:
+        for thread in plain:
+            thread.start()
+        _arrived(arrivals, count, "threads")
+    except BaseException:
+        event.set()
+        raise
     return _Parked(event, plain, [])
 
 
 def _start_tasks(tasks: Runtime, count: int) -> _Parked:
-    """*count* thread tasks on *tasks*, each parked by the time this returns."""
+    """*count* thread tasks on *tasks*, each parked by the time this returns. If
+    they do not all start, those that did are released: they park on the event,
+    not on their token, so a stop of *tasks* would not."""
     arrivals, event = ThreadArrivals(count), threading.Event()
-    spawned = [tasks.spawn(_parked, arrivals, event) for _ in range(count)]
-    _arrived(arrivals, count, "thread tasks")
+    try:
+        spawned = [tasks.spawn(_parked, arrivals, event) for _ in range(count)]
+        _arrived(arrivals, count, "thread tasks")
+    except BaseException:
+        event.set()
+        raise
     return _Parked(event, [], spawned)
 
 

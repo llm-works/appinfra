@@ -34,19 +34,19 @@ from appinfra.app import AppBuilder, Tool  # noqa: E402
 from appinfra.log import Logger  # noqa: E402
 from appinfra.runtime import Runtime  # noqa: E402
 from appinfra.runtime.bench import (  # noqa: E402
+    loop_cost,
+    loop_rates,
+    loop_round_trip_rate,
+    loop_runtime_rates,
     process_cost,
     process_rates,
     process_round_trip_rate,
     process_runtime_rates,
-    task_cost,
-    task_rates,
     thread_cost,
     thread_rates,
     thread_round_trip_rate,
     thread_runtime_rates,
 )
-from appinfra.runtime.bench import round_trip_rate as task_round_trip_rate  # noqa: E402
-from appinfra.runtime.bench import runtime_rates as task_runtime_rates  # noqa: E402
 from appinfra.service import Runtime as ServiceRuntime  # noqa: E402
 from appinfra.service.bench import (  # noqa: E402
     parked_maker,
@@ -141,13 +141,13 @@ def _measure_tasks(lg: Logger, count: int) -> _Column:
     """A loop task's numbers, over *count* tasks."""
     with Runtime(lg) as rt:
         lg.info("measuring memory per task...", extra={"tasks": count})
-        cost = task_cost(rt, count)
+        cost = loop_cost(rt, count)
         lg.info("measuring task spawn and cancel...", extra={"tasks": count})
-        spawn, cancel = task_rates(rt, count)
+        spawn, cancel = loop_rates(rt, count)
         lg.info("measuring channel round trips...", extra={"round_trips": count})
-        trips = task_round_trip_rate(rt, count)
+        trips = loop_round_trip_rate(rt, count)
     lg.info("measuring runtime spawn and stop...", extra={"tasks": count})
-    rt_spawn, rt_stop = task_runtime_rates(lg, count)
+    rt_spawn, rt_stop = loop_runtime_rates(lg, count)
     return _Column(
         count,
         cost.net,

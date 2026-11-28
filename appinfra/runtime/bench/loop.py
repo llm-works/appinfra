@@ -154,7 +154,7 @@ def parked(tasks: Runtime, count: int, *, receiving: bool = False) -> Iterator[N
         cancel_all(spawned)
 
 
-def task_rates(tasks: Runtime, count: int) -> tuple[float, float]:
+def loop_rates(tasks: Runtime, count: int) -> tuple[float, float]:
     """Tasks per second spawned and running, over *count* parked tasks on the
     loop of *tasks*, and tasks per second that cancel() and wait() then end,
     one task after the other.
@@ -165,7 +165,7 @@ def task_rates(tasks: Runtime, count: int) -> tuple[float, float]:
     return spawn_and_cancel_rates(tasks, count, _spawn_parked)
 
 
-def runtime_rates(lg: Logger, count: int) -> tuple[float, float]:
+def loop_runtime_rates(lg: Logger, count: int) -> tuple[float, float]:
     """Tasks per second spawned and running, over *count* parked tasks on a
     runtime of its own, and tasks per second its one stop() then ends: it
     stops every task's token, cancels the tasks and shuts the loop down.
@@ -191,7 +191,7 @@ async def _round_trips(inbox: Chan[int], outbox: Chan[int], count: int) -> float
     return count / (time.perf_counter() - began)
 
 
-def round_trip_rate(tasks: Runtime, count: int) -> float:
+def loop_round_trip_rate(tasks: Runtime, count: int) -> float:
     """Round trips per second, *count* of them, from a task on the loop of
     *tasks* to a doubler task and back, over two channels.
 
@@ -211,7 +211,7 @@ def round_trip_rate(tasks: Runtime, count: int) -> float:
         doubler.wait(timeout=60.0)
 
 
-def task_cost(tasks: Runtime, count: int) -> TaskCost:
+def loop_cost(tasks: Runtime, count: int) -> TaskCost:
     """The cost of a parked task on the loop of *tasks*, over *count* coroutines
     run once as plain asyncio tasks and once as runtime tasks, each measured
     warmed (bytes_per_warmed()).

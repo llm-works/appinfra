@@ -9,7 +9,13 @@ scripts/runtime_bench.py prints these numbers next to appinfra.service.bench's, 
 measures services the same way; the performance tests assert on them.
 """
 
-from .loop import parked, round_trip_rate, runtime_rates, task_cost, task_rates
+from .loop import (
+    loop_cost,
+    loop_rates,
+    loop_round_trip_rate,
+    loop_runtime_rates,
+    parked,
+)
 from .measure import (
     Arrivals,
     TaskCost,
@@ -40,15 +46,15 @@ __all__ = [
     "bytes_per_warmed",
     "cancel_all",
     "check_count",
+    "loop_cost",
+    "loop_rates",
+    "loop_round_trip_rate",
+    "loop_runtime_rates",
     "parked",
     "process_cost",
     "process_rates",
     "process_round_trip_rate",
     "process_runtime_rates",
-    "round_trip_rate",
-    "runtime_rates",
-    "task_cost",
-    "task_rates",
     "thread_cost",
     "thread_rates",
     "thread_round_trip_rate",
