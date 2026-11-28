@@ -201,7 +201,11 @@ class Runtime:
                 raise RuntimeError("runtime is not running")
             task_id = self._next_task_id
             self._next_task_id += 1
-            t = self._task_for(task_id, name, fn, args, token, process, derive_lg)
+            try:
+                t = self._task_for(task_id, name, fn, args, token, process, derive_lg)
+            except BaseException:  # e.g. derive_lg's name held by a library's logger
+                token.detach()
+                raise
             t.done_chan = done
             t.detached = done is not None
             self._tasks[task_id] = t
@@ -594,9 +598,10 @@ def _lg_suffix(suffix: object) -> str | None:
         return None
     if not isinstance(suffix, str):
         raise TypeError(f"derive_lg must be a string, not {type(suffix).__name__}")
-    if not suffix:
+    plain = str.__str__(suffix)  # checked as what it becomes, not as its class says
+    if not plain:
         raise ValueError("derive_lg must not be empty")
-    return str.__str__(suffix)
+    return plain
 
 
 def _snapshot(end: TaskDone) -> TaskDone:

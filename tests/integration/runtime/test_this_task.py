@@ -14,7 +14,7 @@ from typing import Any
 
 import pytest
 
-from appinfra.log import Logger
+from appinfra.log import Logger, LoggerExistsError
 from appinfra.runtime import Chan, Runtime, TaskContext, this_task
 from tests.helpers.lg import quiet_lg
 
@@ -165,6 +165,16 @@ class TestDeriveLg:
         assert captured(lg).arrived.wait(DUE)
         assert captured(lg).records[0].name == lg.name
 
+    def test_a_process_task_carries_the_runtime_loggers_extra(
+        self, rt: Runtime, lg: Logger
+    ) -> None:
+        """A field the runtime's logger adds to every record is on a process
+        task's records too, as on a thread task's."""
+        lg.set_extra({"service": "api"})
+        rt.spawn(logs, "with extra", process=True).wait(timeout=DUE)
+        assert captured(lg).arrived.wait(DUE)
+        assert getattr(captured(lg).records[0], "service", None) == "api"
+
     def test_a_process_task_with_a_chan_logs_and_sends(
         self, rt: Runtime, lg: Logger
     ) -> None:
@@ -187,6 +197,17 @@ class TestDeriveLg:
         assert captured(lg).arrived.wait(DUE)
         record = captured(lg).records[0]
         assert (record.name, record.getMessage()) == (name, "two hops")
+
+    def test_a_clashing_name_is_refused_and_leaves_no_token(
+        self, rt: Runtime, lg: Logger
+    ) -> None:
+        """A library's logger holds the derived name: spawn() raises, and the
+        task's token does not stay among the runtime's."""
+        logging.getLogger(f"{lg.name.rstrip('/')}/clash")
+        children_before = set(rt._root._children or ())
+        with pytest.raises(LoggerExistsError):
+            rt.spawn(echoes, derive_lg="clash")
+        assert set(rt._root._children or ()) == children_before
 
     def test_without_it_the_arguments_are_unchanged(self, rt: Runtime) -> None:
         assert rt.spawn(echoes, 1, "two").wait(timeout=DUE) == (1, "two")

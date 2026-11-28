@@ -434,6 +434,8 @@ class Logger(logging.Logger):
         - The queue for sending records
         - The base log level
         - LogLevelManager rules for pattern-based level filtering
+        - The pre-populated extra fields, pickled with the rest: a value
+          that does not pickle fails the worker's start
 
         Args:
             queue: multiprocessing.Queue for sending records to parent
@@ -463,6 +465,7 @@ class Logger(logging.Logger):
             "queue": queue,
             "level": self.level,
             "level_rules": level_manager.to_dict(),
+            "extra": self._extra.copy(),
         }
 
     @classmethod
@@ -475,6 +478,7 @@ class Logger(logging.Logger):
         determined by:
         1. LogLevelManager pattern rules (if the name matches a pattern)
         2. The base level from config (fallback)
+        It adds the parent's pre-populated extra fields to every record.
 
         Args:
             config: Configuration dict from parent's Logger.queue_config()
@@ -482,6 +486,10 @@ class Logger(logging.Logger):
 
         Returns:
             Logger configured to send records to the parent's queue
+
+        Raises:
+            ReservedKeyError: If an extra key collides with a LogRecord
+                attribute, as set_extra() refuses.
 
         Example:
             # Worker process receives config from parent
@@ -501,8 +509,11 @@ class Logger(logging.Logger):
         if effective_level is None:
             effective_level = config["level"]
 
-        return cls.with_queue(
+        lg = cls.with_queue(
             queue=config["queue"],
             name=name,
             level=effective_level,
         )
+        if config.get("extra"):  # a config made before extra crossed has none
+            lg.set_extra(config["extra"])
+        return lg

@@ -107,20 +107,23 @@ class LogQueueListener:
         Main listener loop - runs in background thread.
 
         Continuously reads from the queue and dispatches records to handlers.
-        Exits when stop_event is set and sentinel is received.
+        Exits on the sentinel stop() posts, once every record queued before it
+        is handled; or, stopped with no sentinel queued (the queue was full or
+        closed), once the queue is empty.
         """
-        while not self._stop_event.is_set():
+        while True:
             try:
                 record = self._queue.get(timeout=0.5)
-
-                # None is the sentinel for shutdown
-                if record is None:
-                    break
-
-                self._handle_record(record)
-
             except queue.Empty:
+                if self._stop_event.is_set():
+                    break
                 continue
+            except (OSError, ValueError):  # the queue was closed under it
+                break
+            if record is None:  # the sentinel: shutdown
+                break
+            try:
+                self._handle_record(record)
             except Exception:
                 # Don't let listener thread die from unexpected errors
                 import sys

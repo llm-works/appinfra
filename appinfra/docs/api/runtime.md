@@ -191,7 +191,7 @@ from appinfra.runtime import this_task
 
 def worker(jobs: Chan[int]) -> None:
     me = this_task()  # TaskContext: id, name, lg, token
-    me.lg.info("started", extra={"task": me.id, "name": me.name})
+    me.lg.info("started", extra={"task": me.id, "task_name": me.name})
     for job in jobs:  # a stop ends the wait with StoppedError
         handle(job)
 

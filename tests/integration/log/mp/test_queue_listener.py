@@ -4,6 +4,7 @@
 """Tests for LogQueueListener running its listener thread or feeding its queue."""
 
 import logging
+import queue as queue_module
 import threading
 import time
 from multiprocessing import Queue
@@ -160,6 +161,38 @@ class TestLogQueueListenerErrorHandling:
             assert listener.is_alive
         finally:
             listener.stop()
+
+
+class TestLogQueueListenerStopDrains:
+    """stop() lets the listener handle every record queued before its sentinel."""
+
+    def test_records_queued_behind_a_slow_one_are_handled(self, mock_logger):
+        """The handler is still on the first record when stop() is called: the
+        two queued behind it are handled before the listener ends."""
+        records = queue_module.Queue()
+        listener = LogQueueListener(records, mock_logger)
+        handled: list[str] = []
+        entered, release = threading.Event(), threading.Event()
+
+        def slow_first(record: logging.LogRecord) -> None:
+            if not handled:
+                entered.set()
+                release.wait(_TIMEOUT)
+            handled.append(record.getMessage())
+
+        listener._handle_record = slow_first
+        listener.start()
+        for i in range(3):
+            records.put(
+                logging.LogRecord("t", logging.INFO, "t.py", i, f"r{i}", (), None)
+            )
+        assert entered.wait(_TIMEOUT)
+        stopping = threading.Thread(target=listener.stop)
+        stopping.start()
+        assert listener._stop_event.wait(_TIMEOUT)  # stop() is under way
+        release.set()
+        stopping.join(_TIMEOUT)
+        assert handled == ["r0", "r1", "r2"]
 
 
 class TestLogQueueListenerIntegration:
