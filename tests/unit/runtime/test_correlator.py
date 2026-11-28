@@ -200,6 +200,30 @@ class TestArrivingAsTheWaitEnds:
         late.append(Msg("s", "just"))
         assert list(c.stream(Msg("s"), timeout=1.0)) == [Msg("s", "just")]
 
+    def test_the_stream_keeps_its_route_for_the_chunks_after(
+        self, peer: Peer, late: list[Any]
+    ) -> None:
+        c = _correlator(peer)
+        late.append(Msg("s", 1, final=False))
+        chunks = c.stream(Msg("s"), timeout=1.0)
+        assert next(chunks) == Msg("s", 1, final=False)
+        c.deliver(Msg("s", 2))
+        assert list(chunks) == [Msg("s", 2)]
+        with pytest.raises(TimeoutError):
+            c.recv(timeout=0)
+
+
+def test_a_call_that_left_does_not_remove_a_newer_calls_route(peer: Peer) -> None:
+    """A call's cleanup running after another call took its key, as its
+    finally does when another thread enters between its timeout and it."""
+    c = _correlator(peer)
+    key, old = c._enter(Msg("a"))
+    c._leave(key, old)
+    _, new = c._enter(Msg("a"))
+    c._leave(key, old)
+    c.deliver(Msg("a", "theirs"))
+    assert new.recv(timeout=0) == Msg("a", "theirs")
+
 
 def test_send_goes_straight_through(peer: Peer) -> None:
     c = _correlator(peer)

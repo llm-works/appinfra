@@ -372,7 +372,9 @@ c.send(answer_to(request))
 - `deliver()` never waits, so the reading thread never stalls; the inbox has no bound
 - `submit()`'s timeout bounds the send and the wait together, `stream()`'s each chunk; a reply
   for which `failed` is true raises `ChanResponseError`, its `response` the reply
-- `stream()` sends when its first chunk is asked for; leaving the loop early ends the call
+- `stream()` sends when its first chunk is asked for; leaving early ends the call when the
+  iterator closes: at once for a loop over `stream()` itself, at `close()` for one kept in a
+  variable
 - `close()` fails the waiting calls and any after with `ChanClosedError`, drops later arrivals,
   and lets `recv()` drain the inbox first; the transport stays the caller's
 - the waits are Chan waits: they end with `StoppedError` when the task's token stops

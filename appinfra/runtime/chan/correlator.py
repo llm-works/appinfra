@@ -74,12 +74,13 @@ class Correlator(Generic[M]):
             self._send(request, timeout)
             return self._wait(key, route, _left(deadline))
         finally:
-            self._leave(key)
+            self._leave(key, route)
 
     def stream(self, request: M, timeout: float | None = None) -> Iterator[M]:
         """Send *request* and yield the chunks with its key, up to the final
         one; *timeout* bounds the send and the wait for each chunk. Nothing is
-        sent before the first chunk is asked for; leaving early ends the wait.
+        sent before the first chunk is asked for; leaving early ends the call
+        when the iterator closes (close() on a kept one).
 
         Raises what submit() does, from the chunk it concerns.
         """
@@ -92,7 +93,7 @@ class Correlator(Generic[M]):
                 if self._final(chunk):
                     return
         finally:
-            self._leave(key)
+            self._leave(key, route)
 
     def recv(self, timeout: float | None = None) -> M:
         """The next message no call waits on.
@@ -130,19 +131,27 @@ class Correlator(Generic[M]):
             return key, route
 
     def _wait(self, key: Hashable, route: Chan[M], timeout: float | None) -> M:
-        """The next message on *route*. On a timeout the route leaves first,
-        so no delivery lands on it after the look at what is there."""
+        """The next message on *route*. On a timeout the route leaves only if
+        nothing landed on it; the look and the removal hold the lock deliver()
+        sends under, so no delivery falls between them."""
         try:
             return self._checked(route.recv(timeout))
         except TimeoutError:
-            self._leave(key)
-            if len(route) == 0:
-                raise
+            with self._lock:
+                if len(route) == 0:
+                    self._drop(key, route)
+                    raise
             return self._checked(route.recv(timeout=0))  # came as the wait ended
 
-    def _leave(self, key: Hashable) -> None:
+    def _leave(self, key: Hashable, route: Chan[M]) -> None:
         with self._lock:
-            self._routes.pop(key, None)
+            self._drop(key, route)
+
+    def _drop(self, key: Hashable, route: Chan[M]) -> None:
+        """Remove *route* under *key* if it is still there: a call that has
+        left must not remove the route of a newer call on the same key."""
+        if self._routes.get(key) is route:
+            del self._routes[key]
 
     def _checked(self, reply: M) -> M:
         if self._failed(reply):
