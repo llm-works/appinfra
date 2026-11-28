@@ -18,8 +18,10 @@ from __future__ import annotations
 import argparse
 import platform
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 # Allow running from a source checkout without installing the package.
 # Walk upward from the script to find the directory containing appinfra/.
@@ -31,8 +33,8 @@ for _ancestor in (_script_dir, *_script_dir.parents):
 
 from appinfra import size_str  # noqa: E402
 from appinfra.app import App, AppBuilder  # noqa: E402
-from appinfra.log import Logger  # noqa: E402
-from appinfra.runtime import Runtime  # noqa: E402
+from appinfra.log import LogConfig, Logger, LoggerFactory  # noqa: E402
+from appinfra.runtime import Chan, Runtime, TaskDone  # noqa: E402
 from appinfra.runtime.bench import (  # noqa: E402
     loop_cost,
     loop_rates,
@@ -119,102 +121,171 @@ class Bench(App):
         self.parser.add_argument(
             "-p", "--processes", type=_positive, default=20, help="process tasks to run"
         )
+        self.parser.add_argument(
+            "-c",
+            "--cores",
+            type=_positive,
+            default=1,
+            help="measurements to run at once, each in a process of its own: "
+            "faster, but ones sharing the machine read lower rates",
+        )
 
     def run_no_tool(self) -> int:
-        """Run the measurements and print their numbers."""
-        count = self.args.count
-        # Slowest task kind first, services last
-        columns = [
-            _measure_processes(self.lg, self.args.processes, count),
-            _measure_threads(self.lg, self.args.threads, count),
-            _measure_tasks(self.lg, count),
-            _measure_services(self.lg, count),
-        ]
+        """Run the measurements, each a process task of its own and at most
+        --cores at once, and print their numbers."""
+        a = self.args
+        sizes = {"process": (a.processes, a.count), "thread": (a.threads, a.count)}
+        sizes |= {"loop": (a.count, a.count), "service": (a.count, a.count)}
+        level = False if self.lg.disabled else self.lg.getEffectiveLevel()
+        jobs = [(name, *sizes[name.split()[0]], level) for name in _JOBS]
+        results = _run_jobs(self.lg, jobs, a.cores)
+        if results is None:
+            return 1
         self.lg.info("done")
-        _report(count, columns)
+        columns = [_column(head, sizes, results) for head in _KINDS]
+        _report(a.count, columns)
         return 0
 
 
-def _measure_tasks(lg: Logger, count: int) -> _Column:
-    """A loop task's numbers, over *count* tasks."""
+# A measurement's fields of its column, by name
+JobResult = dict[str, float | None]
+# A measurement: from a logger, the number of items and the number of round trips
+Job = Callable[[Logger, int, int], JobResult]
+
+
+def _on_runtime(lg: Logger, measure: Callable[[Runtime, int], Any], n: int) -> Any:
+    """*measure*(runtime, *n*), on a runtime of its own."""
     with Runtime(lg) as rt:
-        lg.info("measuring memory per task...", extra={"tasks": count})
-        cost = loop_cost(rt, count)
-        lg.info("measuring task spawn and cancel...", extra={"tasks": count})
-        spawn, cancel = loop_rates(rt, count)
-        lg.info("measuring channel round trips...", extra={"round_trips": count})
-        trips = loop_round_trip_rate(rt, count)
-    lg.info("measuring runtime spawn and stop...", extra={"tasks": count})
-    rt_spawn, rt_stop = loop_runtime_rates(lg, count)
-    return _Column(
-        count,
-        cost.net,
-        cost.base,
-        cost.runtime,
-        spawn,
-        cancel,
-        rt_spawn,
-        rt_stop,
-        trips,
-    )
+        return measure(rt, n)
 
 
-def _measure_threads(lg: Logger, count: int, trips: int) -> _Column:
-    """A thread task's numbers, over *count* tasks and *trips* round trips."""
-    with Runtime(lg) as rt:
-        lg.info("measuring memory per thread task...", extra={"tasks": count})
-        cost = thread_cost(rt, count)
-        lg.info("measuring thread spawn and cancel...", extra={"tasks": count})
-        spawn, cancel = thread_rates(rt, count)
-        lg.info("measuring thread round trips...", extra={"round_trips": trips})
-        rate = thread_round_trip_rate(rt, trips)
-    lg.info("measuring thread runtime spawn and stop...", extra={"tasks": count})
-    rt_spawn, rt_stop = thread_runtime_rates(lg, count)
-    return _Column(
-        count, cost.net, cost.base, cost.runtime, spawn, cancel, rt_spawn, rt_stop, rate
-    )
+def _pair(first: str, second: str, values: tuple[float, float]) -> JobResult:
+    """Two rates, as the fields *first* and *second*."""
+    return {first: values[0], second: values[1]}
 
 
-def _measure_processes(lg: Logger, count: int, trips: int) -> _Column:
-    """A process task's numbers, over *count* tasks and *trips* round trips."""
-    with Runtime(lg) as rt:
-        lg.info("measuring memory per process task...", extra={"tasks": count})
-        cost = process_cost(rt, count)
-        lg.info("measuring process spawn and cancel...", extra={"tasks": count})
-        spawn, cancel = process_rates(rt, count)
-        lg.info("measuring process round trips...", extra={"round_trips": trips})
-        rate = process_round_trip_rate(rt, trips)
-    lg.info("measuring process runtime spawn and stop...", extra={"tasks": count})
-    rt_spawn, rt_stop = process_runtime_rates(lg, count)
-    # What each more task costs: its child's private memory, where the OS
-    # tells it apart (Linux); elsewhere its resident set
-    net = cost.resident if cost.private is None else cost.private
-    return _Column(count, net, None, None, spawn, cancel, rt_spawn, rt_stop, rate)
+def _task_memory(
+    lg: Logger, cost_of: Callable[[Runtime, int], Any], n: int
+) -> JobResult:
+    """Memory per loop or thread task: net, and its part without appinfra and
+    appinfra's."""
+    cost = _on_runtime(lg, cost_of, n)
+    return {"net": cost.net, "base": cost.base, "appinfra": cost.runtime}
 
 
-def _measure_services(lg: Logger, count: int) -> _Column:
-    """A service's numbers, over *count* services, run on a service runtime's loop."""
+def _process_memory(lg: Logger, n: int, trips: int) -> JobResult:
+    """Memory per process task: what each more one costs, its child's private
+    memory where the OS tells it apart (Linux), else its resident set."""
+    cost = _on_runtime(lg, process_cost, n)
+    return {"net": cost.resident if cost.private is None else cost.private}
+
+
+def _service_memory(lg: Logger, n: int, trips: int) -> JobResult:
+    """Memory per service, run on a service runtime's loop."""
     with Runtime(lg) as tasks, ServiceRuntime(lg) as rt:
-        lg.info("measuring memory per service...", extra={"services": count})
-        cost = service_cost(tasks, rt, lg, count)
-        lg.info("measuring spawn and stop_service...", extra={"services": count})
-        runners, start = spawn_services(rt, parked_maker(lg), count)
+        cost = service_cost(tasks, rt, lg, n)
+    return {"net": cost.net, "base": cost.asyncio, "appinfra": cost.framework}
+
+
+def _service_rates(lg: Logger, n: int, trips: int) -> JobResult:
+    """Services spawned and stopped per second, by spawn() and stop_service()."""
+    with ServiceRuntime(lg) as rt:
+        runners, start = spawn_services(rt, parked_maker(lg), n)
         stop = stop_services(rt, runners)
-    lg.info("measuring request/reply rate...", extra={"round_trips": count})
-    trips = round_trip_rate(lg, count)
-    lg.info("measuring service runtime spawn and stop...", extra={"services": count})
-    rt_spawn, rt_stop = runtime_rates(lg, parked_maker(lg), count)
-    return _Column(
-        count,
-        cost.net,
-        cost.asyncio,
-        cost.framework,
-        start,
-        stop,
-        rt_spawn,
-        rt_stop,
-        trips,
-    )
+    return {"start": start, "stop": stop}
+
+
+# The measurements by name, the longest first, so the short ones fill in
+# around them instead of the long ones starting last
+_JOBS: dict[str, Job] = {
+    "process runtime": lambda lg, n, _: _pair(
+        "rt_spawn", "rt_stop", process_runtime_rates(lg, n)
+    ),
+    "process rates": lambda lg, n, _: _pair(
+        "start", "stop", _on_runtime(lg, process_rates, n)
+    ),
+    "service runtime": lambda lg, n, _: _pair(
+        "rt_spawn", "rt_stop", runtime_rates(lg, parked_maker(lg), n)
+    ),
+    "service rates": _service_rates,
+    "service memory": _service_memory,
+    "loop runtime": lambda lg, n, _: _pair(
+        "rt_spawn", "rt_stop", loop_runtime_rates(lg, n)
+    ),
+    "process memory": _process_memory,
+    "thread runtime": lambda lg, n, _: _pair(
+        "rt_spawn", "rt_stop", thread_runtime_rates(lg, n)
+    ),
+    "thread rates": lambda lg, n, _: _pair(
+        "start", "stop", _on_runtime(lg, thread_rates, n)
+    ),
+    "loop rates": lambda lg, n, _: _pair(
+        "start", "stop", _on_runtime(lg, loop_rates, n)
+    ),
+    "loop memory": lambda lg, n, _: _task_memory(lg, loop_cost, n),
+    "thread memory": lambda lg, n, _: _task_memory(lg, thread_cost, n),
+    "service trips": lambda lg, _, t: {"trips": round_trip_rate(lg, t)},
+    "process trips": lambda lg, _, t: {
+        "trips": _on_runtime(lg, process_round_trip_rate, t)
+    },
+    "thread trips": lambda lg, _, t: {
+        "trips": _on_runtime(lg, thread_round_trip_rate, t)
+    },
+    "loop trips": lambda lg, _, t: {"trips": _on_runtime(lg, loop_round_trip_rate, t)},
+}
+# The kinds, by column, in the order printed
+_KINDS = ["process", "thread", "loop", "service"]
+
+
+def _job(name: str, count: int, trips: int, level: int | bool) -> JobResult:
+    """In a process task's child: run the measurement *name*, logging at
+    *level* to a logger of its own, as none crosses spawn()."""
+    lg = LoggerFactory.create_root(LogConfig.from_params(level=level))
+    if name.startswith("process"):
+        # The fork server starts with this process's first process task: a
+        # cost paid once, not by every task, so not in what is measured
+        with Runtime(lg) as rt:
+            rt.spawn(int, process=True).wait(timeout=120.0)
+    lg.info(f"measuring {name}...", extra={"items": count, "round_trips": trips})
+    return _JOBS[name](lg, count, trips)
+
+
+def _run_jobs(
+    lg: Logger, jobs: list[tuple[str, int, int, int | bool]], cores: int
+) -> dict[str, JobResult] | None:
+    """Run each of *jobs* as a process task, at most *cores* at once, and
+    return their results by name; None, logged, if one failed."""
+    results: dict[str, JobResult] = {}
+    pending = list(jobs)
+    ends: Chan[TaskDone] = Chan(None)
+    with Runtime(lg) as rt:
+        for _ in range(min(cores, len(pending))):
+            name, *args = pending.pop(0)
+            rt.spawn(_job, name, *args, name=name, done=ends, process=True)
+        while len(results) < len(jobs):
+            end = ends.recv()
+            if end.error is not None:
+                lg.error(
+                    "measurement failed",
+                    extra={"job": end.name, "exception": end.error},
+                )
+                return None
+            results[str(end.name)] = end.result
+            if pending:
+                name, *args = pending.pop(0)
+                rt.spawn(_job, name, *args, name=name, done=ends, process=True)
+    return results
+
+
+def _column(
+    kind: str, sizes: dict[str, tuple[int, int]], results: dict[str, JobResult]
+) -> _Column:
+    """The column of *kind*, from its measurements' results."""
+    fields: JobResult = {"base": None, "appinfra": None}
+    for name, result in results.items():
+        if name.split()[0] == kind:
+            fields |= result
+    return _Column(count=sizes[kind][0], **fields)  # type: ignore[arg-type]
 
 
 def _cell(value: float | None, unit: str) -> str:
