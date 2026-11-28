@@ -64,8 +64,9 @@ with `process=True`: a child has no event loop.
 
 ### Processes
 
-`process=True` calls the function in a child process, started with the `spawn` method; the
-returned `Task` is waited for and cancelled like any other.
+`process=True` calls the function in a child process, started with the runtime's start method
+(`forkserver` unless [configured](#configuration) otherwise); the returned `Task` is waited for
+and cancelled like any other.
 
 ```python
 from appinfra.runtime import Runtime, stopping
@@ -99,9 +100,24 @@ if __name__ == "__main__":
   that way raises `StoppedError` instead
 - `Runtime.stop()` terminates, then kills, a child still running after its timeout;
   `t.stop(timeout)` does the same for one task
-- a queue, event or value shared with the child comes from `process_context()` (also
-  `rt.process_context`), the context children start in: one from another context, e.g. a default
+- a queue, event or value shared with the child comes from `rt.process_context`, or
+  `process_context()` before any runtime exists: one from the `fork` context, e.g. a default
   `mp.Queue()` on Linux before Python 3.14, fails in the child
+
+With `forkserver`, every child is forked from one server process that imported the modules once,
+so the children share those pages. What each more process task costs is its child's private
+memory (Linux), not its resident set, which counts the shared pages in every child:
+
+- before its first child, the runtime sets the server's preload to the main module and every
+  `appinfra` module the process has imported by then
+- the server imports the main module only when Python hands it the module's file path: 3.13.8
+  and later, and 3.14.1 and later, do for a script run by path (`python app.py`); earlier
+  releases, 3.12 included, do not, and no version does for `python -m pkg`. Where it does not,
+  each child imports the main module itself, running its module-level code, but what it imports
+  from appinfra is already shared
+- the preload list is process-wide: it replaces one the application set with
+  `set_forkserver_preload()`. Where the main module is not preloaded, a module it imports from
+  outside appinfra, a large dependency say, is still imported by each child on its own
 
 `t.process` is the task's child (`TaskProcess`), and `None` for a task on the loop or a thread:
 
@@ -221,13 +237,58 @@ the parent.
 
 ### Stopping
 
-`Runtime.stop(timeout=5.0)` stops every task's token, cancels the loop tasks and waits for the
-thread and process tasks, all within `timeout`. A thread task still running then is logged and
-left: a thread cannot be killed. Process tasks still running then are ended by force, on top of
-`timeout`: every such child is sent SIGTERM and given 2 seconds, then every survivor SIGKILL and
-2 seconds more, so a stop with late children takes up to `timeout` plus 4 seconds. Leaving a
+`Runtime.stop(timeout=None)` stops every task's token, cancels the loop tasks and waits for the
+thread and process tasks, all within `timeout`, the config's `stop_timeout` (5 seconds) when
+`None`. A thread task still running then is logged and left: a thread cannot be killed. Process
+tasks still running then are ended by force, on top of `timeout`: every such child is sent SIGTERM
+and given the config's `process.grace` (2 seconds), then every survivor SIGKILL and the grace
+again, so a stop with late children takes up to `timeout` plus twice the grace. Leaving a
 `with Runtime(lg) as rt:` block calls it, and a runtime left running is stopped at interpreter
 exit.
+
+### Configuration
+
+Every setting has a default; `Runtime(lg)` takes them all. `Config` overrides them in code, and
+`Factory` builds a runtime by name from a config's `runtime` section:
+
+```python
+from appinfra.runtime import Config, Factory, ProcessConfig, Runtime
+
+rt = Runtime(lg)  # forkserver, a 2 s grace, a 5 s stop
+rt = Runtime(lg, Config(process=ProcessConfig(method="spawn"), stop_timeout=10.0))
+rt = Factory(lg, config).create("compute")  # config's runtime.compute
+```
+
+```yaml
+runtime:
+  default:            # what Factory.create() with no name builds
+    process:
+      method: forkserver
+  compute:
+    process:
+      method: spawn   # forkserver or spawn
+      grace: 5s       # seconds, or a duration: 500ms, 2s, 1m30s
+    stop_timeout: 30s
+```
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `process.method` | `forkserver` | how a process task's child starts: `forkserver` forks it from a server that imported the runtime once; `spawn` starts a fresh interpreter. `fork` is refused: a running runtime has threads |
+| `process.grace` | `2s` | a child outliving its stop: SIGTERM, then SIGKILL, this far apart |
+| `stop_timeout` | `5s` | how long `stop()` waits when given no timeout |
+
+- a key left out keeps its default; an unknown key raises `ValueError`, so a misspelt one is not
+  silently ignored; an unknown runtime name raises `KeyError` naming the known ones
+- `INFRA_RUNTIME_<NAME>_<KEY>` overrides a key the config declares, e.g.
+  `INFRA_RUNTIME_COMPUTE_PROCESS_METHOD=forkserver`, when the config given to `Factory` is loaded
+  through `appinfra.config.Config` (an App's, `Config.from_path()`, `Config.from_spec()`), which
+  applies the overrides as it loads; a plain mapping gets none. appinfra's own `etc/infra.yaml`
+  declares a `default` runtime with every key, so `INFRA_RUNTIME_DEFAULT_...` works there out of
+  the box
+- `rt.config` is what a runtime was configured with; a service `Runtime` takes the same `Config`
+  for the task runtime its services run on (`config=`), as an application that also uses
+  `appinfra.config.Config` imports it under another name: `from appinfra.runtime import Config as
+  RuntimeConfig`
 
 ## Channels
 
@@ -383,11 +444,13 @@ c.send(answer_to(request))
 
 | Name | Kind |
 |------|------|
-| `Runtime` | runs tasks: `start`, `stop`, `spawn`, `process_context`, context manager |
+| `Runtime` | runs tasks: `start`, `stop`, `spawn`, `config`, `process_context`, context manager |
+| `Config`, `ProcessConfig` | what a runtime is configured with: start method, grace, stop timeout |
+| `Factory` | runtimes by name from a config's `runtime` section: `create(name)`, `config(name)` |
 | `Task` | the handle `spawn()` returns |
 | `TaskKind` | what a task runs as: `LOOP`, `THREAD`, `PROCESS` |
 | `TaskProcess`, `ProcessDetail` | a process task's child, and its `pid`, `exitcode`, `alive` |
-| `process_context()` | the multiprocessing context process tasks' children start in |
+| `process_context()` | a multiprocessing context for what is shared with a child before any runtime exists |
 | `TaskDone` | `(task_id, name, result, error)`, sent on `done` |
 | `stopping()`, `task_id()` | the current task's token and id |
 | `StopToken`, `StoppedError` | the stop signal, and the error a stop ends a wait with |

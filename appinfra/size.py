@@ -113,8 +113,10 @@ def size_str(
     Format a size in bytes as a compact human-readable string.
 
     Args:
-        size: Size in bytes (can be None)
-        precise: Whether to show fixed 3 decimal places (default: False)
+        size: Size in bytes (can be None); below a kilobyte, whole bytes, a
+            fraction rounded
+        precise: Whether to show fixed 3 decimal places of a unit above bytes
+            (default: False)
         binary: Whether to use binary (1024) or SI (1000) units (default: True)
 
     Returns:
@@ -136,6 +138,8 @@ def size_str(
         '1MB'
         >>> size_str(1536, precise=True)
         '1.500KB'
+        >>> size_str(815, precise=True)
+        '815B'
         >>> size_str(1500, binary=False)
         '1.5KB'
     """
@@ -144,10 +148,15 @@ def size_str(
 
     _validate_size_input(size)
 
-    if size == 0:
-        return "0B"
-
     units = _BINARY_UNITS if binary else _SI_UNITS
+    kilo = BYTES_PER_KB if binary else BYTES_PER_KB_SI
+
+    # No part of a byte: below a kilobyte, the size is whole bytes, rounded
+    # first, so one that rounds up to a kilobyte is shown as one
+    if size < kilo:
+        size = round(size)
+        if size < kilo:
+            return f"{size}B"
 
     for threshold, suffix in units:
         if size >= threshold:

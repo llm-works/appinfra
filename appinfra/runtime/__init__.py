@@ -14,7 +14,9 @@ from .chan import ClosedError as ChanClosedError
 from .chan import Recv as ChanRecv
 from .chan import ResponseError as ChanResponseError
 from .chan import Send as ChanSend
+from .config import Config, ProcessConfig
 from .errors import ProcessExitError, StoppedError
+from .factory import Factory
 from .runtime import Runtime, process_context
 from .stop import StopToken
 from .task import (
@@ -33,7 +35,10 @@ __all__ = [
     "ChanRecv",
     "ChanResponseError",
     "ChanSend",
+    "Config",
     "Correlator",
+    "Factory",
+    "ProcessConfig",
     "ProcessDetail",
     "Runtime",
     "StopToken",

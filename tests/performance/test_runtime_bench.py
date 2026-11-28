@@ -55,9 +55,13 @@ PROCESSES = 20 if FULL else 4
 CEILING = 1024
 # The same over a plain thread: Linux measures 0.9 to 1.1 KiB
 THREAD_CEILING = 2048
-# What a process task's child may hold resident: the interpreter, appinfra and
-# pytest's main module, about 40 MiB on Linux
+# What a process task's child may hold resident, pages it shares with its
+# siblings and the fork server too: about 30 MiB on Linux
 PROCESS_CEILING = 256 * 2**20
+# What each more process task costs: the private memory of its child, on
+# Linux. Forked from a fork server that imported the runtime, about 5 MiB; a
+# child that imports its own copy, as one the spawn method starts, about 22
+PRIVATE_CEILING = 12 * 2**20
 # Seconds of wall time over which idle CPU is measured: long enough to catch two
 # wakeups of a receive that polled every 0.1 s
 IDLE_WINDOW = 0.2
@@ -192,11 +196,20 @@ class TestProcessCost:
     """No floors on rates: a child's start is the interpreter's and the OS's,
     not the runtime's. The measurements run to their end."""
 
-    def test_resident_memory_per_process_task(self, prt):
-        rss = process_cost(prt, PROCESSES)
+    def test_memory_per_process_task(self, prt):
+        cost = process_cost(prt, PROCESSES)
 
+        rss = cost.resident
         print(f"\nresident set of a process task's child: {rss / 2**20:,.1f} MiB")
         assert 0 < rss <= PROCESS_CEILING, f"{rss / 2**20:,.1f} MiB per child"
+        if cost.private is not None:  # Linux: what each more task costs
+            private = cost.private
+            print(
+                f"private memory of a process task's child: {private / 2**20:,.1f} MiB"
+            )
+            assert 0 < private <= PRIVATE_CEILING, (
+                f"{private / 2**20:,.1f} MiB per child"
+            )
 
     def test_spawn_and_cancel_rate(self, prt):
         spawn, cancel = process_rates(prt, PROCESSES)

@@ -11,6 +11,10 @@ For API stability guarantees and deprecation policy, see
 ## [Unreleased]
 
 ### Added
+- `appinfra.runtime.Config`: a runtime's start method, forcing grace and stop timeout, all with
+  defaults; `Factory(lg, config).create(name)` builds one from the config's `runtime.<name>`,
+  overridable through `INFRA_RUNTIME_*` when loaded by `appinfra.config.Config`. The service
+  `Runtime` takes it as `config=`.
 - `appinfra.runtime`: `Task.kind` tells what a task runs as (`TaskKind`: loop, thread, process).
   A process task's `Task.process` gives its child's `detail()` (pid, exit code, liveness) and
   `terminate()`/`kill()`; `Runtime.process_context` and `process_context()` give the context its
@@ -66,6 +70,9 @@ For API stability guarantees and deprecation policy, see
   rest. Takes the place of the removed `BufferedChannel`; a failed reply raises `ChanResponseError`.
 
 ### Changed
+- Process tasks start through `forkserver` instead of `spawn`: children share appinfra's modules,
+  imported once by the fork server, instead of each importing its own copy. The runtime sets the
+  server's process-wide preload. `Runtime.stop()` defaults to the config's `stop_timeout`.
 - **Breaking:** the FastAPI server's subprocess runs as an isolated service of a service `Runtime`
   (its own, or one given with `.subprocess.with_runtime()`). `.subprocess.with_ipc()` takes no
   queues; `start_subprocess()` returns `None`, with `server.process`, `pid` and `is_running` for
@@ -110,7 +117,7 @@ For API stability guarantees and deprecation policy, see
 
 ### Removed
 - **Breaking:** the FastAPI server's start method (`ApiConfig.start_method`,
-  `.subprocess.with_start_method()`): its subprocess always starts with `spawn`.
+  `.subprocess.with_start_method()`): its subprocess starts as every process task does.
 - **Breaking:** `ThreadRunner`, `ProcessRunner`, `RunnerFactory` and `RunnerWithChannel` from
   `appinfra.service`: `Runtime.spawn()` runs every service, `isolate=True` in a process of its own.
 - **Breaking:** `ServiceFactory` and `ServiceRegistration`: construct the service and pass
@@ -131,6 +138,8 @@ For API stability guarantees and deprecation policy, see
   `PYDANTIC_AVAILABLE`. `appinfra.config.schemas` needs pydantic to import.
 
 ### Fixed
+- `size_str()` shows a size below a kilobyte as whole bytes, a fraction rounded: `precise=True`
+  printed `815.000B`, and a fraction showed as `500.7B`.
 - `make pg.server.up.repl` starts from any project, not only from the appinfra repo: the
   primary mounted its `pg_hba.conf` from a path under the project directory.
 - `pg.sh reboot` and the `pg.*` waits find the server however many other containers the runtime

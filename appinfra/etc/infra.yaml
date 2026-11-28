@@ -25,6 +25,18 @@ logging: !include lg.yaml#logging
 pgserver: !include pg.yaml#pgserver
 dbs: !include pg.yaml#dbs
 
+# Runtime Configuration
+# =====================
+# Runtimes by name for appinfra.runtime.Factory: Factory(lg, config).create("default").
+# Declared here so INFRA_RUNTIME_DEFAULT_* can override them as appinfra.config.Config loads this
+# file; a key left out keeps its default
+runtime:
+  default:
+    process:
+      method: forkserver       # start method of a process task's child: forkserver or spawn
+      grace: 2s                # a child that outlives its stop: SIGTERM, then SIGKILL, this far apart
+    stop_timeout: 5s           # how long Runtime.stop() waits for the tasks when given no timeout
+
 # Test Configuration
 # ==================
 # Controls test execution behavior and cleanup

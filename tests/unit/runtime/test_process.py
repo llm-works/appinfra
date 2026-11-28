@@ -12,8 +12,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from appinfra.runtime import ProcessExitError, Runtime, StopToken
-from appinfra.runtime.process import _ProcessTask
+from appinfra.runtime import ProcessConfig, ProcessExitError, Runtime, StopToken
+from appinfra.runtime.process import _preload, _ProcessTask
 
 
 async def parked() -> None:
@@ -109,7 +109,9 @@ class LockChecking:
 
 def process_task() -> Any:
     """A process task not launched."""
-    return _ProcessTask(MagicMock(), lambda _: None, 1, None, abs, (), StopToken())
+    return _ProcessTask(
+        MagicMock(), ProcessConfig(), lambda _: None, 1, None, abs, (), StopToken()
+    )
 
 
 def test_a_published_child_is_signalled_under_the_lock() -> None:
@@ -136,6 +138,17 @@ def test_a_reaped_child_is_released_under_the_lock() -> None:
     task._release(child)
     assert child.held == {"close": True}
     assert task._process is None
+
+
+def test_the_fork_server_preloads_the_main_module_and_appinfras_imports() -> None:
+    """Every appinfra module imported by now, the runtime among them, and the
+    main module first; nothing outside appinfra."""
+    ctx = MagicMock()
+    _preload.__wrapped__(ctx)
+    (preload,), _ = ctx.set_forkserver_preload.call_args
+    assert preload[0] == "__main__"
+    assert "appinfra.runtime.process" in preload
+    assert all(m == "appinfra" or m.startswith("appinfra.") for m in preload[1:])
 
 
 def test_a_process_exit_error_survives_a_pickle_round_trip() -> None:

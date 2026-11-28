@@ -21,13 +21,13 @@ from types import TracebackType
 from typing import Any, final
 
 from ..log import Logger
-from . import process as process_module
 from .chan import Chan, ClosedError
 from .chan.chan import _copied
 from .chan.proxy import _ChanProxy
+from .config import DEFAULT_CONFIG, Config
 from .errors import StoppedError
 from .loop import LoopHost, _LoopTask
-from .process import START_METHOD, _ProcessTask
+from .process import _ProcessTask
 from .stop import StopToken
 from .task import Task, TaskDone, _current_token, _in_task, _Task
 from .thread import _ThreadTask
@@ -70,9 +70,11 @@ class Runtime:
                 server.wait(timeout=5.0)
     """
 
-    def __init__(self, lg: Logger) -> None:
-        """A runtime not yet started."""
+    def __init__(self, lg: Logger, config: Config = DEFAULT_CONFIG) -> None:
+        """A runtime not yet started, configured by *config*: how its process
+        tasks start and are forced to end, and how long stop() waits."""
         self._lg = lg
+        self._config = config
         self._host = LoopHost()
         self._root = StopToken()
         self._lock = threading.Lock()  # guards everything below
@@ -109,11 +111,16 @@ class Runtime:
             self._lg.warning("runtime stop at exit failed", extra={"exception": e})
 
     @property
+    def config(self) -> Config:
+        """What the runtime is configured with."""
+        return self._config
+
+    @property
     def process_context(self) -> BaseContext:
-        """The multiprocessing context a process task's child starts in. A
-        queue, event or value shared with a child is made from it: one from
-        another context fails in the child. The same as process_context()."""
-        return process_context()
+        """The multiprocessing context a process task's child starts in, by
+        the config's start method. A queue, event or value shared with a child
+        is made from it, or from process_context()."""
+        return mp.get_context(self._config.process.method)
 
     # -- spawn --------------------------------------------------------------
 
@@ -148,13 +155,14 @@ class Runtime:
                 ended; one that cannot be pickled and unpickled again is sent
                 with a RuntimeError naming why, in place of its result and
                 error.
-            process: Call *fn* in a child process, started with the ``spawn``
-                method: *fn* and *args* are pickled, so *fn* is defined at
+            process: Call *fn* in a child process, started with the runtime's
+                configured start method (``forkserver`` unless its Config says
+                ``spawn``): *fn* and *args* are pickled, so *fn* is defined at
                 module level, and process creation goes under ``if __name__ ==
                 "__main__":``. Its result or exception comes back pickled; an
                 exception carries the child's traceback as a note, which a
-                done process channel keeps. The child is a fresh interpreter: it does not
-                see the spawner's contextvars; stopping() and task_id() work
+                done process channel keeps. The child starts with a fresh
+                context: it does not see the spawner's contextvars; stopping() and task_id() work
                 there, as the child sets them up itself. The
                 child's token stops with the task's, or once the parent is
                 gone. A child that exits without an outcome fails the task
@@ -200,7 +208,14 @@ class Runtime:
         is an async function, else on a thread."""
         if process:
             return _ProcessTask(
-                self._lg, self._end_hook, task_id, name, fn, args, token
+                self._lg,
+                self._config.process,
+                self._end_hook,
+                task_id,
+                name,
+                fn,
+                args,
+                token,
             )
         if inspect.iscoroutinefunction(fn):
             return _LoopTask(self._end_hook, self._host, task_id, name, fn, args, token)
@@ -281,13 +296,14 @@ class Runtime:
 
     def _stop(self, t: _Task, timeout: float) -> None:
         """Task.stop(): cancel *t*; a killable one still running *timeout*
-        seconds on is terminated, then killed _GRACE seconds later, on the
+        seconds on is terminated, then killed the config's grace later, on the
         loop's timers. Once the loop is stopping, stop() escalates instead."""
         t.cancel()
         if not t.killable or t.ended:
             return
+        grace = self._config.process.grace
         with contextlib.suppress(RuntimeError):  # the loop is stopping
-            self._host._schedule(functools.partial(_force_later, t, timeout))
+            self._host._schedule(functools.partial(_force_later, t, timeout, grace))
 
     def _on_end(self, t: _Task) -> None:
         """Once *t*'s call has ended: forget it, wake the awaits waiting for
@@ -356,22 +372,24 @@ class Runtime:
 
     # -- stop ---------------------------------------------------------------
 
-    def stop(self, timeout: float = 5.0) -> None:
+    def stop(self, timeout: float | None = None) -> None:
         """Stop every task's token, then the loop, which cancels the tasks on
         it; then wait for the tasks on threads and in processes. All of it
-        takes at most *timeout* seconds: the loop, the thread and the process
-        tasks share the one budget. A thread task still running then is logged
-        and left, as a thread cannot be killed. Process tasks still running
-        then are ended by force, on top of *timeout*: every child is sent
-        SIGTERM and given _GRACE seconds, then every survivor SIGKILL and
-        _GRACE seconds more; one still running after that is logged. The tasks
-        keep their outcomes, to be waited for.
+        takes at most *timeout* seconds, the config's stop_timeout if None:
+        the loop, the thread and the process tasks share the one budget. A
+        thread task still running then is logged and left, as a thread cannot
+        be killed. Process tasks still running then are ended by force, on top
+        of *timeout*: every child is sent SIGTERM and given the config's grace,
+        then every survivor SIGKILL and the grace again; one still running
+        after that is logged. The tasks keep their outcomes, to be waited for.
 
         Raises:
             RuntimeError: If called on the runtime's loop thread.
         """
         if self._host.on_loop_thread():
             raise RuntimeError("Runtime.stop() on the loop thread would block it")
+        if timeout is None:
+            timeout = self._config.stop_timeout
         deadline = time.monotonic() + timeout
         with self._lock:
             if not self._started_runtime or self._closing:
@@ -400,7 +418,8 @@ class Runtime:
         """The *tasks* still running once the loop has stopped and the killable
         ones have been ended by force (_escalate())."""
         late = self._overdue(tasks, deadline)
-        killable = _escalate([t for t in late if t.killable])
+        grace = self._config.process.grace
+        killable = _escalate([t for t in late if t.killable], grace)
         return [t for t in late if not t.killable] + killable
 
     def _overdue(self, tasks: list[_Task], deadline: float) -> list[_Task]:
@@ -463,10 +482,10 @@ def _error(t: _Task) -> BaseException | None:
     return None
 
 
-def _escalate(late: list[_Task]) -> list[_Task]:
+def _escalate(late: list[_Task], grace: float) -> list[_Task]:
     """Terminate every one of *late*, killable tasks, then wait for them, all
-    against one deadline _GRACE away; kill the survivors and wait for them the
-    same way. No task's wait delays another's signal.
+    against one deadline *grace* seconds away; kill the survivors and wait for
+    them the same way. No task's wait delays another's signal.
 
     Returns:
         The tasks still running after the kill's grace.
@@ -476,29 +495,31 @@ def _escalate(late: list[_Task]) -> list[_Task]:
             break
         for t in late:
             end(t)
-        grace = time.monotonic() + process_module._GRACE
-        late = [t for t in late if not t.join(max(0.0, grace - time.monotonic()))]
+        deadline = time.monotonic() + grace
+        late = [t for t in late if not t.join(max(0.0, deadline - time.monotonic()))]
     return late
 
 
 def process_context() -> BaseContext:
-    """The multiprocessing context every process task's child starts in, for
-    what is shared with a child before any Runtime exists: a queue, event or
-    value from another context fails in the child."""
-    return mp.get_context(START_METHOD)
+    """The multiprocessing context of the default start method, forkserver,
+    for what is shared with a child before any Runtime exists: a queue, event
+    or value made from it works in a child of either method a runtime may use,
+    spawn too; one from the fork context does not."""
+    return mp.get_context(DEFAULT_CONFIG.process.method)
 
 
-def _force_later(t: _Task, timeout: float) -> None:
-    """On the loop: terminate *t* *timeout* seconds from now, if it still runs."""
-    asyncio.get_running_loop().call_later(timeout, _terminate_late, t)
+def _force_later(t: _Task, timeout: float, grace: float) -> None:
+    """On the loop: terminate *t* *timeout* seconds from now, if it still runs,
+    and kill it *grace* seconds after that."""
+    asyncio.get_running_loop().call_later(timeout, _terminate_late, t, grace)
 
 
-def _terminate_late(t: _Task) -> None:
+def _terminate_late(t: _Task, grace: float) -> None:
     """On the loop: terminate *t*, which outlived its stop's timeout, and kill
-    it _GRACE seconds later if it outlives that too."""
+    it *grace* seconds later if it outlives that too."""
     if not t.ended:
         t.terminate()
-        asyncio.get_running_loop().call_later(process_module._GRACE, _kill_late, t)
+        asyncio.get_running_loop().call_later(grace, _kill_late, t)
 
 
 def _kill_late(t: _Task) -> None:
