@@ -382,16 +382,14 @@ carries the Chan its reply comes back on, so replies need no ids:
 ```python
 from appinfra.runtime import Chan
 
-requests: Chan[tuple[str, Chan[str]]] = Chan(
-    16
-)  # Chan(16, process=True) for an isolated service
+# Chan(16, process=True) for an isolated service
+requests: Chan[tuple[str, Chan[str]]] = Chan(16)
 rt.spawn(WorkerService(lg, requests=requests))
 
 reply: Chan[str] = Chan(1)
 requests.send(("work", reply))
-result = reply.recv(
-    timeout=5.0
-)  # TimeoutError if no reply came; ClosedError if it was refused
+# TimeoutError if no reply came; ChanClosedError if it was refused
+result = reply.recv(timeout=5.0)
 ```
 
 A streaming reply is any number of values on the reply Chan, ended by the replier closing it; the
