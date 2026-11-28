@@ -123,24 +123,25 @@ service runs once its loop has ended (stopped or failed), so it never overlaps `
 
 ```python
 class Doubler(AsyncService):
-    def __init__(self, lg: Logger, inbox: AsyncChannel):
+    def __init__(self, lg: Logger, requests: Chan[tuple[int, Chan[int]]]):
         self._lg = lg
-        self._inbox = inbox
+        self._requests = requests
 
     @property
     def name(self) -> str:
         return "doubler"
 
     async def run(self) -> None:
-        while True:
-            msg = await self._inbox.recv()  # parked: holds no thread
-            await self._inbox.send(Message(id=msg.id, payload=msg.payload * 2))
+        async for value, reply in self._requests:  # parked: holds no thread
+            await reply.asend(value * 2)
 
 
-pair = AsyncQueueChannelFactory().create_pair()
+requests: Chan[tuple[int, Chan[int]]] = Chan(16)
 with Runtime(lg) as rt:
-    rt.ready(rt.spawn(Doubler(lg, pair.child)))
-    # Callers on the same loop, another AsyncService for one, await pair.parent
+    rt.ready(rt.spawn(Doubler(lg, requests)))
+    reply: Chan[int] = Chan(1)
+    requests.send((21, reply))
+    assert reply.recv(timeout=5.0) == 42
 ```
 
 Every async service shares the runtime's one event loop thread: a service waiting on an `await`
@@ -373,170 +374,30 @@ rt.spawn(service, policy=policy)
 | `DependencyFailedError` | A dependency left the runtime before the waiting service started |
 | `DependencyNotRunningError` | `ready()` timed out on a service still waiting for a dependency; also a `TimeoutError` |
 
-## Channels
+## Talking to a Service
 
-For bidirectional communication between services and the code that calls them.
-
-Architecture: Transport handles wire-level send/recv, Channel wraps a Transport with correlation
-logic (request/response matching), and ChannelPairFactory creates connected pairs.
-
-### Sync Channels
-
-For threaded code with blocking calls:
+Services and their callers talk over [`appinfra.runtime`](runtime.md#channels) Chans. A request
+carries the Chan its reply comes back on, so replies need no ids:
 
 ```python
-from appinfra.service import QueueChannelFactory, Message
+from appinfra.runtime import Chan
 
-# Create paired channels
-factory = QueueChannelFactory()
-pair = factory.create_pair()
+# An isolated service needs process Chans on both sides:
+# Chan(16, process=True) here and Chan(1, process=True) for each reply
+requests: Chan[tuple[str, Chan[str]]] = Chan(16)
+rt.spawn(WorkerService(lg, requests=requests))
 
-# Fire-and-forget
-pair.parent.send(Message(payload="hello"))
-
-# Request/response (blocking)
-response = pair.parent.submit(Request(id="1", data="work"), timeout=5.0)
-
-# Streaming response: chunks carrying the request's id, up to the one with is_final=True;
-# the timeout applies to each chunk
-for chunk in pair.parent.stream(Request(id="2", data="stream"), timeout=5.0):
-    print(chunk.payload)
-
-# Receive messages
-msg = pair.child.recv(timeout=1.0)
-pair.child.send(Response(id=msg.id, result="done"))
+reply: Chan[str] = Chan(1)
+requests.send(("work", reply))
+# TimeoutError if no reply came; ChanClosedError if it was refused
+result = reply.recv(timeout=5.0)
 ```
 
-### Async Channels
-
-For asyncio code with async/await:
-
-```python
-from appinfra.service import AsyncQueueChannelFactory
-
-# Async channels for coroutine communication
-factory = AsyncQueueChannelFactory()
-pair = factory.create_pair()
-
-# Fire-and-forget (async)
-await pair.parent.send(Message(payload="hello"))
-
-# Request/response (async)
-response = await pair.parent.submit(Request(id="1", data="work"), timeout=5.0)
-
-# Streaming response (async)
-async for chunk in pair.parent.stream(Request(id="2", data="stream")):
-    print(chunk.data)
-    if chunk.is_final:
-        break  # Automatically stops when is_final=True
-
-# For subprocess communication (async parent, sync child)
-from appinfra.service import AsyncProcessQueueChannelFactory
-
-pair = AsyncProcessQueueChannelFactory().create_pair()
-await pair.parent.send(request)  # Parent uses async
-pair.child.recv()  # Child uses sync in subprocess
-```
-
-### Error Responses
-
-A response whose `error` field is set makes `submit()` and `stream()` raise
-`ChannelResponseError`, a `ChannelError` subclass. Its `response` attribute holds the message as
-received, so fields beyond the error text stay readable:
-
-```python
-try:
-    response = await pair.parent.submit(request, timeout=5.0)
-except ChannelResponseError as e:
-    status = e.response.status  # e.g. tell a rejection from a failure
-```
-
-### Custom Channels and Transports
-
-Smart transports (ZMQ, gRPC) that handle their own correlation can implement
-the `Channel` protocol directly:
-
-```python
-from appinfra.service import Channel
-
-
-class ZMQChannel:
-    """Implements Channel protocol directly — no BufferedChannel needed."""
-
-    def send(self, message, timeout=None): ...
-    def recv(self, timeout=None): ...
-    def submit(self, request, timeout=None): ...
-    def stream(self, request, timeout=None): ...
-    def close(self): ...
-    @property
-    def is_closed(self) -> bool: ...
-```
-
-For dumb transports that only provide raw send/recv, wrap in `BufferedChannel`
-to get request/response correlation and redelivery:
-
-```python
-from appinfra.service import BufferedChannel, Transport
-
-
-class SharedMemTransport:
-    """Any object satisfying the Transport protocol."""
-
-    def send(self, message, timeout=None): ...
-    def recv(self, timeout=None): ...
-    def close(self): ...
-    @property
-    def is_closed(self) -> bool: ...
-
-
-channel = BufferedChannel(SharedMemTransport(shm_region))
-```
-
-A transport's `send()` and `recv()` must return or raise within *timeout*: `send()` raises
-`ChannelFullError` when there is no room, `recv()` raises `ChannelTimeoutError` when nothing
-arrives. `BufferedChannel` calls both in short slices so that `close()` interrupts a wait.
-
-`send(message, timeout=None)` on a channel waits while a bounded queue is full. It raises
-`ChannelClosedError` if the channel closes meanwhile and `ChannelFullError` once *timeout* passes;
-`timeout=0` tries once without waiting. `submit()` counts that wait against its own timeout.
-
-### Transports and Channel Types
-
-| Factory | Transport | Use Case |
-|---------|-----------|----------|
-| `QueueChannelFactory` | `QueueTransport` (`queue.Queue`) | Sync thread communication |
-| `ProcessQueueChannelFactory` | `ProcessQueueTransport` (`mp.Queue`) | Sync cross-process IPC |
-| `AsyncQueueChannelFactory` | `AsyncQueueTransport` (`asyncio.Queue`) | Async coroutine communication |
-| `AsyncProcessQueueChannelFactory` | `AsyncProcessQueueTransport` (`mp.Queue`) | Async parent, sync child subprocess |
-
-### Process Channels and Exit
-
-The process transports use `multiprocessing.Queue`, so its rule applies ([Joining processes that
-use queues](https://docs.python.org/3/library/multiprocessing.html#programming-guidelines)): at
-exit, a process waits until its queue's feeder thread has written every message it sent into the
-pipe. Unread messages that fit in the pipe do not delay exit, but once the pipe is full the
-feeder blocks until a reader takes from it, so messages nobody reads can keep the sender alive.
-Pipe capacity varies by system and can be as small as one page, so code must not rely on it.
-
-- Consume every message sent, or call `allow_exit_without_flush()` on the sending
-  `ProcessQueueTransport` where unread messages may be dropped at exit.
-- A channel an isolated service holds is pickled with the service when its process starts, under
-  the `spawn` method; this works only while the child starts. The child's copy starts with an
-  empty redelivery buffer. Queues and events passed to a child must come from the same start
-  method: multiprocessing refuses them in the child otherwise.
-
-### Channel Pairs
-
-A channel factory creates connected pairs with one configuration; a service takes its end of a
-pair, and the code that calls it keeps the other:
-
-```python
-from appinfra.service import ChannelConfig, QueueChannelFactory
-
-pair = QueueChannelFactory(ChannelConfig(response_timeout=60.0)).create_pair()
-rt.spawn(WorkerService(lg, channel=pair.child))
-reply = pair.parent.submit(Message(payload="work"))
-```
+A streaming reply is any number of values on the reply Chan, ended by the replier closing it; the
+caller iterates the reply Chan. An isolated service takes process Chans (`Chan(n, process=True)`),
+the requests Chan and each reply Chan: a local Chan cannot travel inside a process Chan's
+message. The requests Chan is homed in the parent and crosses into the service's process with
+the service, and a restarted process reaches the same Chan.
 
 ## API Reference
 
@@ -550,38 +411,3 @@ reply = pair.parent.submit(Message(payload="work"))
 - `StopToken` - Hierarchical, one-way stop signal; every service's `self.stopping`
 - `RestartPolicy` - Restart configuration
 - `State` - State enum
-
-### Transport Protocols
-
-- `Transport` - Sync wire-level protocol (send, recv, close, is_closed)
-- `AsyncTransport` - Async wire-level protocol
-
-### Built-in Transports
-
-- `QueueTransport` - Wraps `queue.Queue` for in-process sync communication
-- `ProcessQueueTransport` - Wraps `mp.Queue` for cross-process sync communication
-- `AsyncQueueTransport` - Wraps `asyncio.Queue` for async coroutine communication
-- `AsyncProcessQueueTransport` - Wraps `mp.Queue` with async interface
-
-### Channel Protocols
-
-- `Channel` - Sync channel protocol (implement directly for smart transports)
-- `AsyncChannel` - Async channel protocol (implement directly for smart transports)
-
-### Built-in Channels
-
-- `BufferedChannel` - Wraps a `Transport` with correlation, streaming, and redelivery
-- `AsyncBufferedChannel` - Wraps an `AsyncTransport` with correlation, streaming, and redelivery
-- `Message` - Generic message with id for correlation
-
-### Channel Pairs and Factories
-
-- `ChannelPairFactory` - Protocol for pluggable channel pair creation (`create_pair()`)
-- `QueueChannelFactory` - Creates sync `Channel` pairs over `QueueTransport`
-- `ProcessQueueChannelFactory` - Creates sync `Channel` pairs over `ProcessQueueTransport`
-- `AsyncQueueChannelFactory` - Creates async `AsyncChannel` pairs over `AsyncQueueTransport`
-- `AsyncProcessQueueChannelFactory` - Creates mixed async parent + sync child pairs
-- `ChannelConfig` - Channel configuration (timeout, queue size)
-- `ChannelPair` - Sync channel pair (parent, child)
-- `AsyncChannelPair` - Async channel pair (parent, child)
-- `AsyncProcessChannelPair` - Mixed async parent + sync child pair

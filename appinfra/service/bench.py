@@ -3,8 +3,9 @@
 
 """
 Measure what async services on one event loop cost: memory per service, the rate a
-Runtime spawns and stops them one at a time and all at once, and the submit/reply rate
-through an async channel. The services run on the service Runtime's loop.
+Runtime spawns and stops them one at a time and all at once, and the request/reply rate
+between two of them: each request carries the Chan its reply comes back on. The services
+run on the service Runtime's loop.
 
 The memory figure is the net cost of a service: a service holding nothing of its own,
 idle on the loop, as an idle goroutine parks on a channel. It is asyncio's part (the
@@ -27,14 +28,17 @@ from concurrent.futures import Future
 from dataclasses import dataclass
 
 from ..log import Logger
+from ..runtime import Chan
 from ..runtime import Runtime as Tasks
 from ..runtime.bench import Arrivals, bytes_per_warmed, check_count
 from .base import AsyncService
-from .channel import AsyncChannel, AsyncQueueChannelFactory, Message
 from .runtime import Runner, Runtime
 
 ServiceMaker = Callable[[int, Arrivals], AsyncService]
 """Makes the i-th service of a run, which calls arrive() once its run() has started."""
+
+Requests = Chan[tuple[int, Chan[int]]]
+"""What a Doubler answers: a value, and the Chan its reply goes back on."""
 
 
 class Minimal(AsyncService):
@@ -61,12 +65,12 @@ class Minimal(AsyncService):
 
 
 class Doubler(AsyncService):
-    """Replies to each request with its payload doubled."""
+    """Replies to each request with its value doubled."""
 
-    def __init__(self, lg: Logger, inbox: AsyncChannel) -> None:
-        """Answer the requests arriving on *inbox*."""
+    def __init__(self, lg: Logger, requests: Requests) -> None:
+        """Answer the requests arriving on *requests*."""
         self._lg = lg
-        self._inbox = inbox
+        self._requests = requests
 
     @property
     def name(self) -> str:
@@ -74,10 +78,9 @@ class Doubler(AsyncService):
         return "doubler"
 
     async def run(self) -> None:  # type: ignore[override]
-        """Answer requests until cancelled."""
-        while True:
-            msg = await self._inbox.recv()
-            await self._inbox.send(Message(id=msg.id, payload=msg.payload * 2))
+        """Answer requests until stopped."""
+        async for value, reply in self._requests:
+            await reply.asend(value * 2)
 
 
 @dataclass(frozen=True)
@@ -242,10 +245,10 @@ class _Caller(AsyncService):
     and reports the round trips per second in *rate*."""
 
     def __init__(
-        self, lg: Logger, outbox: AsyncChannel, count: int, rate: Future[float]
+        self, lg: Logger, requests: Requests, count: int, rate: Future[float]
     ) -> None:
         self._lg = lg
-        self._outbox = outbox
+        self._requests = requests
         self._count = count
         self._rate = rate
 
@@ -264,7 +267,9 @@ class _Caller(AsyncService):
         try:
             began = time.perf_counter()
             for i in range(self._count):
-                await self._outbox.submit(Message(payload=i), timeout=5.0)
+                reply: Chan[int] = Chan(1)
+                await self._requests.asend((i, reply), timeout=5.0)
+                await reply.arecv(timeout=5.0)
             self._rate.set_result(self._count / (time.perf_counter() - began))
         except Exception as e:
             self._rate.set_exception(e)
@@ -279,9 +284,9 @@ def round_trip_rate(lg: Logger, count: int) -> float:
         ValueError: If *count* is less than 1.
     """
     check_count(count)
-    pair = AsyncQueueChannelFactory().create_pair()
+    requests: Requests = Chan(1)
     rate: Future[float] = Future()
     with Runtime(lg) as rt:
-        rt.spawn(_Caller(lg, pair.parent, count, rate))
-        rt.ready(rt.spawn(Doubler(lg, pair.child)), timeout=5.0)
+        rt.spawn(_Caller(lg, requests, count, rate))
+        rt.ready(rt.spawn(Doubler(lg, requests)), timeout=5.0)
         return rate.result(timeout=300.0)

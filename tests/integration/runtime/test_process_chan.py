@@ -6,6 +6,7 @@ as references, over a link made for the run, and work there as here."""
 
 from __future__ import annotations
 
+import threading
 import time
 from collections.abc import Iterator
 from typing import Any
@@ -61,6 +62,25 @@ def set_and_send(event: Any, out: Chan[int]) -> None:
     out.send(1, timeout=DUE)
 
 
+def send_range(out: Chan[int], start: int, count: int) -> None:
+    for x in range(start, start + count):
+        out.send(x, timeout=DUE)
+
+
+def collect(inbox: Chan[int]) -> list[int]:
+    """Every value this child received, until the Chan was closed."""
+    return list(inbox)
+
+
+def home_and_wait(out: Chan[Chan[int]], parked: Chan[bool]) -> None:
+    """Make a Chan homed here and hand it to the parent; once the parent's
+    receive waits on it, say so, then wait on it too."""
+    mine: Chan[int] = Chan(1, process=True)
+    out.send(mine, timeout=DUE)
+    parked.send(_parked(mine, receivers=1), timeout=DUE)
+    mine.recv()
+
+
 def _parked(chan: Chan[Any], receivers: int) -> bool:
     """Whether *receivers* receives wait at *chan* before DUE: a child's call
     parks here after its frame crosses, which signals nothing. The deadline
@@ -113,7 +133,68 @@ class TestCrossing:
         assert event.is_set()
 
 
+CHILDREN = 4
+VALUES = 20
+
+
+class TestMany:
+    """One Chan, its senders or its receivers in several processes."""
+
+    def test_the_values_of_many_child_senders_each_arrive_once(
+        self, rt: Runtime
+    ) -> None:
+        out: Chan[int] = Chan(0, process=True)
+        tasks = [
+            rt.spawn(send_range, out, i * VALUES, VALUES, process=True)
+            for i in range(CHILDREN)
+        ]
+        got = [out.recv(timeout=DUE) for _ in range(CHILDREN * VALUES)]
+        for t in tasks:
+            t.wait(timeout=DUE)
+        assert sorted(got) == list(range(CHILDREN * VALUES))
+
+    def test_each_value_goes_to_exactly_one_of_many_child_receivers(
+        self, rt: Runtime
+    ) -> None:
+        """Capacity 0: a send completes only once a child took the value, so
+        the close after the last one leaves none behind."""
+        inbox: Chan[int] = Chan(0, process=True)
+        tasks = [rt.spawn(collect, inbox, process=True) for _ in range(CHILDREN)]
+        for x in range(CHILDREN * VALUES):
+            inbox.send(x, timeout=DUE)
+        inbox.close()  # ends every child's iteration
+        got = [x for t in tasks for x in t.wait(timeout=DUE)]
+        assert sorted(got) == list(range(CHILDREN * VALUES))
+
+
 class TestEnds:
+    def test_a_home_killed_fails_the_calls_on_its_chan(self, rt: Runtime) -> None:
+        """Its link at EOF: a receive waiting at the home when it is killed,
+        and a send after, both raise ClosedError, not wait out their timeout."""
+        out: Chan[Chan[int]] = Chan(1, process=True)
+        parked: Chan[bool] = Chan(1, process=True)
+        t = rt.spawn(home_and_wait, out, parked, process=True)
+        theirs = out.recv(timeout=DUE)
+        errors: list[type[BaseException]] = []
+
+        def receive() -> None:
+            try:
+                theirs.recv(timeout=DUE * 6)
+            except BaseException as e:  # what ended it, whatever it is
+                errors.append(type(e))
+
+        receiving = threading.Thread(target=receive)
+        receiving.start()
+        assert parked.recv(timeout=DUE)  # the parent's receive waits at the home
+        assert t.process is not None
+        t.process.kill()
+        with pytest.raises(ProcessExitError):
+            t.wait(timeout=DUE)
+        receiving.join(DUE)
+        assert errors == [ClosedError]
+        with pytest.raises(ClosedError):
+            theirs.send(1, timeout=DUE)
+
     def test_a_close_the_child_posts_last_reaches_the_chan(self, rt: Runtime) -> None:
         """Posted, not waited for, then the child ends: the run's end here
         still applies it before dropping what it handed the child."""
