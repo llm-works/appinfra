@@ -5,12 +5,10 @@
 reports its errors to the parent pickled."""
 
 import pickle
-from types import SimpleNamespace
 
 import pytest
 
 from appinfra.service import (
-    ChannelResponseError,
     CycleError,
     DependencyFailedError,
     DependencyNotRunningError,
@@ -29,7 +27,6 @@ ERRORS = [
     DependencyNotRunningError("api", "db"),
     InvalidTransitionError("svc", State.CREATED, State.RUNNING),
     CycleError(["a", "b"]),
-    ChannelResponseError(SimpleNamespace(error="refused")),
 ]
 
 
@@ -42,5 +39,4 @@ def test_an_error_survives_pickling(error: Exception) -> None:
     assert str(copy) == str(error)
     assert vars(copy).keys() == vars(error).keys()
     for name, value in vars(error).items():
-        if not isinstance(value, SimpleNamespace):  # compared by identity
-            assert getattr(copy, name) == value
+        assert getattr(copy, name) == value

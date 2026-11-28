@@ -8,7 +8,8 @@ Print what idle tasks and services on one event loop cost on this machine and Py
 version, side by side: a bare task on appinfra.runtime, and a service under the service
 layer. For each, the net memory cost (asyncio's part and appinfra's) and the rate they
 start and stop; for services also the spawn() and stop() rate of a service Runtime and
-the submit/reply rate through an async channel. See appinfra.runtime.bench and
+the request/reply rate between two services, each request with its reply Chan. See
+appinfra.runtime.bench and
 appinfra.service.bench.
 """
 
@@ -75,7 +76,7 @@ _NOTES = [
     ("stop", "cancel() and wait() of a task, stop_service() of a service"),
     ("Runtime spawn", "spawn() into a runtime of its own, until each runs"),
     ("Runtime stop", "one stop() of that runtime"),
-    ("submit/reply", "round trips over channels between two tasks, or to a service"),
+    ("request/reply", "round trips over Chans between two tasks, or two services"),
 ]
 
 
@@ -125,7 +126,7 @@ def _measure_services(lg: Logger, count: int) -> _Column:
         lg.info("measuring spawn and stop_service...", extra={"services": count})
         runners, start = spawn_services(rt, parked_maker(lg), count)
         stop = stop_services(rt, runners)
-    lg.info("measuring submit/reply rate...", extra={"round_trips": count})
+    lg.info("measuring request/reply rate...", extra={"round_trips": count})
     trips = round_trip_rate(lg, count)
     lg.info("measuring service runtime spawn and stop...", extra={"services": count})
     rt_spawn, rt_stop = runtime_rates(lg, parked_maker(lg), count)
@@ -144,7 +145,7 @@ def _rows(tasks: _Column, services: _Column) -> list[tuple[str, str, str]]:
         ("stop", "stop", "/s"),
         ("Runtime spawn", "rt_spawn", "/s"),
         ("Runtime stop", "rt_stop", "/s"),
-        ("submit/reply", "trips", "/s"),
+        ("request/reply", "trips", "/s"),
     ]
     return [
         (

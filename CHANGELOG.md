@@ -31,8 +31,6 @@ For API stability guarantees and deprecation policy, see
   `Store.object_types` and `Store.write_objects`; their defaults loop over the single-object calls.
 - `AsyncService`: a service whose `run()` is a coroutine. The `Runtime` runs it as a task on one
   shared event loop thread, so a service waiting on an `await` holds no thread of its own.
-- `BufferedChannel.stream()`: the sync counterpart of `AsyncBufferedChannel.stream()`, yielding
-  the response chunks of a request until the one with `is_final=True`.
 - `Runtime`: `spawn()` takes services in any order, from any thread, and runs each once its
   `depends_on` run: on a shared event loop, a thread, or a process of its own (`isolate=True`).
   `ready()` waits for health, `stop_service()` stops one; `stop()` goes in reverse start order. A
@@ -72,16 +70,12 @@ For API stability guarantees and deprecation policy, see
   `(request, reply)`, answered with `reply.send()`, replacing `server.request_queue` and
   `server.response_queue`. Messages need no `id`; `IPCConfig.poll_interval`,
   `.subprocess.with_poll_interval()` and `IPCChannel.start_polling()`/`stop_polling()` are gone.
-- **Breaking:** `submit_stream()` is renamed `stream()` on `AsyncChannel`, `AsyncBufferedChannel`
-  and `IPCChannel`. The sync `Channel` protocol gains `stream()`, so a class implementing it
-  directly must add the method.
+- **Breaking:** `IPCChannel.submit_stream()` is renamed `stream()`.
 - `make check.ci` gives each pytest run `APPINFRA_PYTEST_WORKERS` workers (default: one per CPU),
   since its stages run one after another; `make check` keeps its worker shares.
 - `make test.coverage` (and its `.v` / `.html` / `.json` variants) and `make check` measure with
   `sys.monitoring` on Python 3.12+ only where it can measure the run: not with coverage
   plugins, dynamic contexts, or branch measurement before Python 3.14.
-- An async channel over `AsyncQueueTransport` waits in `recv()` without waking every 0.1 s:
-  `close()` wakes it instead. A custom `AsyncTransport` opts in with `wakes_on_close = True`.
 - **Breaking:** the `appinfra.service.runner` package is `appinfra.service.runtime`, and its
   `base` module is `runtime.runner`. Imports from `appinfra.service` are unchanged.
 - **Breaking:** `RestartPolicy` is frozen: runners share one policy, so a field cannot change for
@@ -116,8 +110,11 @@ For API stability guarantees and deprecation policy, see
 - **Breaking:** `ThreadRunner`, `ProcessRunner`, `RunnerFactory` and `RunnerWithChannel` from
   `appinfra.service`: `Runtime.spawn()` runs every service, `isolate=True` in a process of its own.
 - **Breaking:** `ServiceFactory` and `ServiceRegistration`: construct the service and pass
-  `spawn()` its policy. The channel pair factories move to `appinfra.service.channel`; their
-  imports from `appinfra.service` are unchanged.
+  `spawn()` its policy.
+- **Breaking:** `appinfra.service`'s channels: `Channel`, `AsyncChannel`, `BufferedChannel`,
+  `AsyncBufferedChannel`, `Message`, the transports, channel pairs and their factories,
+  `ChannelConfig` and the `Channel*Error`s. Services talk over `appinfra.runtime` Chans, each
+  request with the Chan its reply comes back on.
 - **Breaking:** `appinfra.service.Manager`: `Runtime` replaces it. `rt.spawn(service)` takes the
   place of `add_service()`/`add()`: a service whose dependency is not running yet waits for it
   instead of being refused. `rt.services[name].state` replaces `is_running(name)`; a stopped
@@ -130,8 +127,6 @@ For API stability guarantees and deprecation policy, see
   `PYDANTIC_AVAILABLE`. `appinfra.config.schemas` needs pydantic to import.
 
 ### Fixed
-- A streamed reply on an `AsyncBufferedChannel` shared with other `submit()` or `stream()` callers
-  could lose a chunk or yield it out of order.
 - `make pg.server.up.repl` starts from any project, not only from the appinfra repo: the
   primary mounted its `pg_hba.conf` from a path under the project directory.
 - `pg.sh reboot` and the `pg.*` waits find the server however many other containers the runtime

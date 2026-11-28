@@ -160,18 +160,17 @@ class AsyncService(Service):
 
     Example:
         class Doubler(AsyncService):
-            def __init__(self, lg: Logger, inbox: AsyncChannel) -> None:
+            def __init__(self, lg: Logger, requests: Chan[tuple[int, Chan[int]]]) -> None:
                 self._lg = lg
-                self._inbox = inbox
+                self._requests = requests
 
             @property
             def name(self) -> str:
                 return "doubler"
 
             async def run(self) -> None:
-                while True:
-                    msg = await self._inbox.recv()
-                    await self._inbox.send(Message(id=msg.id, payload=msg.payload * 2))
+                async for value, reply in self._requests:
+                    await reply.asend(value * 2)
     """
 
     # A coroutine, unlike Service.run(): the runtime runs it on its event loop,
