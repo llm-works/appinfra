@@ -20,7 +20,8 @@ from typing import Any
 import pytest
 
 from appinfra.log import Logger
-from appinfra.runtime import process as process_module
+from appinfra.runtime import Config as TasksConfig
+from appinfra.runtime import ProcessConfig
 from appinfra.service import Runner, Runtime, State
 from tests.helpers.http import wait_ready
 
@@ -166,25 +167,30 @@ class TestSupervision:
 
 
 class TestStop:
-    def test_a_hung_server_is_terminated_then_killed(
-        self, rt: Runtime, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_a_hung_server_is_terminated_then_killed(self) -> None:
         """A child that does not end within stop()'s timeout is forced, and
         stop() returns once it has ended."""
-        monkeypatch.setattr(process_module, "_GRACE", 0.2)
-        server = (
-            _build_server(rt).with_on_shutdown(_never_shuts_down, name="hang").build()
-        )
-        server.start_subprocess()
-        process = server.process
-        assert process is not None
-        _wait_ready(server)
+        quick = TasksConfig(process=ProcessConfig(grace=0.2))
+        rt = Runtime(Logger("test-server-runtime"), name="test", config=quick)
+        rt.start()
+        try:
+            server = (
+                _build_server(rt)
+                .with_on_shutdown(_never_shuts_down, name="hang")
+                .build()
+            )
+            server.start_subprocess()
+            process = server.process
+            assert process is not None
+            _wait_ready(server)
 
-        server.stop(timeout=0.2)
+            server.stop(timeout=0.2)
 
-        detail = process.detail()
-        assert not detail.alive
-        assert detail.exitcode in (-signal.SIGTERM, -signal.SIGKILL)
+            detail = process.detail()
+            assert not detail.alive
+            assert detail.exitcode in (-signal.SIGTERM, -signal.SIGKILL)
+        finally:
+            rt.stop(timeout=10.0)
 
     def test_a_blocking_start_returns_when_stopped_in_a_restart_backoff(
         self, rt: Runtime

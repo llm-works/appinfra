@@ -30,7 +30,7 @@ for _ancestor in (_script_dir, *_script_dir.parents):
         break
 
 from appinfra import size_str  # noqa: E402
-from appinfra.app import AppBuilder, Tool  # noqa: E402
+from appinfra.app import App, AppBuilder  # noqa: E402
 from appinfra.log import Logger  # noqa: E402
 from appinfra.runtime import Runtime  # noqa: E402
 from appinfra.runtime.bench import (  # noqa: E402
@@ -57,16 +57,6 @@ from appinfra.service.bench import (  # noqa: E402
     stop_services,
 )
 
-app = (
-    AppBuilder("runtime_bench")
-    .with_description("What idle tasks of each kind and services cost")
-    .logging(level="info")
-    .cli(log_level=True, quiet=True)
-    .tools.with_main("bench")
-    .done()
-    .build()
-)
-
 
 @dataclass(frozen=True)
 class _Column:
@@ -87,7 +77,8 @@ class _Column:
 
 # What each row measures, printed under the table
 _NOTES = [
-    ("net cost", "a process: its child's resident set, shared pages too"),
+    ("net cost", "a process: what its child alone holds (Linux), or its resident"),
+    ("", "set, shared pages too; the fork server is paid once, not per task"),
     ("base", "a plain asyncio task, or a plain thread, parked the same way"),
     ("", "a thread's stack, mapped by the OS, is not counted"),
     ("start", "spawn() of a task or a service, until each runs"),
@@ -108,33 +99,40 @@ def _positive(value: str) -> int:
     return count
 
 
-@app.tool(name="bench", help="Measure idle tasks of each kind and services")
-@app.argument(
-    "-n",
-    "--count",
-    type=_positive,
-    default=20_000,
-    help="loop tasks and services to run, and round trips for every column",
-)
-@app.argument(
-    "-t", "--threads", type=_positive, default=1_000, help="thread tasks to run"
-)
-@app.argument(
-    "-p", "--processes", type=_positive, default=20, help="process tasks to run"
-)
-def bench(self: Tool) -> int:
-    """Run the measurements and print their numbers."""
-    count = self.args.count
-    # Slowest task kind first, services last
-    columns = [
-        _measure_processes(self.lg, self.args.processes, count),
-        _measure_threads(self.lg, self.args.threads, count),
-        _measure_tasks(self.lg, count),
-        _measure_services(self.lg, count),
-    ]
-    self.lg.info("done")
-    _report(count, columns)
-    return 0
+class Bench(App):
+    """The benchmark, as the app's one command: it has no tools, so it takes
+    no subcommand."""
+
+    def add_args(self) -> None:
+        """The standard arguments, and how many items to measure."""
+        super().add_args()
+        self.parser.add_argument(
+            "-n",
+            "--count",
+            type=_positive,
+            default=20_000,
+            help="loop tasks and services to run, and round trips for every column",
+        )
+        self.parser.add_argument(
+            "-t", "--threads", type=_positive, default=1_000, help="thread tasks to run"
+        )
+        self.parser.add_argument(
+            "-p", "--processes", type=_positive, default=20, help="process tasks to run"
+        )
+
+    def run_no_tool(self) -> int:
+        """Run the measurements and print their numbers."""
+        count = self.args.count
+        # Slowest task kind first, services last
+        columns = [
+            _measure_processes(self.lg, self.args.processes, count),
+            _measure_threads(self.lg, self.args.threads, count),
+            _measure_tasks(self.lg, count),
+            _measure_services(self.lg, count),
+        ]
+        self.lg.info("done")
+        _report(count, columns)
+        return 0
 
 
 def _measure_tasks(lg: Logger, count: int) -> _Column:
@@ -181,14 +179,17 @@ def _measure_processes(lg: Logger, count: int, trips: int) -> _Column:
     """A process task's numbers, over *count* tasks and *trips* round trips."""
     with Runtime(lg) as rt:
         lg.info("measuring memory per process task...", extra={"tasks": count})
-        rss = process_cost(rt, count)
+        cost = process_cost(rt, count)
         lg.info("measuring process spawn and cancel...", extra={"tasks": count})
         spawn, cancel = process_rates(rt, count)
         lg.info("measuring process round trips...", extra={"round_trips": trips})
         rate = process_round_trip_rate(rt, trips)
     lg.info("measuring process runtime spawn and stop...", extra={"tasks": count})
     rt_spawn, rt_stop = process_runtime_rates(lg, count)
-    return _Column(count, rss, None, None, spawn, cancel, rt_spawn, rt_stop, rate)
+    # What each more task costs: its child's private memory, where the OS
+    # tells it apart (Linux); elsewhere its resident set
+    net = cost.resident if cost.private is None else cost.private
+    return _Column(count, net, None, None, spawn, cancel, rt_spawn, rt_stop, rate)
 
 
 def _measure_services(lg: Logger, count: int) -> _Column:
@@ -257,6 +258,16 @@ def _report(trips: int, columns: list[_Column]) -> None:
     print()
     for label, note in _NOTES:
         print(f"  {label:<16}{note}")
+
+
+app = (
+    AppBuilder("runtime_bench")
+    .with_main_cls(Bench)
+    .with_description("What idle tasks of each kind and services cost")
+    .logging(level="info")
+    .cli(log_level=True, quiet=True)
+    .build()
+)
 
 
 if __name__ == "__main__":

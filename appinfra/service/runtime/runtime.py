@@ -16,8 +16,10 @@ from typing import Any
 
 from ...log import Logger
 from ...runtime import Chan, ChanClosedError, StoppedError, StopToken, Task
+from ...runtime import Config as TasksConfig
 from ...runtime import Runtime as Tasks
 from ...runtime import task_id as current_task_id
+from ...runtime.config import DEFAULT_CONFIG
 from ..base import AsyncService, Service
 from ..errors import DependencyNotRunningError, HealthTimeoutError, RunError
 from ..state import RestartPolicy
@@ -62,11 +64,15 @@ class Runtime:
             rt.ready(api)
     """
 
-    def __init__(self, lg: Logger, name: str = "runtime") -> None:
-        """A runtime not yet started; *name* names it in errors."""
+    def __init__(
+        self, lg: Logger, name: str = "runtime", config: TasksConfig = DEFAULT_CONFIG
+    ) -> None:
+        """A runtime not yet started; *name* names it in errors. Its services
+        run on a task runtime configured by *config* (appinfra.runtime.Config):
+        how an isolated one's process starts and is forced to end."""
         self._lg = lg
         self.name = name
-        self._tasks = Tasks(lg)
+        self._tasks = Tasks(lg, config)
         self._root = StopToken()
         # Unbounded: a task's end is sent from any thread, the loop's included
         self._inbox: Chan[Any] = Chan(None)

@@ -26,6 +26,7 @@ from .measure import (
     check_count,
 )
 from .process import (
+    ProcessCost,
     process_cost,
     process_rates,
     process_round_trip_rate,
@@ -40,6 +41,7 @@ from .thread import (
 
 __all__ = [
     "Arrivals",
+    "ProcessCost",
     "TaskCost",
     "ThreadArrivals",
     "bytes_per",

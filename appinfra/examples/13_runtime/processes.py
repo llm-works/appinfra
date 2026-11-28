@@ -9,8 +9,8 @@ A ``Chan(n, process=True)`` lives in the process that made it, its home; handed
 to a process task, it arrives in the child as the same Chan, and the child uses
 it as the parent does. Each example is a function, from a child sending to a
 child's own tasks reporting their ends; main() runs them in order. A child's
-function is defined at module level, as the spawn start method imports this
-module in the child to find it.
+function is defined at module level, as the child finds it in this module by
+name.
 """
 
 import math

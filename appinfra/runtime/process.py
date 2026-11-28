@@ -9,37 +9,37 @@ import contextlib
 import functools
 import multiprocessing as mp
 import pickle
+import sys
 import threading
 import traceback
 from collections.abc import Callable
 from multiprocessing.connection import Connection, wait
+from multiprocessing.context import ForkServerContext, SpawnContext
 from multiprocessing.process import BaseProcess
-from typing import Any, Final
+from typing import Any, Final, cast
 
 from ..log import Logger
 from .chan.crossing import Crossing, close_child
+from .config import ProcessConfig
 from .errors import ProcessExitError, StoppedError
 from .stop import StopToken
 from .task import ProcessDetail, TaskKind, _label, _Task
 from .thread import _ThreadTask
 
-# How every child starts: a fresh interpreter. Forking a process that runs the
-# runtime's loop and threads is unsafe
-START_METHOD: Final = "spawn"
-
 # What terminate() and kill() ask of a child, the stronger one winning
 _TERMINATE, _KILL = 1, 2
 
-# Seconds a child forced to end gets after SIGTERM, and then after SIGKILL:
-# on top of the timeout of the stop that forces it
-_GRACE = 2.0
+# The package whose modules the fork server imports before it forks a child
+_PRELOADED: Final = __package__.split(".")[0]
 
 
 class _ProcessTask(_ThreadTask):
-    """Calls a function in a child process, started with the ``spawn`` method:
-    the function and its arguments are pickled, and the function is found by
-    import in the child. A thread of the parent's starts the child and waits
-    for it, so the task is waited for, cancelled and joined as a thread task.
+    """Calls a function in a child process, started with the runtime's start
+    method (ProcessConfig): the function and its arguments are pickled, and
+    the function is found by import in the child. A thread of the parent's
+    starts the child and waits for it, so the task is waited for, cancelled
+    and joined as a thread task. A child that outlives its stop gets SIGTERM,
+    then SIGKILL, the config's grace apart.
 
     The child runs the call as a thread task of its own, inline: stopping()
     and task_id() work there, with this task's id. Its token stops when this
@@ -56,7 +56,7 @@ class _ProcessTask(_ThreadTask):
     of it (chan/crossing.py). A start that meets none makes no link.
     """
 
-    __slots__ = ("_lg", "_process", "_lock", "_forced", "_ended")
+    __slots__ = ("_lg", "_config", "_process", "_lock", "_forced", "_ended")
 
     killable = True
 
@@ -65,6 +65,7 @@ class _ProcessTask(_ThreadTask):
     def __init__(
         self,
         lg: Logger,
+        config: ProcessConfig,
         on_end: Callable[[_Task], None],
         task_id: int,
         name: str | None,
@@ -72,9 +73,11 @@ class _ProcessTask(_ThreadTask):
         args: tuple[Any, ...],
         token: StopToken,
     ) -> None:
-        """Initialize task, logging to the runtime's *lg*; see _Task."""
+        """Initialize task, logging to the runtime's *lg*, its child started
+        and forced to end as *config* says; see _Task."""
         super().__init__(on_end, task_id, name, fn, args, token)
         self._lg = lg
+        self._config = config
         # The child, once started. Under _lock: terminate() and kill() record
         # what they were asked in _forced and signal it, so a force between
         # the child's start and its publication is not lost; and _release()
@@ -87,7 +90,12 @@ class _ProcessTask(_ThreadTask):
 
     def _call(self, fn: Callable[..., Any], args: tuple[Any, ...]) -> Any:
         """Run *fn*(*args*) in a child and return or raise its outcome."""
-        ctx = mp.get_context(START_METHOD)
+        # One of the methods ProcessConfig accepts, which both start children
+        ctx = cast(
+            "ForkServerContext | SpawnContext", mp.get_context(self._config.method)
+        )
+        if self._config.method == "forkserver":
+            _preload(ctx)
         with contextlib.ExitStack() as ends:
             # Closed last: it waits for the child's end of the link, which the
             # child closes as it ends, told to stop by then on an early exit
@@ -190,9 +198,8 @@ class _ProcessTask(_ThreadTask):
 
     def grace(self) -> float:
         """Seconds past a stop's timeout by which a forced child has been
-        terminated, killed _GRACE later, and given _GRACE more to be reaped.
-        Read on each call, so a test can shorten _GRACE."""
-        return 2 * _GRACE
+        terminated, killed a grace later, and given a grace more to be reaped."""
+        return 2 * self._config.grace
 
     def process_detail(self) -> ProcessDetail:
         """The child as it is now: running, or ended and not yet reaped; as
@@ -222,6 +229,20 @@ def _send(process: BaseProcess | None, level: int) -> None:
                 process.kill()
             else:
                 process.terminate()
+
+
+@functools.cache
+def _preload(ctx: Any) -> None:
+    """Have the fork server import, before it forks a child, the main module
+    and every module of _PRELOADED this process has imported by now; once per
+    process. Each child then shares them with the others instead of importing
+    its own copy: Python before 3.14 never hands the server the main module's
+    path, so a child would import the main module, and all it imports, alone.
+    Process-wide, and replacing a preload the application set; it takes
+    effect only before the server starts."""
+    root = _PRELOADED
+    imported = sorted(m for m in sys.modules if m == root or m.startswith(f"{root}."))
+    ctx.set_forkserver_preload(["__main__", *imported])
 
 
 def _opened(

@@ -6,13 +6,14 @@ Measure what a task in a process of its own costs: the resident memory of its
 child, the rate tasks spawn and end, and the round-trip rate over process Chans
 between a task in the parent and one in a child.
 
-A child's memory is its resident set once it runs, as ps reports it: the
-interpreter, appinfra's imports, the parent's main module (which the spawn method
-imports again in the child) and the link to the parent. It counts pages the
-children share (the interpreter's code), so it is more than each child adds. Not
-the child's own getrusage(): on Linux a child the spawn method starts is forked,
-then exec'd, and its peak resident set keeps the forked parent's. The functions
-the children run are at module level, as the spawn method needs.
+A child's memory is measured twice once it runs. Its private memory, on Linux,
+is what each more task costs: the pages it alone holds, its own objects and the
+link to the parent, while the interpreter and the modules the fork server
+imported stay shared. Its resident set, as ps reports it on Linux and macOS,
+counts those shared pages in every child, so it is more than each child adds.
+Not the child's own getrusage(): its peak resident set starts from the process
+it was forked from. The functions the children run are at module level, as the
+child imports them by name.
 
 The runtime the tasks are spawned on needs a real logger: it is carried into each
 child its Chans cross to, which a mock cannot be.
@@ -21,7 +22,9 @@ child its Chans cross to, which a mock cannot be.
 from __future__ import annotations
 
 import subprocess
+import sys
 import time
+from dataclasses import dataclass
 
 from ...log import Logger
 from ..chan import Chan
@@ -90,16 +93,52 @@ def _resident(spawned: list[Task]) -> float:
     return 1024 * sum(sizes) / len(sizes)
 
 
-def process_cost(tasks: Runtime, count: int) -> float:
-    """The mean resident set, in bytes, of the children of *count* parked
-    process tasks on *tasks*.
+def _private(spawned: list[Task]) -> float | None:
+    """The mean private memory, in bytes, of the children of *spawned*: the
+    pages each holds that no other process shares, from /proc's smaps_rollup.
+    None off Linux, which has no such file.
+
+    Raises:
+        FileNotFoundError: If a child is already gone.
+    """
+    if not sys.platform.startswith("linux"):
+        return None
+    details = [t.process.detail() for t in spawned if t.process is not None]
+    sizes = [_private_of(d.pid) for d in details if d.pid is not None]
+    return sum(sizes) / len(sizes)
+
+
+def _private_of(pid: int) -> int:
+    """The private memory, in bytes, of process *pid*: its clean and dirty
+    private pages, which smaps_rollup gives in KiB."""
+    total = 0
+    with open(f"/proc/{pid}/smaps_rollup") as rollup:
+        for line in rollup:
+            if line.startswith(("Private_Clean:", "Private_Dirty:")):
+                total += int(line.split()[1])
+    return 1024 * total
+
+
+@dataclass(frozen=True)
+class ProcessCost:
+    """What a parked process task's child holds, in bytes: its resident set,
+    pages it shares with other processes too, and its private memory, what it
+    alone holds (None off Linux)."""
+
+    resident: float
+    private: float | None
+
+
+def process_cost(tasks: Runtime, count: int) -> ProcessCost:
+    """The mean memory of the children of *count* parked process tasks on
+    *tasks*.
 
     Raises:
         ValueError: If *count* is less than 1.
     """
     spawned, _ = _spawn_parked(tasks, count)
     try:
-        return _resident(spawned)
+        return ProcessCost(_resident(spawned), _private(spawned))
     finally:
         cancel_all(spawned)
 

@@ -24,6 +24,8 @@ import pytest
 
 from appinfra.runtime import (
     Chan,
+    Config,
+    ProcessConfig,
     ProcessDetail,
     ProcessExitError,
     Runtime,
@@ -37,7 +39,10 @@ from appinfra.runtime import (
 from appinfra.runtime import process as process_module
 from appinfra.runtime.process import _stop_on_signal
 
-# The child imports these by name: module level, as the spawn method needs
+# A runtime whose forced children get a short grace after SIGTERM and SIGKILL
+QUICK_GRACE = Config(process=ProcessConfig(grace=0.1))
+
+# The child imports these by name: module level, as it finds them by name
 
 
 def double(n: int) -> int:
@@ -313,7 +318,7 @@ def reported(report: tuple[Any, ...]) -> tuple[Any, Any]:
 def process_task() -> Any:
     """A process task not launched: _outcome() is called on it directly."""
     return process_module._ProcessTask(
-        MagicMock(), lambda _: None, 1, None, double, (), StopToken()
+        MagicMock(), ProcessConfig(), lambda _: None, 1, None, double, (), StopToken()
     )
 
 
@@ -383,20 +388,19 @@ class TestStopWithTimeout:
         assert task.process.detail().exitcode == -signal.SIGTERM
         del started  # freed here: the error caught keeps this frame in a cycle
 
-    def test_a_child_ignoring_sigterm_is_killed(
-        self, rt: Runtime, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.setattr(process_module, "_GRACE", 0.1)
-        started = rt.process_context.Event()
-        task = rt.spawn(ignores_everything, started, process=True)
-        assert task.process is not None
-        assert started.wait(30.0)
+    def test_a_child_ignoring_sigterm_is_killed(self) -> None:
+        """Killed the config's grace after its SIGTERM."""
+        with Runtime(MagicMock(), QUICK_GRACE) as rt:
+            started = rt.process_context.Event()
+            task = rt.spawn(ignores_everything, started, process=True)
+            assert task.process is not None
+            assert started.wait(30.0)
 
-        task.stop(timeout=0.1)
-        with pytest.raises(StoppedError):
-            task.wait(timeout=30.0)
-        assert task.process.detail().exitcode == -signal.SIGKILL
-        del started  # freed here: the error caught keeps this frame in a cycle
+            task.stop(timeout=0.1)
+            with pytest.raises(StoppedError):
+                task.wait(timeout=30.0)
+            assert task.process.detail().exitcode == -signal.SIGKILL
+            del started  # freed here: the error caught keeps this frame in a cycle
 
     def test_a_thread_task_is_stopped_as_cancel_stops_it(self, rt: Runtime) -> None:
         """Stopped once its call runs: stopped before, the call is skipped."""
@@ -474,7 +478,13 @@ class TestKindAndDetail:
         del started  # freed here: the error caught keeps this frame in a cycle
 
     def test_children_start_in_the_runtimes_context(self, rt: Runtime) -> None:
-        assert rt.process_context.get_start_method() == "spawn"
+        assert rt.process_context.get_start_method() == "forkserver"
+
+    def test_a_spawn_runtime_starts_its_children_by_spawn(self) -> None:
+        config = Config(process=ProcessConfig(method="spawn"))
+        with Runtime(MagicMock(), config) as rt:
+            assert rt.process_context.get_start_method() == "spawn"
+            assert rt.spawn(double, 3, process=True).wait(timeout=30.0) == 6
 
 
 class TestStop:
@@ -496,13 +506,10 @@ class TestStop:
             t.wait(timeout=30.0)
         del started  # freed here: the error caught keeps this frame in a cycle
 
-    def test_the_runtimes_stop_kills_a_child_that_ignores_it(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_the_runtimes_stop_kills_a_child_that_ignores_it(self) -> None:
         """Past the stop's timeout the child is terminated, then killed: it
         ignores SIGTERM too. Without an outcome, the stopped task is stopped."""
-        monkeypatch.setattr(process_module, "_GRACE", 0.2)
-        rt = Runtime(MagicMock())
+        rt = Runtime(MagicMock(), QUICK_GRACE)
         rt.start()
         started = mp.get_context("spawn").Event()
         t = rt.spawn(ignores_everything, started, process=True)
@@ -519,7 +526,6 @@ class TestStop:
         """The child is running its call, ignoring its stop, but the parent
         thread has not published it yet when the runtime's stop forces the
         task: the force is recorded, and applied as the child is published."""
-        monkeypatch.setattr(process_module, "_GRACE", 0.1)
         real = mp.get_context("spawn")
         held, release = HeldAfterStart.held, HeldAfterStart.release
         held.clear()
@@ -534,7 +540,7 @@ class TestStop:
 
         monkeypatch.setattr(process_module.mp, "get_context", lambda _: SpawnsHeld())
         started = real.Event()
-        rt = Runtime(MagicMock())
+        rt = Runtime(MagicMock(), QUICK_GRACE)
         rt.start()
         try:
             t = rt.spawn(ignores_everything, started, process=True)
@@ -555,9 +561,8 @@ class TestStop:
     ) -> None:
         """The runtime's stop forces a child whose start() is still pickling
         its arguments: once it starts, it is killed, not left running."""
-        monkeypatch.setattr(process_module, "_GRACE", 0.1)
         slow = SlowToPickle()
-        rt = Runtime(MagicMock())
+        rt = Runtime(MagicMock(), QUICK_GRACE)
         rt.start()
         try:
             t = rt.spawn(holds_its_argument, slow, process=True)
