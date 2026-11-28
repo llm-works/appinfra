@@ -135,8 +135,9 @@ class Service(ABC):
     def is_healthy(self) -> bool:
         """Check if service is ready.
 
-        Called after the service's work begins to determine when it is
-        ready. Runner waits for this before reporting RUNNING state.
+        Called once the service's work has been started, to determine when it
+        is ready; for an AsyncService, possibly before run() has taken its
+        first step. Runner waits for this before reporting RUNNING state.
 
         Returns:
             True if service is ready, False otherwise.

@@ -11,9 +11,6 @@ The same coroutines run once as plain asyncio tasks on the runtime's loop and on
 spawned as runtime tasks; the difference is the runtime's: its task, the handle, the
 child token, the context the call runs in. Each coroutine parks on an event all of
 them share, so it holds nothing of its own, as an idle goroutine parks on a channel.
-
-scripts/runtime_bench.py prints these numbers next to appinfra.service.bench's, which
-measures services the same way; the performance tests assert on them.
 """
 
 from __future__ import annotations
@@ -21,118 +18,24 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import functools
-import gc
-import threading
 import time
-import tracemalloc
-from collections.abc import Callable, Iterator
+from collections.abc import Iterator
 from dataclasses import dataclass
-from typing import TypeVar
 
-from ..log import Logger
-from .chan import Chan
-from .errors import StoppedError
-from .runtime import Runtime
-from .task import Task
-
-T = TypeVar("T")
-
-
-def check_count(count: int) -> None:
-    """Reject a count below 1, which no measurement can use.
-
-    Raises:
-        ValueError: If *count* is less than 1.
-    """
-    if count < 1:
-        raise ValueError(f"count must be at least 1, got {count}")
-
-
-class Arrivals:
-    """Counts coroutines that have started; set once all *expected* have.
-    Updated on the loop thread only."""
-
-    def __init__(self, expected: int) -> None:
-        """Wait for *expected* arrivals.
-
-        Raises:
-            ValueError: If *expected* is less than 1: no arrival would set ``all``.
-        """
-        check_count(expected)
-        self._left = expected
-        self.all = threading.Event()
-
-    def arrive(self) -> None:
-        """Count one as started."""
-        self._left -= 1
-        if self._left == 0:
-            self.all.set()
-
-
-def bytes_per(start: Callable[[], T], count: int) -> tuple[float, T]:
-    """Bytes allocated per item while *start* starts *count* of them, and what
-    *start* returned.
-
-    Raises:
-        ValueError: If *count* is less than 1.
-    """
-    check_count(count)
-    gc.collect()
-    # A session the caller started stays theirs: stopping it would discard its traces
-    owned = not tracemalloc.is_tracing()
-    if owned:
-        tracemalloc.start()
-    try:
-        before = tracemalloc.take_snapshot()
-        started = start()
-        after = tracemalloc.take_snapshot()
-    finally:
-        if owned:
-            tracemalloc.stop()
-    size = sum(d.size_diff for d in after.compare_to(before, "filename"))
-    return size / count, started
-
-
-def bytes_per_warmed(
-    start: Callable[[], T], end: Callable[[T], object], count: int
-) -> tuple[float, T]:
-    """bytes_per() of *start*, after one run of *start* and *end* that is not
-    measured. The containers the items go into (asyncio's set of tasks, a
-    runtime's table) grow in steps and never shrink: a measured run that pays
-    for a step costs tens of bytes more per item than one that does not, and
-    which run pays depends on what ran before. Warmed, none does.
-
-    The warm-up is traced too: a table it drains does not shrink, so the
-    measured run may still replace it, and the new table is only offset by
-    freeing the old one if the old one was traced. A session the caller
-    started stays theirs.
-
-    Raises:
-        ValueError: If *count* is less than 1.
-    """
-    check_count(count)
-    owned = not tracemalloc.is_tracing()
-    if owned:
-        tracemalloc.start()
-    try:
-        end(start())
-        return bytes_per(start, count)
-    finally:
-        if owned:
-            tracemalloc.stop()
-
-
-@dataclass(frozen=True)
-class TaskCost:
-    """Bytes per parked task: asyncio's part and the runtime's."""
-
-    asyncio: float
-    runtime: float
-
-    @property
-    def net(self) -> float:
-        """What a parked task costs on the runtime, before what it holds."""
-        return self.asyncio + self.runtime
+from ...log import Logger
+from ..chan import Chan
+from ..runtime import Runtime
+from ..task import Task
+from .measure import (
+    Arrivals,
+    TaskCost,
+    bytes_per_warmed,
+    cancel_all,
+    check_count,
+    spawn_and_cancel_rates,
+    spawn_and_stop_rates,
+    spawn_parked,
+)
 
 
 async def _event() -> asyncio.Event:
@@ -215,10 +118,18 @@ def _spawn_parked(tasks: Runtime, count: int) -> tuple[list[Task], float]:
     not until the last spawn() returns: how much of the loop's share falls
     before that depends on how the GIL switches between the threads."""
     arrivals = Arrivals(count)
+
+    def arrived() -> None:
+        """Wait until every task runs.
+
+        Raises:
+            TimeoutError: If they did not all start in 60 s.
+        """
+        if not arrivals.all.wait(timeout=60.0):
+            raise TimeoutError(f"{count:,} runtime tasks did not all start in 60 s")
+
     began = time.perf_counter()
-    spawned = [tasks.spawn(_parked_alone, arrivals) for _ in range(count)]
-    if not arrivals.all.wait(timeout=60.0):
-        raise TimeoutError(f"{count:,} runtime tasks did not all start in 60 s")
+    spawned = spawn_parked(lambda: tasks.spawn(_parked_alone, arrivals), count, arrived)
     return spawned, count / (time.perf_counter() - began)
 
 
@@ -226,14 +137,6 @@ async def _receiving(arrivals: Arrivals, inbox: Chan[int]) -> None:
     """Arrive, then park in arecv() on *inbox*, which nothing sends to."""
     arrivals.arrive()
     await inbox.arecv()
-
-
-def _cancel_all(spawned: list[Task]) -> None:
-    """Cancel *spawned* and wait until each has ended."""
-    for task in spawned:
-        task.cancel()
-        with contextlib.suppress(StoppedError):  # Its stop ended it: no result
-            task.wait(timeout=60.0)
 
 
 @contextlib.contextmanager
@@ -257,24 +160,21 @@ def parked(tasks: Runtime, count: int, *, receiving: bool = False) -> Iterator[N
             raise TimeoutError(f"{count:,} runtime tasks did not all start in 60 s")
         yield
     finally:
-        _cancel_all(spawned)
+        cancel_all(spawned)
 
 
-def task_rates(tasks: Runtime, count: int) -> tuple[float, float]:
+def loop_rates(tasks: Runtime, count: int) -> tuple[float, float]:
     """Tasks per second spawned and running, over *count* parked tasks on the
-    loop of *tasks*, and tasks per second that cancel() and wait() then end,
-    one task after the other.
+    loop of *tasks*, and tasks per second that a cancel() of each, then a
+    wait() of each, ends.
 
     Raises:
         ValueError: If *count* is less than 1.
     """
-    spawned, spawn = _spawn_parked(tasks, count)
-    began = time.perf_counter()
-    _cancel_all(spawned)
-    return spawn, count / (time.perf_counter() - began)
+    return spawn_and_cancel_rates(tasks, count, _spawn_parked)
 
 
-def runtime_rates(lg: Logger, count: int) -> tuple[float, float]:
+def loop_runtime_rates(lg: Logger, count: int) -> tuple[float, float]:
     """Tasks per second spawned and running, over *count* parked tasks on a
     runtime of its own, and tasks per second its one stop() then ends: it
     stops every task's token, cancels the tasks and shuts the loop down.
@@ -282,12 +182,7 @@ def runtime_rates(lg: Logger, count: int) -> tuple[float, float]:
     Raises:
         ValueError: If *count* is less than 1.
     """
-    with Runtime(lg) as rt:
-        _, spawn = _spawn_parked(rt, count)
-        began = time.perf_counter()
-        rt.stop(timeout=60.0)
-        stop = count / (time.perf_counter() - began)
-    return spawn, stop
+    return spawn_and_stop_rates(lg, count, _spawn_parked, timeout=60.0)
 
 
 async def _doubler(inbox: Chan[int], outbox: Chan[int]) -> None:
@@ -305,7 +200,7 @@ async def _round_trips(inbox: Chan[int], outbox: Chan[int], count: int) -> float
     return count / (time.perf_counter() - began)
 
 
-def round_trip_rate(tasks: Runtime, count: int) -> float:
+def loop_round_trip_rate(tasks: Runtime, count: int) -> float:
     """Round trips per second, *count* of them, from a task on the loop of
     *tasks* to a doubler task and back, over two channels.
 
@@ -325,7 +220,7 @@ def round_trip_rate(tasks: Runtime, count: int) -> float:
         doubler.wait(timeout=60.0)
 
 
-def task_cost(tasks: Runtime, count: int) -> TaskCost:
+def loop_cost(tasks: Runtime, count: int) -> TaskCost:
     """The cost of a parked task on the loop of *tasks*, over *count* coroutines
     run once as plain asyncio tasks and once as runtime tasks, each measured
     warmed (bytes_per_warmed()).
@@ -338,4 +233,4 @@ def task_cost(tasks: Runtime, count: int) -> TaskCost:
     end(parked)
     net, parked = bytes_per_warmed(lambda: _start_tasks(tasks, count), end, count)
     end(parked)
-    return TaskCost(asyncio=plain, runtime=net - plain)
+    return TaskCost(base=plain, runtime=net - plain)
