@@ -14,13 +14,22 @@ from __future__ import annotations
 import contextlib
 import logging
 import queue
+import sys
 import threading
+import traceback
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from multiprocessing import Queue as QueueType
 
     from ..logger import Logger
+
+
+def _report(doing: str) -> None:
+    """Write the exception being handled to stderr, as the listener met it
+    *doing* a record: no logger can be trusted with its own failure."""
+    sys.stderr.write(f"LogQueueListener: error {doing} record:\n")
+    traceback.print_exc(file=sys.stderr)
 
 
 class LogQueueListener:
@@ -109,7 +118,8 @@ class LogQueueListener:
         Continuously reads from the queue and dispatches records to handlers.
         Exits on the sentinel stop() posts, once every record queued before it
         is handled; or, stopped with no sentinel queued (the queue was full or
-        closed), once the queue is empty.
+        closed), once the queue is empty; or once the queue is closed under
+        it. A record get() cannot decode is reported and skipped.
         """
         while True:
             try:
@@ -118,19 +128,20 @@ class LogQueueListener:
                 if self._stop_event.is_set():
                     break
                 continue
-            except (OSError, ValueError):  # the queue was closed under it
-                break
+            except Exception:
+                # multiprocessing.Queue unpickles in get(), so a bad record
+                # raises here too; a closed queue is told by the flag close()
+                # sets (private, but what get() itself checks), not the error
+                if getattr(self._queue, "_closed", False):
+                    break
+                _report("decoding")
+                continue
             if record is None:  # the sentinel: shutdown
                 break
             try:
                 self._handle_record(record)
-            except Exception:
-                # Don't let listener thread die from unexpected errors
-                import sys
-                import traceback
-
-                sys.stderr.write("LogQueueListener: error handling record:\n")
-                traceback.print_exc(file=sys.stderr)
+            except Exception:  # the listener thread outlives a bad record
+                _report("handling")
 
     def _handle_record(self, record: logging.LogRecord) -> None:
         """

@@ -163,6 +163,52 @@ class TestLogQueueListenerErrorHandling:
             listener.stop()
 
 
+def _raises(error: type[Exception]) -> None:
+    """Rebuilds an Undecodable: raises *error*, as unpickling it in get() does."""
+    raise error("cannot decode")
+
+
+class Undecodable:
+    """Pickles fine; unpickling it raises the error it was made with."""
+
+    def __init__(self, error: type[Exception]) -> None:
+        self.error = error
+
+    def __reduce__(self) -> tuple[object, tuple[type[Exception]]]:
+        return (_raises, (self.error,))
+
+
+class TestLogQueueListenerDecodeErrors:
+    """A record get() cannot decode is reported and skipped: the listener goes on."""
+
+    @pytest.mark.parametrize("error", [AttributeError, ValueError])
+    def test_a_record_after_an_undecodable_one_is_handled(
+        self, queue, mock_logger, error, capsys
+    ):
+        listener = LogQueueListener(queue, mock_logger)
+        handled = threading.Event()
+        listener._handle_record = lambda record: handled.set()
+        listener.start()
+        try:
+            queue.put(Undecodable(error))
+            queue.put(logging.LogRecord("t", logging.INFO, "t.py", 1, "ok", (), None))
+            assert handled.wait(_TIMEOUT)
+            assert listener.is_alive
+            assert "error decoding record" in capsys.readouterr().err
+        finally:
+            listener.stop()
+
+    def test_a_queue_closed_under_it_ends_the_listener(self, queue, mock_logger):
+        """Closed, the queue raises from get() on every read: the listener
+        ends instead of reporting it forever."""
+        listener = LogQueueListener(queue, mock_logger)
+        listener.start()
+        thread = listener._thread
+        queue.close()
+        thread.join(_TIMEOUT)
+        assert not thread.is_alive()
+
+
 class TestLogQueueListenerStopDrains:
     """stop() lets the listener handle every record queued before its sentinel."""
 
