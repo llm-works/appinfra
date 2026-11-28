@@ -30,6 +30,7 @@ from .measure import (
     check_count,
     spawn_and_cancel_rates,
     spawn_and_stop_rates,
+    spawn_parked,
 )
 
 
@@ -111,8 +112,11 @@ def _spawn_parked(tasks: Runtime, count: int) -> tuple[list[Task], float]:
     and how many per second were spawned and running."""
     arrivals = ThreadArrivals(count)
     began = time.perf_counter()
-    spawned = [tasks.spawn(_parked_alone, arrivals) for _ in range(count)]
-    _arrived(arrivals, count, "thread tasks")
+    spawned = spawn_parked(
+        lambda: tasks.spawn(_parked_alone, arrivals),
+        count,
+        lambda: _arrived(arrivals, count, "thread tasks"),
+    )
     return spawned, count / (time.perf_counter() - began)
 
 

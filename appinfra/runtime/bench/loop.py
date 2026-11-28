@@ -34,6 +34,7 @@ from .measure import (
     check_count,
     spawn_and_cancel_rates,
     spawn_and_stop_rates,
+    spawn_parked,
 )
 
 
@@ -117,10 +118,18 @@ def _spawn_parked(tasks: Runtime, count: int) -> tuple[list[Task], float]:
     not until the last spawn() returns: how much of the loop's share falls
     before that depends on how the GIL switches between the threads."""
     arrivals = Arrivals(count)
+
+    def arrived() -> None:
+        """Wait until every task runs.
+
+        Raises:
+            TimeoutError: If they did not all start in 60 s.
+        """
+        if not arrivals.all.wait(timeout=60.0):
+            raise TimeoutError(f"{count:,} runtime tasks did not all start in 60 s")
+
     began = time.perf_counter()
-    spawned = [tasks.spawn(_parked_alone, arrivals) for _ in range(count)]
-    if not arrivals.all.wait(timeout=60.0):
-        raise TimeoutError(f"{count:,} runtime tasks did not all start in 60 s")
+    spawned = spawn_parked(lambda: tasks.spawn(_parked_alone, arrivals), count, arrived)
     return spawned, count / (time.perf_counter() - began)
 
 

@@ -99,6 +99,29 @@ def cancel_all(spawned: list[Task]) -> None:
             task.wait(timeout=60.0)
 
 
+def spawn_parked(
+    spawn: Callable[[], Task], count: int, arrived: Callable[[], None]
+) -> list[Task]:
+    """*count* tasks from *spawn*, each parked once *arrived* returns. If a
+    spawn or *arrived* fails, the tasks already spawned are cancelled and ended
+    before the error leaves: nothing else holds them.
+
+    Raises:
+        ValueError: If *count* is less than 1.
+    """
+    check_count(count)
+    spawned: list[Task] = []
+    try:
+        # One at a time: a spawn that raises leaves the earlier ones listed
+        for _ in range(count):
+            spawned.append(spawn())  # noqa: PERF401
+        arrived()
+    except BaseException:
+        cancel_all(spawned)
+        raise
+    return spawned
+
+
 def spawn_and_cancel_rates(
     tasks: Runtime, count: int, spawn_parked: SpawnParked
 ) -> tuple[float, float]:

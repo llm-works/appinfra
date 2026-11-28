@@ -32,6 +32,7 @@ from .measure import (
     check_count,
     spawn_and_cancel_rates,
     spawn_and_stop_rates,
+    spawn_parked,
 )
 from .thread import doubler, round_trips
 
@@ -55,11 +56,21 @@ def _spawn_parked(tasks: Runtime, count: int) -> tuple[list[Task], float]:
         ValueError: If *count* is less than 1.
     """
     check_count(count)
-    arrived: Chan[bool] = Chan(count, process=True)
+    arrivals: Chan[bool] = Chan(count, process=True)
+
+    def arrived() -> None:
+        """Wait until every child has said it runs.
+
+        Raises:
+            TimeoutError: If one did not within DUE seconds.
+        """
+        for _ in range(count):
+            arrivals.recv(timeout=DUE)
+
     began = time.perf_counter()
-    spawned = [tasks.spawn(parked, arrived, process=True) for _ in range(count)]
-    for _ in range(count):
-        arrived.recv(timeout=DUE)
+    spawned = spawn_parked(
+        lambda: tasks.spawn(parked, arrivals, process=True), count, arrived
+    )
     return spawned, count / (time.perf_counter() - began)
 
 
