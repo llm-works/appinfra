@@ -78,7 +78,9 @@ class TestPGSecretUrl:
     """A URL built from a secret arrives as an Envelope; PG connects with it."""
 
     def test_connects_with_a_secret_url(self, pg_config, pg_logger):
-        pg = PG(pg_logger, {"url": Envelope(pg_config.url)})
+        # create_db as the unittest config has it: no test may rely on another
+        # having created the database first
+        pg = PG(pg_logger, {"url": Envelope(pg_config.url), "create_db": True})
         try:
             with pg.connect() as conn:
                 assert conn.execute(text("SELECT 1")).scalar() == 1
