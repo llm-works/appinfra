@@ -26,7 +26,6 @@ from appinfra.runtime import (
     stopping,
     task_id,
 )
-from appinfra.runtime.chan import pipe
 from appinfra.runtime.loop import LoopHost, _LoopTask
 from appinfra.runtime.thread import _ThreadTask
 from appinfra.testing import FakeClock
@@ -158,20 +157,6 @@ class _UnformattableName(str):
 
     def __format__(self, spec: str) -> str:
         raise ValueError("cannot format")
-
-
-class _PicklesOnce:
-    """Pickles the first time only, as a result another thread is changing
-    can: pickled again, it raises."""
-
-    def __init__(self) -> None:
-        self._pickled = 0
-
-    def __reduce__(self) -> tuple[type, tuple[()]]:
-        self._pickled += 1
-        if self._pickled > 1:
-            raise RuntimeError("changed while pickled")
-        return _PicklesOnce, ()
 
 
 def _raises_stopped_error() -> None:
@@ -613,7 +598,7 @@ class TestNames:
         assert t.wait(timeout=5.0) == 42  # the timeout is the failure path
 
     def test_a_name_that_is_not_a_string_is_refused(self, rt):
-        """It travels to whoever receives the end, also through a pipe."""
+        """It travels to whoever receives the end, also to another process."""
         with pytest.raises(TypeError, match="name"):
             rt.spawn(abs, 1, name=7)
         assert not rt._root._children  # Private: no token left behind
@@ -1243,59 +1228,49 @@ class TestSpawnHooks:
         with pytest.raises(ChanClosedError):
             done.recv(timeout=5.0)
 
-    def test_an_end_arrives_through_a_pipe(self, rt):
-        send, recv = pipe(1)
-        sender, chan = send.open(), recv.open()
-        t = rt.spawn(abs, -3, done=sender)
-        assert chan.recv(timeout=5.0) == TaskDone(t.id, None, 3, None)
-        sender.close()
+    def test_an_end_arrives_on_a_process_chan(self, rt):
+        done: Chan[TaskDone] = Chan(1, process=True)
+        t = rt.spawn(abs, -3, done=done)
+        assert done.recv(timeout=5.0) == TaskDone(t.id, None, 3, None)
 
-    def test_an_unpicklable_end_arrives_through_a_pipe_as_a_runtime_error(self, rt):
-        send, recv = pipe(1)
-        sender, chan = send.open(), recv.open()
-        t = rt.spawn(threading.Lock, done=sender)  # returns a lock
-        end = chan.recv(timeout=5.0)
+    def test_an_unpicklable_end_arrives_on_a_process_chan_as_a_runtime_error(self, rt):
+        """A process Chan stores a pickled copy; the runtime sends the end,
+        so there is no caller to raise to: the end must still arrive."""
+        done: Chan[TaskDone] = Chan(1, process=True)
+        t = rt.spawn(threading.Lock, done=done)  # returns a lock
+        end = done.recv(timeout=5.0)  # the timeout is the failure path
         assert (end.task_id, end.result) == (t.id, None)
         assert isinstance(end.error, RuntimeError)
         assert "pickle" in str(end.error)
-        sender.close()
 
     def test_an_end_that_cannot_be_unpickled_arrives_as_a_runtime_error(self, rt):
-        """It pickles, but the receiving side could not unpickle it, and would
-        skip it: the end must still arrive, once per task."""
-        send, recv = pipe(1)
-        sender, chan = send.open(), recv.open()
-        t = rt.spawn(_raises_undecodable, done=sender)
-        end = chan.recv(timeout=5.0)  # the timeout is the failure path
+        """It pickles, but its copy cannot be unpickled: the end must still
+        arrive, once per task."""
+        done: Chan[TaskDone] = Chan(1, process=True)
+        t = rt.spawn(_raises_undecodable, done=done)
+        end = done.recv(timeout=5.0)  # the timeout is the failure path
         assert (end.task_id, end.result) == (t.id, None)
         assert isinstance(end.error, RuntimeError)
         assert "_Undecodable" in str(end.error)
-        sender.close()
 
     @pytest.mark.parametrize("full", [False, True], ids=["at-once", "once-room"])
-    def test_an_end_is_sent_as_the_bytes_that_were_checked(self, rt, full):
-        """Pickled again, a result another thread changes meanwhile can fail
-        where the check passed, and the end would be lost. A full pipe sends
-        it from the loop, later."""
-        send, recv = pipe(1)
-        sender, chan = send.open(), recv.open()
-        # The reader holds the first, the writer the second, the buffer the third
-        sent = list(range(3)) if full else []
-        for value in sent:
-            sender.send(value, timeout=5.0)
-        t = rt.spawn(_PicklesOnce, done=sender)
-        # Its end sent, or deferred, before anything is received: a receive
-        # first would make room, and the end go at once
+    def test_an_end_is_its_result_as_the_task_ended(self, rt, full):
+        """A full process Chan gets the end from the loop, later: what it
+        stores is the result as it was when the task ended, not as another
+        thread changed it since."""
+        done: Chan[TaskDone] = Chan(1, process=True)
+        if full:
+            done.send(TaskDone(0, None, None, None))
+            release = _hold_loop(rt)  # the later send cannot start before the change
+        result = [1, 2, 3]
+        t = rt.spawn(lambda: result, done=done)  # a thread task: ends off the loop
         assert _wait_until(lambda: not t._t.is_running())  # Private: end sent
-        if full:  # Private: the end waits on the loop
-            assert _wait_until(lambda: len(rt._sending) == 1)
-        else:
-            assert not rt._sending
-        assert [chan.recv(timeout=5.0) for _ in sent] == sent
-        end = chan.recv(timeout=5.0)  # the timeout is the failure path
-        assert (end.task_id, end.error) == (t.id, None)
-        assert isinstance(end.result, _PicklesOnce)
-        sender.close()
+        result.append(4)  # after the task ended, before its end is received
+        if full:
+            release.set()
+            assert done.recv(timeout=5.0).task_id == 0
+        end = done.recv(timeout=5.0)  # the timeout is the failure path
+        assert (end.task_id, end.result, end.error) == (t.id, [1, 2, 3], None)
 
     def test_an_end_waiting_for_room_is_refused_once_the_loop_is_stopping(
         self, monkeypatch

@@ -13,7 +13,6 @@ import functools
 import inspect
 import multiprocessing as mp
 import operator
-import pickle
 import threading
 import time
 from collections.abc import Callable
@@ -23,7 +22,9 @@ from typing import Any, final
 
 from ..log import Logger
 from . import process as process_module
-from .chan import Chan, ClosedError, Sender
+from .chan import Chan, ClosedError
+from .chan.chan import _copied
+from .chan.proxy import _ChanProxy
 from .errors import StoppedError
 from .loop import LoopHost, _LoopTask
 from .process import START_METHOD, _ProcessTask
@@ -57,8 +58,8 @@ class Runtime:
     and returns ends with its result.
 
     A task spawned with ``done`` is detached, and its TaskDone is sent on that
-    channel (or pipe) as it ends, instead: one receiver learns of the ends of
-    many tasks, as a Go supervisor reads them from one channel.
+    channel as it ends, instead: one receiver learns of the ends of many tasks,
+    as a Go supervisor reads them from one channel.
 
     Example:
         with Runtime(lg) as rt:
@@ -122,7 +123,7 @@ class Runtime:
         *args: Any,
         name: str | None = None,
         token: StopToken | None = None,
-        done: Chan[TaskDone] | Sender[TaskDone] | None = None,
+        done: Chan[TaskDone] | None = None,
         process: bool = False,
     ) -> Task:
         """Call *fn*(*args*) as a task: on the loop if it is an async function,
@@ -136,22 +137,23 @@ class Runtime:
                 its process, its log records and its TaskDone.
             token: The token the task's derives from, instead of the spawning
                 task's or the runtime's. stop() stops the task all the same.
-            done: A channel, or a pipe's sending end, the task's TaskDone is
-                sent on as it ends; one channel can take the ends of many
-                tasks. The task is detached: not waited for, its failure
-                sent, not logged. The ending task does not
-                wait for room: an end that finds the channel full waits on
-                the loop, so ends come in end order only while there is room,
-                and one still waiting when the runtime stops is lost. On a
-                closed channel the end is dropped. Through a pipe, an end
-                that cannot be pickled and unpickled again is sent with a
-                RuntimeError naming why, in place of its result and error.
+            done: A channel the task's TaskDone is sent on as it ends; one
+                channel can take the ends of many tasks. The task is detached:
+                not waited for, its failure sent, not logged. The ending task
+                does not wait for room: an end that finds the channel full
+                waits on the loop, so ends come in end order only while there
+                is room, and one still waiting when the runtime stops is lost.
+                On a closed channel the end is dropped. A process channel, or
+                a process's proxy of one, gets the end as it was when the task
+                ended; one that cannot be pickled and unpickled again is sent
+                with a RuntimeError naming why, in place of its result and
+                error.
             process: Call *fn* in a child process, started with the ``spawn``
                 method: *fn* and *args* are pickled, so *fn* is defined at
                 module level, and process creation goes under ``if __name__ ==
                 "__main__":``. Its result or exception comes back pickled; an
                 exception carries the child's traceback as a note, which a
-                done pipe keeps. The child is a fresh interpreter: it does not
+                done process channel keeps. The child is a fresh interpreter: it does not
                 see the spawner's contextvars; stopping() and task_id() work
                 there, as the child sets them up itself. The
                 child's token stops with the task's, or once the parent is
@@ -305,35 +307,38 @@ class Runtime:
             return
         self._send_done(t.done_chan, TaskDone(t.id, t.name, t.result, _error(t)))
 
-    def _send_done(
-        self, done: Chan[TaskDone] | Sender[TaskDone], end: TaskDone
-    ) -> None:
+    def _send_done(self, chan: Chan[TaskDone], end: TaskDone) -> None:
         """Send *end* without waiting, on the ending task's thread or the
         loop's: neither may block on a receiver. A full channel gets it from
-        the loop, once it has room. A pipe gets the bytes its check pickled,
-        on the Sender's own channel: pickled again, a result another thread
-        is changing could fail where the check passed, and the end be lost."""
-        chan: Chan[Any]
-        value: Any  # a TaskDone, or a pipe's pickled bytes
-        if isinstance(done, Sender):
-            chan, value = done._chan, _portable(end)
-        else:
-            chan, value = done, end
+        the loop, once it has room. A process channel gets a snapshot of it,
+        taken now: sent later, the result would go as another thread had
+        changed it since. A proxy sends only from the loop: its send is a call
+        to the channel's home, which the ending thread would wait on, and the
+        loop must not."""
+        if chan._process:  # Private: a process channel, or a proxy of one
+            end = _snapshot(end)
+        if isinstance(chan, _ChanProxy):
+            self._send_on_loop(chan, end)
+            return
         try:
-            chan.send(value, timeout=0)
+            chan.send(end, timeout=0)
         except TimeoutError:
-            # Through the host's gate: once it is stopping, the send would
-            # start after the loop took the tasks to cancel, and outlive the
-            # loop; the end is dropped instead. An empty context: the ending
-            # task's has its stopped token, which would end the wait at once
-            with contextlib.suppress(RuntimeError):  # the loop is stopping
-                self._host._schedule(
-                    functools.partial(
-                        contextvars.Context().run, self._send_later, chan, value
-                    )
-                )
+            self._send_on_loop(chan, end)
         except ClosedError:
             pass  # nobody receives any more
+
+    def _send_on_loop(self, chan: Chan[TaskDone], end: TaskDone) -> None:
+        """Send *end* from the loop, once *chan* has room."""
+        # Through the host's gate: once it is stopping, the send would start
+        # after the loop took the tasks to cancel, and outlive the loop; the
+        # end is dropped instead. An empty context: the ending task's has its
+        # stopped token, which would end the wait at once
+        with contextlib.suppress(RuntimeError):  # the loop is stopping
+            self._host._schedule(
+                functools.partial(
+                    contextvars.Context().run, self._send_later, chan, end
+                )
+            )
 
     def _send_later(self, chan: Chan[Any], value: Any) -> None:
         """On the loop: await room for *value* in an asyncio task of its own."""
@@ -518,7 +523,8 @@ def _async_callable(fn: Callable[..., Any]) -> bool:
 
 def _task_name(name: object) -> str | None:
     """spawn()'s *name* as a plain str: bypassing a subclass's own __str__,
-    whose formatting or pickling could fail on the loop, a pipe or in a child,
+    whose formatting or pickling could fail on the loop, a process channel or
+    in a child,
     where the caller never sees it. A StrEnum becomes its value.
 
     Raises:
@@ -531,18 +537,18 @@ def _task_name(name: object) -> str | None:
     return str.__str__(name)
 
 
-def _portable(end: TaskDone) -> bytes:
-    """*end* pickled, once the bytes unpickle here; else a TaskDone with a
-    RuntimeError naming why, in place of its result and error, pickled. The
-    receiving side skips a value it cannot unpickle, and an end skipped
-    there would never arrive. Costs an unpickle, once per task."""
+def _snapshot(end: TaskDone) -> TaskDone:
+    """A copy of *end*, as a process channel stores one: pickled and
+    unpickled now, so what is sent later is the result as it was. One that
+    cannot be is a TaskDone with a RuntimeError naming why, in place of its
+    result and error: the runtime sends it, so there is no caller to raise to,
+    and the end would never arrive. Costs a round trip, once per task."""
     try:
-        payload = pickle.dumps(end)
-        pickle.loads(payload)
+        copy: TaskDone = _copied(end)
     except Exception as e:
         error = RuntimeError(f"task {end.task_id} ended unpicklable: {e!r}")
-        return pickle.dumps(TaskDone(end.task_id, end.name, None, error))
-    return payload
+        return TaskDone(end.task_id, end.name, None, error)
+    return copy
 
 
 async def _asend(chan: Chan[Any], value: Any) -> None:

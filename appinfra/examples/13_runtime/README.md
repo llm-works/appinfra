@@ -1,7 +1,7 @@
 # Runtime Examples
 
-Concurrency patterns on `appinfra.runtime`: tasks on threads and on the runtime's event loop,
-channels between them, and pipes between processes. Each script runs its examples in order, one
+Concurrency patterns on `appinfra.runtime`: tasks on threads, on the runtime's event loop and in
+processes of their own, and channels between them. Each script runs its examples in order, one
 function per pattern. See the [Runtime API reference](../../docs/api/runtime.md).
 
 ## `tasks.py`
@@ -45,18 +45,17 @@ Patterns built on `Chan` and `select`.
 python channels.py
 ```
 
-## `pipe.py`
+## `processes.py`
 
-A channel from one process to another.
+Process Chans: `Chan(n, process=True)` handed to a process task, used there as here.
 
 | Example | What it shows |
 |---------|---------------|
-| in one process | both ends in one process, values pickled |
 | from a child | a child sends, the parent receives until the child closes |
-| request and reply | two pipes, one each way |
-| a child's task ends | a child's tasks report their ends through a pipe |
-| select over a pipe | a pipe's receiver in select next to a local channel |
+| request and reply | each request carries the Chan its reply comes back on |
+| a child's task ends | a child's own tasks report their ends on the parent's Chan with `done=` |
+| select in the home | a process Chan in select next to a local Chan, in its home |
 
 ```bash
-python pipe.py
+python processes.py
 ```

@@ -17,8 +17,8 @@ class ProcessExitError(Exception):
     the signal that ended it."""
 
     def __init__(self, task_id: int, exitcode: int | None) -> None:
-        # Both in args, which pickling passes back to __init__: a done pipe
-        # pickles the error again
+        # Both in args, which pickling passes back to __init__: a done process
+        # channel pickles the error again
         super().__init__(task_id, exitcode)
         self.task_id = task_id
         self.exitcode = exitcode

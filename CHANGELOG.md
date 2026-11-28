@@ -45,7 +45,7 @@ For API stability guarantees and deprecation policy, see
   `contextvars`.
 - `Runtime.spawn(..., name=, token=, done=)`: the task's name, on its thread and log records; its
   token derives from the given one; its end (`TaskDone`: its name, result, or error as `wait()`
-  would raise it) is sent on a channel or pipe.
+  would raise it) is sent on a channel, a process Chan too.
 - `Runtime.spawn(fn, *args, process=True)`: the call runs in a child process, with the same `Task`;
   the child's token stops with the task's. A child that exits without an outcome fails the task
   with `ProcessExitError`.
@@ -58,8 +58,9 @@ For API stability guarantees and deprecation policy, see
   with `StoppedError` when the task's token stops.
 - `appinfra.runtime.select()` / `aselect()`: wait on several channel cases (`ChanRecv`,
   `ChanSend`) and complete exactly one, chosen at random among those ready, like Go's `select`.
-- `appinfra.runtime.pipe()`: a channel between two processes, `send, recv = pipe(capacity)`;
-  each end is opened in the process that uses it, and the other process exiting closes it.
+- `Chan(n, process=True)`: a channel process tasks can use. Handed to one, in its arguments or
+  inside a value sent on a process Chan, it arrives in the child as the same channel; each send
+  stores a pickled copy, and `select` works on it in the process that made it.
 
 ### Changed
 - **Breaking:** the FastAPI server's subprocess runs as an isolated service of a service `Runtime`

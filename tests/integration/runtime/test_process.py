@@ -31,7 +31,6 @@ from appinfra.runtime import (
     StopToken,
     TaskDone,
     TaskKind,
-    pipe,
     stopping,
     task_id,
 )
@@ -173,16 +172,16 @@ class TestOutcome:
             t.wait(timeout=30.0)
         assert any("in fails" in note for note in caught.value.__notes__)
 
-    def test_the_childs_traceback_survives_a_done_pipe(self, rt: Runtime) -> None:
-        """A pipe pickles the end again: the traceback, a note on the error,
-        comes along."""
-        send, recv = pipe(1)
-        sender, chan = send.open(), recv.open()
-        rt.spawn(fails, "no", done=sender, process=True)
-        end = chan.recv(timeout=30.0)
+    def test_the_childs_traceback_survives_a_done_process_chan(
+        self, rt: Runtime
+    ) -> None:
+        """A process Chan pickles the end again: the traceback, a note on the
+        error, comes along."""
+        done: Chan[TaskDone] = Chan(1, process=True)
+        rt.spawn(fails, "no", done=done, process=True)
+        end = done.recv(timeout=30.0)
         assert isinstance(end.error, ValueError)
         assert any("in fails" in note for note in getattr(end.error, "__notes__", ()))
-        sender.close()
 
     def test_an_unpicklable_result_is_named(self, rt: Runtime) -> None:
         t = rt.spawn(returns_unpicklable, process=True)
@@ -229,18 +228,16 @@ class TestOutcome:
         finally:
             gc.enable()
 
-    def test_an_exit_without_an_outcome_reaches_a_done_pipe_as_itself(
+    def test_an_exit_without_an_outcome_reaches_a_done_process_chan_as_itself(
         self, rt: Runtime
     ) -> None:
-        """Through a pipe the end is pickled again: the receiver gets the same
-        ProcessExitError, with its exit code, as a waiter would."""
-        send, recv = pipe(1)
-        sender, chan = send.open(), recv.open()
-        rt.spawn(exits_hard, 3, done=sender, process=True)
-        end = chan.recv(timeout=30.0)
+        """On a process Chan the end is pickled again: the receiver gets the
+        same ProcessExitError, with its exit code, as a waiter would."""
+        done: Chan[TaskDone] = Chan(1, process=True)
+        rt.spawn(exits_hard, 3, done=done, process=True)
+        end = done.recv(timeout=30.0)
         assert isinstance(end.error, ProcessExitError)
         assert end.error.exitcode == 3
-        sender.close()
 
     def test_a_pipe_that_fails_to_open_leaves_none_open(
         self, rt: Runtime, monkeypatch: pytest.MonkeyPatch

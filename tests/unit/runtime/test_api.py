@@ -10,14 +10,8 @@ import pytest
 
 import appinfra.runtime
 import appinfra.runtime.chan
-from appinfra.runtime import (
-    PipeReceiver,
-    PipeRecvEnd,
-    PipeSendEnd,
-    PipeSender,
-    Task,
-    TaskProcess,
-)
+from appinfra.runtime import Task, TaskProcess
+from appinfra.runtime.chan import PipeRecvEnd, PipeSendEnd, Receiver, Sender
 
 
 @pytest.mark.parametrize(
@@ -27,8 +21,8 @@ from appinfra.runtime import (
         (TaskProcess, "Task.process"),
         (PipeSendEnd, "pipe"),
         (PipeRecvEnd, "pipe"),
-        (PipeSender, "open"),
-        (PipeReceiver, "open"),
+        (Sender, "open"),
+        (Receiver, "open"),
     ],
 )
 def test_what_the_api_makes_cannot_be_constructed(cls: type, maker: str) -> None:
@@ -45,10 +39,6 @@ def test_the_runtime_exports_its_api() -> None:
         "ChanClosedError",
         "ChanRecv",
         "ChanSend",
-        "PipeReceiver",
-        "PipeRecvEnd",
-        "PipeSendEnd",
-        "PipeSender",
         "ProcessDetail",
         "ProcessExitError",
         "Runtime",
@@ -59,7 +49,6 @@ def test_the_runtime_exports_its_api() -> None:
         "TaskKind",
         "TaskProcess",
         "aselect",
-        "pipe",
         "process_context",
         "select",
         "stopping",

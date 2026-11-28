@@ -1,6 +1,6 @@
 # Runtime Module
 
-Tasks, and the runtime that runs them; channels between tasks, and pipes between processes.
+Tasks, and the runtime that runs them; channels between tasks, in one process or across processes.
 
 ## Overview
 
@@ -12,11 +12,10 @@ Tasks, and the runtime that runs them; channels between tasks, and pipes between
 - **One stop signal**: each task has a `StopToken`, derived from the token of the task that
   spawned it; cancelling a task stops every task it spawned
 - **Channels**: `Chan` connects tasks of either kind; `select` waits on several channel
-  operations and completes one; `pipe` connects two processes
+  operations and completes one; `Chan(n, process=True)` crosses into process tasks
 
 The package imports nothing from `appinfra.service`. What it exports is the whole API: `Runtime`
-and `Task` are final, and the types `spawn()` and `pipe()` return cannot be constructed
-directly.
+and `Task` are final, and the handles `spawn()` returns cannot be constructed directly.
 
 ## Quick Start
 
@@ -92,8 +91,8 @@ if __name__ == "__main__":
   `contextvars`
 - inside the child, `stopping()` and `task_id()` work as in any task, with the parent's task id
 - the result comes back pickled; an exception is raised with the child's traceback as a note
-  (`__notes__`), so it survives a `done=` pipe too; an outcome that does not survive a pickle
-  round trip, here or in the child, arrives as a `RuntimeError` naming why
+  (`__notes__`), so it survives a `done=` process Chan too; an outcome that does not survive a
+  pickle round trip, here or in the child, arrives as a `RuntimeError` naming why
 - `cancel()` and the runtime's stop stop the child's token; so does the parent going away
 - a child that exits without an outcome (killed, crashed, `os._exit()`) fails the task with
   `ProcessExitError`, whose `exitcode` is negative for the signal that ended it; a task stopped
@@ -199,8 +198,8 @@ field of its log records, and its `TaskDone`.
 **`token=`** derives the task's token from the given one instead of the spawner's. A layer that
 runs its own units as tasks stops them with its own tokens; `Runtime.stop()` still stops them.
 
-**`done=`** takes a `Chan` or a pipe's `PipeSender`. The task is detached, and its end is sent
-there as a `TaskDone`, so one receiver learns of the ends of many tasks:
+**`done=`** takes a `Chan`, local or process. The task is detached, and its end is sent there as
+a `TaskDone`, so one receiver learns of the ends of many tasks:
 
 ```python
 done = Chan[TaskDone](len(urls))
@@ -215,8 +214,10 @@ for _ in urls:
 `error` is what `wait()` would raise: the exception, or `StoppedError` for a stop. The ending
 task never waits for room: an end that finds the channel full is sent from the loop once there
 is room, an end on a closed channel is dropped, and one still waiting when the runtime stops is
-lost. Through a pipe, an end that does not survive a pickle round trip arrives with a
-`RuntimeError` naming why, in place of its result and error.
+lost. A process Chan, or a child's proxy of one, gets the end as it was when the task ended; an
+end that does not survive a pickle round trip arrives with a `RuntimeError` naming why, in place
+of its result and error. A child's own runtime can report its tasks' ends this way on a Chan of
+the parent.
 
 ### Stopping
 
@@ -287,45 +288,57 @@ except TimeoutError:
 
 A closed channel's case raises `ChanClosedError`, its `index` naming the case.
 
-## Pipes
+## Process channels
 
-`pipe(capacity)` is a channel from one process to another. Each end goes to the process that
-uses it, which opens it there; values are pickled.
+`Chan(capacity, process=True)` is a channel a process task can use. It lives in the process that
+made it, its home. Handed to a process task, in its arguments or inside a value sent on another
+process Chan, it arrives in the child as a proxy of the same channel, used there as here: `send`,
+`recv`, iteration, `close`, and the coroutine forms.
 
 ```python
-import multiprocessing as mp
-
-from appinfra.runtime import PipeSendEnd, pipe
+from appinfra.runtime import Chan, Runtime
 
 
-def child(send: PipeSendEnd[int]) -> None:
-    out = send.open()  # a PipeSender: send, asend, close, aclose
-    for i in range(3):
-        out.send(i * i)
-    out.close()  # returns once the values are on the pipe
+def squares(out: Chan[int], n: int) -> None:  # module level: the child imports it
+    for i in range(n):
+        out.send(i * i, timeout=10.0)
+    out.close()
 
 
 if __name__ == "__main__":
-    send, recv = pipe(4)
-    proc = mp.get_context("spawn").Process(target=child, args=(send,))
-    proc.start()
-    send.release()  # the child has its copy
-    # a PipeReceiver: recv, arecv, iteration, close
-    assert list(recv.open()) == [0, 1, 4]
-    proc.join()
+    with Runtime(lg) as rt:
+        out: Chan[int] = Chan(4, process=True)
+        child = rt.spawn(squares, out, 3, process=True)
+        assert list(out) == [0, 1, 4]
+        child.wait(timeout=10.0)
 ```
 
-- with the `spawn` start method the child imports the main module again: process creation
-  goes under `if __name__ == "__main__":`, the child's function at module level
-- `capacity` must be at least 1: a send cannot wait for a receiver in another process
-- a close on either side, or the other process exiting, closes the channel; a close on the
-  receiving side drops what is still on its way
-- EOF comes once every copy of an end is closed: a process that hands an end to another
-  `release()`s its own copy, and a forked child, which inherits both ends, `release()`s the
-  one it does not use
-- a value the receiving side cannot unpickle is skipped and reported through
-  `threading.excepthook`
-- `ChanSend(sender, v)` and `ChanRecv(receiver)` work in `select`
+Request and reply needs no ids: each request carries the Chan its reply comes back on, a process
+Chan too.
+
+```python
+requests: Chan[tuple[int, Chan[int]]] = Chan(16, process=True)
+rt.spawn(
+    serve, requests, process=True
+)  # def serve(requests): for n, reply in requests: ...
+reply: Chan[int] = Chan(1, process=True)
+requests.send((21, reply), timeout=5.0)
+result = reply.recv(timeout=5.0)
+```
+
+- the channel's semantics are the same in every process: capacity, including 0, many senders
+  and receivers, close; the buffer and the waits are in the home, a proxy's calls go there
+- every send stores a pickled copy of its value, local senders too: a value that cannot be
+  pickled fails at the sender, and every receiver gets a copy of its own
+- a local `Chan(n)` cannot cross, with a `TypeError` naming `process=True`: in a process task's
+  arguments the task fails with it, inside a value sent on a process Chan the send raises it
+- a close on any side closes the channel for all of them; the home exiting fails the calls of
+  every proxy with `ChanClosedError`; a proxy's process exiting drops its waiting calls, and the
+  values it already sent stay
+- on an event loop's thread a proxy takes no sync call: coroutines `await asend()` and
+  `arecv()`
+- `select` works on a process Chan in its home; on a proxy, in another process, it raises
+  `TypeError`: a select must complete exactly one case, and a proxy's are decided in its home
 
 ## API Reference
 
@@ -340,11 +353,11 @@ if __name__ == "__main__":
 | `stopping()`, `task_id()` | the current task's token and id |
 | `StopToken`, `StoppedError` | the stop signal, and the error a stop ends a wait with |
 | `ProcessExitError` | a process task's child exited without an outcome; `exitcode` |
-| `Chan`, `ChanClosedError` | a channel, and the error a closed one raises |
+| `Chan`, `ChanClosedError` | a channel, local or `process=True`, and the error a closed one raises |
 | `select`, `aselect`, `ChanRecv`, `ChanSend` | select and its cases |
-| `pipe`, `PipeSendEnd`, `PipeRecvEnd`, `PipeSender`, `PipeReceiver` | a channel between processes |
 
 ## See Also
 
-- [Runtime examples](../../examples/13_runtime/) - Tasks, channels and pipes, run as scripts
+- [Runtime examples](../../examples/13_runtime/) - Tasks and channels, in one process and across
+  processes, run as scripts
 - [Service](service.md) - Long-lived services with dependency ordering, restarts and state
