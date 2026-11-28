@@ -109,13 +109,14 @@ so the children share those pages. What each more process task costs is its chil
 memory (Linux), not its resident set, which counts the shared pages in every child:
 
 - before its first child, the runtime sets the server's preload to the main module and every
-  `appinfra` module the process has imported by then. Python before 3.14 does not pass the main
-  module to the fork server, so there each child still imports the main module, but what it
-  imports from appinfra is already shared; on 3.14 the main module itself is shared too
+  `appinfra` module the process has imported by then
+- the server imports the main module only when Python hands it the module's file path: recent
+  3.14 releases do for a script run by path (`python app.py`), 3.12 and earlier do not, and no
+  version does for `python -m pkg`. Where it does not, each child imports the main module itself,
+  running its module-level code, but what it imports from appinfra is already shared
 - the preload list is process-wide: it replaces one the application set with
-  `set_forkserver_preload()`. Before 3.14, a module the main module imports from outside appinfra,
-  a large dependency say, is still imported by each child on its own
-- on 3.14, module-level code of the main module runs once, in the fork server, not in every child
+  `set_forkserver_preload()`. Where the main module is not preloaded, a module it imports from
+  outside appinfra, a large dependency say, is still imported by each child on its own
 
 `t.process` is the task's child (`TaskProcess`), and `None` for a task on the loop or a thread:
 

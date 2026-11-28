@@ -29,8 +29,8 @@ class TestConfig:
         with pytest.raises(ValueError, match="'thread'"):
             ProcessConfig(method="thread")
 
-    @pytest.mark.parametrize("bad", [0, -1.0])
-    def test_seconds_must_be_positive(self, bad: float) -> None:
+    @pytest.mark.parametrize("bad", [0, -1.0, float("inf")])
+    def test_seconds_must_be_positive_and_finite(self, bad: float) -> None:
         with pytest.raises(ValueError, match="grace"):
             ProcessConfig(grace=bad)
         with pytest.raises(ValueError, match="stop_timeout"):

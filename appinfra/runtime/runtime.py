@@ -155,13 +155,14 @@ class Runtime:
                 ended; one that cannot be pickled and unpickled again is sent
                 with a RuntimeError naming why, in place of its result and
                 error.
-            process: Call *fn* in a child process, started with the ``spawn``
-                method: *fn* and *args* are pickled, so *fn* is defined at
+            process: Call *fn* in a child process, started with the runtime's
+                configured start method (``forkserver`` unless its Config says
+                ``spawn``): *fn* and *args* are pickled, so *fn* is defined at
                 module level, and process creation goes under ``if __name__ ==
                 "__main__":``. Its result or exception comes back pickled; an
                 exception carries the child's traceback as a note, which a
-                done process channel keeps. The child is a fresh interpreter: it does not
-                see the spawner's contextvars; stopping() and task_id() work
+                done process channel keeps. The child starts with a fresh
+                context: it does not see the spawner's contextvars; stopping() and task_id() work
                 there, as the child sets them up itself. The
                 child's token stops with the task's, or once the parent is
                 gone. A child that exits without an outcome fails the task

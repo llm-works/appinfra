@@ -21,8 +21,8 @@ child its Chans cross to, which a mock cannot be.
 
 from __future__ import annotations
 
+import os
 import subprocess
-import sys
 import time
 from dataclasses import dataclass
 
@@ -96,12 +96,13 @@ def _resident(spawned: list[Task]) -> float:
 def _private(spawned: list[Task]) -> float | None:
     """The mean private memory, in bytes, of the children of *spawned*: the
     pages each holds that no other process shares, from /proc's smaps_rollup.
-    None off Linux, which has no such file.
+    None where this process has no such file: off Linux, or on a kernel built
+    without it.
 
     Raises:
         FileNotFoundError: If a child is already gone.
     """
-    if not sys.platform.startswith("linux"):
+    if not os.path.exists("/proc/self/smaps_rollup"):
         return None
     details = [t.process.detail() for t in spawned if t.process is not None]
     sizes = [_private_of(d.pid) for d in details if d.pid is not None]

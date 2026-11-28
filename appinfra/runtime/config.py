@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping
 from dataclasses import dataclass, field, fields
 from typing import Any
@@ -94,10 +95,13 @@ class Config:
 
 
 def _check_positive(name: str, value: float) -> None:
-    """Refuse *value*, the field *name*, unless it is a positive number: a
-    bool is not one."""
-    if isinstance(value, bool) or not value > 0:
-        raise ValueError(f"{name} must be a positive number of seconds, not {value!r}")
+    """Refuse *value*, the field *name*, unless it is a positive, finite
+    number: a bool is not one, and nothing waits forever, as a wait that
+    long overflows the platform's time."""
+    if isinstance(value, bool) or not 0 < value < math.inf:
+        raise ValueError(
+            f"{name} must be a positive, finite number of seconds, not {value!r}"
+        )
 
 
 def _check_keys(where: str, section: Mapping[str, Any], known: set[str]) -> None:
