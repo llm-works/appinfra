@@ -108,6 +108,8 @@ class Crossing:
                 self._listener.stop()
                 self._queue.close()
                 self._queue.join_thread()
+            elif self._queue is not None:  # its listener never made: nothing fed it
+                self._queue.close()
             self._opened = self._listener = self._queue = self._carried = None
 
     def _reference(self, chan: Chan[Any]) -> tuple[Any, ...]:
