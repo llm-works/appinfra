@@ -33,11 +33,11 @@ from appinfra.runtime import (
     StopToken,
     TaskDone,
     TaskKind,
-    stopping,
-    task_id,
+    this_task,
 )
 from appinfra.runtime import process as process_module
 from appinfra.runtime.process import _stop_on_signal
+from tests.helpers.lg import quiet_lg
 
 # A runtime whose forced children get a short grace after SIGTERM and SIGKILL
 QUICK_GRACE = Config(process=ProcessConfig(grace=0.1))
@@ -89,13 +89,13 @@ def child_pid() -> int:
 def returns_on_stop(started: Any) -> int:
     """Waits for its stop, then returns its task id, as the child sees it."""
     started.set()
-    stopping().wait()
-    return task_id()
+    this_task().token.wait()
+    return this_task().id
 
 
 def raises_on_stop(started: Any) -> None:
     started.set()
-    stopping().wait()
+    this_task().token.wait()
     raise StoppedError()
 
 
@@ -145,7 +145,7 @@ class SlowToPickle:
 
 @pytest.fixture
 def rt() -> Iterator[Runtime]:
-    runtime = Runtime(MagicMock())
+    runtime = Runtime(quiet_lg())
     runtime.start()
     yield runtime
     runtime.stop()
@@ -318,7 +318,15 @@ def reported(report: tuple[Any, ...]) -> tuple[Any, Any]:
 def process_task() -> Any:
     """A process task not launched: _outcome() is called on it directly."""
     return process_module._ProcessTask(
-        MagicMock(), ProcessConfig(), lambda _: None, 1, None, double, (), StopToken()
+        MagicMock(),
+        ProcessConfig(),
+        lambda _: None,
+        1,
+        None,
+        double,
+        (),
+        StopToken(),
+        None,
     )
 
 
@@ -390,7 +398,7 @@ class TestStopWithTimeout:
 
     def test_a_child_ignoring_sigterm_is_killed(self) -> None:
         """Killed the config's grace after its SIGTERM."""
-        with Runtime(MagicMock(), QUICK_GRACE) as rt:
+        with Runtime(quiet_lg(), QUICK_GRACE) as rt:
             started = rt.process_context.Event()
             task = rt.spawn(ignores_everything, started, process=True)
             assert task.process is not None
@@ -408,7 +416,7 @@ class TestStopWithTimeout:
 
         def waits_on_its_stop() -> None:
             started.set()
-            stopping().wait()
+            this_task().token.wait()
 
         task = rt.spawn(waits_on_its_stop)
         assert started.wait(30.0)
@@ -482,7 +490,7 @@ class TestKindAndDetail:
 
     def test_a_spawn_runtime_starts_its_children_by_spawn(self) -> None:
         config = Config(process=ProcessConfig(method="spawn"))
-        with Runtime(MagicMock(), config) as rt:
+        with Runtime(quiet_lg(), config) as rt:
             assert rt.process_context.get_start_method() == "spawn"
             assert rt.spawn(double, 3, process=True).wait(timeout=30.0) == 6
 
@@ -509,7 +517,7 @@ class TestStop:
     def test_the_runtimes_stop_kills_a_child_that_ignores_it(self) -> None:
         """Past the stop's timeout the child is terminated, then killed: it
         ignores SIGTERM too. Without an outcome, the stopped task is stopped."""
-        rt = Runtime(MagicMock(), QUICK_GRACE)
+        rt = Runtime(quiet_lg(), QUICK_GRACE)
         rt.start()
         started = mp.get_context("spawn").Event()
         t = rt.spawn(ignores_everything, started, process=True)
@@ -540,7 +548,7 @@ class TestStop:
 
         monkeypatch.setattr(process_module.mp, "get_context", lambda _: SpawnsHeld())
         started = real.Event()
-        rt = Runtime(MagicMock(), QUICK_GRACE)
+        rt = Runtime(quiet_lg(), QUICK_GRACE)
         rt.start()
         try:
             t = rt.spawn(ignores_everything, started, process=True)
@@ -562,7 +570,7 @@ class TestStop:
         """The runtime's stop forces a child whose start() is still pickling
         its arguments: once it starts, it is killed, not left running."""
         slow = SlowToPickle()
-        rt = Runtime(MagicMock(), QUICK_GRACE)
+        rt = Runtime(quiet_lg(), QUICK_GRACE)
         rt.start()
         try:
             t = rt.spawn(holds_its_argument, slow, process=True)
@@ -581,14 +589,17 @@ class TestStop:
     ) -> None:
         """A stop signalled before the child starts is seen before the call,
         whatever its listener thread does: here the listener never reads it.
-        Run in this process: _child() is the child's main."""
+        Run in this process: _child() is the child's main. Its logger is a
+        mock, so this process keeps no child's logger."""
         monkeypatch.setattr(process_module, "_stop_on_signal", lambda *_: None)
+        monkeypatch.setattr(process_module, "_task_lg", lambda *_: MagicMock())
         ctx = mp.get_context("spawn")
         stop_recv, stop_send = ctx.Pipe(duplex=False)
         outcome_recv, outcome_send = ctx.Pipe(duplex=False)
         stop_send.send_bytes(b"")  # as the task's token stopping does
         called = threading.Event()
-        process_module._child(1, None, called.set, (), stop_recv, outcome_send)
+        carry = (({}, "lg"), None)
+        process_module._child(1, None, called.set, (), carry, stop_recv, outcome_send)
         _, error, stopped = pickle.loads(outcome_recv.recv_bytes())
         assert (stopped, error) == (True, None)
         assert not called.is_set()

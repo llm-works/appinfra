@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from ...log import Logger
 from ..chan import Chan
 from ..runtime import Runtime
-from ..task import Task, stopping
+from ..task import Task, this_task
 from .measure import (
     TaskCost,
     ThreadArrivals,
@@ -44,7 +44,7 @@ def _parked(arrivals: ThreadArrivals, event: threading.Event) -> None:
 def _parked_alone(arrivals: ThreadArrivals) -> None:
     """Arrive, then park until the task is stopped: for rates."""
     arrivals.arrive()
-    stopping().wait()
+    this_task().token.wait()
 
 
 @dataclass(frozen=True)

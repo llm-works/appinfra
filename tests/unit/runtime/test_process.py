@@ -110,7 +110,15 @@ class LockChecking:
 def process_task() -> Any:
     """A process task not launched."""
     return _ProcessTask(
-        MagicMock(), ProcessConfig(), lambda _: None, 1, None, abs, (), StopToken()
+        MagicMock(),
+        ProcessConfig(),
+        lambda _: None,
+        1,
+        None,
+        abs,
+        (),
+        StopToken(),
+        None,
     )
 
 

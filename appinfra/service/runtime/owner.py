@@ -25,7 +25,7 @@ from ...runtime import (
     Task,
     TaskDone,
     process_context,
-    stopping,
+    this_task,
 )
 from ...runtime import Runtime as Tasks
 from ..base import AsyncService, ScheduledService, Service
@@ -831,7 +831,7 @@ def _poll_health(service: Service) -> bool:
     Returns:
         True once healthy; False if the run ended first.
     """
-    token = stopping()
+    token = this_task().token
     while not token.is_set():
         if service.is_healthy():
             return True
@@ -846,7 +846,7 @@ def _back_off(delay: float) -> None:
     Raises:
         StoppedError: If stopped first, as a stopped task ends.
     """
-    if stopping().wait(delay):
+    if this_task().token.wait(delay):
         raise StoppedError()
 
 

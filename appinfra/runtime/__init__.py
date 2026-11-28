@@ -22,11 +22,11 @@ from .stop import StopToken
 from .task import (
     ProcessDetail,
     Task,
+    TaskContext,
     TaskDone,
     TaskKind,
     TaskProcess,
-    stopping,
-    task_id,
+    this_task,
 )
 
 __all__ = [
@@ -45,12 +45,12 @@ __all__ = [
     "ProcessExitError",
     "StoppedError",
     "Task",
+    "TaskContext",
     "TaskDone",
     "TaskKind",
     "TaskProcess",
     "aselect",
     "process_context",
     "select",
-    "stopping",
-    "task_id",
+    "this_task",
 ]

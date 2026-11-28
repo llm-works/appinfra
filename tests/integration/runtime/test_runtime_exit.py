@@ -17,14 +17,14 @@ SCRIPT = """
 import threading
 from unittest.mock import MagicMock
 
-from appinfra.runtime import Runtime, stopping
+from appinfra.runtime import Runtime, this_task
 
 entered = threading.Event()
 
 
 def marks():
     entered.set()
-    stopping().wait()
+    this_task().token.wait()
     print("stopped", flush=True)
 
 

@@ -50,7 +50,7 @@ with Runtime(lg) as rt:
 ### Spawning
 
 ```python
-t = rt.spawn(fn, *args, name=None, token=None, done=None, process=False)
+t = rt.spawn(fn, *args, name=None, token=None, done=None, process=False, derive_lg=None)
 ```
 
 | Function | Runs as |
@@ -60,7 +60,9 @@ t = rt.spawn(fn, *args, name=None, token=None, done=None, process=False)
 | any other callable, `process=True` | a child process of its own |
 
 `spawn()` raises `RuntimeError` once the runtime is not running, and `TypeError` for an `async def`
-with `process=True`: a child has no event loop.
+with `process=True`: a child has no event loop. `derive_lg` gives the task a logger of its own
+(see [Inside a task](#inside-a-task)); a suffix that is not a string raises `TypeError`, an empty
+one `ValueError`.
 
 ### Processes
 
@@ -69,15 +71,17 @@ with `process=True`: a child has no event loop.
 and cancelled like any other.
 
 ```python
-from appinfra.runtime import Runtime, stopping
+from appinfra.runtime import Runtime, this_task
 
 
 def index(path: str) -> int:  # module level: the child imports it
+    me = this_task()
     count = 0
     for _ in walk(path):
-        if stopping().is_set():
+        if me.token.is_set():
             break
         count += 1
+    me.lg.info("indexed", extra={"path": path, "count": count})
     return count
 
 
@@ -90,7 +94,10 @@ if __name__ == "__main__":
 - the function and its arguments are pickled: the function is defined at module level, and
   process creation goes under `if __name__ == "__main__":`; the child does not see the parent's
   `contextvars`
-- inside the child, `stopping()` and `task_id()` work as in any task, with the parent's task id
+- inside the child, `this_task()` works as in any task, with the parent's task id and name. Its
+  logger has the runtime logger's name, or the derived one with `derive_lg`, and the runtime's
+  handlers in the parent emit its records: every child gets a queue for them, with a listener
+  thread in the parent while it runs
 - the result comes back pickled; an exception is raised with the child's traceback as a note
   (`__notes__`), so it survives a `done=` process Chan too; an outcome that does not survive a
   pickle round trip, here or in the child, arrives as a `RuntimeError` naming why
@@ -179,14 +186,34 @@ Refused with `RuntimeError`:
 ### Inside a task
 
 ```python
-from appinfra.runtime import stopping, task_id
+from appinfra.runtime import this_task
 
 
 def worker(jobs: Chan[int]) -> None:
-    token = stopping()  # this task's StopToken
+    me = this_task()  # TaskContext: id, name, lg, token
+    me.lg.info("started", extra={"task": me.id, "name": me.name})
     for job in jobs:  # a stop ends the wait with StoppedError
-        handle(job, task_id())
+        handle(job)
+
+
+rt.spawn(worker, jobs)  # me.lg is the runtime's logger
+rt.spawn(worker, jobs, derive_lg="worker")  # me.lg is <runtime lg>/worker
 ```
+
+`this_task()` returns the `TaskContext` of the task the caller runs in, wherever below the task's
+function the call is made; outside a task it raises `RuntimeError`.
+
+| `TaskContext` | Meaning |
+|---------------|---------|
+| `id` | the id the runtime assigned, as on the `Task` handle |
+| `name` | the name given to `spawn()`, or `None` |
+| `lg` | the task's logger: the runtime's own, shared by every task, or one derived with `derive_lg` |
+| `token` | the task's `StopToken` |
+
+`spawn(..., derive_lg="worker")` derives a logger named `<runtime lg>/worker` for the task. The
+logger factory keeps every derived logger: a suffix tasks share is one logger however many use it,
+a suffix of each task's own (its id, say) adds one per task. The caller picks the suffix, and owns
+a clash with another logger's name. A process task derives it in its child.
 
 A task on a thread or the loop runs in a copy of its spawner's `contextvars`, as
 `asyncio.create_task()` and `asyncio.to_thread()` do: it sees the spawner's values, and what it
@@ -452,7 +479,7 @@ c.send(answer_to(request))
 | `TaskProcess`, `ProcessDetail` | a process task's child, and its `pid`, `exitcode`, `alive` |
 | `process_context()` | a multiprocessing context for what is shared with a child before any runtime exists |
 | `TaskDone` | `(task_id, name, result, error)`, sent on `done` |
-| `stopping()`, `task_id()` | the current task's token and id |
+| `this_task()`, `TaskContext` | the current task: its `id`, `name`, `lg` and `token` |
 | `StopToken`, `StoppedError` | the stop signal, and the error a stop ends a wait with |
 | `ProcessExitError` | a process task's child exited without an outcome; `exitcode` |
 | `Chan`, `ChanClosedError` | a channel, local or `process=True`, and the error a closed one raises |

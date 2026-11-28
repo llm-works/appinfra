@@ -9,13 +9,15 @@ import threading
 from collections.abc import Callable
 from typing import Any
 
+from ..log import Logger
 from .stop import StopToken
 from .task import TaskKind, _label, _Task
 
 
 class _ThreadTask(_Task):
     """Calls a function on a daemon thread of its own. A thread cannot be
-    interrupted: the function sees its token (``stopping()``) and returns."""
+    interrupted: the function sees its token (``this_task().token``) and
+    returns."""
 
     __slots__ = ("_thread", "_finished")
 
@@ -23,6 +25,7 @@ class _ThreadTask(_Task):
 
     def __init__(
         self,
+        lg: Logger,
         on_end: Callable[[_Task], None],
         task_id: int,
         name: str | None,
@@ -31,7 +34,7 @@ class _ThreadTask(_Task):
         token: StopToken,
     ) -> None:
         """Initialize task; see _Task."""
-        super().__init__(on_end, task_id, name, fn, args, token)
+        super().__init__(lg, on_end, task_id, name, fn, args, token)
         self._thread: threading.Thread | None = None
         # Set by _run() as its last step. Thread.is_alive() on Python 3.13+
         # stays True until the OS thread handle is marked done, after the GIL

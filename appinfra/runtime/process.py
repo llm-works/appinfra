@@ -18,8 +18,8 @@ from multiprocessing.context import ForkServerContext, SpawnContext
 from multiprocessing.process import BaseProcess
 from typing import Any, Final, cast
 
-from ..log import Logger
-from .chan.crossing import Crossing, close_child
+from ..log import Logger, LoggerFactory
+from .chan.crossing import Carried, Crossing, child_lg, close_child
 from .config import ProcessConfig
 from .errors import ProcessExitError, StoppedError
 from .stop import StopToken
@@ -41,22 +41,32 @@ class _ProcessTask(_ThreadTask):
     and joined as a thread task. A child that outlives its stop gets SIGTERM,
     then SIGKILL, the config's grace apart.
 
-    The child runs the call as a thread task of its own, inline: stopping()
-    and task_id() work there, with this task's id. Its token stops when this
+    The child runs the call as a thread task of its own, inline: this_task()
+    works there, with this task's id and name. Its token stops when this
     task's does, or when the parent's end of the stop connection closes, so a
     child outliving its parent stops. The outcome comes back over a second
     connection: the result, the exception with the child's traceback as a
     note (PEP 678), which, unlike a cause, survives any later pickling, as a
-    done process channel's, or the stop. A child that exits without one fails the task with
-    ProcessExitError, unless the task was stopped.
+    done process channel's, or the stop. A child that exits without one
+    fails the task with ProcessExitError, unless the task was stopped.
 
-    A process Chan in the arguments pickles, as the child starts, as a
-    reference over a link made for the run, and arrives in the child as a
-    proxy; the runtime's logger, *lg*, is carried over for the child's end
-    of it (chan/crossing.py). A start that meets none makes no link.
+    The runtime's logger, *lg*, is carried to every child: the child's task
+    logs through a logger of the same name, or one derived from it with
+    *derive_lg*, whose records *lg* emits here. A process Chan in the
+    arguments pickles, as the child starts, as a reference over a link made
+    for the run, and arrives in the child as a proxy (chan/crossing.py). A
+    start that meets none makes no link.
     """
 
-    __slots__ = ("_lg", "_config", "_process", "_lock", "_forced", "_ended")
+    __slots__ = (
+        "_lg",
+        "_config",
+        "_derive_lg",
+        "_process",
+        "_lock",
+        "_forced",
+        "_ended",
+    )
 
     killable = True
 
@@ -72,12 +82,16 @@ class _ProcessTask(_ThreadTask):
         fn: Callable[..., Any],
         args: tuple[Any, ...],
         token: StopToken,
+        derive_lg: str | None,
     ) -> None:
         """Initialize task, logging to the runtime's *lg*, its child started
-        and forced to end as *config* says; see _Task."""
-        super().__init__(on_end, task_id, name, fn, args, token)
+        and forced to end as *config* says, its call logging through a logger
+        derived from *lg* with the suffix *derive_lg*, or through *lg*'s name
+        without one; see _Task."""
+        super().__init__(lg, on_end, task_id, name, fn, args, token)
         self._lg = lg
         self._config = config
+        self._derive_lg = derive_lg
         # The child, once started. Under _lock: terminate() and kill() record
         # what they were asked in _forced and signal it, so a force between
         # the child's start and its publication is not lost; and _release()
@@ -105,9 +119,10 @@ class _ProcessTask(_ThreadTask):
             outcome_recv, outcome_send = _opened(ends, ctx.Pipe(duplex=False))
             stop_recv, stop_send = _opened(ends, ctx.Pipe(duplex=False))
             ends.callback(self.token._on_stop(functools.partial(_signal, stop_send)))
+            lg_carry = (crossing.carry(), self._derive_lg)
             process = ctx.Process(
                 target=_child,
-                args=(self.id, self.name, fn, args, stop_recv, outcome_send),
+                args=(self.id, self.name, fn, args, lg_carry, stop_recv, outcome_send),
                 name=_label(self.id, self.name),
             )
             with crossing.starting():  # the arguments are pickled here
@@ -270,17 +285,19 @@ def _child(
     name: str | None,
     fn: Callable[..., Any],
     args: tuple[Any, ...],
+    lg_carry: tuple[Carried, str | None],
     stop: Connection,
     outcome: Connection,
 ) -> None:
     """The child's main: run the call as a thread task, inline, and send its
-    outcome; its token stops on a signal or EOF on *stop*. A signal sent
-    before the child started is read here, before the call, not left to the
-    listener thread to win the race against it: the runtime's stop signals a
-    child before it forces it, so a child its stop forced before it was
-    started skips the call. The run's link, if a Chan in the arguments
-    opened one, closes before the outcome is sent: what its proxies posted
-    reaches the parent first."""
+    outcome; its token stops on a signal or EOF on *stop*. The task logs
+    through the logger *lg_carry* carries, derived with its suffix if it has
+    one. A signal sent before the child started is read here, before the
+    call, not left to the listener thread to win the race against it: the
+    runtime's stop signals a child before it forces it, so a child its stop
+    forced before it was started skips the call. The run's link, if a Chan
+    in the arguments opened one, closes before the outcome is sent: what its
+    proxies posted reaches the parent first."""
     token = StopToken()
     if stop.poll(0):  # a signal, or EOF: the parent is gone
         token.stop()
@@ -288,8 +305,15 @@ def _child(
         target=_stop_on_signal, args=(stop, token), name="stop", daemon=True
     ).start()
     report = functools.partial(_report, outcome=outcome)
-    task = _ThreadTask(report, task_id, name, fn, args, token)
+    task = _ThreadTask(_task_lg(*lg_carry), report, task_id, name, fn, args, token)
     task._context.run(task._run)
+
+
+def _task_lg(carried: Carried, derive_lg: str | None) -> Logger:
+    """In the child: the logger of its task, the runtime's as *carried*, or
+    one derived from it with the suffix *derive_lg*."""
+    lg = child_lg(*carried)
+    return lg if derive_lg is None else LoggerFactory.derive(lg, derive_lg)
 
 
 def _stop_on_signal(stop: Connection, token: StopToken) -> None:

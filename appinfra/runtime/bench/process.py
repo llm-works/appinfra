@@ -16,7 +16,7 @@ it was forked from. The functions the children run are at module level, as the
 child imports them by name.
 
 The runtime the tasks are spawned on needs a real logger: it is carried into each
-child its Chans cross to, which a mock cannot be.
+child, which a mock cannot be.
 """
 
 from __future__ import annotations
@@ -29,7 +29,7 @@ from dataclasses import dataclass
 from ...log import Logger
 from ..chan import Chan
 from ..runtime import Runtime
-from ..task import Task, stopping
+from ..task import Task, this_task
 from .measure import (
     cancel_all,
     check_count,
@@ -48,7 +48,7 @@ def parked(arrived: Chan[bool]) -> None:
     """Say on *arrived* that this child runs, then park until the task is
     stopped."""
     arrived.send(True, timeout=DUE)
-    stopping().wait()
+    this_task().token.wait()
 
 
 def _spawn_parked(tasks: Runtime, count: int) -> tuple[list[Task], float]:

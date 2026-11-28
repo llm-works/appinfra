@@ -29,7 +29,7 @@ from appinfra.runtime import (
     Task,
     TaskDone,
     select,
-    stopping,
+    this_task,
 )
 
 
@@ -91,7 +91,7 @@ def error_group(lg: Logger, rt: Runtime) -> None:
         """Fail at once for the database, else run until stopped."""
         if host == "db.local":
             raise ConnectionError(f"{host}: connection refused")
-        stopping().wait(timeout=5.0)
+        this_task().token.wait(timeout=5.0)
         return host
 
     for host in hosts:
@@ -113,13 +113,13 @@ def cancellation_tree(lg: Logger, rt: Runtime) -> None:
 
     def child() -> None:
         """Run until stopped."""
-        stopping().wait()
+        this_task().token.wait()
 
     def parent() -> list[Task]:
         """Spawn three children, then run until stopped."""
         children = [rt.spawn(child) for _ in range(3)]
         spawned.set()
-        stopping().wait()
+        this_task().token.wait()
         return children
 
     p = rt.spawn(parent)
@@ -147,7 +147,7 @@ def deadline(lg: Logger, rt: Runtime) -> None:
     def crawl() -> int:
         """Count pages until the budget's token stops."""
         pages = 0
-        while not stopping().wait(timeout=0.01):
+        while not this_task().token.wait(timeout=0.01):
             pages += 1
         return pages
 
