@@ -382,7 +382,8 @@ carries the Chan its reply comes back on, so replies need no ids:
 ```python
 from appinfra.runtime import Chan
 
-# Chan(16, process=True) for an isolated service
+# An isolated service needs process Chans on both sides:
+# Chan(16, process=True) here and Chan(1, process=True) for each reply
 requests: Chan[tuple[str, Chan[str]]] = Chan(16)
 rt.spawn(WorkerService(lg, requests=requests))
 
@@ -393,9 +394,10 @@ result = reply.recv(timeout=5.0)
 ```
 
 A streaming reply is any number of values on the reply Chan, ended by the replier closing it; the
-caller iterates the reply Chan. An isolated service takes a process Chan
-(`Chan(n, process=True)`) homed in the parent: it crosses into the service's process with the
-service, and a restarted process reaches the same Chan.
+caller iterates the reply Chan. An isolated service takes process Chans (`Chan(n, process=True)`),
+the requests Chan and each reply Chan: a local Chan cannot travel inside a process Chan's
+message. The requests Chan is homed in the parent and crosses into the service's process with
+the service, and a restarted process reaches the same Chan.
 
 ## API Reference
 

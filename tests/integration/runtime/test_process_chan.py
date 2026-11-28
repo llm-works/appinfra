@@ -72,10 +72,12 @@ def collect(inbox: Chan[int]) -> list[int]:
     return list(inbox)
 
 
-def home_and_wait(out: Chan[Chan[int]]) -> None:
-    """Make a Chan homed here, hand it to the parent, and wait on it."""
+def home_and_wait(out: Chan[Chan[int]], parked: Chan[bool]) -> None:
+    """Make a Chan homed here and hand it to the parent; once the parent's
+    receive waits on it, say so, then wait on it too."""
     mine: Chan[int] = Chan(1, process=True)
     out.send(mine, timeout=DUE)
+    parked.send(_parked(mine, receivers=1), timeout=DUE)
     mine.recv()
 
 
@@ -167,10 +169,11 @@ class TestMany:
 
 class TestEnds:
     def test_a_home_killed_fails_the_calls_on_its_chan(self, rt: Runtime) -> None:
-        """Its link at EOF: a receive under way and a send after both raise
-        ClosedError, not wait out their timeout."""
+        """Its link at EOF: a receive waiting at the home when it is killed,
+        and a send after, both raise ClosedError, not wait out their timeout."""
         out: Chan[Chan[int]] = Chan(1, process=True)
-        t = rt.spawn(home_and_wait, out, process=True)
+        parked: Chan[bool] = Chan(1, process=True)
+        t = rt.spawn(home_and_wait, out, parked, process=True)
         theirs = out.recv(timeout=DUE)
         errors: list[type[BaseException]] = []
 
@@ -182,6 +185,7 @@ class TestEnds:
 
         receiving = threading.Thread(target=receive)
         receiving.start()
+        assert parked.recv(timeout=DUE)  # the parent's receive waits at the home
         assert t.process is not None
         t.process.kill()
         with pytest.raises(ProcessExitError):
