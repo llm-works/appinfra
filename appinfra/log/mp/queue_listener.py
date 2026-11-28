@@ -76,6 +76,8 @@ class LogQueueListener:
         self._respect_handler_level = respect_handler_level
         self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
+        # Set by stop(close_queue=True): the thread closes the queue as it ends
+        self._close_queue = False
 
     def start(self) -> None:
         """
@@ -91,7 +93,7 @@ class LogQueueListener:
         self._thread = threading.Thread(target=self._listen, daemon=True)
         self._thread.start()
 
-    def stop(self, timeout: float = 5.0) -> None:
+    def stop(self, timeout: float = 5.0, close_queue: bool = False) -> None:
         """
         Stop the listener thread gracefully.
 
@@ -100,7 +102,13 @@ class LogQueueListener:
 
         Args:
             timeout: Maximum seconds to wait for thread to finish
+            close_queue: Close the multiprocessing queue, and join its
+                feeder, once the thread has handled every record before the
+                sentinel. The thread does it as it ends, so a drain that
+                outlasts *timeout* still loses no record, and the caller is
+                not held past *timeout*.
         """
+        self._close_queue = close_queue
         self._stop_event.set()
 
         # Send sentinel to unblock queue.get(); the queue might be full or closed
@@ -110,8 +118,23 @@ class LogQueueListener:
         if self._thread is not None:
             self._thread.join(timeout)
             self._thread = None
+        elif close_queue:  # never started: nothing to drain
+            self._close()
+
+    def _close(self) -> None:
+        """Close the queue and join its feeder thread."""
+        self._queue.close()
+        self._queue.join_thread()
 
     def _listen(self) -> None:
+        """Run the listener loop, then close the queue if stop() asked to."""
+        try:
+            self._drain()
+        finally:
+            if self._close_queue:
+                self._close()
+
+    def _drain(self) -> None:
         """
         Main listener loop - runs in background thread.
 

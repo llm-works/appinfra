@@ -209,6 +209,24 @@ class TestLogQueueListenerDecodeErrors:
         assert not thread.is_alive()
 
 
+class TestLogQueueListenerCloseQueue:
+    """stop(close_queue=True) closes the queue once nothing is left to read."""
+
+    def test_a_listener_never_started_closes_the_queue_at_once(
+        self, queue, mock_logger
+    ):
+        LogQueueListener(queue, mock_logger).stop(close_queue=True)
+        assert queue._closed
+
+    def test_a_running_listener_closes_the_queue_as_it_ends(self, queue, mock_logger):
+        listener = LogQueueListener(queue, mock_logger)
+        listener.start()
+        thread = listener._thread
+        listener.stop(close_queue=True)
+        thread.join(_TIMEOUT)
+        assert queue._closed
+
+
 class TestLogQueueListenerStopDrains:
     """stop() lets the listener handle every record queued before its sentinel."""
 

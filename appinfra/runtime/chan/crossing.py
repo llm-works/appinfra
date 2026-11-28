@@ -94,20 +94,22 @@ class Crossing:
     def close(self) -> None:
         """End the run's link and the forwarding of the child's records,
         once the child has ended: every frame it sent (a close or a Release
-        it posted last) is handled first. The queue is closed and let go
-        here: the crossing can outlive the run (a task's error keeps the
-        frame that holds it), and a queue left to the cyclic collector frees
-        its semaphores wherever that runs, inside the resource tracker too,
-        which refuses the reentrant call."""
+        it posted last) is handled first. The queue is let go here, and
+        closed explicitly: by the listener once it has handled the child's
+        last record, so none is dropped however long their handling takes.
+        The crossing can outlive the run (a task's error keeps the frame that
+        holds it), and a queue left to the cyclic collector frees its
+        semaphores wherever that runs, inside the resource tracker too, which
+        refuses the reentrant call."""
         try:
             self.handed()  # a child that never started: its end goes too
             if self._opened is not None:
                 self._opened[0].finish()
         finally:
             if self._listener is not None:
-                self._listener.stop()
-                self._queue.close()
-                self._queue.join_thread()
+                # The listener closes the queue once it has handled every
+                # record the child sent, though that outlast stop()'s join
+                self._listener.stop(close_queue=True)
             elif self._queue is not None:  # its listener never made: nothing fed it
                 self._queue.close()
             self._opened = self._listener = self._queue = self._carried = None
