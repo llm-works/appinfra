@@ -3,6 +3,7 @@
 
 """Tests for FastAPIAdapter."""
 
+import asyncio
 import pickle
 from contextlib import asynccontextmanager
 from unittest.mock import MagicMock, patch
@@ -10,6 +11,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from appinfra.app.fastapi.config.api import ApiConfig
+from appinfra.app.fastapi.config.ipc import IPCConfig
 from appinfra.app.fastapi.runtime.adapter import (
     CORSDefinition,
     ExceptionCallbackDefinition,
@@ -24,6 +26,8 @@ from appinfra.app.fastapi.runtime.adapter import (
     RouteDefinition,
     RouterDefinition,
 )
+from appinfra.app.fastapi.runtime.ipc import IPCChannel
+from appinfra.runtime import Chan
 from appinfra.subprocess import Lazy
 
 # Module-level factories used by Lazy tests. Must be importable via qualname
@@ -1235,6 +1239,82 @@ class TestLifespan:
             adapter.set_lifespan(LifespanDefinition(lifespan=user_lifespan))
 
             assert adapter._build_lifespan() is user_lifespan
+
+    @pytest.mark.asyncio
+    async def test_lifecycle_callbacks_reach_the_parent_over_ipc(self):
+        """The IPC channel is on app.state before the lifespan starts, and
+        still answers in the shutdown callbacks."""
+        got = []
+
+        async def startup(app):
+            got.append(await app.state.ipc_channel.submit("up", timeout=5.0))
+
+        async def shutdown(app):
+            got.append(await app.state.ipc_channel.submit("down", timeout=5.0))
+
+        def configure(adapter):
+            adapter.add_startup_callback(LifecycleCallbackDefinition(callback=startup))
+            adapter.add_shutdown_callback(
+                LifecycleCallbackDefinition(callback=shutdown)
+            )
+
+        async with _parent() as ipc:
+            app, lifespan = _built(configure, ipc)
+            async with lifespan(app):
+                assert got == ["upup"]
+        assert got == ["upup", "downdown"]
+
+    @pytest.mark.asyncio
+    async def test_a_user_lifespan_reaches_the_parent_over_ipc(self):
+        """Before its yield and after it."""
+        got = []
+
+        @asynccontextmanager
+        async def user_lifespan(app):
+            got.append(await app.state.ipc_channel.submit("up", timeout=5.0))
+            yield
+            got.append(await app.state.ipc_channel.submit("down", timeout=5.0))
+
+        def configure(adapter):
+            adapter.set_lifespan(LifespanDefinition(lifespan=user_lifespan))
+
+        async with _parent() as ipc:
+            app, lifespan = _built(configure, ipc)
+            async with lifespan(app):
+                assert got == ["upup"]
+        assert got == ["upup", "downdown"]
+
+
+@asynccontextmanager
+async def _parent():
+    """An IPC channel whose parent, a task on this loop, answers each request
+    with its value doubled until the requests Chan is closed."""
+    requests = Chan(1, process=True)
+
+    async def answer():
+        async for data, reply in requests:
+            await reply.asend(data * 2)
+
+    answering = asyncio.create_task(answer())
+    try:
+        yield IPCChannel(requests, IPCConfig())
+    finally:
+        requests.close()
+        await answering
+
+
+def _built(configure, ipc):
+    """The app an adapter that *configure* set up builds with *ipc*, and the
+    lifespan it handed FastAPI."""
+    with (
+        patch("appinfra.app.fastapi.runtime.adapter.FASTAPI_AVAILABLE", True),
+        patch("appinfra.app.fastapi.runtime.adapter.FastAPI") as fastapi,
+        patch("appinfra.app.fastapi.runtime.adapter.CORSMiddleware"),
+    ):
+        adapter = FastAPIAdapter(ApiConfig())
+        configure(adapter)
+        app = adapter.build(ipc_channel=ipc)
+    return app, fastapi.call_args.kwargs["lifespan"]
 
 
 class TestLazy:

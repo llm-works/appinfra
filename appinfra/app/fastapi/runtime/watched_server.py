@@ -23,9 +23,10 @@ class WatchedServer(uvicorn.Server):
     without blocking, whether the parent's process sentinel is readable (the
     parent exited, including by SIGKILL) or the service's stopping token is set. On
     either, the main loop exits into uvicorn's normal shutdown, which drains
-    in-flight requests. Those waiting for an IPC reply do not hold it: a stop
-    fails their wait (StoppedError, the stopping token's), and a dead parent
-    every call on its Chans (ClosedError, its link at its end).
+    in-flight requests. Those waiting for an IPC reply do not hold it: the
+    service's stop and the parent's death both stop the run's token, failing
+    their wait with StoppedError; a call still out on a dead parent's link
+    fails with ClosedError.
 
     The parent is ``mp.parent_process()``, not ``os.getppid()``: under the
     forkserver start method the OS parent is the fork server.

@@ -55,11 +55,11 @@ def _copy_api(config: ApiConfig) -> ApiConfig:
     )
 
 
-def _requests(config: IPCConfig | None) -> Chan[Any]:
+def _requests(config: IPCConfig) -> Chan[Any]:
     """The server's requests Chan, holding up to max_pending: as many as
     the subprocess lets be in flight, so a request it admits does not wait
     for room."""
-    return Chan((config or IPCConfig()).max_pending, process=True)
+    return Chan(config.max_pending, process=True)
 
 
 class ServerBuilder:
@@ -534,11 +534,17 @@ class ServerBuilder:
         if self._is_subprocess_mode():
             self._validate_subprocess_handlers()
 
+        requests: Chan[Any] | None = None
+        if self._ipc_enabled:
+            # The one IPCConfig both ends read: it sizes requests here and
+            # bounds the requests in flight in the subprocess
+            config.ipc = config.ipc or IPCConfig()
+            requests = _requests(config.ipc)
         return Server(
             lg=self._lg,
             name=self._name,
             config=config,
             adapter=adapter,
-            requests=_requests(config.ipc) if self._ipc_enabled else None,
+            requests=requests,
             runtime=self._runtime,
         )

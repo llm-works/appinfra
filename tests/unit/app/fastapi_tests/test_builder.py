@@ -336,6 +336,27 @@ class TestSubprocessConfigurer:
         with pytest.raises(TimeoutError):
             requests.send((7, None), timeout=0)
 
+    def test_with_ipc_alone_sizes_requests_from_the_servers_config(
+        self, mock_fastapi, mock_lg
+    ):
+        """One IPCConfig, the server's, sizes the requests Chan and is what
+        its subprocess bounds requests in flight by."""
+        from appinfra.app.fastapi.builder.server import ServerBuilder
+        from appinfra.app.fastapi.config.ipc import IPCConfig
+
+        builder = ServerBuilder(mock_lg, "test-api")
+        builder.subprocess.with_ipc().done()
+        server = builder.build()
+
+        ipc = server.config.ipc
+        assert isinstance(ipc, IPCConfig)
+        requests = server.requests
+        assert requests is not None
+        for i in range(ipc.max_pending):
+            requests.send((i, None), timeout=0)
+        with pytest.raises(TimeoutError):
+            requests.send((ipc.max_pending, None), timeout=0)
+
     def test_without_ipc_the_server_has_no_requests(self, mock_fastapi, mock_lg):
         from appinfra.app.fastapi.builder.server import ServerBuilder
 

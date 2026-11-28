@@ -89,8 +89,8 @@ class IPCChannel:
             ClosedError: If the parent closed its requests Chan, or the reply
                 Chan without a reply
         """
-        self._admit()
         reply: Chan[Any] = Chan(1, process=True)
+        self._admit()
         try:
             deadline = time.monotonic() + self._timeout(timeout)
             await self._requests.asend((request, reply), timeout=_left(deadline))
@@ -119,8 +119,8 @@ class IPCChannel:
             TimeoutError: If a value did not come within *timeout*
             ClosedError: If the parent closed its requests Chan
         """
-        self._admit()
         reply: Chan[Any] = Chan(1, process=True)
+        self._admit()
         try:
             wait = self._timeout(timeout)
             await self._requests.asend((request, reply), timeout=wait)
