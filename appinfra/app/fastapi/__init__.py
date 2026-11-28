@@ -5,18 +5,19 @@
 FastAPI server framework for appinfra.
 
 Provides production-ready FastAPI + Uvicorn server framework with subprocess
-isolation and queue-based IPC.
+isolation and Chan-based IPC.
 
 Installation:
     pip install appinfra[fastapi]
 
 Example (Simple Server - Direct Mode):
-    from . import ServerBuilder
+    from appinfra.app.fastapi import ServerBuilder
+    from appinfra.log import Logger
 
     async def health():
         return {"status": "ok"}
 
-    server = (ServerBuilder("myapi")
+    server = (ServerBuilder(Logger("myapi"), "myapi")
         .with_port(8000)
         .routes.with_route("/health", health).done()
         .build())
@@ -24,22 +25,32 @@ Example (Simple Server - Direct Mode):
     server.start()  # Blocking
 
 Example (Subprocess Mode with IPC):
-    from . import ServerBuilder
+    async def work(data: str, request: Request):
+        ipc = request.app.state.ipc_channel
+        return {"result": await ipc.submit(data, timeout=10.0)}
 
-    server = (ServerBuilder("worker-api")
+    server = (ServerBuilder(Logger("worker-api"), "worker-api")
         .with_port(8000)
-        .routes.with_route("/health", health).done()
+        .routes.with_route("/work/{data}", work).done()
         .subprocess
             .with_ipc()
             .with_auto_restart(True)
             .done()
         .build())
 
-    server.start_subprocess()  # Non-blocking
+    # The main process answers each request on the Chan it came with, until
+    # the requests Chan is closed; a restarted server sends to the same one
+    def answer():
+        for data, reply in server.requests:
+            reply.send(data.upper())
 
-    # Main process answers each request on the Chan it came with
-    for request, reply in server.requests:
-        reply.send(process(request))
+    serving = threading.Thread(target=answer)
+    serving.start()
+    try:
+        server.start()  # Blocking; start_subprocess() returns once it serves
+    finally:
+        server.requests.close()
+        serving.join()
 """
 
 from __future__ import annotations

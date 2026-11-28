@@ -31,13 +31,14 @@ class SubprocessConfigurer(Generic[P]):
     the server runs uvicorn directly in the current process.
 
     Example:
-        server = (ServerBuilder("myapi")
+        server = (ServerBuilder(lg, "myapi")
             .subprocess
                 .with_ipc()
                 .with_log_file("/var/log/api.log")
                 .with_auto_restart(True).with_max_restarts(10)
                 .done()
             .build())
+        server.start_subprocess()  # Non-blocking
         for request, reply in server.requests:
             reply.send(handle(request))
     """

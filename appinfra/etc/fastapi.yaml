@@ -1,7 +1,7 @@
 # FastAPI Server Configuration
 # ============================
 # This file contains FastAPI server configuration for HTTP APIs with optional
-# subprocess isolation and queue-based IPC.
+# subprocess isolation and Chan-based IPC.
 #
 # Installation: pip install appinfra[fastapi]
 
@@ -41,29 +41,29 @@ uvicorn:
 
 # IPC Settings
 # ============
-# Inter-process communication settings for subprocess mode
-# These settings control queue-based communication between the main process
-# and the FastAPI subprocess
+# Inter-process communication settings for subprocess mode: the FastAPI
+# subprocess sends each request to the main process on server.requests, a
+# process Chan, with a Chan for the reply
 ipc:
-  poll_interval: 0.01          # Response queue polling interval in seconds (10ms = 100 polls/sec)
   response_timeout: 60.0       # Default timeout waiting for response from main process
-  max_pending: 100             # Maximum pending requests before rejection (prevents memory growth)
+  max_pending: 100             # Max requests in flight before rejection; also the requests Chan's capacity
   enable_health_reporting: true  # Include IPC status in /_health endpoint
 
 # Usage Examples
 # ==============
 #
 # Direct Mode (simple, blocking):
-#   server = (ServerBuilder("myapi")
+#   server = (ServerBuilder(lg, "myapi")
 #       .with_config(ApiConfig(**config['api']))
 #       .uvicorn.with_config(UvicornConfig(**config['uvicorn'])).done()
 #       .build())
 #   server.start()
 #
 # Subprocess Mode (non-blocking, IPC):
-#   request_q, response_q = mp.Queue(), mp.Queue()
-#   server = (ServerBuilder("myapi")
+#   server = (ServerBuilder(lg, "myapi")
 #       .with_config(ApiConfig(**config['api'], ipc=IPCConfig(**config['ipc'])))
-#       .subprocess.with_ipc(request_q, response_q).done()
+#       .subprocess.with_ipc().done()
 #       .build())
-#   proc = server.start_subprocess()
+#   server.start_subprocess()
+#   for request, reply in server.requests:
+#       reply.send(handle(request))

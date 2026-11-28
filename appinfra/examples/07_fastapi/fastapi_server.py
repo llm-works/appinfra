@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -40,6 +41,7 @@ from fastapi import Request
 from appinfra.app.fastapi import ServerBuilder
 from appinfra.app.fastapi.runtime.server import Server
 from appinfra.log import Logger
+from appinfra.runtime import ChanClosedError
 
 # -----------------------------------------------------------------------------
 # Route handlers
@@ -139,15 +141,15 @@ def create_subprocess_server(port: int = 25443) -> Server:
 
 
 def serve_requests(server: Server) -> None:
-    """Answer the server's requests until it stops running: each on the
-    Chan it came with. The one-second waits let Ctrl+C through."""
+    """Answer the server's requests, each on the Chan it came with, until
+    the requests Chan is closed. A restarted server sends to the same Chan,
+    so this goes on across a crash."""
     assert server.requests is not None
-    while server.is_running:
+    for request, reply in server.requests:
         try:
-            request, reply = server.requests.recv(timeout=1.0)
-        except TimeoutError:
-            continue
-        reply.send(WorkResponse(result=request.data.upper()), timeout=1.0)
+            reply.send(WorkResponse(result=request.data.upper()), timeout=1.0)
+        except ChanClosedError:
+            pass  # the route stopped waiting for it
 
 
 def run_subprocess_demo() -> int:
@@ -156,24 +158,25 @@ def run_subprocess_demo() -> int:
 
     Shows the typical pattern:
     1. Build server with subprocess config (it makes server.requests)
-    2. Start server (non-blocking)
-    3. Main process answers requests (try GET /work/hello)
+    2. Answer its requests on a thread (try GET /work/hello)
+    3. Run the server: start() blocks until it is stopped, or has ended
+       with no restart left, and stops it on Ctrl+C
     """
-    print("Starting subprocess mode demo...")
-
     server = create_subprocess_server()
-    server.start_subprocess()
-
-    print(f"Server started in subprocess (pid={server.pid})")
-    print(f"Listening on http://localhost:{server.port}")
+    assert server.requests is not None
+    print("Starting subprocess mode demo...")
+    print(f"Listening on http://localhost:{server.config.port}")
     print("Press Ctrl+C to stop")
 
+    serving = threading.Thread(target=serve_requests, args=(server,))
+    serving.start()
     try:
-        serve_requests(server)
+        server.start()
     except KeyboardInterrupt:
         print("\nShutting down...")
     finally:
-        server.stop()
+        server.requests.close()  # ends serve_requests()
+        serving.join()
 
     return 0
 

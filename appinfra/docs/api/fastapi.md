@@ -1,6 +1,6 @@
 # FastAPI Server Framework
 
-Production-ready FastAPI + Uvicorn server framework with subprocess isolation and queue-based IPC.
+Production-ready FastAPI + Uvicorn server framework with subprocess isolation and Chan-based IPC.
 
 ## Installation
 

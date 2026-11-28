@@ -73,7 +73,7 @@ class ServerBuilder:
     - .build() creates runtime instance
 
     Example (simple server):
-        server = (ServerBuilder("myapi")
+        server = (ServerBuilder(lg, "myapi")
             .with_port(8000)
             .routes
                 .with_route("/health", health_handler)
@@ -84,7 +84,7 @@ class ServerBuilder:
         server.start()  # Blocking
 
     Example (subprocess mode with IPC):
-        server = (ServerBuilder("worker-api")
+        server = (ServerBuilder(lg, "worker-api")
             .with_port(8000)
             .routes
                 .with_route("/process", process_handler, methods=["POST"])

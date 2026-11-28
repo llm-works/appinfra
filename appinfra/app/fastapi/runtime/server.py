@@ -66,11 +66,11 @@ class Server:
     Mode is determined by whether a requests Chan is given at construction.
 
     Example (direct mode):
-        server = ServerBuilder("myapi").with_port(8000).build()
+        server = ServerBuilder(lg, "myapi").with_port(8000).build()
         server.start()  # Blocking
 
     Example (subprocess mode):
-        server = ServerBuilder("myapi").subprocess.with_ipc().done().build()
+        server = ServerBuilder(lg, "myapi").subprocess.with_ipc().done().build()
         server.start_subprocess()  # Non-blocking
         for request, reply in server.requests:
             reply.send(handle(request))
