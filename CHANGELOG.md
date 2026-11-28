@@ -13,7 +13,8 @@ For API stability guarantees and deprecation policy, see
 ### Added
 - `appinfra.runtime.Config`: a runtime's start method, forcing grace and stop timeout, all with
   defaults; `Factory(lg, config).create(name)` builds one from the config's `runtime.<name>`,
-  overridable through `INFRA_RUNTIME_*`. The service `Runtime` takes it as `config=`.
+  overridable through `INFRA_RUNTIME_*` when loaded by `appinfra.config.Config`. The service
+  `Runtime` takes it as `config=`.
 - `appinfra.runtime`: `Task.kind` tells what a task runs as (`TaskKind`: loop, thread, process).
   A process task's `Task.process` gives its child's `detail()` (pid, exit code, liveness) and
   `terminate()`/`kill()`; `Runtime.process_context` and `process_context()` give the context its

@@ -278,8 +278,11 @@ runtime:
 - a key left out keeps its default; an unknown key raises `ValueError`, so a misspelt one is not
   silently ignored; an unknown runtime name raises `KeyError` naming the known ones
 - `INFRA_RUNTIME_<NAME>_<KEY>` overrides a key the config declares, e.g.
-  `INFRA_RUNTIME_COMPUTE_PROCESS_METHOD=forkserver`; appinfra's own `etc/infra.yaml` declares a
-  `default` runtime with every key, so `INFRA_RUNTIME_DEFAULT_...` works there out of the box
+  `INFRA_RUNTIME_COMPUTE_PROCESS_METHOD=forkserver`, when the config given to `Factory` is loaded
+  through `appinfra.config.Config` (an App's, `Config.from_path()`, `Config.from_spec()`), which
+  applies the overrides as it loads; a plain mapping gets none. appinfra's own `etc/infra.yaml`
+  declares a `default` runtime with every key, so `INFRA_RUNTIME_DEFAULT_...` works there out of
+  the box
 - `rt.config` is what a runtime was configured with; a service `Runtime` takes the same `Config`
   for the task runtime its services run on (`config=`), as an application that also uses
   `appinfra.config.Config` imports it under another name: `from appinfra.runtime import Config as

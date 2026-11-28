@@ -17,7 +17,8 @@ class Factory:
     """Runtimes by name, from the runtime section of a config: each
     runtime.<name> holds the fields of a Config, a key left out
     keeping its default. An INFRA_RUNTIME_<NAME>_... variable overrides a key
-    the config declares.
+    the config declares, when *config* is an appinfra.config.Config, which
+    applies the overrides as it loads.
 
     Example:
         # runtime:

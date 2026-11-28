@@ -28,7 +28,8 @@ dbs: !include pg.yaml#dbs
 # Runtime Configuration
 # =====================
 # Runtimes by name for appinfra.runtime.Factory: Factory(lg, config).create("default").
-# Declared here so INFRA_RUNTIME_DEFAULT_* can override them; a key left out keeps its default
+# Declared here so INFRA_RUNTIME_DEFAULT_* can override them as appinfra.config.Config loads this
+# file; a key left out keeps its default
 runtime:
   default:
     process:
