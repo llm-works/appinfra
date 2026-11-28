@@ -44,9 +44,12 @@ For API stability guarantees and deprecation policy, see
 - `appinfra.runtime`: `Runtime.spawn(fn, *args)` calls a function once as a task (an async one on
   a shared event loop, any other on a thread of its own) and returns its `Task`: `wait()`, or
   `await task` on any event loop, as often as wanted; `cancel()`, `alive()`, `detach()`. Inside a
-  task, `stopping()` and `task_id()` return its token and id; a task its stop ended without a
-  result raises `StoppedError`. A task on a thread or the loop runs in a copy of the spawner's
-  `contextvars`.
+  task, `this_task()` returns its `TaskContext`: id, name, logger and token; a task its stop ended
+  without a result raises `StoppedError`. A task on a thread or the loop runs in a copy of the
+  spawner's `contextvars`.
+- `Runtime.spawn(..., derive_lg="worker")`: the task logs through `<runtime lg>/worker`, its own
+  logger; without it, through the runtime's. A process task's child logs too, its records emitted
+  by the parent's handlers.
 - `Runtime.spawn(..., name=, token=, done=)`: the task's name, on its thread and log records; its
   token derives from the given one; its end (`TaskDone`: its name, result, or error as `wait()`
   would raise it) is sent on a channel, a process Chan too.

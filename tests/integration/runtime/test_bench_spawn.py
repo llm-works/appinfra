@@ -77,8 +77,8 @@ def rt() -> Iterator[Runtime]:
 
 @pytest.fixture
 def prt() -> Iterator[Runtime]:
-    """A runtime with a real logger: it is carried into each child its Chans
-    cross to, which a mock cannot be."""
+    """A runtime with a real logger: it is carried into each child, which a
+    mock cannot be."""
     rt = Runtime(LoggerFactory.create_root(LogConfig.from_params(level="warning")))
     rt.start()
     yield rt

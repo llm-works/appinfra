@@ -20,7 +20,7 @@ from multiprocessing.context import BaseContext
 from types import TracebackType
 from typing import Any, final
 
-from ..log import Logger
+from ..log import Logger, LoggerFactory
 from .chan import Chan, ClosedError
 from .chan.chan import _copied
 from .chan.proxy import _ChanProxy
@@ -47,11 +47,12 @@ class Runtime:
     its failure is logged then, as nobody else sees it.
 
     Every task's token derives from the token of the task that spawned it, or
-    from the runtime's; ``stopping()`` returns it inside the task, ``task_id()``
-    its id. A task on a thread or the loop runs in a copy of the spawner's
-    contextvars, as asyncio's create_task() and to_thread() do; a process
-    task's child starts with a fresh context. stop() stops every task's token, cancels
-    the tasks on the loop, and waits for the ones on threads.
+    from the runtime's. Inside the task, ``this_task()`` says who it is: its
+    id, name, token and logger. A task on a thread or the loop runs in a copy
+    of the spawner's contextvars, as asyncio's create_task() and to_thread()
+    do; a process task's child starts with a fresh context. stop() stops
+    every task's token, cancels the tasks on the loop, and waits for the ones
+    on threads.
 
     A task its stop ended has no result: wait() raises StoppedError for it,
     and a detached one is not logged as failed. A function that sees the stop
@@ -132,10 +133,12 @@ class Runtime:
         token: StopToken | None = None,
         done: Chan[TaskDone] | None = None,
         process: bool = False,
+        derive_lg: str | None = None,
     ) -> Task:
         """Call *fn*(*args*) as a task: on the loop if it is an async function,
         else on a thread of its own, or in a process of its own if *process*.
-        Returns the task.
+        Returns the task. Inside it, this_task() says who it is: its id, name,
+        token and logger.
 
         Args:
             fn: The function to call.
@@ -162,19 +165,30 @@ class Runtime:
                 "__main__":``. Its result or exception comes back pickled; an
                 exception carries the child's traceback as a note, which a
                 done process channel keeps. The child starts with a fresh
-                context: it does not see the spawner's contextvars; stopping() and task_id() work
-                there, as the child sets them up itself. The
+                context: it does not see the spawner's contextvars;
+                this_task() works there, as the child sets it up itself. The
                 child's token stops with the task's, or once the parent is
                 gone. A child that exits without an outcome fails the task
                 with ProcessExitError. stop() kills one still running past its
                 timeout.
+            derive_lg: A logger of the task's own, derived from the runtime's
+                with this suffix (``<runtime lg>/<suffix>``), as
+                this_task().lg; without one the task logs through the
+                runtime's logger, shared by every task. The factory keeps
+                each derived logger: a suffix tasks share is one logger
+                however many use it, a suffix of each task's own adds one
+                per task. The caller picks the suffix, and owns a clash with
+                another logger's name. A process task derives it in its
+                child, from the runtime's logger as carried there.
 
         Raises:
-            TypeError: If *name* is not a string, or *process* is asked for an
-                async function: a child has no event loop.
+            TypeError: If *name* or *derive_lg* is not a string, or *process*
+                is asked for an async function: a child has no event loop.
+            ValueError: If *derive_lg* is empty.
             RuntimeError: If the runtime is not running.
         """
         name = _task_name(name)
+        derive_lg = _lg_suffix(derive_lg)
         if process and _async_callable(fn):
             raise TypeError("an async function runs on the loop, not in a process")
         if token is None:
@@ -187,7 +201,11 @@ class Runtime:
                 raise RuntimeError("runtime is not running")
             task_id = self._next_task_id
             self._next_task_id += 1
-            t = self._task_for(task_id, name, fn, args, token, process)
+            try:
+                t = self._task_for(task_id, name, fn, args, token, process, derive_lg)
+            except BaseException:  # e.g. derive_lg's name held by a library's logger
+                token.detach()
+                raise
             t.done_chan = done
             t.detached = done is not None
             self._tasks[task_id] = t
@@ -203,9 +221,12 @@ class Runtime:
         args: tuple[Any, ...],
         token: StopToken,
         process: bool,
+        derive_lg: str | None,
     ) -> _Task:
         """The task that calls *fn*: in a process if asked, on the loop if it
-        is an async function, else on a thread."""
+        is an async function, else on a thread. It logs through the runtime's
+        logger, or one derived with *derive_lg*: here, or in a process task's
+        child."""
         if process:
             return _ProcessTask(
                 self._lg,
@@ -216,10 +237,16 @@ class Runtime:
                 fn,
                 args,
                 token,
+                derive_lg,
             )
+        lg = (
+            self._lg if derive_lg is None else LoggerFactory.derive(self._lg, derive_lg)
+        )
         if inspect.iscoroutinefunction(fn):
-            return _LoopTask(self._end_hook, self._host, task_id, name, fn, args, token)
-        return _ThreadTask(self._end_hook, task_id, name, fn, args, token)
+            return _LoopTask(
+                lg, self._end_hook, self._host, task_id, name, fn, args, token
+            )
+        return _ThreadTask(lg, self._end_hook, task_id, name, fn, args, token)
 
     def _launch(self, t: _Task) -> None:
         """Launch *t*; under the lock. A task the loop refuses leaves the
@@ -556,6 +583,25 @@ def _task_name(name: object) -> str | None:
     if not isinstance(name, str):
         raise TypeError(f"task name must be a string, not {type(name).__name__}")
     return str.__str__(name)
+
+
+def _lg_suffix(suffix: object) -> str | None:
+    """spawn()'s *derive_lg* as a plain str, as *name* is (_task_name()): it
+    is pickled to a process task's child too.
+
+    Raises:
+        TypeError: If *suffix* is not a string or None.
+        ValueError: If it is empty: the derived logger would be named as the
+            runtime's, with a trailing slash.
+    """
+    if suffix is None:
+        return None
+    if not isinstance(suffix, str):
+        raise TypeError(f"derive_lg must be a string, not {type(suffix).__name__}")
+    plain = str.__str__(suffix)  # checked as what it becomes, not as its class says
+    if not plain:
+        raise ValueError("derive_lg must not be empty")
+    return plain
 
 
 def _snapshot(end: TaskDone) -> TaskDone:

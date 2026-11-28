@@ -19,7 +19,7 @@ from appinfra.runtime import (
     StoppedError,
     aselect,
     select,
-    stopping,
+    this_task,
 )
 from appinfra.runtime import ChanRecv as Recv
 from appinfra.runtime import ChanSend as Send
@@ -437,7 +437,7 @@ class TestStop:
         ch.send("a")
 
         def drain() -> list[str]:
-            stopping().stop()
+            this_task().token.stop()
             got = [ch.recv()]
             try:
                 ch.recv()

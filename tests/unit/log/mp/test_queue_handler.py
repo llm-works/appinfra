@@ -489,3 +489,35 @@ class TestLoggerQueueConfig:
         # Cleanup
         level_manager.set_default_level(logging.INFO)
         level_manager.clear_rules()
+
+
+class TestLoggerQueueConfigExtra:
+    """The pre-populated extra crosses with the queue config. The queue is a
+    stand-in object: nothing is sent on it."""
+
+    def test_queue_config_carries_the_extra(self):
+        from appinfra.log import Logger
+
+        lg = Logger("parent", extra={"service": "api"})
+        assert lg.queue_config(object())["extra"] == {"service": "api"}
+
+    def test_from_queue_config_applies_the_extra(self):
+        from appinfra.log import Logger
+
+        config = {"queue": object(), "level": logging.INFO, "extra": {"service": "api"}}
+        assert Logger.from_queue_config(config, name="worker")._extra == {
+            "service": "api"
+        }
+
+    def test_from_queue_config_refuses_a_reserved_key(self):
+        from appinfra.log import Logger, ReservedKeyError
+
+        config = {"queue": object(), "level": logging.INFO, "extra": {"name": "x"}}
+        with pytest.raises(ReservedKeyError):
+            Logger.from_queue_config(config, name="worker")
+
+    def test_a_config_without_extra_is_still_read(self):
+        from appinfra.log import Logger
+
+        config = {"queue": object(), "level": logging.INFO}
+        assert Logger.from_queue_config(config, name="worker")._extra == {}

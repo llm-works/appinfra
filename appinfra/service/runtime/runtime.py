@@ -15,10 +15,9 @@ from types import TracebackType
 from typing import Any
 
 from ...log import Logger
-from ...runtime import Chan, ChanClosedError, StoppedError, StopToken, Task
+from ...runtime import Chan, ChanClosedError, StoppedError, StopToken, Task, this_task
 from ...runtime import Config as TasksConfig
 from ...runtime import Runtime as Tasks
-from ...runtime import task_id as current_task_id
 from ...runtime.config import DEFAULT_CONFIG
 from ..base import AsyncService, Service
 from ..errors import DependencyNotRunningError, HealthTimeoutError, RunError
@@ -293,7 +292,7 @@ class Runtime:
         if self._own is None:
             return
         try:
-            own = current_task_id() == self._own.id
+            own = this_task().id == self._own.id
         except RuntimeError:  # not in a task at all
             return
         if own:

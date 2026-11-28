@@ -17,7 +17,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from appinfra.runtime import Chan, Runtime, StoppedError, stopping
+from appinfra.runtime import Chan, Runtime, StoppedError, this_task
 from appinfra.runtime.chan import ClosedError, Recv, Send
 from appinfra.runtime.chan.endpoint import Endpoint
 from appinfra.runtime.chan.link import link
@@ -262,7 +262,7 @@ class TestStop:
         h.chan.send("a")
 
         def drain() -> list[str]:
-            stopping().stop()
+            this_task().token.stop()
             h.proxy.send("b")  # room at the home: no wait
             got = [h.proxy.recv(), h.proxy.recv()]
             try:
@@ -282,7 +282,7 @@ class TestStop:
         h.chan.send("a")
 
         async def drain() -> list[str]:
-            stopping().stop()
+            this_task().token.stop()
             got = [await h.proxy.arecv()]
             try:
                 await h.proxy.arecv()

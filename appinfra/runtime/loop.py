@@ -12,6 +12,7 @@ import threading
 from collections.abc import Callable
 from typing import Any
 
+from ..log import Logger
 from .errors import StoppedError
 from .stop import StopToken
 from .task import TaskKind, _label, _past_own_frames, _Task
@@ -153,6 +154,7 @@ class _LoopTask(_Task):
 
     def __init__(
         self,
+        lg: Logger,
         on_end: Callable[[_Task], None],
         host: LoopHost,
         task_id: int,
@@ -162,7 +164,7 @@ class _LoopTask(_Task):
         token: StopToken,
     ) -> None:
         """Initialize task on *host*'s loop; see _Task for the rest."""
-        super().__init__(on_end, task_id, name, fn, args, token)
+        super().__init__(lg, on_end, task_id, name, fn, args, token)
         self._host = host
         # Held here: the loop keeps only a weak reference to a task
         self._aio: asyncio.Task[None] | None = None

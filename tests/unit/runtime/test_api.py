@@ -50,14 +50,14 @@ def test_the_runtime_exports_its_api() -> None:
         "StopToken",
         "StoppedError",
         "Task",
+        "TaskContext",
         "TaskDone",
         "TaskKind",
         "TaskProcess",
         "aselect",
         "process_context",
         "select",
-        "stopping",
-        "task_id",
+        "this_task",
     }
     for name in appinfra.runtime.__all__:
         assert hasattr(appinfra.runtime, name)

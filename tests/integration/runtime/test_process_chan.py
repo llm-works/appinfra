@@ -23,8 +23,8 @@ DUE = 10.0
 
 @pytest.fixture
 def rt() -> Iterator[Runtime]:
-    """A runtime with a real logger: the runtime carries it into a child
-    its Chans cross to, which a mock cannot be."""
+    """A runtime with a real logger: the runtime carries it into each
+    child, which a mock cannot be."""
     runtime = Runtime(LoggerFactory.create_root(LogConfig.from_params(level="warning")))
     runtime.start()
     yield runtime

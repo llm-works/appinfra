@@ -37,6 +37,7 @@ from appinfra.runtime.chan.link import (
     Return,
     link,
 )
+from tests.helpers.lg import quiet_lg
 
 # Seconds a frame expected now may take: the failure path, not a wait
 DUE = 5.0
@@ -225,7 +226,7 @@ class TestLink:
         the child closed its end or its process just ended."""
         near, far = link()
         opened = near.open()
-        rt = Runtime(MagicMock())
+        rt = Runtime(quiet_lg())
         rt.start()
         try:
             rt.spawn(child, far, process=True)

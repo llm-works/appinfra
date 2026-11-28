@@ -4,6 +4,7 @@
 """Tests for LogQueueListener running its listener thread or feeding its queue."""
 
 import logging
+import queue as queue_module
 import threading
 import time
 from multiprocessing import Queue
@@ -160,6 +161,102 @@ class TestLogQueueListenerErrorHandling:
             assert listener.is_alive
         finally:
             listener.stop()
+
+
+def _raises(error: type[Exception]) -> None:
+    """Rebuilds an Undecodable: raises *error*, as unpickling it in get() does."""
+    raise error("cannot decode")
+
+
+class Undecodable:
+    """Pickles fine; unpickling it raises the error it was made with."""
+
+    def __init__(self, error: type[Exception]) -> None:
+        self.error = error
+
+    def __reduce__(self) -> tuple[object, tuple[type[Exception]]]:
+        return (_raises, (self.error,))
+
+
+class TestLogQueueListenerDecodeErrors:
+    """A record get() cannot decode is reported and skipped: the listener goes on."""
+
+    @pytest.mark.parametrize("error", [AttributeError, ValueError])
+    def test_a_record_after_an_undecodable_one_is_handled(
+        self, queue, mock_logger, error, capsys
+    ):
+        listener = LogQueueListener(queue, mock_logger)
+        handled = threading.Event()
+        listener._handle_record = lambda record: handled.set()
+        listener.start()
+        try:
+            queue.put(Undecodable(error))
+            queue.put(logging.LogRecord("t", logging.INFO, "t.py", 1, "ok", (), None))
+            assert handled.wait(_TIMEOUT)
+            assert listener.is_alive
+            assert "error decoding record" in capsys.readouterr().err
+        finally:
+            listener.stop()
+
+    def test_a_queue_closed_under_it_ends_the_listener(self, queue, mock_logger):
+        """Closed, the queue raises from get() on every read: the listener
+        ends instead of reporting it forever."""
+        listener = LogQueueListener(queue, mock_logger)
+        listener.start()
+        thread = listener._thread
+        queue.close()
+        thread.join(_TIMEOUT)
+        assert not thread.is_alive()
+
+
+class TestLogQueueListenerCloseQueue:
+    """stop(close_queue=True) closes the queue once nothing is left to read."""
+
+    def test_a_listener_never_started_closes_the_queue_at_once(
+        self, queue, mock_logger
+    ):
+        LogQueueListener(queue, mock_logger).stop(close_queue=True)
+        assert queue._closed
+
+    def test_a_running_listener_closes_the_queue_as_it_ends(self, queue, mock_logger):
+        listener = LogQueueListener(queue, mock_logger)
+        listener.start()
+        thread = listener._thread
+        listener.stop(close_queue=True)
+        thread.join(_TIMEOUT)
+        assert queue._closed
+
+
+class TestLogQueueListenerStopDrains:
+    """stop() lets the listener handle every record queued before its sentinel."""
+
+    def test_records_queued_behind_a_slow_one_are_handled(self, mock_logger):
+        """The handler is still on the first record when stop() is called: the
+        two queued behind it are handled before the listener ends."""
+        records = queue_module.Queue()
+        listener = LogQueueListener(records, mock_logger)
+        handled: list[str] = []
+        entered, release = threading.Event(), threading.Event()
+
+        def slow_first(record: logging.LogRecord) -> None:
+            if not handled:
+                entered.set()
+                release.wait(_TIMEOUT)
+            handled.append(record.getMessage())
+
+        listener._handle_record = slow_first
+        listener.start()
+        for i in range(3):
+            records.put(
+                logging.LogRecord("t", logging.INFO, "t.py", i, f"r{i}", (), None)
+            )
+        assert entered.wait(_TIMEOUT)
+        stopping = threading.Thread(target=listener.stop)
+        stopping.start()
+        assert listener._stop_event.wait(_TIMEOUT)  # stop() is under way
+        release.set()
+        stopping.join(_TIMEOUT)
+        assert handled == ["r0", "r1", "r2"]
 
 
 class TestLogQueueListenerIntegration:

@@ -33,8 +33,8 @@ for _ancestor in (_script_dir, *_script_dir.parents):
 
 from appinfra import size_str  # noqa: E402
 from appinfra.app import App, AppBuilder  # noqa: E402
-from appinfra.log import LogConfig, Logger, LoggerFactory  # noqa: E402
-from appinfra.runtime import Chan, Runtime, TaskDone  # noqa: E402
+from appinfra.log import Logger  # noqa: E402
+from appinfra.runtime import Chan, Runtime, TaskDone, this_task  # noqa: E402
 from appinfra.runtime.bench import (  # noqa: E402
     loop_cost,
     loop_rates,
@@ -136,8 +136,7 @@ class Bench(App):
         a = self.args
         sizes = {"process": (a.processes, a.count), "thread": (a.threads, a.count)}
         sizes |= {"loop": (a.count, a.count), "service": (a.count, a.count)}
-        level = False if self.lg.disabled else self.lg.getEffectiveLevel()
-        jobs = [(name, *sizes[name.split()[0]], level) for name in _JOBS]
+        jobs = [(name, *sizes[name.split()[0]]) for name in _JOBS]
         results = _run_jobs(self.lg, jobs, a.cores)
         if results is None:
             return 1
@@ -237,10 +236,10 @@ _JOBS: dict[str, Job] = {
 _KINDS = ["process", "thread", "loop", "service"]
 
 
-def _job(name: str, count: int, trips: int, level: int | bool) -> JobResult:
-    """In a process task's child: run the measurement *name*, logging at
-    *level* to a logger of its own, as none crosses spawn()."""
-    lg = LoggerFactory.create_root(LogConfig.from_params(level=level))
+def _job(name: str, count: int, trips: int) -> JobResult:
+    """In a process task's child: run the measurement *name*, logging through
+    the task's logger, whose records the bench's handlers emit."""
+    lg = this_task().lg
     if name.startswith("process"):
         # The fork server starts with this process's first process task: a
         # cost paid once, not by every task, so not in what is measured
@@ -251,7 +250,7 @@ def _job(name: str, count: int, trips: int, level: int | bool) -> JobResult:
 
 
 def _run_jobs(
-    lg: Logger, jobs: list[tuple[str, int, int, int | bool]], cores: int
+    lg: Logger, jobs: list[tuple[str, int, int]], cores: int
 ) -> dict[str, JobResult] | None:
     """Run each of *jobs* as a process task, at most *cores* at once, and
     return their results by name; None, logged, if one failed."""
@@ -260,8 +259,7 @@ def _run_jobs(
     ends: Chan[TaskDone] = Chan(None)
     with Runtime(lg) as rt:
         for _ in range(min(cores, len(pending))):
-            name, *args = pending.pop(0)
-            rt.spawn(_job, name, *args, name=name, done=ends, process=True)
+            _spawn_job(rt, pending.pop(0), ends)
         while len(results) < len(jobs):
             end = ends.recv()
             if end.error is not None:
@@ -272,9 +270,24 @@ def _run_jobs(
                 return None
             results[str(end.name)] = end.result
             if pending:
-                name, *args = pending.pop(0)
-                rt.spawn(_job, name, *args, name=name, done=ends, process=True)
+                _spawn_job(rt, pending.pop(0), ends)
     return results
+
+
+def _spawn_job(rt: Runtime, job: tuple[str, int, int], ends: Chan[TaskDone]) -> None:
+    """Spawn *job* on *rt* as a process task, its end sent on *ends*; it
+    logs under a logger named after it."""
+    name, count, trips = job
+    rt.spawn(
+        _job,
+        name,
+        count,
+        trips,
+        name=name,
+        done=ends,
+        process=True,
+        derive_lg=name.replace(" ", "-"),
+    )
 
 
 def _column(

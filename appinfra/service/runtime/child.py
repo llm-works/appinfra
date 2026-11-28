@@ -10,7 +10,7 @@ import threading
 from typing import Any
 
 from ...log import Logger
-from ...runtime import stopping
+from ...runtime import this_task
 from ..base import Service
 from ..errors import SetupError
 
@@ -28,7 +28,7 @@ def main(service: Service, healthy: Any, log_config: dict[str, Any]) -> None:
         SetupError: If setup() fails; what is_healthy() raised, which ends the
             run; whatever the run raised otherwise.
     """
-    token = stopping()
+    token = this_task().token
     lg = Logger.from_queue_config(log_config, name=f"svc/{service.name}")
     if hasattr(service, "_lg"):
         service._lg = lg
@@ -66,7 +66,7 @@ def wait_healthy(healthy: Any) -> bool:
     Returns:
         True once reported healthy; False if the run ended first.
     """
-    token = stopping()
+    token = this_task().token
     while not token.is_set():
         if healthy.wait(HEALTH_INTERVAL):
             return True

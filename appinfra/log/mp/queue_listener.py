@@ -14,13 +14,22 @@ from __future__ import annotations
 import contextlib
 import logging
 import queue
+import sys
 import threading
+import traceback
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from multiprocessing import Queue as QueueType
 
     from ..logger import Logger
+
+
+def _report(doing: str) -> None:
+    """Write the exception being handled to stderr, as the listener met it
+    *doing* a record: no logger can be trusted with its own failure."""
+    sys.stderr.write(f"LogQueueListener: error {doing} record:\n")
+    traceback.print_exc(file=sys.stderr)
 
 
 class LogQueueListener:
@@ -67,6 +76,8 @@ class LogQueueListener:
         self._respect_handler_level = respect_handler_level
         self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
+        # Set by stop(close_queue=True): the thread closes the queue as it ends
+        self._close_queue = False
 
     def start(self) -> None:
         """
@@ -82,7 +93,7 @@ class LogQueueListener:
         self._thread = threading.Thread(target=self._listen, daemon=True)
         self._thread.start()
 
-    def stop(self, timeout: float = 5.0) -> None:
+    def stop(self, timeout: float = 5.0, close_queue: bool = False) -> None:
         """
         Stop the listener thread gracefully.
 
@@ -91,7 +102,13 @@ class LogQueueListener:
 
         Args:
             timeout: Maximum seconds to wait for thread to finish
+            close_queue: Close the multiprocessing queue, and join its
+                feeder, once the thread has handled every record before the
+                sentinel. The thread does it as it ends, so a drain that
+                outlasts *timeout* still loses no record, and the caller is
+                not held past *timeout*.
         """
+        self._close_queue = close_queue
         self._stop_event.set()
 
         # Send sentinel to unblock queue.get(); the queue might be full or closed
@@ -101,33 +118,53 @@ class LogQueueListener:
         if self._thread is not None:
             self._thread.join(timeout)
             self._thread = None
+        elif close_queue:  # never started: nothing to drain
+            self._close()
+
+    def _close(self) -> None:
+        """Close the queue and join its feeder thread."""
+        self._queue.close()
+        self._queue.join_thread()
 
     def _listen(self) -> None:
+        """Run the listener loop, then close the queue if stop() asked to."""
+        try:
+            self._drain()
+        finally:
+            if self._close_queue:
+                self._close()
+
+    def _drain(self) -> None:
         """
         Main listener loop - runs in background thread.
 
         Continuously reads from the queue and dispatches records to handlers.
-        Exits when stop_event is set and sentinel is received.
+        Exits on the sentinel stop() posts, once every record queued before it
+        is handled; or, stopped with no sentinel queued (the queue was full or
+        closed), once the queue is empty; or once the queue is closed under
+        it. A record get() cannot decode is reported and skipped.
         """
-        while not self._stop_event.is_set():
+        while True:
             try:
                 record = self._queue.get(timeout=0.5)
-
-                # None is the sentinel for shutdown
-                if record is None:
-                    break
-
-                self._handle_record(record)
-
             except queue.Empty:
+                if self._stop_event.is_set():
+                    break
                 continue
             except Exception:
-                # Don't let listener thread die from unexpected errors
-                import sys
-                import traceback
-
-                sys.stderr.write("LogQueueListener: error handling record:\n")
-                traceback.print_exc(file=sys.stderr)
+                # multiprocessing.Queue unpickles in get(), so a bad record
+                # raises here too; a closed queue is told by the flag close()
+                # sets (private, but what get() itself checks), not the error
+                if getattr(self._queue, "_closed", False):
+                    break
+                _report("decoding")
+                continue
+            if record is None:  # the sentinel: shutdown
+                break
+            try:
+                self._handle_record(record)
+            except Exception:  # the listener thread outlives a bad record
+                _report("handling")
 
     def _handle_record(self, record: logging.LogRecord) -> None:
         """

@@ -18,20 +18,40 @@ from dataclasses import dataclass
 from types import CodeType, FunctionType, TracebackType
 from typing import Any, Protocol, final
 
+from ..log import Logger
 from .errors import StoppedError
 from .stop import StopToken
 
 
 @dataclass(frozen=True, slots=True)
-class _Running:
-    """The task the code runs in, as its context holds it: its id and token,
-    and the task itself only weakly. The context is the task's own
-    (_Task._context): holding the task, it would make a cycle with it, and
-    what the task keeps, its error and the frames on that, would wait for
-    the cyclic GC."""
+class TaskContext:
+    """Who the task the code runs in is, as this_task() returns it.
+
+    Attributes:
+        id: The id the runtime assigned it.
+        name: spawn()'s name, None without one.
+        lg: Its logger: the runtime's own, shared by every task, or one
+            derived from it for this task when spawn() was given derive_lg.
+            In a process task's child, a logger of the same name whose
+            records the parent's handlers emit.
+        token: Its token: stopped when the task is cancelled or the runtime
+            stops.
+    """
 
     id: int
+    name: str | None
+    lg: Logger
     token: StopToken
+
+
+@dataclass(frozen=True, slots=True)
+class _Running:
+    """The task the code runs in, as its context holds it: who it is, and the
+    task itself only weakly. The context is the task's own (_Task._context):
+    holding the task, it would make a cycle with it, and what the task keeps,
+    its error and the frames on that, would wait for the cyclic GC."""
+
+    context: TaskContext
     task: weakref.ReferenceType[_Task]
 
 
@@ -41,41 +61,25 @@ _current: contextvars.ContextVar[_Running] = contextvars.ContextVar(
 )
 
 
-def _running(caller: str) -> _Running:
-    """The task the caller runs in.
+def this_task() -> TaskContext:
+    """The task the caller runs in: its id, name, logger and token. Each task
+    runs in a context of its own (contextvars), so the answer is the
+    caller's task wherever below its function the call is made: on a thread,
+    on the loop, or in a process task's child.
 
     Raises:
         RuntimeError: If called outside a task.
     """
     try:
-        return _current.get()
+        return _current.get().context
     except LookupError:
-        raise RuntimeError(f"{caller}() called outside a task") from None
-
-
-def stopping() -> StopToken:
-    """The token of the task the caller runs in: stopped when the task is
-    cancelled or the runtime stops.
-
-    Raises:
-        RuntimeError: If called outside a task.
-    """
-    return _running("stopping").token
-
-
-def task_id() -> int:
-    """The id of the task the caller runs in.
-
-    Raises:
-        RuntimeError: If called outside a task.
-    """
-    return _running("task_id").id
+        raise RuntimeError("this_task() called outside a task") from None
 
 
 def _current_token() -> StopToken | None:
     """The token of the task the caller runs in, or None outside a task."""
     running = _current.get(None)
-    return None if running is None else running.token
+    return None if running is None else running.context.token
 
 
 def _in_task(t: _Task) -> bool:
@@ -377,6 +381,7 @@ class _Task(ABC):
 
     def __init__(
         self,
+        lg: Logger,
         on_end: Callable[[_Task], None],
         task_id: int,
         name: str | None,
@@ -387,6 +392,7 @@ class _Task(ABC):
         """Initialize task, on the spawner's thread.
 
         Args:
+            lg: The task's logger, as this_task() returns it in the call.
             on_end: The runtime's report of the end, once the call has ended.
             task_id: The id the runtime assigned.
             name: spawn()'s name, if one was given.
@@ -403,7 +409,8 @@ class _Task(ABC):
         self._args = args
         # The context the call runs in, with the task current in it
         self._context = contextvars.copy_context()
-        self._context.run(_current.set, _Running(task_id, token, weakref.ref(self)))
+        context = TaskContext(task_id, name, lg, token)
+        self._context.run(_current.set, _Running(context, weakref.ref(self)))
         # The outcome
         self.result: Any = None
         self.exception: BaseException | None = None

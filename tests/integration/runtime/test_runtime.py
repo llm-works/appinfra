@@ -23,8 +23,7 @@ from appinfra.runtime import (
     StopToken,
     Task,
     TaskDone,
-    stopping,
-    task_id,
+    this_task,
 )
 from appinfra.runtime.loop import LoopHost, _LoopTask
 from appinfra.runtime.thread import _ThreadTask
@@ -40,7 +39,7 @@ class Parked:
         self.token: StopToken | None = None
 
     async def run(self) -> None:
-        self.token = stopping()
+        self.token = this_task().token
         self.entered.set()
         try:
             await asyncio.Event().wait()
@@ -73,7 +72,7 @@ class JoinsItsWorkerOnCancel:
         self.work: StopToken | None = None
 
     async def run(self) -> None:
-        self.work = stopping().child()
+        self.work = this_task().token.child()
         worker = threading.Thread(target=self.work.wait, daemon=True)
         worker.start()
         self.entered.set()
@@ -92,7 +91,7 @@ class WaitsOnAThread:
         self.work: StopToken | None = None
 
     async def run(self) -> None:
-        self.work = stopping().child()
+        self.work = this_task().token.child()
         self.entered.set()
         await asyncio.to_thread(self.work.wait)
 
@@ -102,7 +101,7 @@ async def _park() -> None:
 
 
 def _waits_for_stop() -> StopToken:
-    token = stopping()
+    token = this_task().token
     token.wait()
     return token
 
@@ -499,19 +498,17 @@ class TestTaskIds:
     @pytest.mark.parametrize("on_loop", [True, False], ids=["loop", "thread"])
     def test_a_task_knows_its_own_task_id(self, rt, on_loop):
         async def mine_async() -> int:
-            return task_id()
+            return this_task().id
 
         def mine() -> int:
-            return task_id()
+            return this_task().id
 
         t = rt.spawn(mine_async if on_loop else mine)
         assert t.wait(timeout=5.0) == t.id
 
-    def test_tid_and_stopping_outside_a_task_are_refused(self):
-        with pytest.raises(RuntimeError, match="outside a task"):
-            task_id()
-        with pytest.raises(RuntimeError, match="outside a task"):
-            stopping()
+    def test_this_task_outside_a_task_is_refused(self):
+        with pytest.raises(RuntimeError, match="this_task\\(\\) called outside a task"):
+            this_task()
 
 
 class TestHandle:
@@ -774,7 +771,7 @@ class TestTokens:
         def parent() -> None:
             children.append(rt.spawn(child))
             spawned.set()
-            stopping().wait()
+            this_task().token.wait()
 
         t = rt.spawn(async_parent if on_loop else parent)
         # The child can enter before spawn() returns to the parent: both
@@ -802,10 +799,10 @@ class TestTokens:
         """Work the task derived from its token is told to stop once it ends."""
 
         async def async_returns() -> StopToken:
-            return stopping().child()
+            return this_task().token.child()
 
         def returns() -> StopToken:
-            return stopping().child()
+            return this_task().token.child()
 
         derived = rt.spawn(async_returns if on_loop else returns).wait(timeout=5.0)
         assert derived.is_set()
@@ -825,7 +822,7 @@ class TestTokens:
             entered.set()
 
         def parent() -> Task:
-            stopping().stop()  # the parent's token: the child derives from it
+            this_task().token.stop()  # the parent's token: the child derives from it
             return rt.spawn(async_marks if on_loop else marks)
 
         child = rt.spawn(parent).wait(timeout=5.0)
@@ -849,7 +846,7 @@ class TestTokens:
 
         def returns() -> str:
             entered.set()
-            stopping().wait()
+            this_task().token.wait()
             return "done"
 
         t = rt.spawn(async_returns if on_loop else returns)
@@ -890,7 +887,7 @@ class TestTokens:
         async def raises_then_is_stopped() -> None:
             # Runs before the task's end is recorded: asyncio schedules that
             # after the raise, behind this
-            asyncio.get_running_loop().call_soon(stopping().stop)
+            asyncio.get_running_loop().call_soon(this_task().token.stop)
             raise asyncio.CancelledError()
 
         with pytest.raises(asyncio.CancelledError):
@@ -912,11 +909,11 @@ class TestFailingStopCallback:
     @pytest.mark.parametrize("on_loop", [True, False], ids=["loop", "thread"])
     def test_a_task_that_returns_still_ends(self, rt, reported, on_loop):
         async def async_returns() -> str:
-            stopping()._on_stop(_failing_callback)
+            this_task().token._on_stop(_failing_callback)
             return "done"
 
         def returns() -> str:
-            stopping()._on_stop(_failing_callback)
+            this_task().token._on_stop(_failing_callback)
             return "done"
 
         t = rt.spawn(async_returns if on_loop else returns)
@@ -931,7 +928,7 @@ class TestFailingStopCallback:
         entered = threading.Event()
 
         async def parks() -> None:
-            stopping()._on_stop(_failing_callback)
+            this_task().token._on_stop(_failing_callback)
             entered.set()
             await asyncio.Event().wait()
 
@@ -951,9 +948,9 @@ class TestFailingStopCallback:
         entered = threading.Event()
 
         def waits() -> None:
-            stopping()._on_stop(_failing_callback)
+            this_task().token._on_stop(_failing_callback)
             entered.set()
-            stopping().wait()
+            this_task().token.wait()
 
         thread_task = rt.spawn(waits)
         assert entered.wait(5.0)
@@ -970,11 +967,11 @@ class TestFailingStopCallback:
         loop, which asyncio would end with it, runs on."""
 
         async def async_returns() -> str:
-            stopping()._on_stop(_interrupting_callback)
+            this_task().token._on_stop(_interrupting_callback)
             return "done"
 
         def returns() -> str:
-            stopping()._on_stop(_interrupting_callback)
+            this_task().token._on_stop(_interrupting_callback)
             return "done"
 
         t = rt.spawn(async_returns if on_loop else returns)
@@ -995,7 +992,7 @@ class TestFailingStopCallback:
         entered = threading.Event()
 
         async def parks() -> None:
-            stopping()._on_stop(_interrupting_callback)
+            this_task().token._on_stop(_interrupting_callback)
             entered.set()
             await asyncio.Event().wait()
 
@@ -1170,7 +1167,7 @@ class TestSpawnHooks:
 
         def stops() -> None:
             entered.set()
-            stopping().wait()
+            this_task().token.wait()
             raise StoppedError("stopped")
 
         done = Chan[TaskDone](1)
